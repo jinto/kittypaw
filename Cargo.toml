@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/oochy-core",
+    "crates/oochy-llm",
+    "crates/oochy-sandbox",
+    "crates/oochy-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# Shared across crates
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Internal crates
+oochy-core = { path = "crates/oochy-core" }
+oochy-llm = { path = "crates/oochy-llm" }
+oochy-sandbox = { path = "crates/oochy-sandbox" }

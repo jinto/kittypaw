@@ -1,0 +1,21 @@
+[package]
+name = "oochy-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "oochy"
+path = "src/main.rs"
+
+[dependencies]
+oochy-core = { workspace = true }
+oochy-llm = { workspace = true }
+oochy-sandbox = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }

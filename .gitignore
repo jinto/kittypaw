@@ -37,6 +37,13 @@ out/
 # Reference materials
 pensieve/
 
+# Rust
+target/
+rust/
+spikes/*/target/
+spikes/*/.omc/
+spikes/*/Cargo.lock
+
 # Test
 .pytest_cache/
 .mypy_cache/
