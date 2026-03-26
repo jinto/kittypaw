@@ -19,3 +19,4 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 rusqlite = { version = "0.32", features = ["bundled"] }
 clap = { version = "4", features = ["derive"] }
+atty = "0.2"
