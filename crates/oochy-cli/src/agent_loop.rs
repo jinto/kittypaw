@@ -125,11 +125,16 @@ pub async fn run_agent_loop(
                 )
                 .instrument(info_span!("skill_execute"))
                 .await;
-                if let Ok(results) = &skill_results {
-                    for r in results {
-                        if !r.success {
-                            tracing::warn!("Skill {}.{} failed: {:?}", r.skill_name, r.method, r.error);
+                match &skill_results {
+                    Ok(results) => {
+                        for r in results {
+                            if !r.success {
+                                tracing::warn!("Skill {}.{} failed: {:?}", r.skill_name, r.method, r.error);
+                            }
                         }
+                    }
+                    Err(e) => {
+                        tracing::error!("Skill executor failed: {e}");
                     }
                 }
             }

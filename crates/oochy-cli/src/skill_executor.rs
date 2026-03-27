@@ -119,27 +119,37 @@ async fn execute_discord(_call: &SkillCall) -> Result<serde_json::Value> {
 }
 
 fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
+    use std::net::IpAddr;
+
+    let parsed = url::Url::parse(url_str)
+        .map_err(|_| OochyError::Sandbox("Http: invalid URL".into()))?;
+
     // Block non-HTTP(S) schemes
-    if !url_str.starts_with("http://") && !url_str.starts_with("https://") {
+    if !matches!(parsed.scheme(), "http" | "https") {
         return Err(OochyError::Sandbox("Http: only http/https schemes allowed".into()));
     }
 
-    // Extract host
-    let host = url_str
-        .split("://").nth(1)
-        .and_then(|s| s.split('/').next())
-        .and_then(|s| s.split(':').next())
-        .unwrap_or("");
+    let host = parsed.host_str()
+        .ok_or_else(|| OochyError::Sandbox("Http: URL has no host".into()))?;
 
-    // Block private/internal IPs
-    let blocked = ["127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-        "192.168.", "169.254.", "0.", "localhost", "[::1]"];
-    for b in &blocked {
-        if host.starts_with(b) || host == *b {
-            return Err(OochyError::Sandbox(format!("Http: blocked private/internal host: {host}")));
+    // Block private/internal IPs (including IPv6-mapped IPv4)
+    let addr_str = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = addr_str.parse::<IpAddr>() {
+        let blocked = match ip {
+            IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified(),
+            IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+                    || matches!(v6.to_ipv4_mapped(), Some(v4) if v4.is_loopback() || v4.is_private() || v4.is_link_local())
+            }
+        };
+        if blocked {
+            return Err(OochyError::Sandbox(format!("Http: blocked private/internal IP: {host}")));
         }
+    }
+
+    // Block known private hostnames
+    if matches!(host, "localhost" | "metadata.google.internal") {
+        return Err(OochyError::Sandbox(format!("Http: blocked host: {host}")));
     }
 
     // Check allowlist if configured
