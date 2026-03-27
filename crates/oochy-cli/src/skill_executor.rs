@@ -9,12 +9,11 @@ pub async fn execute_skill_calls(
     config: &oochy_core::config::Config,
 ) -> Result<Vec<SkillResult>> {
     let allowed_hosts = &config.sandbox.allowed_hosts;
-    let mut results = Vec::new();
-
-    for call in skill_calls {
-        let result = execute_single_call(call, allowed_hosts).await;
-        results.push(result);
-    }
+    let futures: Vec<_> = skill_calls
+        .iter()
+        .map(|call| execute_single_call(call, allowed_hosts))
+        .collect();
+    let results = futures::future::join_all(futures).await;
 
     Ok(results)
 }

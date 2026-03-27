@@ -286,9 +286,9 @@ fn filter_skill_calls(
     // Find the agent config whose id matches or whose channels match the agent_id prefix
     let agent_config = agents.iter().find(|a| {
         a.id == agent_id
-            || (agent_id.starts_with("telegram-") && a.channels.contains(&"telegram".to_string()))
-            || (agent_id.starts_with("discord-") && a.channels.contains(&"discord".to_string()))
-            || (agent_id.starts_with("web-") && a.channels.contains(&"web".to_string()))
+            || (agent_id.starts_with("telegram-") && a.channels.iter().any(|c| c == "telegram"))
+            || (agent_id.starts_with("discord-") && a.channels.iter().any(|c| c == "discord"))
+            || (agent_id.starts_with("web-") && a.channels.iter().any(|c| c == "web"))
     });
 
     let Some(config) = agent_config else {
