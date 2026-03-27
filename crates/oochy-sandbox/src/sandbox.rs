@@ -174,7 +174,18 @@ fn read_all_from_fd(fd: libc::c_int) -> Vec<u8> {
 
 fn run_child(write_fd: libc::c_int, code: &str, context: serde_json::Value, timeout_secs: u64) {
     if let Err(e) = apply_seatbelt() {
-        eprintln!("[oochy-sandbox] Seatbelt failed: {e}");
+        // Fail-closed: abort child if sandbox cannot be applied
+        let result = ExecutionResult {
+            success: false,
+            output: String::new(),
+            skill_calls: vec![],
+            error: Some(format!("Sandbox initialization failed (will not execute unsandboxed): {e}")),
+        };
+        if let Ok(json) = serde_json::to_string(&result) {
+            write_to_fd(write_fd, json.as_bytes());
+        }
+        unsafe { libc::close(write_fd) };
+        return;
     }
     // SIGALRM backstop for infinite JS loops
     unsafe { libc::alarm(timeout_secs as u32) };

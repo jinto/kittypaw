@@ -168,7 +168,7 @@ async fn run_serve(bind_addr: &str) {
                 };
                 let event_type = event.event_type.clone();
 
-                match agent_loop::run_agent_loop(event, &provider, &sandbox, &store).await {
+                match agent_loop::run_agent_loop(event, &provider, &sandbox, &store, &config).await {
                     Ok(output) => {
                         // Route response back to originating channel
                         match event_type {
@@ -319,7 +319,7 @@ async fn run_stdin() {
     });
 
     // Run agent loop
-    match agent_loop::run_agent_loop(event, &provider, &sandbox, &store).await {
+    match agent_loop::run_agent_loop(event, &provider, &sandbox, &store, &config).await {
         Ok(output) => {
             println!("{output}");
         }

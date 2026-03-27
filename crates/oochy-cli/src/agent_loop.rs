@@ -52,6 +52,7 @@ pub async fn run_agent_loop(
     provider: &dyn LlmProvider,
     sandbox: &Sandbox,
     store: &Store,
+    config: &oochy_core::config::Config,
 ) -> Result<String> {
     let agent_id = agent_id_for_event(&event);
 
@@ -117,7 +118,6 @@ pub async fn run_agent_loop(
             // Execute captured skill calls on the host (real API calls)
             if !exec_result.skill_calls.is_empty() {
                 tracing::info!("Executing {} skill calls", exec_result.skill_calls.len());
-                let config = oochy_core::config::Config::load().unwrap_or_default();
                 let allowed_calls = filter_skill_calls(&exec_result.skill_calls, &config.agents, &agent_id);
                 let skill_results = crate::skill_executor::execute_skill_calls(
                     &allowed_calls,
@@ -260,7 +260,9 @@ fn format_exec_result(result: &ExecutionResult) -> String {
 fn agent_id_for_event(event: &Event) -> String {
     match event.event_type {
         EventType::Telegram => {
-            let chat_id = event.payload.get("chat_id").and_then(|v| v.as_str()).unwrap_or("default");
+            let chat_id = event.payload.get("chat_id")
+                .map(|v| v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string()))
+                .unwrap_or_else(|| "default".to_string());
             format!("telegram-{chat_id}")
         }
         EventType::Discord => {
@@ -284,17 +286,17 @@ fn filter_skill_calls(
     // Find the agent config whose id matches or whose channels match the agent_id prefix
     let agent_config = agents.iter().find(|a| {
         a.id == agent_id
-            || agent_id.starts_with(&"telegram-".to_string())
-                && a.channels.contains(&"telegram".to_string())
-            || agent_id.starts_with(&"discord-".to_string())
-                && a.channels.contains(&"discord".to_string())
-            || agent_id.starts_with(&"web-".to_string())
-                && a.channels.contains(&"web".to_string())
+            || (agent_id.starts_with("telegram-") && a.channels.contains(&"telegram".to_string()))
+            || (agent_id.starts_with("discord-") && a.channels.contains(&"discord".to_string()))
+            || (agent_id.starts_with("web-") && a.channels.contains(&"web".to_string()))
     });
 
     let Some(config) = agent_config else {
-        // No agent config found — allow all calls (stdin / default mode)
-        return calls.to_vec();
+        // Default-deny: no agent config means no skill calls allowed
+        if !calls.is_empty() {
+            tracing::warn!("No agent config for '{}' — denying {} skill calls (default-deny)", agent_id, calls.len());
+        }
+        return vec![];
     };
 
     let mut checker = CapabilityChecker::from_agent_config(config);
