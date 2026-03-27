@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Oochy installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/USER/oochy/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/jinto/oochy/main/install.sh | bash
 
-REPO="USER/oochy"  # TODO: Update with actual repo
+REPO="jinto/oochy"
 VERSION="${OOCHY_VERSION:-latest}"
 INSTALL_DIR="${OOCHY_INSTALL_DIR:-$HOME/.local/bin}"
 

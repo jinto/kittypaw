@@ -10,7 +10,7 @@ No workflow canvas. No drag-and-drop. Just conversation.
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/USER/oochy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jinto/oochy/main/install.sh | bash
 
 # Set up
 oochy init
