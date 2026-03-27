@@ -6,12 +6,13 @@ use oochy_core::types::SkillCall;
 /// executed with real API calls after capability checking.
 pub async fn execute_skill_calls(
     skill_calls: &[SkillCall],
-    _config: &oochy_core::config::Config,
+    config: &oochy_core::config::Config,
 ) -> Result<Vec<SkillResult>> {
+    let allowed_hosts = &config.sandbox.allowed_hosts;
     let mut results = Vec::new();
 
     for call in skill_calls {
-        let result = execute_single_call(call).await;
+        let result = execute_single_call(call, allowed_hosts).await;
         results.push(result);
     }
 
@@ -27,11 +28,11 @@ pub struct SkillResult {
     pub error: Option<String>,
 }
 
-async fn execute_single_call(call: &SkillCall) -> SkillResult {
+async fn execute_single_call(call: &SkillCall, allowed_hosts: &[String]) -> SkillResult {
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call).await,
         "Discord" => execute_discord(call).await,
-        "Http" => execute_http(call).await,
+        "Http" => execute_http(call, allowed_hosts).await,
         "Storage" => execute_storage(call).await,
         _ => Err(OochyError::CapabilityDenied(format!(
             "Unknown skill: {}",
@@ -118,13 +119,47 @@ async fn execute_discord(_call: &SkillCall) -> Result<serde_json::Value> {
     Ok(serde_json::json!({"ok": true, "stub": true}))
 }
 
-async fn execute_http(call: &SkillCall) -> Result<serde_json::Value> {
+fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
+    // Block non-HTTP(S) schemes
+    if !url_str.starts_with("http://") && !url_str.starts_with("https://") {
+        return Err(OochyError::Sandbox("Http: only http/https schemes allowed".into()));
+    }
+
+    // Extract host
+    let host = url_str
+        .split("://").nth(1)
+        .and_then(|s| s.split('/').next())
+        .and_then(|s| s.split(':').next())
+        .unwrap_or("");
+
+    // Block private/internal IPs
+    let blocked = ["127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+        "192.168.", "169.254.", "0.", "localhost", "[::1]"];
+    for b in &blocked {
+        if host.starts_with(b) || host == *b {
+            return Err(OochyError::Sandbox(format!("Http: blocked private/internal host: {host}")));
+        }
+    }
+
+    // Check allowlist if configured
+    if !allowed_hosts.is_empty() && !allowed_hosts.iter().any(|h| host.ends_with(h.as_str())) {
+        return Err(OochyError::Sandbox(format!("Http: host '{host}' not in allowed_hosts")));
+    }
+
+    Ok(())
+}
+
+async fn execute_http(call: &SkillCall, allowed_hosts: &[String]) -> Result<serde_json::Value> {
     let client = reqwest::Client::new();
     let url = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
 
     if url.is_empty() {
         return Err(OochyError::Sandbox("Http: URL is required".into()));
     }
+
+    validate_url(url, allowed_hosts)?;
 
     let resp = match call.method.as_str() {
         "get" => client.get(url).send().await,
