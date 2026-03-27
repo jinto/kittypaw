@@ -120,6 +120,7 @@ pub async fn run_agent_loop(
                 let skill_results = crate::skill_executor::execute_skill_calls(
                     &allowed_calls,
                     config,
+                    None,
                 )
                 .instrument(info_span!("skill_execute"))
                 .await;

@@ -89,7 +89,8 @@ pub async fn handle_teach(
         "chat_id": chat_id,
     });
 
-    let exec_result = sandbox.execute(&code, mock_context).await?;
+    let wrapped = format!("const ctx = JSON.parse(__context__);\n{code}");
+    let exec_result = sandbox.execute(&wrapped, mock_context).await?;
 
     if !exec_result.success {
         let err_msg = exec_result
@@ -103,11 +104,21 @@ pub async fn handle_teach(
     // Derive skill metadata
     let skill_name = slugify_description(teach_text);
     let permissions = detect_permissions(&code);
-    let trigger = SkillTrigger {
-        trigger_type: "message".into(),
-        keyword: Some(skill_name.clone()),
-        cron: None,
-        natural: None,
+    let is_schedule = detect_schedule(teach_text);
+    let trigger = if is_schedule {
+        SkillTrigger {
+            trigger_type: "schedule".into(),
+            keyword: None,
+            cron: None,
+            natural: Some(teach_text.to_string()),
+        }
+    } else {
+        SkillTrigger {
+            trigger_type: "message".into(),
+            keyword: Some(skill_name.clone()),
+            cron: None,
+            natural: None,
+        }
     };
 
     let dry_run_output = if exec_result.output.is_empty() {
@@ -176,6 +187,19 @@ fn slugify_description(text: &str) -> String {
     } else {
         slug
     }
+}
+
+fn detect_schedule(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    const SCHEDULE_KEYWORDS: &[&str] = &[
+        "every day", "every morning", "every evening", "every night",
+        "every hour", "every minute", "daily", "hourly", "weekly",
+        "monthly", "at midnight", "at noon", "every monday", "every tuesday",
+        "every wednesday", "every thursday", "every friday", "every saturday",
+        "every sunday", "once a day", "once a week", "once a month",
+        "every week", "every month", "scheduled", "cron",
+    ];
+    SCHEDULE_KEYWORDS.iter().any(|kw| lower.contains(kw))
 }
 
 fn detect_permissions(code: &str) -> Vec<String> {

@@ -13,6 +13,7 @@ const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
 pub async fn execute_skill_calls(
     skill_calls: &[SkillCall],
     config: &oochy_core::config::Config,
+    skill_context: Option<&str>,
 ) -> Result<Vec<SkillResult>> {
     let allowed_hosts = &config.sandbox.allowed_hosts;
     let db_path = std::env::var("OOCHY_DB_PATH").unwrap_or_else(|_| "oochy.db".into());
@@ -22,7 +23,7 @@ pub async fn execute_skill_calls(
     // Parallel would break ordering guarantees (message order, read-after-write).
     let mut results = Vec::new();
     for call in skill_calls {
-        let result = execute_single_call(call, allowed_hosts, &db_path, config).await;
+        let result = execute_single_call(call, allowed_hosts, &db_path, config, skill_context).await;
         results.push(result);
     }
 
@@ -43,11 +44,12 @@ async fn execute_single_call(
     allowed_hosts: &[String],
     db_path: &str,
     config: &oochy_core::config::Config,
+    skill_context: Option<&str>,
 ) -> SkillResult {
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call).await,
         "Http" => execute_http(call, allowed_hosts).await,
-        "Storage" => execute_storage(call, db_path),
+        "Storage" => execute_storage(call, db_path, skill_context),
         "Llm" => execute_llm(call, config).await,
         _ => Err(OochyError::CapabilityDenied(format!(
             "Unknown skill: {}",
@@ -241,9 +243,9 @@ fn open_storage_db(db_path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
-fn execute_storage(call: &SkillCall, db_path: &str) -> Result<serde_json::Value> {
+fn execute_storage(call: &SkillCall, db_path: &str, skill_context: Option<&str>) -> Result<serde_json::Value> {
     let conn = open_storage_db(db_path)?;
-    let namespace = "default";
+    let namespace = skill_context.unwrap_or("default");
 
     match call.method.as_str() {
         "get" => {
@@ -389,11 +391,11 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("set", vec![json_str("mykey"), json_str("myvalue")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
 
         let call = make_call("get", vec![json_str("mykey")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "value": "myvalue" }));
 
         let _ = std::fs::remove_file(&path);
@@ -405,7 +407,7 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("get", vec![json_str("nokey")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "value": null }));
 
         let _ = std::fs::remove_file(&path);
@@ -417,13 +419,13 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("set", vec![json_str("k"), json_str("v1")]);
-        execute_storage(&call, db).unwrap();
+        execute_storage(&call, db, None).unwrap();
 
         let call = make_call("set", vec![json_str("k"), json_str("v2")]);
-        execute_storage(&call, db).unwrap();
+        execute_storage(&call, db, None).unwrap();
 
         let call = make_call("get", vec![json_str("k")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "value": "v2" }));
 
         let _ = std::fs::remove_file(&path);
@@ -435,14 +437,14 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("set", vec![json_str("k"), json_str("v")]);
-        execute_storage(&call, db).unwrap();
+        execute_storage(&call, db, None).unwrap();
 
         let call = make_call("delete", vec![json_str("k")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
 
         let call = make_call("get", vec![json_str("k")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "value": null }));
 
         let _ = std::fs::remove_file(&path);
@@ -454,7 +456,7 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("delete", vec![json_str("nokey")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
 
         let _ = std::fs::remove_file(&path);
@@ -466,7 +468,7 @@ mod tests {
         let db = path.to_str().unwrap();
 
         let call = make_call("list", vec![]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         let empty: Vec<String> = vec![];
         assert_eq!(result, serde_json::json!({ "keys": empty }));
 
@@ -480,11 +482,11 @@ mod tests {
 
         for key in &["alpha", "beta", "gamma"] {
             let call = make_call("set", vec![json_str(key), json_str("val")]);
-            execute_storage(&call, db).unwrap();
+            execute_storage(&call, db, None).unwrap();
         }
 
         let call = make_call("list", vec![]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         let keys = result["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 3);
         assert!(keys.contains(&serde_json::json!("alpha")));
@@ -501,7 +503,7 @@ mod tests {
 
         // Set a key via the default namespace (through execute_storage)
         let call = make_call("set", vec![json_str("shared_key"), json_str("default_val")]);
-        execute_storage(&call, db).unwrap();
+        execute_storage(&call, db, None).unwrap();
 
         // Directly insert into a different namespace to verify isolation
         let conn = open_storage_db(db).unwrap();
@@ -513,12 +515,12 @@ mod tests {
 
         // Reading via execute_storage should only see the "default" namespace
         let call = make_call("get", vec![json_str("shared_key")]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         assert_eq!(result, serde_json::json!({ "value": "default_val" }));
 
         // List should only show default namespace keys
         let call = make_call("list", vec![]);
-        let result = execute_storage(&call, db).unwrap();
+        let result = execute_storage(&call, db, None).unwrap();
         let keys = result["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 1);
 

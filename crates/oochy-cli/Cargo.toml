@@ -23,3 +23,5 @@ reqwest = { version = "0.12", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 atty = "0.2"
 url = "2"
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.16"

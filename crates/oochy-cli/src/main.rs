@@ -1,9 +1,11 @@
 use std::io::Read;
 
 use clap::{Parser, Subcommand};
+use oochy_llm::provider::LlmProvider;
 use tracing_subscriber::EnvFilter;
 
 mod agent_loop;
+mod schedule;
 mod skill_executor;
 mod store;
 mod teach_loop;
@@ -32,6 +34,45 @@ enum Commands {
     Agent {
         #[command(subcommand)]
         command: AgentCommands,
+    },
+    /// Teach the bot a new skill from a natural language description
+    Teach {
+        /// Description of the skill to teach
+        description: Vec<String>,
+    },
+    /// Skill management commands
+    Skills {
+        #[command(subcommand)]
+        command: SkillsCommands,
+    },
+    /// Run a taught skill
+    Run {
+        /// Name of the skill to run
+        name: String,
+        /// Dry-run mode: execute in sandbox with mock data, no real side effects
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillsCommands {
+    /// List all taught skills
+    List,
+    /// Disable a skill (stops it from triggering)
+    Disable {
+        /// Name of the skill to disable
+        name: String,
+    },
+    /// Delete a skill permanently
+    Delete {
+        /// Name of the skill to delete
+        name: String,
+    },
+    /// Explain a skill using LLM
+    Explain {
+        /// Name of the skill to explain
+        name: String,
     },
 }
 
@@ -71,6 +112,26 @@ async fn main() {
         }
         Some(Commands::Agent { command: AgentCommands::List }) => {
             run_agent_list();
+        }
+        Some(Commands::Teach { description }) => {
+            let desc = description.join(" ");
+            if desc.trim().is_empty() {
+                eprintln!("Usage: oochy teach <description>");
+                eprintln!("Example: oochy teach send me a daily joke every morning");
+                std::process::exit(1);
+            }
+            run_teach_cli(&desc).await;
+        }
+        Some(Commands::Skills { command }) => {
+            match command {
+                SkillsCommands::List => run_skills_list(),
+                SkillsCommands::Disable { name } => run_skills_disable(&name),
+                SkillsCommands::Delete { name } => run_skills_delete(&name),
+                SkillsCommands::Explain { name } => run_skills_explain(&name).await,
+            }
+        }
+        Some(Commands::Run { name, dry_run }) => {
+            run_skill_cli(&name, dry_run).await;
         }
         None => {
             run_stdin().await;
@@ -125,6 +186,17 @@ async fn run_serve(bind_addr: &str) {
 
     eprintln!("oochy serve started. WebSocket at ws://{}/ws/chat", bind_addr);
     eprintln!("Press Ctrl+C to stop.");
+
+    // Spawn schedule evaluator
+    let schedule_config = config.clone();
+    let schedule_sandbox = oochy_sandbox::sandbox::Sandbox::new(
+        config.sandbox.timeout_secs,
+        config.sandbox.memory_limit_mb,
+    );
+    let db_path_sched = db_path.clone();
+    tokio::spawn(async move {
+        schedule::run_schedule_loop(&schedule_config, &schedule_sandbox, &db_path_sched).await;
+    });
 
     // Graceful shutdown signal
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
@@ -233,7 +305,7 @@ async fn run_serve(bind_addr: &str) {
                     }
                 };
 
-                if let Some((_skill, js_code)) = matched_skill {
+                if let Some((skill, js_code)) = matched_skill {
                     let wrapped_code = format!("const ctx = JSON.parse(__context__);\n{}", js_code);
                     let context = serde_json::json!({
                         "event_type": format!("{:?}", event_type).to_lowercase(),
@@ -244,7 +316,7 @@ async fn run_serve(bind_addr: &str) {
                     match sandbox.execute(&wrapped_code, context).await {
                         Ok(exec_result) => {
                             if !exec_result.skill_calls.is_empty() {
-                                let _ = crate::skill_executor::execute_skill_calls(&exec_result.skill_calls, &config).await;
+                                let _ = crate::skill_executor::execute_skill_calls(&exec_result.skill_calls, &config, Some(&skill.name)).await;
                             }
                             let output = if exec_result.output.is_empty() {
                                 "(no output)".to_string()
@@ -411,6 +483,259 @@ fn run_agent_list() {
                     skill.methods.join(", ")
                 };
                 println!("    - {} [{}] (rate: {}/min)", skill.skill, methods, skill.rate_limit_per_minute);
+            }
+        }
+    }
+}
+
+fn run_skills_list() {
+    let skills = oochy_core::skill::load_all_skills();
+    match skills {
+        Err(e) => {
+            eprintln!("Error loading skills: {e}");
+            std::process::exit(1);
+        }
+        Ok(ref list) if list.is_empty() => {
+            println!("No skills found. Use 'oochy teach' to create one.");
+        }
+        Ok(list) => {
+            println!("Skills:");
+            println!("  {:<16} | {:<7} | {:<8} | {:<18} | enabled", "name", "version", "trigger", "schedule");
+            for (skill, _) in &list {
+                let schedule = if skill.trigger.trigger_type == "schedule" {
+                    skill.trigger.natural.as_deref()
+                        .or(skill.trigger.cron.as_deref())
+                        .unwrap_or("—")
+                        .to_string()
+                } else {
+                    "—".to_string()
+                };
+                let enabled = if skill.enabled { "yes" } else { "no" };
+                println!(
+                    "  {:<16} | {:<7} | {:<8} | {:<18} | {}",
+                    skill.name, skill.version, skill.trigger.trigger_type, schedule, enabled
+                );
+            }
+        }
+    }
+}
+
+fn run_skills_disable(name: &str) {
+    match oochy_core::skill::disable_skill(name) {
+        Ok(()) => println!("Skill '{name}' disabled."),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_skills_delete(name: &str) {
+    match oochy_core::skill::delete_skill(name) {
+        Ok(()) => println!("Skill '{name}' deleted."),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run_skills_explain(name: &str) {
+    let config = oochy_core::config::Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    if config.llm.api_key.is_empty() {
+        eprintln!("Error: OOCHY_API_KEY not set.");
+        std::process::exit(1);
+    }
+
+    match oochy_core::skill::load_skill(name) {
+        Ok(Some((skill, js_code))) => {
+            let provider = oochy_llm::claude::ClaudeProvider::new(
+                config.llm.api_key.clone(),
+                config.llm.model.clone(),
+                config.llm.max_tokens,
+            );
+
+            let prompt = format!(
+                "Explain this JavaScript skill in plain English. What does it do, what permissions does it need, and when does it run?\n\nSkill name: {}\nTrigger: {} {}\nPermissions: {}\n\nCode:\n{}",
+                skill.name,
+                skill.trigger.trigger_type,
+                skill.trigger.cron.as_deref().or(skill.trigger.keyword.as_deref()).unwrap_or(""),
+                skill.permissions.primitives.join(", "),
+                js_code
+            );
+
+            let messages = vec![oochy_core::types::LlmMessage {
+                role: oochy_core::types::Role::User,
+                content: prompt,
+            }];
+
+            match provider.generate(&messages).await {
+                Ok(explanation) => println!("{explanation}"),
+                Err(e) => eprintln!("Failed to generate explanation: {e}"),
+            }
+        }
+        Ok(None) => {
+            eprintln!("Skill '{name}' not found.");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run_skill_cli(name: &str, dry_run: bool) {
+    let config = oochy_core::config::Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    match oochy_core::skill::load_skill(name) {
+        Ok(Some((skill, js_code))) => {
+            let sandbox = oochy_sandbox::sandbox::Sandbox::new(
+                config.sandbox.timeout_secs,
+                config.sandbox.memory_limit_mb,
+            );
+
+            let context = serde_json::json!({
+                "event_type": "cli",
+                "event_text": "",
+                "chat_id": "",
+                "skill_name": skill.name,
+            });
+            let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+
+            match sandbox.execute(&wrapped, context).await {
+                Ok(result) if result.success => {
+                    println!("Output: {}", result.output);
+                    if !result.skill_calls.is_empty() {
+                        if dry_run {
+                            println!("\n[dry-run] Skill calls that would execute:");
+                            for call in &result.skill_calls {
+                                println!("  {}.{}({:?})", call.skill_name, call.method, call.args);
+                            }
+                        } else {
+                            match skill_executor::execute_skill_calls(&result.skill_calls, &config, Some(&skill.name)).await {
+                                Ok(results) => {
+                                    for r in &results {
+                                        if r.success {
+                                            println!("  {}.{}: OK", r.skill_name, r.method);
+                                        } else {
+                                            eprintln!("  {}.{}: FAILED {:?}", r.skill_name, r.method, r.error);
+                                        }
+                                    }
+                                }
+                                Err(e) => eprintln!("Skill execution error: {e}"),
+                            }
+                        }
+                    }
+                }
+                Ok(result) => {
+                    eprintln!("Skill failed: {:?}", result.error);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Execution error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Ok(None) => {
+            eprintln!("Skill '{name}' not found.");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run_teach_cli(description: &str) {
+    let config = oochy_core::config::Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    if config.llm.api_key.is_empty() {
+        eprintln!("Error: OOCHY_API_KEY not set.");
+        std::process::exit(1);
+    }
+
+    let provider = oochy_llm::claude::ClaudeProvider::new(
+        config.llm.api_key.clone(),
+        config.llm.model.clone(),
+        config.llm.max_tokens,
+    );
+
+    let sandbox = oochy_sandbox::sandbox::Sandbox::new(
+        config.sandbox.timeout_secs,
+        config.sandbox.memory_limit_mb,
+    );
+
+    println!("Generating skill for: {description}...\n");
+
+    loop {
+        match teach_loop::handle_teach(description, "cli", &provider, &sandbox, &config).await {
+            Ok(
+                ref result @ teach_loop::TeachResult::Generated {
+                    ref code,
+                    ref dry_run_output,
+                    ref skill_name,
+                    ref description,
+                    ref permissions,
+                    ..
+                },
+            ) => {
+                println!("=== Generated Skill: {skill_name} ===\n");
+                println!("Description: {description}");
+                println!("Permissions: {}", permissions.join(", "));
+                println!("\nCode:\n{code}\n");
+                println!("Dry-run output: {dry_run_output}\n");
+
+                // Interactive prompt
+                eprint!("[a]pprove / [r]eject / re[g]enerate? ");
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input).unwrap_or_default();
+                let choice = input.trim().to_lowercase();
+
+                match choice.as_str() {
+                    "a" | "approve" | "y" | "yes" => match teach_loop::approve_skill(result) {
+                        Ok(()) => {
+                            println!("Skill '{skill_name}' saved to .oochy/skills/");
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save: {e}");
+                            std::process::exit(1);
+                        }
+                    },
+                    "r" | "reject" | "n" | "no" => {
+                        println!("Skill rejected.");
+                        return;
+                    }
+                    "g" | "regenerate" => {
+                        println!("\nRegenerating...\n");
+                        continue;
+                    }
+                    _ => {
+                        println!("Unknown choice. Skill rejected.");
+                        return;
+                    }
+                }
+            }
+            Ok(teach_loop::TeachResult::Error(e)) => {
+                eprintln!("Teach failed: {e}");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("Error: {e}");
+                std::process::exit(1);
             }
         }
     }

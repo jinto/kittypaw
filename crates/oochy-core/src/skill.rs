@@ -208,6 +208,42 @@ fn version_increment_in(dir: &Path, safe_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Disable a skill by setting its `enabled` field to `false`.
+pub fn disable_skill(name: &str) -> Result<()> {
+    let name = sanitize_name(name)?;
+    let dir = skills_dir();
+    let toml_path = dir.join(format!("{name}.skill.toml"));
+    if !toml_path.exists() {
+        return Err(OochyError::Config(format!("Skill '{name}' not found")));
+    }
+    let content = std::fs::read_to_string(&toml_path)?;
+    let mut skill: Skill = toml::from_str(&content)
+        .map_err(|e| OochyError::Config(format!("Invalid skill TOML: {e}")))?;
+    skill.enabled = false;
+    let new_content = toml::to_string_pretty(&skill)
+        .map_err(|e| OochyError::Config(format!("TOML serialize error: {e}")))?;
+    std::fs::write(&toml_path, new_content)?;
+    Ok(())
+}
+
+/// Delete a skill by removing its TOML and JS files.
+pub fn delete_skill(name: &str) -> Result<()> {
+    let name = sanitize_name(name)?;
+    let dir = skills_dir();
+    let toml_path = dir.join(format!("{name}.skill.toml"));
+    let js_path = dir.join(format!("{name}.js"));
+    if !toml_path.exists() && !js_path.exists() {
+        return Err(OochyError::Config(format!("Skill '{name}' not found")));
+    }
+    if toml_path.exists() {
+        std::fs::remove_file(&toml_path)?;
+    }
+    if js_path.exists() {
+        std::fs::remove_file(&js_path)?;
+    }
+    Ok(())
+}
+
 /// Check if a skill's trigger matches the given event text.
 ///
 /// - `"message"` triggers match if `event_text` contains the keyword (case-insensitive).
