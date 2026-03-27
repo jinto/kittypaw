@@ -5,6 +5,7 @@ members = [
     "crates/oochy-llm",
     "crates/oochy-sandbox",
     "crates/oochy-cli",
+    "crates/oochy-channels",
 ]
 
 [workspace.package]
@@ -25,3 +26,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 oochy-core = { path = "crates/oochy-core" }
 oochy-llm = { path = "crates/oochy-llm" }
 oochy-sandbox = { path = "crates/oochy-sandbox" }
+oochy-channels = { path = "crates/oochy-channels" }

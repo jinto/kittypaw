@@ -1,0 +1,18 @@
+[package]
+name = "oochy-channels"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+oochy-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+async-trait = "0.1"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
+axum = { version = "0.8", features = ["ws"] }
+dashmap = "6"
+futures = "=0.3.31"

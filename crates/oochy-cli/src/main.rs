@@ -1,9 +1,28 @@
 use std::io::Read;
 
+use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 mod agent_loop;
+mod skill_executor;
 mod store;
+
+#[derive(Parser)]
+#[command(name = "oochy", version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start all configured channels and run the event loop
+    Serve {
+        /// Address to bind the WebSocket server (default: 0.0.0.0:3000)
+        #[arg(long, default_value = "0.0.0.0:3000")]
+        bind: String,
+    },
+}
 
 #[tokio::main]
 async fn main() {
@@ -11,11 +30,122 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Serve { bind }) => {
+            run_serve(&bind).await;
+        }
+        None => {
+            run_stdin().await;
+        }
+    }
+}
+
+async fn run_serve(bind_addr: &str) {
+    use oochy_channels::websocket::ServeWebSocketChannel;
+    use oochy_core::types::EventType;
+
+    let config = oochy_core::config::Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    if config.llm.api_key.is_empty() {
+        eprintln!("Error: OOCHY_API_KEY not set. Export your Claude API key:");
+        eprintln!("  export OOCHY_API_KEY=sk-ant-...");
+        std::process::exit(1);
+    }
+
+    let provider = oochy_llm::claude::ClaudeProvider::new(
+        config.llm.api_key.clone(),
+        config.llm.model.clone(),
+        config.llm.max_tokens,
+    );
+
+    let sandbox = oochy_sandbox::sandbox::Sandbox::new(
+        config.sandbox.timeout_secs,
+        config.sandbox.memory_limit_mb,
+    );
+
+    let db_path = std::env::var("OOCHY_DB_PATH").unwrap_or_else(|_| "oochy.db".into());
+    let store = store::Store::open(&db_path).unwrap_or_else(|e| {
+        eprintln!("Database error: {e}");
+        std::process::exit(1);
+    });
+
+    // Bounded mpsc channel for all incoming events
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<oochy_core::types::Event>(256);
+
+    // Start WebSocket channel
+    let ws_channel = ServeWebSocketChannel::new(bind_addr);
+    let _ws_handle = ws_channel
+        .spawn(event_tx.clone())
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to start WebSocket channel: {e}");
+            std::process::exit(1);
+        });
+
+    eprintln!("oochy serve started. WebSocket at ws://{}/ws/chat", bind_addr);
+
+    // Event processing loop
+    while let Some(event) = event_rx.recv().await {
+        // Capture session_id before moving event
+        let session_id = match event.event_type {
+            EventType::WebChat => event
+                .payload
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
+            EventType::Telegram => event
+                .payload
+                .get("chat_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
+            EventType::Discord => event
+                .payload
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
+        };
+        let event_type = event.event_type.clone();
+
+        match agent_loop::run_agent_loop(event, &provider, &sandbox, &store).await {
+            Ok(output) => {
+                // Route response back to originating channel
+                match event_type {
+                    EventType::WebChat => {
+                        if let Err(e) = ws_channel.send_to_session(&session_id, &output).await {
+                            tracing::warn!("Failed to send WebSocket response: {e}");
+                        }
+                    }
+                    EventType::Telegram | EventType::Discord => {
+                        // Other channels handle their own responses via skill calls
+                        tracing::info!("Agent response for {session_id}: {output}");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Agent loop error for session {session_id}: {e}");
+                let _ = ws_channel
+                    .send_to_session(&session_id, &format!("Error: {e}"))
+                    .await;
+            }
+        }
+    }
+}
+
+async fn run_stdin() {
     // Read event from stdin
     let mut input = String::new();
     if atty::is(atty::Stream::Stdin) {
         eprintln!("oochy v{}", env!("CARGO_PKG_VERSION"));
         eprintln!("Usage: echo '{{\"type\":\"web_chat\",\"payload\":{{\"text\":\"hello\"}}}}' | oochy");
+        eprintln!("       oochy serve [--bind 0.0.0.0:3000]");
         std::process::exit(0);
     }
 

@@ -105,7 +105,23 @@ pub async fn run_agent_loop(
         let exec_result = sandbox.execute(&code, context).await?;
 
         if exec_result.success {
-            // Save assistant turn
+            // Execute captured skill calls on the host (real API calls)
+            if !exec_result.skill_calls.is_empty() {
+                tracing::info!("Executing {} skill calls", exec_result.skill_calls.len());
+                let skill_results = crate::skill_executor::execute_skill_calls(
+                    &exec_result.skill_calls,
+                    &oochy_core::config::Config::load().unwrap_or_default(),
+                )
+                .await;
+                if let Ok(results) = &skill_results {
+                    for r in results {
+                        if !r.success {
+                            tracing::warn!("Skill {}.{} failed: {:?}", r.skill_name, r.method, r.error);
+                        }
+                    }
+                }
+            }
+
             let output = if exec_result.output.is_empty() {
                 "(no output)".to_string()
             } else {
