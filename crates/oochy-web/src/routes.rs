@@ -1,8 +1,9 @@
 use axum::{
-    extract::Path,
+    extract::{Path, State},
     http::StatusCode,
     response::Json,
 };
+use oochy_core::metrics::Metrics;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -26,6 +27,10 @@ pub struct ConversationRow {
 
 pub async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "version": "0.1.0"}))
+}
+
+pub async fn get_metrics(State(metrics): State<Metrics>) -> Json<Value> {
+    Json(json!(metrics.snapshot()))
 }
 
 pub async fn list_agents(db_path: String) -> Result<Json<Value>, (StatusCode, String)> {

@@ -6,6 +6,7 @@ use oochy_core::types::{
 };
 use oochy_llm::provider::LlmProvider;
 use oochy_sandbox::sandbox::Sandbox;
+use tracing::{info_span, Instrument};
 
 use crate::store::Store;
 
@@ -94,7 +95,10 @@ pub async fn run_agent_loop(
         }
 
         // Call LLM
-        let code = provider.generate(&retry_messages).await?;
+        let code = provider
+            .generate(&retry_messages)
+            .instrument(info_span!("llm_generate"))
+            .await?;
         tracing::debug!("Generated JS ({} chars)", code.len());
 
         // Execute in sandbox
@@ -104,7 +108,10 @@ pub async fn run_agent_loop(
             "agent_id": agent_id,
         });
 
-        let exec_result = sandbox.execute(&code, context).await?;
+        let exec_result = sandbox
+            .execute(&code, context)
+            .instrument(info_span!("sandbox_execute"))
+            .await?;
 
         if exec_result.success {
             // Execute captured skill calls on the host (real API calls)
@@ -116,6 +123,7 @@ pub async fn run_agent_loop(
                     &allowed_calls,
                     &config,
                 )
+                .instrument(info_span!("skill_execute"))
                 .await;
                 if let Ok(results) = &skill_results {
                     for r in results {

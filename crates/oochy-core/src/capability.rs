@@ -133,4 +133,70 @@ mod tests {
         // 4th call should fail (limit is 3/min)
         assert!(checker.check(&call).is_err());
     }
+
+    #[test]
+    fn test_empty_methods_allows_all() {
+        // SkillPermission with empty methods vec allows any method
+        let config = AgentConfig {
+            id: "test2".into(),
+            name: "Test Agent 2".into(),
+            system_prompt: String::new(),
+            channels: vec![],
+            allowed_skills: vec![SkillPermission {
+                skill: "Telegram".into(),
+                methods: vec![],
+                rate_limit_per_minute: 60,
+            }],
+        };
+        let mut checker = CapabilityChecker::from_agent_config(&config);
+        // Any method should be allowed when methods is empty
+        let call1 = SkillCall { skill_name: "Telegram".into(), method: "sendMessage".into(), args: vec![] };
+        let call2 = SkillCall { skill_name: "Telegram".into(), method: "sendPhoto".into(), args: vec![] };
+        let call3 = SkillCall { skill_name: "Telegram".into(), method: "anyArbitraryMethod".into(), args: vec![] };
+        assert!(checker.check(&call1).is_ok());
+        assert!(checker.check(&call2).is_ok());
+        assert!(checker.check(&call3).is_ok());
+    }
+
+    #[test]
+    fn test_multiple_skills() {
+        // Agent with multiple skill permissions
+        let config = AgentConfig {
+            id: "test3".into(),
+            name: "Test Agent 3".into(),
+            system_prompt: String::new(),
+            channels: vec![],
+            allowed_skills: vec![
+                SkillPermission {
+                    skill: "Telegram".into(),
+                    methods: vec!["sendMessage".into()],
+                    rate_limit_per_minute: 10,
+                },
+                SkillPermission {
+                    skill: "Http".into(),
+                    methods: vec!["get".into(), "post".into()],
+                    rate_limit_per_minute: 20,
+                },
+                SkillPermission {
+                    skill: "Storage".into(),
+                    methods: vec!["get".into(), "set".into()],
+                    rate_limit_per_minute: 30,
+                },
+            ],
+        };
+        let mut checker = CapabilityChecker::from_agent_config(&config);
+
+        // Each skill's allowed methods pass
+        assert!(checker.check(&SkillCall { skill_name: "Telegram".into(), method: "sendMessage".into(), args: vec![] }).is_ok());
+        assert!(checker.check(&SkillCall { skill_name: "Http".into(), method: "get".into(), args: vec![] }).is_ok());
+        assert!(checker.check(&SkillCall { skill_name: "Http".into(), method: "post".into(), args: vec![] }).is_ok());
+        assert!(checker.check(&SkillCall { skill_name: "Storage".into(), method: "set".into(), args: vec![] }).is_ok());
+
+        // Disallowed methods on each skill are rejected
+        assert!(checker.check(&SkillCall { skill_name: "Telegram".into(), method: "deleteMessage".into(), args: vec![] }).is_err());
+        assert!(checker.check(&SkillCall { skill_name: "Http".into(), method: "delete".into(), args: vec![] }).is_err());
+
+        // Skill not in config is rejected
+        assert!(checker.check(&SkillCall { skill_name: "Discord".into(), method: "sendMessage".into(), args: vec![] }).is_err());
+    }
 }

@@ -48,9 +48,16 @@ enum AgentCommands {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    if std::env::var("OOCHY_LOG_FORMAT").as_deref() == Ok("json") {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
 
     let cli = Cli::parse();
 
@@ -116,52 +123,73 @@ async fn run_serve(bind_addr: &str) {
         });
 
     eprintln!("oochy serve started. WebSocket at ws://{}/ws/chat", bind_addr);
+    eprintln!("Press Ctrl+C to stop.");
+
+    // Graceful shutdown signal
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        tracing::info!("Shutting down...");
+        let _ = shutdown_tx.send(true);
+    });
 
     // Event processing loop
-    while let Some(event) = event_rx.recv().await {
-        // Capture session_id before moving event
-        let session_id = match event.event_type {
-            EventType::WebChat => event
-                .payload
-                .get("session_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string(),
-            EventType::Telegram => event
-                .payload
-                .get("chat_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string(),
-            EventType::Discord => event
-                .payload
-                .get("channel_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string(),
-        };
-        let event_type = event.event_type.clone();
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                tracing::info!("Shutdown signal received, exiting event loop.");
+                break;
+            }
+            maybe_event = event_rx.recv() => {
+                let event = match maybe_event {
+                    Some(e) => e,
+                    None => break,
+                };
+                // Capture session_id before moving event
+                let session_id = match event.event_type {
+                    EventType::WebChat => event
+                        .payload
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default")
+                        .to_string(),
+                    EventType::Telegram => event
+                        .payload
+                        .get("chat_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default")
+                        .to_string(),
+                    EventType::Discord => event
+                        .payload
+                        .get("channel_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default")
+                        .to_string(),
+                };
+                let event_type = event.event_type.clone();
 
-        match agent_loop::run_agent_loop(event, &provider, &sandbox, &store).await {
-            Ok(output) => {
-                // Route response back to originating channel
-                match event_type {
-                    EventType::WebChat => {
-                        if let Err(e) = ws_channel.send_to_session(&session_id, &output).await {
-                            tracing::warn!("Failed to send WebSocket response: {e}");
+                match agent_loop::run_agent_loop(event, &provider, &sandbox, &store).await {
+                    Ok(output) => {
+                        // Route response back to originating channel
+                        match event_type {
+                            EventType::WebChat => {
+                                if let Err(e) = ws_channel.send_to_session(&session_id, &output).await {
+                                    tracing::warn!("Failed to send WebSocket response: {e}");
+                                }
+                            }
+                            EventType::Telegram | EventType::Discord => {
+                                // Other channels handle their own responses via skill calls
+                                tracing::info!("Agent response for {session_id}: {output}");
+                            }
                         }
                     }
-                    EventType::Telegram | EventType::Discord => {
-                        // Other channels handle their own responses via skill calls
-                        tracing::info!("Agent response for {session_id}: {output}");
+                    Err(e) => {
+                        tracing::error!("Agent loop error for session {session_id}: {e}");
+                        let _ = ws_channel
+                            .send_to_session(&session_id, &format!("Error: {e}"))
+                            .await;
                     }
                 }
-            }
-            Err(e) => {
-                tracing::error!("Agent loop error for session {session_id}: {e}");
-                let _ = ws_channel
-                    .send_to_session(&session_id, &format!("Error: {e}"))
-                    .await;
             }
         }
     }
