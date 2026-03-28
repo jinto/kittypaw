@@ -1,0 +1,56 @@
+[package]
+id = "weather-briefing"
+name = "Weather Briefing"
+version = "1.0.0"
+description = "Daily weather summary for a configured city. Fetches forecast data from Open-Meteo and delivers a natural language briefing via Telegram."
+author = "KittyPaw Team"
+category = "weather"
+tags = ["weather", "telegram", "daily", "llm", "open-meteo"]
+
+[trigger]
+type = "schedule"
+cron = "0 7 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Llm"]
+allowed_hosts = ["api.open-meteo.com"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "Telegram Bot Token"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "Telegram Chat ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "city"
+label = "City Name (display only)"
+type = "string"
+required = false
+default = "Seoul"
+
+[[config.fields]]
+key = "latitude"
+label = "Latitude"
+type = "string"
+required = false
+default = "37.57"
+
+[[config.fields]]
+key = "longitude"
+label = "Longitude"
+type = "string"
+required = false
+default = "126.98"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 7 * * *"

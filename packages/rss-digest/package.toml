@@ -1,0 +1,49 @@
+[package]
+id = "rss-digest"
+name = "RSS Digest"
+version = "1.0.0"
+description = "Fetches an RSS feed, filters out already-seen items using Storage, summarizes new entries with LLM, and sends a digest to Telegram."
+author = "KittyPaw Team"
+category = "news"
+tags = ["rss", "news", "telegram", "llm", "digest", "storage"]
+
+[trigger]
+type = "schedule"
+cron = "0 9 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Llm", "Storage"]
+allowed_hosts = ["*"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "Telegram Bot Token"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "Telegram Chat ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "feed_url"
+label = "RSS Feed URL"
+type = "string"
+required = false
+default = "https://news.ycombinator.com/rss"
+
+[[config.fields]]
+key = "max_items"
+label = "Max New Items to Process"
+type = "number"
+required = false
+default = "5"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 9 * * *"

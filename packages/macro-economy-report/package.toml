@@ -1,0 +1,42 @@
+[package]
+id = "macro-economy-report"
+name = "Macro Economy Report"
+version = "1.0.0"
+description = "Daily macro-economic briefing: fetches market data for major ETFs, summarizes with LLM, and sends a formatted report to Telegram."
+author = "KittyPaw Team"
+category = "finance"
+tags = ["finance", "market", "telegram", "daily", "llm"]
+
+[trigger]
+type = "schedule"
+cron = "0 8 * * 1-5"
+
+[permissions]
+primitives = ["Http", "Telegram", "Llm", "Storage"]
+allowed_hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "Telegram Bot Token"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "Telegram Chat ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "tickers"
+label = "Tickers (comma-separated)"
+type = "string"
+required = false
+default = "SPY,QQQ,TLT,GLD"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 8 * * 1-5"

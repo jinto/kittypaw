@@ -1,0 +1,41 @@
+[package]
+id = "url-monitor"
+name = "URL Monitor"
+version = "1.0.0"
+description = "Periodically checks if a URL is reachable. Stores last status in Storage and sends a Telegram alert whenever the status changes."
+author = "KittyPaw Team"
+category = "devops"
+tags = ["monitoring", "uptime", "telegram", "storage", "alert"]
+
+[trigger]
+type = "schedule"
+cron = "*/5 * * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Storage"]
+allowed_hosts = ["*"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "Telegram Bot Token"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "Telegram Chat ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "target_url"
+label = "URL to Monitor"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "*/5 * * * *"

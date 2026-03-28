@@ -1,0 +1,15 @@
+[package]
+id = "reminder"
+name = "Reminder"
+version = "1.0.0"
+description = "Keyword-triggered reminder manager. Store, list, and complete reminders using persistent Storage. Responds inline — no Telegram needed."
+author = "KittyPaw Team"
+category = "productivity"
+tags = ["reminder", "storage", "productivity", "keyword"]
+
+[trigger]
+type = "keyword"
+keywords = ["remind", "알림", "reminder"]
+
+[permissions]
+primitives = ["Storage"]
