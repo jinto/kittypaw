@@ -168,7 +168,11 @@ pub async fn run_schedule_loop(
                 match sandbox.execute(&wrapped, context).await {
                     Ok(result) if result.success => {
                         if !result.skill_calls.is_empty() {
-                            let preresolved = crate::skill_executor::resolve_storage_calls(&result.skill_calls, &store, Some(&skill.name));
+                            let preresolved = crate::skill_executor::resolve_storage_calls(
+                                &result.skill_calls,
+                                &store,
+                                Some(&skill.name),
+                            );
                             let _ = crate::skill_executor::execute_skill_calls(
                                 &result.skill_calls,
                                 config,

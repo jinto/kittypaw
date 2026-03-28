@@ -63,9 +63,9 @@ fn parse_semantic_response(response: &str) -> Result<Vec<SemanticResult>> {
         KittypawError::Sandbox(format!("Failed to parse LLM response as JSON: {e}"))
     })?;
 
-    let arr = parsed.as_array().ok_or_else(|| {
-        KittypawError::Sandbox("Expected JSON array from LLM".to_string())
-    })?;
+    let arr = parsed
+        .as_array()
+        .ok_or_else(|| KittypawError::Sandbox("Expected JSON array from LLM".to_string()))?;
 
     let results = arr
         .iter()
@@ -73,7 +73,11 @@ fn parse_semantic_response(response: &str) -> Result<Vec<SemanticResult>> {
         .filter_map(|(i, v)| {
             let path = v["path"].as_str()?.to_string();
             let reason = v["reason"].as_str().unwrap_or("").to_string();
-            Some(SemanticResult { path, rank: i + 1, reason })
+            Some(SemanticResult {
+                path,
+                rank: i + 1,
+                reason,
+            })
         })
         .collect();
 

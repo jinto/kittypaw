@@ -35,5 +35,9 @@ pub fn save_api_key(api_key: String, state: State<AppState>) -> Result<(), Strin
 
 /// Internal-only: get the real API key for backend use. Not a Tauri command.
 pub fn get_api_key_internal(state: &State<AppState>) -> String {
-    state.api_key.lock().expect("api_key mutex poisoned").clone()
+    state
+        .api_key
+        .lock()
+        .expect("api_key mutex poisoned")
+        .clone()
 }

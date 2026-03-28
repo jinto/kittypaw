@@ -9,9 +9,9 @@ use kittypaw_core::error::Result;
 use kittypaw_core::types::ExecutionResult;
 
 #[cfg(unix)]
-use crate::backend::SandboxExecConfig;
-#[cfg(unix)]
 use crate::backend::SandboxBackend;
+#[cfg(unix)]
+use crate::backend::SandboxExecConfig;
 #[cfg(unix)]
 use crate::quickjs::run_child_async;
 

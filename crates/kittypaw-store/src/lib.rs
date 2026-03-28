@@ -61,12 +61,11 @@ impl Store {
     pub fn save_state(&self, state: &AgentState) -> Result<()> {
         let state_json = serde_json::to_string(state).map_err(KittypawError::Json)?;
 
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO agents (agent_id, system_prompt, state_json, updated_at) \
+        self.conn.execute(
+            "INSERT OR REPLACE INTO agents (agent_id, system_prompt, state_json, updated_at) \
                  VALUES (?1, ?2, ?3, datetime('now'))",
-                params![state.agent_id, state.system_prompt, state_json],
-            )?;
+            params![state.agent_id, state.system_prompt, state_json],
+        )?;
 
         Ok(())
     }
@@ -77,32 +76,29 @@ impl Store {
             .trim_matches('"')
             .to_string();
 
-        self.conn
-            .execute(
-                "INSERT INTO conversations (agent_id, role, content, code, result, timestamp) \
+        self.conn.execute(
+            "INSERT INTO conversations (agent_id, role, content, code, result, timestamp) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    agent_id,
-                    role_str,
-                    turn.content,
-                    turn.code,
-                    turn.result,
-                    turn.timestamp
-                ],
-            )?;
+            params![
+                agent_id,
+                role_str,
+                turn.content,
+                turn.code,
+                turn.result,
+                turn.timestamp
+            ],
+        )?;
 
         Ok(())
     }
 
     #[allow(dead_code)]
     pub fn recent_turns(&self, agent_id: &str, n: usize) -> Result<Vec<ConversationTurn>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT role, content, code, result, timestamp \
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content, code, result, timestamp \
                  FROM conversations WHERE agent_id = ?1 \
                  ORDER BY timestamp DESC, id DESC LIMIT ?2",
-            )?;
+        )?;
 
         let mut turns: Vec<ConversationTurn> = stmt
             .query_map(params![agent_id, n as i64], map_turn_row)?
@@ -113,13 +109,11 @@ impl Store {
     }
 
     fn recent_turns_all(&self, agent_id: &str) -> Result<Vec<ConversationTurn>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT role, content, code, result, timestamp \
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content, code, result, timestamp \
                  FROM conversations WHERE agent_id = ?1 \
                  ORDER BY timestamp ASC, id ASC LIMIT 100",
-            )?;
+        )?;
 
         let turns: Vec<ConversationTurn> = stmt
             .query_map(params![agent_id], map_turn_row)?
@@ -142,111 +136,83 @@ impl Store {
     }
 
     pub fn storage_set(&self, namespace: &str, key: &str, value: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO skill_storage (namespace, key, value) VALUES (?1, ?2, ?3)",
-                params![namespace, key, value],
-            )
-?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO skill_storage (namespace, key, value) VALUES (?1, ?2, ?3)",
+            params![namespace, key, value],
+        )?;
         Ok(())
     }
 
     pub fn storage_delete(&self, namespace: &str, key: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM skill_storage WHERE namespace = ?1 AND key = ?2",
-                params![namespace, key],
-            )
-?;
+        self.conn.execute(
+            "DELETE FROM skill_storage WHERE namespace = ?1 AND key = ?2",
+            params![namespace, key],
+        )?;
         Ok(())
     }
 
     pub fn storage_list(&self, namespace: &str) -> Result<Vec<String>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT key FROM skill_storage WHERE namespace = ?1")
-?;
+            .prepare("SELECT key FROM skill_storage WHERE namespace = ?1")?;
         let keys: Vec<String> = stmt
-            .query_map(params![namespace], |row| row.get(0))
-?
-            .collect::<rusqlite::Result<Vec<_>>>()
-?;
+            .query_map(params![namespace], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(keys)
     }
 
-    pub fn save_workspace(
-        &self,
-        id: &str,
-        name: &str,
-        root_path: &str,
-    ) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO workspaces (id, name, root_path, last_opened_at) \
+    pub fn save_workspace(&self, id: &str, name: &str, root_path: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspaces (id, name, root_path, last_opened_at) \
                  VALUES (?1, ?2, ?3, datetime('now'))",
-                params![id, name, root_path],
-            )
-?;
+            params![id, name, root_path],
+        )?;
         Ok(())
     }
 
     pub fn list_workspaces(&self) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id, name, root_path FROM workspaces ORDER BY last_opened_at DESC",
-            )
-?;
+            .prepare("SELECT id, name, root_path FROM workspaces ORDER BY last_opened_at DESC")?;
         let rows: Vec<(String, String, String)> = stmt
-            .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-?
-            .collect::<rusqlite::Result<Vec<_>>>()
-?;
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
     pub fn update_last_opened(&self, id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "UPDATE workspaces SET last_opened_at = datetime('now') WHERE id = ?1",
-                params![id],
-            )
-?;
+        self.conn.execute(
+            "UPDATE workspaces SET last_opened_at = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
     }
 
     // ── Permission CRUD ────────────────────────────────────────────────────
 
     pub fn save_file_rule(&self, rule: &FilePermissionRule) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO permission_file_rules \
+        self.conn.execute(
+            "INSERT OR REPLACE INTO permission_file_rules \
                  (id, workspace_id, path_pattern, is_exception, can_read, can_write, can_delete) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    rule.id,
-                    rule.workspace_id,
-                    rule.path_pattern,
-                    rule.is_exception as i32,
-                    rule.can_read as i32,
-                    rule.can_write as i32,
-                    rule.can_delete as i32,
-                ],
-            )
-?;
+            params![
+                rule.id,
+                rule.workspace_id,
+                rule.path_pattern,
+                rule.is_exception as i32,
+                rule.can_read as i32,
+                rule.can_write as i32,
+                rule.can_delete as i32,
+            ],
+        )?;
         Ok(())
     }
 
     pub fn list_file_rules(&self, workspace_id: &str) -> Result<Vec<FilePermissionRule>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, workspace_id, path_pattern, is_exception, can_read, can_write, can_delete \
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace_id, path_pattern, is_exception, can_read, can_write, can_delete \
                  FROM permission_file_rules WHERE workspace_id = ?1",
-            )
-?;
+        )?;
 
         let rules = stmt
             .query_map(params![workspace_id], |row| {
@@ -259,46 +225,42 @@ impl Store {
                     can_write: row.get::<_, i32>(5)? != 0,
                     can_delete: row.get::<_, i32>(6)? != 0,
                 })
-            })
-?
-            .collect::<rusqlite::Result<Vec<_>>>()
-?;
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
 
         Ok(rules)
     }
 
     pub fn delete_file_rule(&self, rule_id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM permission_file_rules WHERE id = ?1",
-                params![rule_id],
-            )
-?;
+        self.conn.execute(
+            "DELETE FROM permission_file_rules WHERE id = ?1",
+            params![rule_id],
+        )?;
         Ok(())
     }
 
     pub fn save_network_rule(&self, rule: &NetworkPermissionRule) -> Result<()> {
         let methods_json =
             serde_json::to_string(&rule.allowed_methods).map_err(KittypawError::Json)?;
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO permission_network_rules \
+        self.conn.execute(
+            "INSERT OR REPLACE INTO permission_network_rules \
                  (id, workspace_id, domain_pattern, allowed_methods) \
                  VALUES (?1, ?2, ?3, ?4)",
-                params![rule.id, rule.workspace_id, rule.domain_pattern, methods_json],
-            )
-?;
+            params![
+                rule.id,
+                rule.workspace_id,
+                rule.domain_pattern,
+                methods_json
+            ],
+        )?;
         Ok(())
     }
 
     pub fn list_network_rules(&self, workspace_id: &str) -> Result<Vec<NetworkPermissionRule>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, workspace_id, domain_pattern, allowed_methods \
+        let mut stmt = self.conn.prepare(
+            "SELECT id, workspace_id, domain_pattern, allowed_methods \
                  FROM permission_network_rules WHERE workspace_id = ?1",
-            )
-?;
+        )?;
 
         let rules = stmt
             .query_map(params![workspace_id], |row| {
@@ -308,10 +270,8 @@ impl Store {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                 ))
-            })
-?
-            .collect::<rusqlite::Result<Vec<_>>>()
-?
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .map(|(id, workspace_id, domain_pattern, methods_json)| {
                 let allowed_methods: Vec<HttpMethod> =
@@ -329,12 +289,10 @@ impl Store {
     }
 
     pub fn delete_network_rule(&self, rule_id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM permission_network_rules WHERE id = ?1",
-                params![rule_id],
-            )
-?;
+        self.conn.execute(
+            "DELETE FROM permission_network_rules WHERE id = ?1",
+            params![rule_id],
+        )?;
         Ok(())
     }
 
@@ -343,21 +301,18 @@ impl Store {
             AccessType::Read => "read",
             AccessType::Write => "write",
         };
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO permission_global_paths (id, path, access_type) \
+        self.conn.execute(
+            "INSERT OR REPLACE INTO permission_global_paths (id, path, access_type) \
                  VALUES (?1, ?2, ?3)",
-                params![global_path.id, global_path.path, access_type_str],
-            )
-?;
+            params![global_path.id, global_path.path, access_type_str],
+        )?;
         Ok(())
     }
 
     pub fn list_global_paths(&self) -> Result<Vec<GlobalPath>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path, access_type FROM permission_global_paths")
-?;
+            .prepare("SELECT id, path, access_type FROM permission_global_paths")?;
 
         let paths = stmt
             .query_map([], |row| {
@@ -366,10 +321,8 @@ impl Store {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                 ))
-            })
-?
-            .collect::<rusqlite::Result<Vec<_>>>()
-?
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .map(|(id, path, access_type_str)| {
                 let access_type = if access_type_str == "write" {
@@ -389,12 +342,10 @@ impl Store {
     }
 
     pub fn delete_global_path(&self, id: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "DELETE FROM permission_global_paths WHERE id = ?1",
-                params![id],
-            )
-?;
+        self.conn.execute(
+            "DELETE FROM permission_global_paths WHERE id = ?1",
+            params![id],
+        )?;
         Ok(())
     }
 
@@ -665,7 +616,9 @@ mod tests {
         let path = temp_db_path();
         let store = Store::open(path.to_str().unwrap()).unwrap();
 
-        store.save_workspace("ws2", "Test WS 2", "/tmp/ws2").unwrap();
+        store
+            .save_workspace("ws2", "Test WS 2", "/tmp/ws2")
+            .unwrap();
 
         let rule = NetworkPermissionRule {
             id: "n1".to_string(),
@@ -718,30 +671,38 @@ mod tests {
         let path = temp_db_path();
         let store = Store::open(path.to_str().unwrap()).unwrap();
 
-        store.save_workspace("ws3", "Test WS 3", "/tmp/ws3").unwrap();
+        store
+            .save_workspace("ws3", "Test WS 3", "/tmp/ws3")
+            .unwrap();
 
-        store.save_file_rule(&FilePermissionRule {
-            id: "fr1".to_string(),
-            workspace_id: "ws3".to_string(),
-            path_pattern: "/src".to_string(),
-            is_exception: false,
-            can_read: true,
-            can_write: true,
-            can_delete: false,
-        }).unwrap();
+        store
+            .save_file_rule(&FilePermissionRule {
+                id: "fr1".to_string(),
+                workspace_id: "ws3".to_string(),
+                path_pattern: "/src".to_string(),
+                is_exception: false,
+                can_read: true,
+                can_write: true,
+                can_delete: false,
+            })
+            .unwrap();
 
-        store.save_network_rule(&NetworkPermissionRule {
-            id: "nr1".to_string(),
-            workspace_id: "ws3".to_string(),
-            domain_pattern: "*.example.com".to_string(),
-            allowed_methods: vec![HttpMethod::Get],
-        }).unwrap();
+        store
+            .save_network_rule(&NetworkPermissionRule {
+                id: "nr1".to_string(),
+                workspace_id: "ws3".to_string(),
+                domain_pattern: "*.example.com".to_string(),
+                allowed_methods: vec![HttpMethod::Get],
+            })
+            .unwrap();
 
-        store.save_global_path(&GlobalPath {
-            id: "gp2".to_string(),
-            path: "/shared".to_string(),
-            access_type: AccessType::Read,
-        }).unwrap();
+        store
+            .save_global_path(&GlobalPath {
+                id: "gp2".to_string(),
+                path: "/shared".to_string(),
+                access_type: AccessType::Read,
+            })
+            .unwrap();
 
         let profile = store.load_permission_profile("ws3").unwrap();
         assert_eq!(profile.workspace_id, "ws3");

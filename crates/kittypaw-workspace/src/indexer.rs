@@ -39,19 +39,16 @@ impl FileIndexer {
         let field_modified = schema_builder.add_text_field("modified", STORED);
         let schema = schema_builder.build();
 
-        let mmap_dir = MmapDirectory::open(index_path).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to open mmap directory: {e}"))
-        })?;
-        let index = if Index::exists(&mmap_dir).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to check index existence: {e}"))
-        })? {
-            Index::open(mmap_dir).map_err(|e| {
-                KittypawError::Sandbox(format!("Failed to open index: {e}"))
-            })?
+        let mmap_dir = MmapDirectory::open(index_path)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to open mmap directory: {e}")))?;
+        let index = if Index::exists(&mmap_dir)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to check index existence: {e}")))?
+        {
+            Index::open(mmap_dir)
+                .map_err(|e| KittypawError::Sandbox(format!("Failed to open index: {e}")))?
         } else {
-            Index::create_in_dir(index_path, schema.clone()).map_err(|e| {
-                KittypawError::Sandbox(format!("Failed to create index: {e}"))
-            })?
+            Index::create_in_dir(index_path, schema.clone())
+                .map_err(|e| KittypawError::Sandbox(format!("Failed to create index: {e}")))?
         };
 
         Ok(Self {
@@ -72,14 +69,14 @@ impl FileIndexer {
             std::fs::remove_dir_all(&self.index_path).map_err(KittypawError::Io)?;
             std::fs::create_dir_all(&self.index_path).map_err(KittypawError::Io)?;
         }
-        let index = Index::create_in_dir(&self.index_path, self.schema.clone()).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to recreate index: {e}"))
-        })?;
+        let index = Index::create_in_dir(&self.index_path, self.schema.clone())
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to recreate index: {e}")))?;
         self.index = index;
 
-        let mut writer: IndexWriter = self.index.writer(50_000_000).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to create index writer: {e}"))
-        })?;
+        let mut writer: IndexWriter = self
+            .index
+            .writer(50_000_000)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to create index writer: {e}")))?;
 
         for entry in files {
             if entry.is_dir {
@@ -107,14 +104,14 @@ impl FileIndexer {
             doc.add_text(self.field_filename, &filename);
             doc.add_text(self.field_content, &content);
             doc.add_text(self.field_modified, &entry.modified);
-            writer.add_document(doc).map_err(|e| {
-                KittypawError::Sandbox(format!("Failed to add document: {e}"))
-            })?;
+            writer
+                .add_document(doc)
+                .map_err(|e| KittypawError::Sandbox(format!("Failed to add document: {e}")))?;
         }
 
-        writer.commit().map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to commit index: {e}"))
-        })?;
+        writer
+            .commit()
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to commit index: {e}")))?;
 
         Ok(())
     }
@@ -130,14 +127,12 @@ impl FileIndexer {
 
         let searcher = reader.searcher();
 
-        let query_parser = QueryParser::for_index(
-            &self.index,
-            vec![self.field_filename, self.field_content],
-        );
+        let query_parser =
+            QueryParser::for_index(&self.index, vec![self.field_filename, self.field_content]);
 
-        let parsed_query = query_parser.parse_query(query).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to parse query: {e}"))
-        })?;
+        let parsed_query = query_parser
+            .parse_query(query)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to parse query: {e}")))?;
 
         let top_docs = searcher
             .search(&parsed_query, &TopDocs::with_limit(limit))
@@ -145,9 +140,9 @@ impl FileIndexer {
 
         let mut results = Vec::new();
         for (score, doc_address) in top_docs {
-            let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| {
-                KittypawError::Sandbox(format!("Failed to retrieve doc: {e}"))
-            })?;
+            let doc: TantivyDocument = searcher
+                .doc(doc_address)
+                .map_err(|e| KittypawError::Sandbox(format!("Failed to retrieve doc: {e}")))?;
 
             let path = doc
                 .get_first(self.field_path)
@@ -162,7 +157,11 @@ impl FileIndexer {
                 .unwrap_or("");
             let snippet = make_snippet(content_val, query);
 
-            results.push(SearchResult { path, score, snippet });
+            results.push(SearchResult {
+                path,
+                score,
+                snippet,
+            });
         }
 
         Ok(results)
@@ -200,9 +199,10 @@ impl FileIndexer {
             })
             .unwrap_or_default();
 
-        let mut writer: IndexWriter = self.index.writer(50_000_000).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to create writer: {e}"))
-        })?;
+        let mut writer: IndexWriter = self
+            .index
+            .writer(50_000_000)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to create writer: {e}")))?;
 
         let mut doc = TantivyDocument::default();
         doc.add_text(self.field_path, rel_path);
@@ -210,27 +210,28 @@ impl FileIndexer {
         doc.add_text(self.field_content, &content);
         doc.add_text(self.field_modified, &modified);
 
-        writer.add_document(doc).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to add document: {e}"))
-        })?;
-        writer.commit().map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to commit: {e}"))
-        })?;
+        writer
+            .add_document(doc)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to add document: {e}")))?;
+        writer
+            .commit()
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to commit: {e}")))?;
 
         Ok(())
     }
 
     /// Remove a file from the index by path.
     pub fn remove_file(&mut self, rel_path: &str) -> Result<()> {
-        let mut writer: IndexWriter = self.index.writer(50_000_000).map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to create writer: {e}"))
-        })?;
+        let mut writer: IndexWriter = self
+            .index
+            .writer(50_000_000)
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to create writer: {e}")))?;
 
         let term = tantivy::Term::from_field_text(self.field_path, rel_path);
         writer.delete_term(term);
-        writer.commit().map_err(|e| {
-            KittypawError::Sandbox(format!("Failed to commit: {e}"))
-        })?;
+        writer
+            .commit()
+            .map_err(|e| KittypawError::Sandbox(format!("Failed to commit: {e}")))?;
 
         Ok(())
     }
@@ -260,7 +261,11 @@ fn make_snippet(content: &str, query: &str) -> String {
         .find(|l| !l.trim().is_empty())
         .map(|l| {
             let t = l.trim();
-            if t.len() > 120 { format!("{}...", &t[..120]) } else { t.to_string() }
+            if t.len() > 120 {
+                format!("{}...", &t[..120])
+            } else {
+                t.to_string()
+            }
         })
         .unwrap_or_default()
 }
@@ -277,12 +282,30 @@ mod tests {
         let ws_dir = dir.path().join("workspace");
         fs::create_dir_all(&ws_dir).unwrap();
 
-        fs::write(ws_dir.join("hello.rs"), "fn main() { println!(\"hello world\"); }").unwrap();
-        fs::write(ws_dir.join("readme.md"), "# Project\nThis is a sample project.").unwrap();
+        fs::write(
+            ws_dir.join("hello.rs"),
+            "fn main() { println!(\"hello world\"); }",
+        )
+        .unwrap();
+        fs::write(
+            ws_dir.join("readme.md"),
+            "# Project\nThis is a sample project.",
+        )
+        .unwrap();
 
         let files = vec![
-            FileEntry { path: "hello.rs".to_string(), size: 40, modified: "0".to_string(), is_dir: false },
-            FileEntry { path: "readme.md".to_string(), size: 40, modified: "0".to_string(), is_dir: false },
+            FileEntry {
+                path: "hello.rs".to_string(),
+                size: 40,
+                modified: "0".to_string(),
+                is_dir: false,
+            },
+            FileEntry {
+                path: "readme.md".to_string(),
+                size: 40,
+                modified: "0".to_string(),
+                is_dir: false,
+            },
         ];
 
         let mut indexer = FileIndexer::new(&idx_dir).unwrap();
@@ -302,9 +325,12 @@ mod tests {
         fs::create_dir_all(&ws_dir).unwrap();
 
         fs::write(ws_dir.join("a.txt"), "something unrelated").unwrap();
-        let files = vec![
-            FileEntry { path: "a.txt".to_string(), size: 20, modified: "0".to_string(), is_dir: false },
-        ];
+        let files = vec![FileEntry {
+            path: "a.txt".to_string(),
+            size: 20,
+            modified: "0".to_string(),
+            is_dir: false,
+        }];
 
         let mut indexer = FileIndexer::new(&idx_dir).unwrap();
         indexer.build_index(&ws_dir, &files).unwrap();

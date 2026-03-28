@@ -26,8 +26,8 @@ fn main() {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let store = Store::open(db_path.to_str().unwrap_or("kittypaw.db"))
-        .expect("Failed to open database");
+    let store =
+        Store::open(db_path.to_str().unwrap_or("kittypaw.db")).expect("Failed to open database");
 
     use commands::settings::{KEY_API_KEY, NS_SETTINGS};
     let persisted_key = store

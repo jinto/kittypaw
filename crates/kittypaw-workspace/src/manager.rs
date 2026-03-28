@@ -85,7 +85,10 @@ impl WorkspaceManager {
                 .unwrap_or_default();
 
             let metadata = entry.metadata().map_err(|e| {
-                KittypawError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                KittypawError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
             })?;
 
             let modified = metadata
@@ -210,7 +213,6 @@ impl WorkspaceManager {
             .get(workspace_id)
             .ok_or_else(|| KittypawError::Sandbox(format!("Workspace not found: {workspace_id}")))
     }
-
 }
 
 impl Default for WorkspaceManager {
@@ -226,7 +228,6 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .map(|s| s.starts_with('.'))
         .unwrap_or(false)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -358,9 +359,7 @@ mod tests {
         let ws = mgr.open(dir.path().to_str().unwrap()).unwrap();
 
         fs::write(dir.path().join("file.txt"), "old content\n").unwrap();
-        let change = mgr
-            .write_file(&ws.id, "file.txt", "new content\n")
-            .unwrap();
+        let change = mgr.write_file(&ws.id, "file.txt", "new content\n").unwrap();
         assert!(matches!(change.change_type, ChangeType::Modify));
         assert!(!change.diff.is_empty());
     }

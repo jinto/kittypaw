@@ -175,9 +175,7 @@ async fn run_serve(bind_addr: &str) {
         config.llm.max_tokens,
     );
 
-    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(
-        config.sandbox.clone(),
-    );
+    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
     let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
@@ -206,9 +204,7 @@ async fn run_serve(bind_addr: &str) {
 
     // Spawn schedule evaluator
     let schedule_config = config.clone();
-    let schedule_sandbox = kittypaw_sandbox::sandbox::Sandbox::new(
-        config.sandbox.clone(),
-    );
+    let schedule_sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
     let db_path_sched = db_path.clone();
     tokio::spawn(async move {
         schedule::run_schedule_loop(&schedule_config, &schedule_sandbox, &db_path_sched).await;
@@ -671,9 +667,7 @@ async fn run_skill_cli(name: &str, dry_run: bool) {
 
     match kittypaw_core::skill::load_skill(name) {
         Ok(Some((skill, js_code))) => {
-            let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(
-                config.sandbox.clone(),
-            );
+            let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
             let context = serde_json::json!({
                 "event_type": "cli",
@@ -693,7 +687,11 @@ async fn run_skill_cli(name: &str, dry_run: bool) {
                                 println!("  {}.{}({:?})", call.skill_name, call.method, call.args);
                             }
                         } else {
-                            let preresolved = skill_executor::resolve_storage_calls(&result.skill_calls, &*store.lock().unwrap(), Some(&skill.name));
+                            let preresolved = skill_executor::resolve_storage_calls(
+                                &result.skill_calls,
+                                &*store.lock().unwrap(),
+                                Some(&skill.name),
+                            );
                             match skill_executor::execute_skill_calls(
                                 &result.skill_calls,
                                 &config,
@@ -757,9 +755,7 @@ async fn run_teach_cli(description: &str) {
         config.llm.max_tokens,
     );
 
-    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(
-        config.sandbox.clone(),
-    );
+    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
     println!("Generating skill for: {description}...\n");
 
@@ -1084,9 +1080,7 @@ async fn run_stdin() {
         config.llm.max_tokens,
     );
 
-    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(
-        config.sandbox.clone(),
-    );
+    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
     let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {

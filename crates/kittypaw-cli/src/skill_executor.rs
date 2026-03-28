@@ -18,7 +18,10 @@ pub fn resolve_storage_calls(
         .iter()
         .map(|call| {
             if call.skill_name == "Storage" {
-                Some(make_skill_result(call, execute_storage(call, store, skill_context)))
+                Some(make_skill_result(
+                    call,
+                    execute_storage(call, store, skill_context),
+                ))
             } else {
                 None
             }
@@ -200,7 +203,9 @@ fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
 
     // Block known private hostnames
     if matches!(host, "localhost" | "metadata.google.internal") {
-        return Err(KittypawError::Sandbox(format!("Http: blocked host: {host}")));
+        return Err(KittypawError::Sandbox(format!(
+            "Http: blocked host: {host}"
+        )));
     }
 
     // Check allowlist if configured
@@ -311,7 +316,9 @@ async fn execute_llm(
     let prompt = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
 
     if prompt.is_empty() {
-        return Err(KittypawError::Skill("Llm.generate: prompt is required".into()));
+        return Err(KittypawError::Skill(
+            "Llm.generate: prompt is required".into(),
+        ));
     }
 
     let max_tokens = call.args.get(1).and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
@@ -499,7 +506,9 @@ mod tests {
         execute_storage(&call, &store, None).unwrap();
 
         // Insert directly into a different namespace to verify isolation
-        store.storage_set("other_ns", "shared_key", "other_val").unwrap();
+        store
+            .storage_set("other_ns", "shared_key", "other_val")
+            .unwrap();
 
         // Reading via execute_storage should only see the "default" namespace
         let call = make_call("get", vec![json_str("shared_key")]);

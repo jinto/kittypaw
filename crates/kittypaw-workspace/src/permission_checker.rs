@@ -87,7 +87,8 @@ impl FilePermissionChecker {
             if paths_match(&gp.path, &path_str) {
                 let allowed = match (&gp.access_type, action) {
                     (AccessType::Read, FileAction::Read) => true,
-                    (AccessType::Write, FileAction::Write) | (AccessType::Write, FileAction::Delete) => true,
+                    (AccessType::Write, FileAction::Write)
+                    | (AccessType::Write, FileAction::Delete) => true,
                     _ => false,
                 };
                 if allowed {
@@ -161,7 +162,14 @@ mod tests {
     use super::*;
     use kittypaw_core::permission::{AccessType, FilePermissionRule, GlobalPath};
 
-    fn rule(id: &str, pattern: &str, is_exception: bool, read: bool, write: bool, delete: bool) -> FilePermissionRule {
+    fn rule(
+        id: &str,
+        pattern: &str,
+        is_exception: bool,
+        read: bool,
+        write: bool,
+        delete: bool,
+    ) -> FilePermissionRule {
         FilePermissionRule {
             id: id.to_string(),
             workspace_id: "ws1".to_string(),
@@ -184,10 +192,8 @@ mod tests {
 
     #[test]
     fn test_read_allowed_by_rule() {
-        let checker = FilePermissionChecker::new(
-            vec![rule("r1", "/src", false, true, false, false)],
-            vec![],
-        );
+        let checker =
+            FilePermissionChecker::new(vec![rule("r1", "/src", false, true, false, false)], vec![]);
         assert_eq!(
             checker.check_file_access(Path::new("/src/main.rs"), &FileAction::Read),
             PermissionResult::Allowed
@@ -196,10 +202,8 @@ mod tests {
 
     #[test]
     fn test_write_denied_by_rule() {
-        let checker = FilePermissionChecker::new(
-            vec![rule("r1", "/src", false, true, false, false)],
-            vec![],
-        );
+        let checker =
+            FilePermissionChecker::new(vec![rule("r1", "/src", false, true, false, false)], vec![]);
         assert_eq!(
             checker.check_file_access(Path::new("/src/main.rs"), &FileAction::Write),
             PermissionResult::Denied

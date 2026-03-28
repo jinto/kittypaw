@@ -15,19 +15,25 @@ pub struct Sandbox {
 impl Sandbox {
     pub fn new(config: SandboxConfig) -> Self {
         #[cfg(unix)]
-        let backend: Box<dyn SandboxBackend> =
-            Box::new(ForkedSandbox::new(config.timeout_secs, config.memory_limit_mb));
+        let backend: Box<dyn SandboxBackend> = Box::new(ForkedSandbox::new(
+            config.timeout_secs,
+            config.memory_limit_mb,
+        ));
         #[cfg(not(unix))]
-        let backend: Box<dyn SandboxBackend> =
-            Box::new(ThreadSandbox::new(config.timeout_secs, config.memory_limit_mb));
+        let backend: Box<dyn SandboxBackend> = Box::new(ThreadSandbox::new(
+            config.timeout_secs,
+            config.memory_limit_mb,
+        ));
 
         Self { config, backend }
     }
 
     /// Create a sandbox with ThreadSandbox backend (for GUI use).
     pub fn new_threaded(config: SandboxConfig) -> Self {
-        let backend: Box<dyn SandboxBackend> =
-            Box::new(ThreadSandbox::new(config.timeout_secs, config.memory_limit_mb));
+        let backend: Box<dyn SandboxBackend> = Box::new(ThreadSandbox::new(
+            config.timeout_secs,
+            config.memory_limit_mb,
+        ));
         Self { config, backend }
     }
 

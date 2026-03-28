@@ -147,10 +147,14 @@ pub async fn run_agent_loop(
                     let s = store.lock().unwrap();
                     crate::skill_executor::resolve_storage_calls(&allowed_calls, &*s, None)
                 };
-                let skill_results =
-                    crate::skill_executor::execute_skill_calls(&allowed_calls, config, preresolved, None)
-                        .instrument(info_span!("skill_execute"))
-                        .await;
+                let skill_results = crate::skill_executor::execute_skill_calls(
+                    &allowed_calls,
+                    config,
+                    preresolved,
+                    None,
+                )
+                .instrument(info_span!("skill_execute"))
+                .await;
                 match &skill_results {
                     Ok(results) => {
                         for r in results {
@@ -387,4 +391,3 @@ fn filter_skill_calls(
     }
     allowed
 }
-

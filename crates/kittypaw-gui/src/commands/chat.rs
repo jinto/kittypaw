@@ -35,7 +35,7 @@ fn build_message_with_context(
     let mut context_blocks: Vec<String> = Vec::new();
     for mention in &mentions {
         let rel_path = &mention[1..]; // strip leading '@'
-        // Reject empty or null-byte paths
+                                      // Reject empty or null-byte paths
         if rel_path.is_empty() || rel_path.contains('\0') {
             continue;
         }
@@ -51,11 +51,7 @@ fn build_message_with_context(
         return message.to_string();
     }
 
-    format!(
-        "{}\n\n{}",
-        context_blocks.join("\n\n"),
-        message
-    )
+    format!("{}\n\n{}", context_blocks.join("\n\n"), message)
 }
 
 #[tauri::command]

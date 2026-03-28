@@ -159,9 +159,9 @@ impl Channel for TelegramChannel {
 
     async fn send_response(&self, agent_id: &str, response: &str) -> Result<()> {
         // agent_id is used as the chat_id for Telegram
-        let chat_id: i64 = agent_id
-            .parse()
-            .map_err(|_| KittypawError::Config(format!("Invalid Telegram chat_id: {}", agent_id)))?;
+        let chat_id: i64 = agent_id.parse().map_err(|_| {
+            KittypawError::Config(format!("Invalid Telegram chat_id: {}", agent_id))
+        })?;
 
         let url = self.api_url("sendMessage");
         let body = json!({
@@ -177,10 +177,9 @@ impl Channel for TelegramChannel {
             .await
             .map_err(|e| KittypawError::Llm(format!("Telegram sendMessage failed: {}", e)))?;
 
-        let tg_resp: TelegramResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(|e| KittypawError::Llm(format!("Failed to parse sendMessage response: {}", e)))?;
+        let tg_resp: TelegramResponse<serde_json::Value> = resp.json().await.map_err(|e| {
+            KittypawError::Llm(format!("Failed to parse sendMessage response: {}", e))
+        })?;
 
         if !tg_resp.ok {
             return Err(KittypawError::Llm(format!(

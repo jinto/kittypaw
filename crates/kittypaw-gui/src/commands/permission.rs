@@ -20,7 +20,9 @@ pub fn respond_permission_request(
             .send(decision)
             .map_err(|_| "Permission channel already closed".to_string())
     } else {
-        Err(format!("No pending permission request with id: {request_id}"))
+        Err(format!(
+            "No pending permission request with id: {request_id}"
+        ))
     }
 }
 

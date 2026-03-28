@@ -39,9 +39,7 @@ pub fn validate_path(workspace_root: &Path, rel_path: &str) -> Result<PathBuf> {
         } else {
             joined.parent().unwrap_or(Path::new("/")).join(&resolved)
         };
-        let resolved_canonical = resolved
-            .canonicalize()
-            .map_err(|e| KittypawError::Io(e))?;
+        let resolved_canonical = resolved.canonicalize().map_err(|e| KittypawError::Io(e))?;
         if !resolved_canonical.starts_with(&canonical_root) {
             return Err(KittypawError::Sandbox(format!(
                 "Symlink escapes workspace root: {rel_path}"
