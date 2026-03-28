@@ -9,7 +9,7 @@ tags = ["reminder", "storage", "productivity", "keyword"]
 
 [trigger]
 type = "keyword"
-keywords = ["remind", "알림", "reminder"]
+keyword = "remind"
 
 [permissions]
 primitives = ["Storage"]

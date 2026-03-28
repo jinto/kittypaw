@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use kittypaw_store::Store;
+mod bundled_packages;
 mod commands;
 mod state;
 
@@ -21,9 +22,9 @@ use commands::workspace::{
 use state::AppState;
 
 fn main() {
-    let data_dir = dirs_next::data_dir()
-        .map(|p| p.join("kittypaw"))
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let data_dir = dirs_next::home_dir()
+        .map(|p| p.join(".kittypaw"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".kittypaw"));
 
     let db_path = data_dir.join("kittypaw.db");
 
@@ -33,6 +34,8 @@ fn main() {
 
     let packages_dir = data_dir.join("packages");
     let _ = std::fs::create_dir_all(&packages_dir);
+
+    bundled_packages::install_bundled_packages(&packages_dir);
 
     let store =
         Store::open(db_path.to_str().unwrap_or("kittypaw.db")).expect("Failed to open database");

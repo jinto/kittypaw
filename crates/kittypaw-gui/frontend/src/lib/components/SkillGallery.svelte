@@ -6,22 +6,29 @@
 	let packages: SkillPackage[] = [];
 	let selectedPackage: SkillPackage | null = null;
 	let loading = true;
+	let loadError = '';
 	let filter = '';
 	let activeCategory = '';
 
-	onMount(async () => {
-		await loadPackages();
+	onMount(() => {
+		loadPackages();
 	});
 
-	async function loadPackages() {
+	function loadPackages() {
 		loading = true;
-		try {
-			packages = await listPackages();
-		} catch (e) {
-			console.error('Failed to load packages:', e);
-		} finally {
-			loading = false;
-		}
+		loadError = '';
+		listPackages()
+			.then((result) => {
+				packages = result;
+			})
+			.catch((e) => {
+				console.error('Failed to load packages:', e);
+				loadError = String(e);
+				packages = [];
+			})
+			.finally(() => {
+				loading = false;
+			});
 	}
 
 	$: categories = [...new Set(packages.map((p) => p.meta.category))];
@@ -103,7 +110,11 @@
 					</svg>
 				</div>
 				<h2>No skills installed yet</h2>
-				<p>Skills will appear here once installed.</p>
+				{#if loadError}
+					<p style="color: #ef4444;">Error: {loadError}</p>
+				{:else}
+					<p>Skills will appear here once installed.</p>
+				{/if}
 			</div>
 		{:else if filtered.length === 0}
 			<div class="empty-state">

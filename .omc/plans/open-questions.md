@@ -26,3 +26,12 @@
 - [ ] **Permission 거부 시 retry 방지** — 현재 agent_loop은 에러 시 retry. Permission 거부는 retry해도 같은 결과이므로 별도 에러 타입으로 분기하여 retry 스킵 필요할 수 있음.
 - [ ] **다중 팝업 동시 발생 시 UX** — 에이전트가 여러 파일에 연속 접근하면 팝업이 쏟아질 수 있음. 큐잉 또는 배치 승인 UI 고려 필요.
 - [ ] **SandboxConfig.allowed_paths 공존 방식** — spec에서 "활성화 및 연결". 새 permission system과 어떻게 공존할지. 제안: allowed_paths를 initial seed로 사용하고, 이후 SQLite 규칙이 우선.
+
+## skill-platform — 2026-03-28
+
+- [ ] **Secret storage strategy** — Base64 encoding is a placeholder. Should Phase 1 integrate macOS Keychain via `security-framework` crate, or defer to a follow-up? Impacts user trust if tokens are visible in plaintext config files.
+- [ ] **Bundled packages and API keys** — The example packages (macro-economy-report, weather-briefing) require third-party API keys (FRED, OpenWeatherMap). Should we bundle packages that work without API keys (e.g., reminder, url-monitor) as the default showcase, and mark API-dependent ones as "requires setup"?
+- [ ] **Package distribution format for Phase 2+** — When we move beyond bundled packages, should distribution be `.zip` files, GitHub repo URLs, or a custom `.kpkg` archive? This affects the install UX significantly.
+- [ ] **Config field type: `cron`** — Should the cron input be a raw cron expression with validation, or a friendly UI (dropdowns for "every day at X", "every hour", etc.)? Non-developers may struggle with cron syntax.
+- [ ] **Existing `teach` command relationship** — Should `teach`-generated skills be auto-packaged into the new package format, or remain as legacy `.skill.toml` + `.js`? Converting them would unify the skill management UI.
+- [ ] **Scope of `File.write` sandbox global** — Should file operations be limited to a per-package `data/` directory, or should packages be able to write to a shared workspace directory? Shared access enables cross-package data but complicates security.
