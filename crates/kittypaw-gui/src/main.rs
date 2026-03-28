@@ -6,6 +6,9 @@ mod commands;
 mod state;
 
 use commands::chat::send_message;
+use commands::packages::{
+    get_package_config, list_packages, set_package_config, uninstall_package,
+};
 use commands::permission::{
     delete_file_rule, delete_global_path, delete_network_rule, get_permission_profile,
     respond_permission_request, save_file_rule, save_global_path, save_network_rule,
@@ -18,13 +21,18 @@ use commands::workspace::{
 use state::AppState;
 
 fn main() {
-    let db_path = dirs_next::data_dir()
-        .map(|p| p.join("kittypaw").join("kittypaw.db"))
-        .unwrap_or_else(|| std::path::PathBuf::from("kittypaw.db"));
+    let data_dir = dirs_next::data_dir()
+        .map(|p| p.join("kittypaw"))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let db_path = data_dir.join("kittypaw.db");
 
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+
+    let packages_dir = data_dir.join("packages");
+    let _ = std::fs::create_dir_all(&packages_dir);
 
     let store =
         Store::open(db_path.to_str().unwrap_or("kittypaw.db")).expect("Failed to open database");
@@ -36,7 +44,7 @@ fn main() {
         .flatten()
         .unwrap_or_default();
 
-    let app_state = AppState::new(store, persisted_key);
+    let app_state = AppState::new(store, persisted_key, packages_dir);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -62,6 +70,10 @@ fn main() {
             delete_network_rule,
             save_global_path,
             delete_global_path,
+            list_packages,
+            get_package_config,
+            set_package_config,
+            uninstall_package,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

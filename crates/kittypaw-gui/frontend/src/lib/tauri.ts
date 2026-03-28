@@ -96,3 +96,48 @@ export function onPermissionRequest(callback: (req: PermissionRequest) => void) 
 	});
 }
 
+// ── Packages API ──────────────────────────────────────────────────────────
+
+export interface SkillPackage {
+	meta: {
+		id: string;
+		name: string;
+		version: string;
+		description: string;
+		author: string;
+		category: string;
+		tags: string[];
+	};
+	config_schema: ConfigField[];
+	permissions: {
+		primitives: string[];
+		allowed_hosts: string[];
+	};
+}
+
+export interface ConfigField {
+	key: string;
+	label: string;
+	field_type: string;
+	required: boolean;
+	default?: string;
+	hint?: string;
+	options?: string[];
+}
+
+export async function listPackages(): Promise<SkillPackage[]> {
+	return await invoke<SkillPackage[]>('list_packages');
+}
+
+export async function getPackageConfig(id: string): Promise<Record<string, string>> {
+	return await invoke<Record<string, string>>('get_package_config', { id });
+}
+
+export async function setPackageConfig(id: string, key: string, value: string): Promise<void> {
+	await invoke('set_package_config', { id, key, value });
+}
+
+export async function uninstallPackage(id: string): Promise<void> {
+	await invoke('uninstall_package', { id });
+}
+

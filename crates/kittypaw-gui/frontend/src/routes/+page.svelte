@@ -9,6 +9,7 @@
 	import Settings from '$lib/components/Settings.svelte';
 	import FilePreview from '$lib/components/FilePreview.svelte';
 	import DiffView from '$lib/components/DiffView.svelte';
+	import SkillGallery from '$lib/components/SkillGallery.svelte';
 
 	let showSettings = false;
 	let needsApiKey = false;
@@ -16,8 +17,8 @@
 	let streamingId: string | null = null;
 	let unlistenStream: (() => void) | null = null;
 
-	// Active panel: 'chat' | 'preview' | 'changes'
-	let activePanel: 'chat' | 'preview' | 'changes' = 'chat';
+	// Active panel: 'chat' | 'preview' | 'changes' | 'skills'
+	let activePanel: 'chat' | 'preview' | 'changes' | 'skills' = 'chat';
 
 	// Switch to preview when a file is selected
 	$: if ($selectedFile) {
@@ -97,6 +98,7 @@
 		showSettings={showSettings}
 		on:openSettings={() => (showSettings = true)}
 		on:newChat={handleNewChat}
+		on:openSkills={() => (activePanel = 'skills')}
 	/>
 
 	<div class="main">
@@ -138,6 +140,18 @@
 				{#if pendingCount > 0}
 					<span class="badge">{pendingCount}</span>
 				{/if}
+			</button>
+			<button
+				class="tab"
+				class:active={activePanel === 'skills'}
+				on:click={() => (activePanel = 'skills')}
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+					<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+					<polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+					<line x1="12" y1="22.08" x2="12" y2="12"></line>
+				</svg>
+				Skills
 			</button>
 		</div>
 
@@ -182,6 +196,10 @@
 					{/each}
 				</div>
 			{/if}
+		</div>
+
+		<div class="panel" class:visible={activePanel === 'skills'}>
+			<SkillGallery />
 		</div>
 	</div>
 </div>

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use kittypaw_core::permission::PermissionDecision;
@@ -14,10 +15,11 @@ pub struct AppState {
     pub permission_checker: Arc<Mutex<FilePermissionChecker>>,
     pub permission_requests:
         Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>>>,
+    pub packages_dir: PathBuf,
 }
 
 impl AppState {
-    pub fn new(store: Store, api_key: String) -> Self {
+    pub fn new(store: Store, api_key: String, packages_dir: PathBuf) -> Self {
         Self {
             store: Arc::new(Mutex::new(store)),
             api_key: Arc::new(Mutex::new(api_key)),
@@ -25,6 +27,7 @@ impl AppState {
             file_indexer: Arc::new(Mutex::new(None)),
             permission_checker: Arc::new(Mutex::new(FilePermissionChecker::permissive())),
             permission_requests: Arc::new(Mutex::new(HashMap::new())),
+            packages_dir,
         }
     }
 }
