@@ -19,6 +19,7 @@ pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
     ("Llm", &["generate"]),
     ("File", &["read", "write"]),
     ("Env", &["get"]),
+    ("Web", &["search", "fetch"]),
 ];
 
 /// Run QuickJS using AsyncRuntime + AsyncContext (avoids RefCell borrow conflicts).

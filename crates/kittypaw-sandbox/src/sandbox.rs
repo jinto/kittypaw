@@ -278,4 +278,25 @@ mod tests {
         assert_eq!(r.skill_calls[1].method, "read");
         assert_eq!(r.skill_calls[2].skill_name, "Env");
     }
+
+    #[test]
+    fn test_direct_web_stubs() {
+        let r = run_child_async(
+            r#"
+            const search = await Web.search("rust programming");
+            const page = await Web.fetch("https://example.com");
+            return "web_stubs_work";
+            "#,
+            json!({}),
+            None,
+            None, // no resolver, stubs return "null" but shouldn't crash
+        );
+        assert!(r.success, "error: {:?}", r.error);
+        assert_eq!(r.output, "web_stubs_work");
+        assert_eq!(r.skill_calls.len(), 2);
+        assert_eq!(r.skill_calls[0].skill_name, "Web");
+        assert_eq!(r.skill_calls[0].method, "search");
+        assert_eq!(r.skill_calls[1].skill_name, "Web");
+        assert_eq!(r.skill_calls[1].method, "fetch");
+    }
 }
