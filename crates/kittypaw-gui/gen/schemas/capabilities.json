@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default capabilities for KittyPaw desktop app","local":true,"windows":["main"],"permissions":["core:default","core:webview:allow-internal-toggle-devtools","dialog:default","dialog:allow-open","shell:default","shell:allow-open"]}}

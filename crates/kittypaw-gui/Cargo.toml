@@ -3,22 +3,22 @@ name = "kittypaw-gui"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "kittypaw-gui"
+path = "src/main.rs"
+
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
+kittypaw-core = { path = "../kittypaw-core" }
+kittypaw-llm = { path = "../kittypaw-llm" }
+kittypaw-store = { path = "../kittypaw-store" }
+kittypaw-sandbox = { path = "../kittypaw-sandbox" }
+kittypaw-cli = { path = "../kittypaw-cli" }
+kittypaw-workspace = { path = "../kittypaw-workspace" }
+
+dioxus = { version = "0.6", features = ["desktop"] }
+tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
-kittypaw-core = { workspace = true }
-kittypaw-llm = { workspace = true }
-kittypaw-store = { workspace = true }
-kittypaw-sandbox = { workspace = true }
-kittypaw-cli = { path = "../kittypaw-cli" }
-kittypaw-workspace = { workspace = true }
 tracing = { workspace = true }
 dirs-next = "2"
-uuid = { version = "1", features = ["v4"] }
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+rfd = "0.15"

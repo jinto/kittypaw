@@ -15,7 +15,7 @@ pub struct Skill {
     pub permissions: SkillPermissions,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillTrigger {
     #[serde(rename = "type")]
     pub trigger_type: String,

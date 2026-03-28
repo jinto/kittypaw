@@ -9,7 +9,7 @@ use crate::skill::SkillTrigger;
 // ---------------------------------------------------------------------------
 
 /// Skill package metadata parsed from `package.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkillPackage {
     pub meta: PackageMeta,
     pub config_schema: Vec<ConfigField>,
@@ -18,7 +18,7 @@ pub struct SkillPackage {
     pub trigger: Option<SkillTrigger>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackageMeta {
     pub id: String,
     pub name: String,
@@ -30,7 +30,7 @@ pub struct PackageMeta {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfigField {
     pub key: String,
     pub label: String,
@@ -46,7 +46,7 @@ pub struct ConfigField {
     pub options: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigFieldType {
     String,
@@ -57,7 +57,7 @@ pub enum ConfigFieldType {
     Select,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PackagePermissions {
     pub primitives: Vec<String>,
     #[serde(default)]

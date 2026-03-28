@@ -50,3 +50,4 @@ spikes/*/Cargo.lock
 htmlcov/
 .coverage
 .omc/
+.playwright-cli/
