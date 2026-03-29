@@ -64,21 +64,48 @@ impl LlmRegistry {
                 cfg.api_key.clone()
             };
 
-            if api_key.is_empty() {
-                continue;
-            }
-
             let provider: Arc<dyn LlmProvider> = match cfg.provider.as_str() {
-                "claude" | "anthropic" => Arc::new(ClaudeProvider::new(
-                    api_key,
-                    cfg.model.clone(),
-                    cfg.max_tokens,
-                )),
-                "openai" => Arc::new(OpenAiProvider::new(
-                    api_key,
-                    cfg.model.clone(),
-                    cfg.max_tokens,
-                )),
+                "claude" | "anthropic" => {
+                    if api_key.is_empty() {
+                        continue;
+                    }
+                    Arc::new(ClaudeProvider::new(
+                        api_key,
+                        cfg.model.clone(),
+                        cfg.max_tokens,
+                    ))
+                }
+                "openai" => {
+                    if api_key.is_empty() {
+                        continue;
+                    }
+                    if let Some(ref base_url) = cfg.base_url {
+                        Arc::new(OpenAiProvider::with_base_url(
+                            base_url.clone(),
+                            api_key,
+                            cfg.model.clone(),
+                            cfg.max_tokens,
+                        ))
+                    } else {
+                        Arc::new(OpenAiProvider::new(
+                            api_key,
+                            cfg.model.clone(),
+                            cfg.max_tokens,
+                        ))
+                    }
+                }
+                "ollama" | "local" => {
+                    let base_url = cfg
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                    Arc::new(OpenAiProvider::with_base_url(
+                        base_url,
+                        String::new(),
+                        cfg.model.clone(),
+                        cfg.max_tokens,
+                    ))
+                }
                 _ => continue,
             };
 
@@ -186,8 +213,25 @@ mod tests {
             api_key: String::new(),
             max_tokens: 1024,
             default: false,
+            base_url: None,
         }];
         let registry = LlmRegistry::from_configs(&configs);
         assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_from_configs_ollama_no_key_needed() {
+        let configs = vec![ModelConfig {
+            name: "local-qwen".into(),
+            provider: "ollama".into(),
+            model: "qwen3.5:27b".into(),
+            api_key: String::new(),
+            max_tokens: 4096,
+            default: true,
+            base_url: None,
+        }];
+        let registry = LlmRegistry::from_configs(&configs);
+        assert_eq!(registry.list().len(), 1);
+        assert!(registry.get("local-qwen").is_some());
     }
 }

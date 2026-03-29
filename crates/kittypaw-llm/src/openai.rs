@@ -8,7 +8,10 @@ use std::sync::Arc;
 use crate::provider::LlmProvider;
 use crate::util::strip_code_fences;
 
+const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+
 pub struct OpenAiProvider {
+    base_url: String,
     api_key: String,
     model: String,
     max_tokens: u32,
@@ -17,7 +20,22 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn new(api_key: String, model: String, max_tokens: u32) -> Self {
+        Self::with_base_url(
+            DEFAULT_OPENAI_BASE_URL.to_string(),
+            api_key,
+            model,
+            max_tokens,
+        )
+    }
+
+    pub fn with_base_url(
+        base_url: String,
+        api_key: String,
+        model: String,
+        max_tokens: u32,
+    ) -> Self {
         Self {
+            base_url,
             api_key,
             model,
             max_tokens,
@@ -109,12 +127,17 @@ impl LlmProvider for OpenAiProvider {
         let mut retries = 0;
         let max_retries = 3;
 
+        let url = format!("{}/chat/completions", self.base_url);
+
         loop {
-            let response = self
+            let mut req = self
                 .client
-                .post("https://api.openai.com/v1/chat/completions")
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
+                .post(&url)
+                .header("content-type", "application/json");
+            if !self.api_key.is_empty() {
+                req = req.header("authorization", format!("Bearer {}", self.api_key));
+            }
+            let response = req
                 .json(&request)
                 .send()
                 .await
@@ -181,11 +204,15 @@ impl LlmProvider for OpenAiProvider {
             stream: true,
         };
 
-        let response = self
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut req = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
+            .post(&url)
+            .header("content-type", "application/json");
+        if !self.api_key.is_empty() {
+            req = req.header("authorization", format!("Bearer {}", self.api_key));
+        }
+        let response = req
             .json(&request)
             .send()
             .await
@@ -298,5 +325,22 @@ mod tests {
 
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["stream"], true);
+    }
+
+    #[test]
+    fn test_new_uses_default_base_url() {
+        let _provider = OpenAiProvider::new("test-key".into(), "gpt-4o".into(), 4096);
+        // Compiles and doesn't panic = default base URL works
+    }
+
+    #[test]
+    fn test_with_base_url_accepts_empty_key() {
+        let _provider = OpenAiProvider::with_base_url(
+            "http://localhost:11434/v1".into(),
+            String::new(),
+            "qwen3.5:27b".into(),
+            4096,
+        );
+        // Empty API key should not panic
     }
 }

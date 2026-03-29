@@ -7,6 +7,7 @@ mod state;
 use std::sync::Arc;
 
 use kittypaw_llm::claude::ClaudeProvider;
+use kittypaw_llm::openai::OpenAiProvider;
 use kittypaw_llm::registry::LlmRegistry;
 use kittypaw_store::Store;
 use state::AppState;
@@ -43,6 +44,22 @@ fn main() {
                 4096,
             )),
         );
+    }
+
+    if let (Ok(Some(url)), Ok(Some(model))) = (
+        kittypaw_core::secrets::get_secret("local_model", "base_url"),
+        kittypaw_core::secrets::get_secret("local_model", "model_name"),
+    ) {
+        llm_registry.register(
+            "local",
+            Arc::new(OpenAiProvider::with_base_url(
+                url,
+                String::new(),
+                model,
+                4096,
+            )),
+        );
+        llm_registry.set_default("local");
     }
 
     let app_state = AppState::new(store, persisted_key, packages_dir, llm_registry);

@@ -48,6 +48,8 @@ pub struct ModelConfig {
     pub max_tokens: u32,
     #[serde(default)]
     pub default: bool,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
