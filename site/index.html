@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittyPaw - 코드 없이 자동화하는 AI 데스크톱 앱</title>
+    <meta name="description" content="스킬 갤러리에서 설치하고, 설정만 채우면 끝. 매일 아침 시장 리포트, RSS 뉴스 요약, URL 모니터링... 전부 자동으로.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: #1e293b;
+            line-height: 1.6;
+            background: #fff;
+        }
+        a { color: #2563eb; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Hero */
+        .hero {
+            text-align: center;
+            padding: 80px 20px 60px;
+            background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+        }
+        .hero-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #2563eb;
+            margin-bottom: 20px;
+        }
+        .hero h1 {
+            font-size: 48px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            margin-bottom: 16px;
+        }
+        .hero h1 span { color: #2563eb; }
+        .hero p {
+            font-size: 20px;
+            color: #64748b;
+            max-width: 600px;
+            margin: 0 auto 32px;
+        }
+        .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            padding: 12px 28px;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; text-decoration: none; }
+        .btn-secondary { background: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0; }
+        .btn-secondary:hover { background: #e2e8f0; text-decoration: none; }
+        .hero-code {
+            margin: 40px auto 0;
+            max-width: 480px;
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px 24px;
+            text-align: left;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 14px;
+            color: #e2e8f0;
+        }
+        .hero-code .prompt { color: #94a3b8; }
+        .hero-code .cmd { color: #38bdf8; }
+        .hero-note {
+            margin-top: 16px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        /* Features */
+        .section { padding: 80px 20px; max-width: 1000px; margin: 0 auto; }
+        .section-title {
+            text-align: center;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        .section-subtitle {
+            text-align: center;
+            font-size: 17px;
+            color: #64748b;
+            margin-bottom: 48px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+        .feature-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 28px;
+            transition: border-color 0.15s;
+        }
+        .feature-card:hover { border-color: #93c5fd; }
+        .feature-icon { font-size: 28px; margin-bottom: 12px; }
+        .feature-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+        .feature-card p { font-size: 14px; color: #64748b; line-height: 1.6; }
+
+        /* Use Cases */
+        .usecases { background: #f8fafc; }
+        .usecase-list { display: flex; flex-direction: column; gap: 20px; }
+        .usecase {
+            display: flex;
+            gap: 20px;
+            align-items: start;
+            background: #fff;
+            border-radius: 14px;
+            padding: 24px 28px;
+            border: 1px solid #e2e8f0;
+        }
+        .usecase-num {
+            min-width: 36px;
+            height: 36px;
+            background: #2563eb;
+            color: #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .usecase h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+        .usecase p { font-size: 14px; color: #64748b; }
+
+        /* Skills */
+        .skills-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+        .skill-card {
+            text-align: center;
+            padding: 24px 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            transition: border-color 0.15s;
+        }
+        .skill-card:hover { border-color: #93c5fd; }
+        .skill-icon { font-size: 32px; margin-bottom: 10px; }
+        .skill-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .skill-card p { font-size: 12px; color: #94a3b8; }
+
+        /* Tech */
+        .tech-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .tech-pill {
+            padding: 8px 18px;
+            background: #f1f5f9;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #475569;
+        }
+
+        /* CTA */
+        .cta {
+            text-align: center;
+            padding: 80px 20px;
+            background: #1e293b;
+            color: #fff;
+        }
+        .cta h2 { font-size: 32px; font-weight: 700; margin-bottom: 12px; }
+        .cta p { font-size: 17px; color: #94a3b8; margin-bottom: 32px; }
+        .cta .btn-primary { background: #3b82f6; font-size: 16px; padding: 14px 32px; }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 32px 20px;
+            font-size: 13px;
+            color: #94a3b8;
+            border-top: 1px solid #f1f5f9;
+        }
+
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 32px; }
+            .hero p { font-size: 17px; }
+            .usecase { flex-direction: column; gap: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="hero">
+    <div class="hero-badge">순수 Rust. 단일 바이너리. 오픈소스.</div>
+    <h1>코드 없이 자동화하는<br><span>AI 데스크톱 앱</span></h1>
+    <p>스킬 갤러리에서 설치하고, 설정만 채우면 끝.<br>매일 아침 시장 리포트, RSS 뉴스 요약, URL 모니터링... 전부 자동으로.</p>
+    <div class="hero-buttons">
+        <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">GitHub에서 받기</a>
+        <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">스킬 갤러리</a>
+    </div>
+    <div class="hero-code">
+        <div><span class="prompt">$</span> <span class="cmd">cargo run -p kittypaw-gui</span></div>
+    </div>
+    <div class="hero-note">npm 없음. JS 없음. cargo run 한 줄이면 끝.</div>
+</div>
+
+<div class="section">
+    <h2 class="section-title">왜 KittyPaw인가요?</h2>
+    <p class="section-subtitle">n8n, Zapier 같은 자동화 도구의 데스크톱 네이티브 대안. AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon">🎯</div>
+            <h3>코드 없이 자동화</h3>
+            <p>스킬 갤러리에서 원하는 자동화를 설치하고, 텔레그램 토큰만 넣으면 바로 동작합니다.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">💬</div>
+            <h3>AI 채팅</h3>
+            <p>데스크톱 앱에서 바로 Claude와 대화. 질문하고, 분석하고, 자동화를 지시하세요.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🔒</div>
+            <h3>안전한 실행</h3>
+            <p>모든 스킬은 QuickJS 샌드박스 + OS 커널 격리 (Seatbelt/Landlock) 안에서 실행됩니다.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🔗</div>
+            <h3>스킬 체이닝</h3>
+            <p>여러 스킬을 순차 파이프라인으로 연결. 데이터 수집 → 요약 → 발송을 한 번에.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🌐</div>
+            <h3>웹 검색</h3>
+            <p>스킬이 웹을 검색하고, 페이지를 읽고, AI로 요약합니다. 팩트체크도 자동으로.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🦀</div>
+            <h3>순수 Rust</h3>
+            <p>JS, CSS, npm 없이 Rust만으로 구축. Dioxus 데스크톱 GUI. 단일 바이너리 배포.</p>
+        </div>
+    </div>
+</div>
+
+<div class="section usecases">
+    <h2 class="section-title">이렇게 쓸 수 있습니다</h2>
+    <p class="section-subtitle">설치하고 설정만 채우면 바로 동작하는 자동화들</p>
+    <div class="usecase-list">
+        <div class="usecase">
+            <div class="usecase-num">1</div>
+            <div>
+                <h3>매일 아침 시장 리포트</h3>
+                <p>ETF 데이터를 수집하고 AI가 요약해서 텔레그램으로 보내줍니다. 평일 오전 8시 자동 발송.</p>
+            </div>
+        </div>
+        <div class="usecase">
+            <div class="usecase-num">2</div>
+            <div>
+                <h3>RSS 뉴스 요약</h3>
+                <p>Hacker News, TechCrunch 등 RSS 피드의 새 글을 AI가 요약. 이미 본 글은 자동 필터링.</p>
+            </div>
+        </div>
+        <div class="usecase">
+            <div class="usecase-num">3</div>
+            <div>
+                <h3>서비스 다운 알림</h3>
+                <p>내 웹사이트/API를 5분마다 체크. 다운되면 즉시 텔레그램 알림. 복구되면 다시 알림.</p>
+            </div>
+        </div>
+        <div class="usecase">
+            <div class="usecase-num">4</div>
+            <div>
+                <h3>날씨 브리핑</h3>
+                <p>매일 아침 7일 예보를 자연어로 알려줍니다. API 키 불필요 (Open-Meteo 무료 API).</p>
+            </div>
+        </div>
+        <div class="usecase">
+            <div class="usecase-num">5</div>
+            <div>
+                <h3>나만의 자동화 만들기</h3>
+                <p><code>kittypaw teach "매일 로또 당첨번호 확인해서 알려줘"</code> — AI가 코드를 짜고 테스트하고 등록합니다.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <h2 class="section-title">내장 스킬 갤러리</h2>
+    <p class="section-subtitle">앱을 열면 바로 쓸 수 있는 5개 스킬이 설치되어 있습니다</p>
+    <div class="skills-grid">
+        <div class="skill-card">
+            <div class="skill-icon">📈</div>
+            <h4>매크로 경제 리포트</h4>
+            <p>ETF + AI 요약</p>
+        </div>
+        <div class="skill-card">
+            <div class="skill-icon">🌤</div>
+            <h4>날씨 브리핑</h4>
+            <p>7일 예보</p>
+        </div>
+        <div class="skill-card">
+            <div class="skill-icon">📰</div>
+            <h4>RSS 뉴스 요약</h4>
+            <p>피드 + LLM 요약</p>
+        </div>
+        <div class="skill-card">
+            <div class="skill-icon">✅</div>
+            <h4>리마인더</h4>
+            <p>채팅 할 일 관리</p>
+        </div>
+        <div class="skill-card">
+            <div class="skill-icon">🔍</div>
+            <h4>URL 모니터</h4>
+            <p>상태 변경 알림</p>
+        </div>
+    </div>
+</div>
+
+<div class="section" style="background: #f8fafc;">
+    <h2 class="section-title">기술 스택</h2>
+    <p class="section-subtitle">외부 런타임 없이 Rust만으로. 단일 바이너리로 배포.</p>
+    <div class="tech-pills">
+        <span class="tech-pill">🦀 Rust</span>
+        <span class="tech-pill">Dioxus GUI</span>
+        <span class="tech-pill">QuickJS Sandbox</span>
+        <span class="tech-pill">Claude + OpenAI</span>
+        <span class="tech-pill">SQLite</span>
+        <span class="tech-pill">OS Keychain</span>
+        <span class="tech-pill">Seatbelt / Landlock</span>
+        <span class="tech-pill">TOML 패키지</span>
+    </div>
+</div>
+
+<div class="cta">
+    <h2>지금 시작하세요</h2>
+    <p>급할수록 필요한 건, 작고 빠른 고양이손 🐱</p>
+    <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">GitHub에서 받기</a>
+</div>
+
+<footer>
+    <p>MIT License · <a href="https://github.com/jinto/kittypaw">GitHub</a> · <a href="https://github.com/kittypaw-skills">스킬 갤러리</a></p>
+</footer>
+
+</body>
+</html>
