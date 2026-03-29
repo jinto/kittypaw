@@ -1,11 +1,11 @@
-# Oochy configuration example
-# Copy to oochy.toml and fill in your values.
+# KittyPaw configuration example
+# Copy to kittypaw.toml and fill in your values.
 # Sensitive values can be overridden via environment variables:
-#   OOCHY_API_KEY, OOCHY_LLM_PROVIDER, OOCHY_MODEL
+#   KITTYPAW_API_KEY, KITTYPAW_LLM_PROVIDER, KITTYPAW_MODEL
 
 [llm]
 provider = "claude"
-api_key = ""          # or set OOCHY_API_KEY env var
+api_key = ""          # or set KITTYPAW_API_KEY env var
 model = "claude-sonnet-4-20250514"
 max_tokens = 4096
 
@@ -14,6 +14,41 @@ timeout_secs = 30
 memory_limit_mb = 64
 allowed_paths = ["/tmp"]
 allowed_hosts = ["api.telegram.org", "discord.com"]
+
+# Model definitions — multi-provider support
+# Provider types: "claude", "openai", "ollama", "local"
+
+# Ollama (default: http://localhost:11434/v1)
+[[models]]
+name = "ollama-qwen"
+provider = "ollama"
+model = "qwen3.5:27b"
+max_tokens = 4096
+default = true
+
+# LM Studio (default port 1234)
+# [[models]]
+# name = "lm-studio"
+# provider = "local"
+# model = "lmstudio-community/Meta-Llama-3-8B-Instruct"
+# base_url = "http://localhost:1234/v1"
+# max_tokens = 4096
+
+# llama.cpp server
+# [[models]]
+# name = "llama-cpp"
+# provider = "local"
+# model = "default"
+# base_url = "http://localhost:8080/v1"
+# max_tokens = 4096
+
+# OpenAI (optional, alongside local models)
+# [[models]]
+# name = "gpt-4o"
+# provider = "openai"
+# model = "gpt-4o"
+# api_key = ""  # or set KITTYPAW_API_KEY env var
+# max_tokens = 4096
 
 # Channel definitions — one entry per integration
 [[channels]]

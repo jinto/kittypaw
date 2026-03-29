@@ -2,7 +2,8 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use clap::{Parser, Subcommand};
-use kittypaw_llm::provider::LlmProvider;
+use kittypaw_core::config::{Config, ModelConfig};
+use kittypaw_llm::registry::LlmRegistry;
 use tracing_subscriber::EnvFilter;
 
 use kittypaw_cli::agent_loop;
@@ -11,6 +12,47 @@ mod schedule;
 mod teach_loop;
 
 use kittypaw_store::Store;
+
+/// Build an LlmRegistry from config.
+/// Uses `[[models]]` if configured, otherwise falls back to the legacy `[llm]` section.
+fn build_registry(config: &Config) -> LlmRegistry {
+    if !config.models.is_empty() {
+        let mut models = config.models.clone();
+        // Inject global api_key as fallback for models that require one but don't have it
+        if !config.llm.api_key.is_empty() {
+            for model in &mut models {
+                if model.api_key.is_empty()
+                    && matches!(model.provider.as_str(), "claude" | "anthropic" | "openai")
+                {
+                    model.api_key = config.llm.api_key.clone();
+                }
+            }
+        }
+        LlmRegistry::from_configs(&models)
+    } else if !config.llm.api_key.is_empty() {
+        let legacy = ModelConfig {
+            name: config.llm.provider.clone(),
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            api_key: config.llm.api_key.clone(),
+            max_tokens: config.llm.max_tokens,
+            default: true,
+            base_url: None,
+        };
+        LlmRegistry::from_configs(&[legacy])
+    } else {
+        LlmRegistry::new()
+    }
+}
+
+/// Build a registry and return the default provider, or exit with an error message.
+fn require_provider(config: &Config) -> std::sync::Arc<dyn kittypaw_llm::provider::LlmProvider> {
+    let registry = build_registry(config);
+    registry.default_provider().unwrap_or_else(|| {
+        eprintln!("Error: No LLM provider configured. Set KITTYPAW_API_KEY or add [[models]] to kittypaw.toml.");
+        std::process::exit(1);
+    })
+}
 
 #[derive(Parser)]
 #[command(name = "kittypaw", version)]
@@ -163,17 +205,7 @@ async fn run_serve(bind_addr: &str) {
         std::process::exit(1);
     });
 
-    if config.llm.api_key.is_empty() {
-        eprintln!("Error: KITTYPAW_API_KEY not set. Export your Claude API key:");
-        eprintln!("  export KITTYPAW_API_KEY=sk-ant-...");
-        std::process::exit(1);
-    }
-
-    let provider = kittypaw_llm::claude::ClaudeProvider::new(
-        config.llm.api_key.clone(),
-        config.llm.model.clone(),
-        config.llm.max_tokens,
-    );
+    let provider = require_provider(&config);
 
     let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
@@ -286,7 +318,7 @@ async fn run_serve(bind_addr: &str) {
                         send_telegram_message(&config, &chat_id_str, "Usage: /teach <description>\n\nExample: /teach send me a daily joke").await;
                     } else {
                         send_telegram_message(&config, &chat_id_str, &format!("Generating skill for: {teach_text}...")).await;
-                        match teach_loop::handle_teach(teach_text, &chat_id_str, &provider, &sandbox, &config).await {
+                        match teach_loop::handle_teach(teach_text, &chat_id_str, &*provider, &sandbox, &config).await {
                             Ok(ref result @ teach_loop::TeachResult::Generated { ref code, ref dry_run_output, ref skill_name, .. }) => {
                                 match teach_loop::approve_skill(result) {
                                     Ok(()) => {
@@ -392,7 +424,7 @@ async fn run_serve(bind_addr: &str) {
                     continue;
                 }
 
-                match agent_loop::run_agent_loop(event, &provider, &sandbox, Arc::clone(&store), &config, None, None).await {
+                match agent_loop::run_agent_loop(event, &*provider, &sandbox, Arc::clone(&store), &config, None, None).await {
                     Ok(output) => {
                         // Route response back to originating channel
                         match event_type {
@@ -489,9 +521,14 @@ fn run_config_check() {
             for agent in &config.agents {
                 println!("    - {} ({})", agent.name, agent.id);
             }
-            if config.llm.api_key.is_empty() {
+            // Check if any LLM provider is available (legacy or [[models]])
+            let has_provider = !config.llm.api_key.is_empty()
+                || config.models.iter().any(|m| {
+                    matches!(m.provider.as_str(), "ollama" | "local") || !m.api_key.is_empty()
+                });
+            if !has_provider {
                 eprintln!(
-                    "Warning: API key not set. Set KITTYPAW_API_KEY or llm.api_key in kittypaw.toml"
+                    "Warning: No LLM provider configured. Set KITTYPAW_API_KEY, add llm.api_key, or add [[models]] to kittypaw.toml"
                 );
                 std::process::exit(1);
             }
@@ -611,19 +648,10 @@ async fn run_skills_explain(name: &str) {
         std::process::exit(1);
     });
 
-    if config.llm.api_key.is_empty() {
-        eprintln!("Error: KITTYPAW_API_KEY not set.");
-        std::process::exit(1);
-    }
+    let provider = require_provider(&config);
 
     match kittypaw_core::skill::load_skill(name) {
         Ok(Some((skill, js_code))) => {
-            let provider = kittypaw_llm::claude::ClaudeProvider::new(
-                config.llm.api_key.clone(),
-                config.llm.model.clone(),
-                config.llm.max_tokens,
-            );
-
             let prompt = format!(
                 "Explain this JavaScript skill in plain English. What does it do, what permissions does it need, and when does it run?\n\nSkill name: {}\nTrigger: {} {}\nPermissions: {}\n\nCode:\n{}",
                 skill.name,
@@ -747,23 +775,14 @@ async fn run_teach_cli(description: &str) {
         std::process::exit(1);
     });
 
-    if config.llm.api_key.is_empty() {
-        eprintln!("Error: KITTYPAW_API_KEY not set.");
-        std::process::exit(1);
-    }
-
-    let provider = kittypaw_llm::claude::ClaudeProvider::new(
-        config.llm.api_key.clone(),
-        config.llm.model.clone(),
-        config.llm.max_tokens,
-    );
+    let provider = require_provider(&config);
 
     let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
     println!("Generating skill for: {description}...\n");
 
     loop {
-        match teach_loop::handle_teach(description, "cli", &provider, &sandbox, &config).await {
+        match teach_loop::handle_teach(description, "cli", &*provider, &sandbox, &config).await {
             Ok(
                 ref result @ teach_loop::TeachResult::Generated {
                     ref code,
@@ -1070,18 +1089,7 @@ async fn run_stdin() {
         std::process::exit(1);
     });
 
-    if config.llm.api_key.is_empty() {
-        eprintln!("Error: KITTYPAW_API_KEY not set. Export your Claude API key:");
-        eprintln!("  export KITTYPAW_API_KEY=sk-ant-...");
-        std::process::exit(1);
-    }
-
-    // Initialize components
-    let provider = kittypaw_llm::claude::ClaudeProvider::new(
-        config.llm.api_key.clone(),
-        config.llm.model.clone(),
-        config.llm.max_tokens,
-    );
+    let provider = require_provider(&config);
 
     let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
@@ -1092,7 +1100,8 @@ async fn run_stdin() {
     })));
 
     // Run agent loop
-    match agent_loop::run_agent_loop(event, &provider, &sandbox, store, &config, None, None).await {
+    match agent_loop::run_agent_loop(event, &*provider, &sandbox, store, &config, None, None).await
+    {
         Ok(output) => {
             println!("{output}");
         }

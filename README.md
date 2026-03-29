@@ -131,7 +131,7 @@ cargo run -p kittypaw-cli -- serve
 |----------|------|
 | GUI | [Dioxus](https://dioxuslabs.com/) 0.6 (데스크톱) |
 | 샌드박스 | QuickJS VM + macOS Seatbelt / Linux Landlock |
-| LLM | Claude API + OpenAI API (멀티 프로바이더) |
+| LLM | Claude API + OpenAI API + 로컬 LLM (Ollama/LM Studio/llama.cpp) |
 | 저장소 | SQLite (rusqlite) + OS Keychain (시크릿) |
 | 패키지 | TOML 기반 스킬 패키지 (`package.toml` + `main.js`) |
 

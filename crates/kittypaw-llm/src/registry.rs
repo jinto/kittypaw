@@ -80,9 +80,24 @@ impl LlmRegistry {
                         continue;
                     }
                     if let Some(ref base_url) = cfg.base_url {
+                        if let Err(e) = validate_llm_base_url(base_url) {
+                            tracing::warn!("Skipping model '{}': {e}", cfg.name);
+                            continue;
+                        }
+                        // Only send API keys to trusted first-party hosts
+                        let safe_key = if is_trusted_llm_host(base_url) {
+                            api_key.clone()
+                        } else {
+                            tracing::warn!(
+                                "base_url '{}' is not a trusted provider; API key will NOT be sent. \
+                                 Use provider = \"ollama\" for local models.",
+                                base_url
+                            );
+                            String::new()
+                        };
                         Arc::new(OpenAiProvider::with_base_url(
                             base_url.clone(),
-                            api_key,
+                            safe_key,
                             cfg.model.clone(),
                             cfg.max_tokens,
                         ))
@@ -99,6 +114,10 @@ impl LlmRegistry {
                         .base_url
                         .clone()
                         .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                    if let Err(e) = validate_llm_base_url(&base_url) {
+                        tracing::warn!("Skipping model '{}': {e}", cfg.name);
+                        continue;
+                    }
                     Arc::new(OpenAiProvider::with_base_url(
                         base_url,
                         String::new(),
@@ -122,6 +141,45 @@ impl Default for LlmRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Check if a base_url points to a trusted first-party LLM provider
+/// where it is safe to send API keys.
+fn is_trusted_llm_host(base_url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(base_url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    is_trusted_domain(host, "openai.com")
+        || is_trusted_domain(host, "anthropic.com")
+        || is_trusted_domain(host, "azure.com")
+}
+
+fn is_trusted_domain(host: &str, domain: &str) -> bool {
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+/// Validate a base_url for LLM provider use.
+/// Blocks non-HTTP schemes and cloud metadata endpoints.
+pub fn validate_llm_base_url(base_url: &str) -> std::result::Result<(), String> {
+    let parsed = url::Url::parse(base_url).map_err(|_| "Invalid base_url".to_string())?;
+
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("base_url must use http or https".into());
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "base_url has no host".to_string())?;
+
+    // Block cloud metadata endpoints
+    if matches!(host, "metadata.google.internal" | "169.254.169.254") {
+        return Err("base_url cannot point to cloud metadata service".into());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -233,5 +291,35 @@ mod tests {
         let registry = LlmRegistry::from_configs(&configs);
         assert_eq!(registry.list().len(), 1);
         assert!(registry.get("local-qwen").is_some());
+    }
+
+    #[test]
+    fn test_is_trusted_llm_host() {
+        assert!(super::is_trusted_llm_host("https://api.openai.com/v1"));
+        assert!(super::is_trusted_llm_host("https://models.azure.com/v1"));
+        assert!(!super::is_trusted_llm_host("http://evil.com/v1"));
+        assert!(!super::is_trusted_llm_host("http://localhost:11434/v1"));
+        // Subdomain spoofing must not match
+        assert!(!super::is_trusted_llm_host("https://evil-openai.com/v1"));
+        assert!(!super::is_trusted_llm_host("https://notrealopenai.com/v1"));
+    }
+
+    #[test]
+    fn test_validate_llm_base_url_blocks_metadata() {
+        assert!(super::validate_llm_base_url("http://169.254.169.254/latest").is_err());
+        assert!(super::validate_llm_base_url("http://metadata.google.internal/v1").is_err());
+    }
+
+    #[test]
+    fn test_validate_llm_base_url_blocks_non_http() {
+        assert!(super::validate_llm_base_url("ftp://localhost:11434/v1").is_err());
+        assert!(super::validate_llm_base_url("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_llm_base_url_allows_valid() {
+        assert!(super::validate_llm_base_url("http://localhost:11434/v1").is_ok());
+        assert!(super::validate_llm_base_url("http://127.0.0.1:8080/v1").is_ok());
+        assert!(super::validate_llm_base_url("https://api.openai.com/v1").is_ok());
     }
 }

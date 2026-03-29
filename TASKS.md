@@ -35,13 +35,16 @@
 
 ## In Progress
 
-### 🔴 P0: 로컬 LLM 지원 (Ollama/llama.cpp)
+### 🔴 P0: 로컬 LLM 지원 (Ollama/llama.cpp) ✅
 > Hermes Agent 급성장 근거. "토큰 먹는 하마" 불만 해소. 구현 쉬움.
-- [ ] `OpenAiProvider`에 `base_url` 파라미터 추가 (Ollama 호환)
-- [ ] `kittypaw.toml` `[[models]]`에 `base_url` 필드 지원
-- [ ] GUI Settings에 로컬 모델 연결 UI (URL + 모델명 입력)
-- [ ] 로컬 모델용 예제 config (`ollama`, `lm-studio` 등)
-- [ ] 랜딩 페이지에 "로컬 LLM 지원" 뱃지 + 경쟁 비교표 추가
+- [x] `OpenAiProvider`에 `base_url` 파라미터 추가 (Ollama 호환)
+- [x] `kittypaw.toml` `[[models]]`에 `base_url` 필드 지원
+- [x] GUI Settings에 로컬 모델 연결 UI (URL + 모델명 입력)
+- [x] 로컬 모델용 예제 config (`ollama`, `lm-studio` 등)
+- [x] 랜딩 페이지에 "로컬 LLM 지원" 뱃지 + 경쟁 비교표 추가
+- [x] CLI에서 `LlmRegistry::from_configs()` 연결 (dead code 해소)
+- [x] `base_url` 보안 검증 (SSRF 방어 + API key 유출 방지)
+- [x] Config keychain fallback (TOML → env → keychain 통합)
 
 ### 배포 준비
 - [ ] kittypaw.app 도메인 DNS 설정 (Cloudflare → GitHub Pages)
@@ -118,7 +121,7 @@
 Hermes Agent       ❌      ✅        ❌          ✅          ✅       ✅
 OpenClaw           ❌      ❌        ❌          ❌          ✅       ✅
 Crew               ✅      ❌        ❌          ❌          ❌       ❌
-KittyPaw           ✅      🔜        ✅          ✅          ✅       ✅
+KittyPaw           ✅      ✅        ✅          ✅          ✅       ✅
 ```
 
 ## 참고 자료
