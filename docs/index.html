@@ -1,357 +1,1262 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KittyPaw - 코드 없이 자동화하는 AI 데스크톱 앱</title>
-    <meta name="description" content="스킬 갤러리에서 설치하고, 설정만 채우면 끝. 매일 아침 시장 리포트, RSS 뉴스 요약, URL 모니터링... 전부 자동으로.">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            color: #1e293b;
-            line-height: 1.6;
-            background: #fff;
-        }
-        a { color: #2563eb; text-decoration: none; }
-        a:hover { text-decoration: underline; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KittyPaw — 코드 없이 자동화하는 AI 데스크톱 앱</title>
+  <meta name="description" content="스킬 갤러리에서 설치하고, 설정만 채우면 끝. 매일 아침 시장 리포트, RSS 뉴스 요약, URL 모니터링... 전부 자동으로.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <style>
+    /* ============================================================
+       RESET & BASE
+    ============================================================ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-        /* Hero */
-        .hero {
-            text-align: center;
-            padding: 80px 20px 60px;
-            background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
-        }
-        .hero-badge {
-            display: inline-block;
-            padding: 4px 14px;
-            background: #eff6ff;
-            border: 1px solid #bfdbfe;
-            border-radius: 20px;
-            font-size: 13px;
-            color: #2563eb;
-            margin-bottom: 20px;
-        }
-        .hero h1 {
-            font-size: 48px;
-            font-weight: 700;
-            letter-spacing: -1px;
-            margin-bottom: 16px;
-        }
-        .hero h1 span { color: #2563eb; }
-        .hero p {
-            font-size: 20px;
-            color: #64748b;
-            max-width: 600px;
-            margin: 0 auto 32px;
-        }
-        .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-        .btn {
-            padding: 12px 28px;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
-            border: none;
-            transition: all 0.15s;
-        }
-        .btn-primary { background: #2563eb; color: #fff; }
-        .btn-primary:hover { background: #1d4ed8; text-decoration: none; }
-        .btn-secondary { background: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0; }
-        .btn-secondary:hover { background: #e2e8f0; text-decoration: none; }
-        .hero-code {
-            margin: 40px auto 0;
-            max-width: 480px;
-            background: #1e293b;
-            border-radius: 12px;
-            padding: 20px 24px;
-            text-align: left;
-            font-family: 'SF Mono', 'Fira Code', monospace;
-            font-size: 14px;
-            color: #e2e8f0;
-        }
-        .hero-code .prompt { color: #94a3b8; }
-        .hero-code .cmd { color: #38bdf8; }
-        .hero-note {
-            margin-top: 16px;
-            font-size: 13px;
-            color: #94a3b8;
-        }
+    :root {
+      --blue-600:   #2563eb;
+      --blue-500:   #3b82f6;
+      --blue-400:   #60a5fa;
+      --blue-100:   #dbeafe;
+      --blue-50:    #eff6ff;
+      --amber-400:  #fbbf24;
+      --amber-300:  #fcd34d;
+      --amber-100:  #fef3c7;
+      --slate-900:  #0f172a;
+      --slate-800:  #1e293b;
+      --slate-700:  #334155;
+      --slate-600:  #475569;
+      --slate-400:  #94a3b8;
+      --slate-200:  #e2e8f0;
+      --slate-100:  #f1f5f9;
+      --slate-50:   #f8fafc;
+      --white:      #ffffff;
+      --radius-sm:  8px;
+      --radius-md:  14px;
+      --radius-lg:  20px;
+      --radius-xl:  28px;
+      --shadow-sm:  0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-md:  0 4px 16px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.05);
+      --shadow-lg:  0 12px 40px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.06);
+      --shadow-glow: 0 0 40px rgba(37,99,235,.25);
+    }
 
-        /* Features */
-        .section { padding: 80px 20px; max-width: 1000px; margin: 0 auto; }
-        .section-title {
-            text-align: center;
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-        .section-subtitle {
-            text-align: center;
-            font-size: 17px;
-            color: #64748b;
-            margin-bottom: 48px;
-            max-width: 600px;
-            margin-left: auto;
-            margin-right: auto;
-        }
+    html { scroll-behavior: smooth; }
 
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-        }
-        .feature-card {
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            padding: 28px;
-            transition: border-color 0.15s;
-        }
-        .feature-card:hover { border-color: #93c5fd; }
-        .feature-icon { font-size: 28px; margin-bottom: 12px; }
-        .feature-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
-        .feature-card p { font-size: 14px; color: #64748b; line-height: 1.6; }
+    body {
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Nanum Gothic', 'Noto Sans KR', sans-serif;
+      color: var(--slate-800);
+      line-height: 1.65;
+      background: var(--white);
+      overflow-x: hidden;
+    }
 
-        /* Use Cases */
-        .usecases { background: #f8fafc; }
-        .usecase-list { display: flex; flex-direction: column; gap: 20px; }
-        .usecase {
-            display: flex;
-            gap: 20px;
-            align-items: start;
-            background: #fff;
-            border-radius: 14px;
-            padding: 24px 28px;
-            border: 1px solid #e2e8f0;
-        }
-        .usecase-num {
-            min-width: 36px;
-            height: 36px;
-            background: #2563eb;
-            color: #fff;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 15px;
-            font-weight: 600;
-        }
-        .usecase h3 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-        .usecase p { font-size: 14px; color: #64748b; }
+    a { color: var(--blue-600); text-decoration: none; }
+    a:hover { text-decoration: underline; }
 
-        /* Skills */
-        .skills-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 16px;
-        }
-        .skill-card {
-            text-align: center;
-            padding: 24px 16px;
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            transition: border-color 0.15s;
-        }
-        .skill-card:hover { border-color: #93c5fd; }
-        .skill-icon { font-size: 32px; margin-bottom: 10px; }
-        .skill-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-        .skill-card p { font-size: 12px; color: #94a3b8; }
+    img, svg { display: block; }
 
-        /* Tech */
-        .tech-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-        }
-        .tech-pill {
-            padding: 8px 18px;
-            background: #f1f5f9;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 500;
-            color: #475569;
-        }
+    /* ============================================================
+       SCROLL ANIMATION — elements start invisible, JS reveals them
+    ============================================================ */
+    .reveal {
+      opacity: 0;
+      transform: translateY(28px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .reveal-delay-1 { transition-delay: 0.08s; }
+    .reveal-delay-2 { transition-delay: 0.16s; }
+    .reveal-delay-3 { transition-delay: 0.24s; }
+    .reveal-delay-4 { transition-delay: 0.32s; }
+    .reveal-delay-5 { transition-delay: 0.40s; }
+    .reveal-delay-6 { transition-delay: 0.48s; }
 
-        /* CTA */
-        .cta {
-            text-align: center;
-            padding: 80px 20px;
-            background: #1e293b;
-            color: #fff;
-        }
-        .cta h2 { font-size: 32px; font-weight: 700; margin-bottom: 12px; }
-        .cta p { font-size: 17px; color: #94a3b8; margin-bottom: 32px; }
-        .cta .btn-primary { background: #3b82f6; font-size: 16px; padding: 14px 32px; }
+    /* ============================================================
+       NAVBAR
+    ============================================================ */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 32px;
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(226,232,240,.6);
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--slate-900);
+      letter-spacing: -.3px;
+    }
+    .nav-brand-paw { font-size: 22px; }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-link {
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--slate-600);
+      transition: background .15s, color .15s;
+    }
+    .nav-link:hover { background: var(--slate-100); color: var(--slate-900); text-decoration: none; }
+    .nav-cta {
+      padding: 8px 18px;
+      background: var(--blue-600);
+      color: var(--white) !important;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .nav-cta:hover { background: #1d4ed8; text-decoration: none; }
 
-        /* Footer */
-        footer {
-            text-align: center;
-            padding: 32px 20px;
-            font-size: 13px;
-            color: #94a3b8;
-            border-top: 1px solid #f1f5f9;
-        }
+    /* ============================================================
+       HERO
+    ============================================================ */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 96px 24px 80px;
+      text-align: center;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% -10%, rgba(37,99,235,.14) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 80% 60%, rgba(251,191,36,.10) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 30% at 20% 70%, rgba(96,165,250,.09) 0%, transparent 55%),
+        linear-gradient(170deg, #f0f7ff 0%, #fefce8 50%, #f0f7ff 100%);
+    }
 
-        @media (max-width: 640px) {
-            .hero h1 { font-size: 32px; }
-            .hero p { font-size: 17px; }
-            .usecase { flex-direction: column; gap: 12px; }
-        }
-    </style>
+    /* decorative blobs */
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -80px; left: -80px;
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, rgba(96,165,250,.18) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -60px; right: -60px;
+      width: 320px; height: 320px;
+      background: radial-gradient(circle, rgba(251,191,36,.15) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .hero-inner { position: relative; z-index: 1; max-width: 700px; margin: 0 auto; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 14px;
+      background: rgba(255,255,255,.75);
+      border: 1px solid rgba(37,99,235,.2);
+      border-radius: 24px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--blue-600);
+      letter-spacing: .2px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 2px 8px rgba(37,99,235,.1);
+    }
+
+    /* CSS-only paw mascot */
+    .hero-paw {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 28px;
+      animation: float 4s ease-in-out infinite;
+      filter: drop-shadow(0 8px 24px rgba(37,99,235,.3));
+    }
+    .paw-toes {
+      display: flex;
+      gap: 4px;
+      margin-bottom: -4px;
+    }
+    .paw-toe {
+      width: 18px;
+      height: 18px;
+      background: linear-gradient(135deg, var(--blue-500), var(--blue-600));
+      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    }
+    .paw-toe:nth-child(1) { transform: translateY(14px) rotate(-18deg); }
+    .paw-toe:nth-child(2) { width: 21px; height: 22px; transform: translateY(-2px) rotate(-5deg); }
+    .paw-toe:nth-child(3) { width: 21px; height: 22px; transform: translateY(-2px) rotate(5deg); }
+    .paw-toe:nth-child(4) { transform: translateY(14px) rotate(18deg); }
+    .paw-pad {
+      width: 60px;
+      height: 52px;
+      background: linear-gradient(135deg, var(--blue-500), var(--blue-600));
+      border-radius: 50% 50% 45% 45% / 55% 55% 45% 45%;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50%       { transform: translateY(-10px); }
+    }
+
+    .hero h1 {
+      font-size: clamp(32px, 5.5vw, 52px);
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 18px;
+      color: var(--slate-900);
+    }
+    .hero h1 .accent { color: var(--blue-600); }
+    .hero h1 .accent-warm {
+      background: linear-gradient(90deg, var(--blue-600), #7c3aed);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(16px, 2.2vw, 19px);
+      color: var(--slate-600);
+      max-width: 540px;
+      margin: 0 auto 36px;
+      line-height: 1.75;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 13px 26px;
+      border-radius: var(--radius-md);
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all .18s cubic-bezier(.4,0,.2,1);
+      letter-spacing: -.1px;
+    }
+    .btn-primary {
+      background: var(--blue-600);
+      color: var(--white);
+      box-shadow: 0 4px 16px rgba(37,99,235,.35);
+    }
+    .btn-primary:hover {
+      background: #1d4ed8;
+      box-shadow: 0 6px 24px rgba(37,99,235,.45);
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,.85);
+      color: var(--slate-700);
+      border: 1.5px solid var(--slate-200);
+      backdrop-filter: blur(8px);
+    }
+    .btn-secondary:hover {
+      background: var(--white);
+      border-color: var(--blue-400);
+      color: var(--blue-600);
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+
+    /* terminal block */
+    .hero-terminal {
+      display: inline-block;
+      background: var(--slate-900);
+      border-radius: var(--radius-lg);
+      padding: 0;
+      overflow: hidden;
+      box-shadow: var(--shadow-lg), var(--shadow-glow);
+      border: 1px solid rgba(255,255,255,.07);
+      text-align: left;
+      min-width: 340px;
+      max-width: 460px;
+      width: 100%;
+    }
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 12px 16px;
+      background: rgba(255,255,255,.05);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .terminal-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .terminal-dot-r { background: #ff5f57; }
+    .terminal-dot-y { background: #febc2e; }
+    .terminal-dot-g { background: #28c840; }
+    .terminal-label {
+      margin-left: 4px;
+      font-size: 12px;
+      color: rgba(255,255,255,.3);
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+    .terminal-body {
+      padding: 18px 20px 20px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 13.5px;
+      line-height: 1.8;
+    }
+    .t-prompt { color: #4ade80; }
+    .t-cmd    { color: #38bdf8; }
+    .t-out    { color: #94a3b8; }
+    .t-highlight { color: #fbbf24; }
+    .t-cursor {
+      display: inline-block;
+      width: 8px; height: 14px;
+      background: #38bdf8;
+      border-radius: 2px;
+      vertical-align: middle;
+      animation: blink 1.1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    .hero-note {
+      margin-top: 14px;
+      font-size: 12.5px;
+      color: var(--slate-400);
+    }
+
+    /* ============================================================
+       SOCIAL PROOF STRIP
+    ============================================================ */
+    .proof-strip {
+      background: linear-gradient(90deg, #f0f7ff 0%, #fefce8 50%, #f0f7ff 100%);
+      border-top: 1px solid rgba(37,99,235,.08);
+      border-bottom: 1px solid rgba(37,99,235,.08);
+      padding: 18px 24px;
+      text-align: center;
+    }
+    .proof-inner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      flex-wrap: wrap;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .proof-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--slate-600);
+    }
+    .proof-dot {
+      width: 6px; height: 6px;
+      background: var(--amber-400);
+      border-radius: 50%;
+    }
+
+    /* ============================================================
+       SECTION WRAPPER
+    ============================================================ */
+    .section {
+      padding: 88px 24px;
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+    .section-full {
+      padding: 88px 24px;
+    }
+    .section-center {
+      text-align: center;
+    }
+
+    .section-eyebrow {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--blue-600);
+      background: var(--blue-50);
+      border: 1px solid var(--blue-100);
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: 14px;
+    }
+    .section-title {
+      font-size: clamp(26px, 4vw, 36px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 12px;
+      color: var(--slate-900);
+      line-height: 1.2;
+    }
+    .section-sub {
+      font-size: 17px;
+      color: var(--slate-500);
+      max-width: 560px;
+      margin: 0 auto 52px;
+      line-height: 1.7;
+    }
+
+    /* ============================================================
+       FEATURES
+    ============================================================ */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--white);
+      border: 1.5px solid var(--slate-200);
+      border-radius: var(--radius-lg);
+      padding: 30px 28px;
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--blue-500), var(--blue-400));
+      opacity: 0;
+      transition: opacity .2s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--blue-400);
+      box-shadow: var(--shadow-lg);
+    }
+    .feature-card:hover::before { opacity: 1; }
+
+    .feature-icon-wrap {
+      width: 52px; height: 52px;
+      background: var(--blue-50);
+      border: 1.5px solid var(--blue-100);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--slate-900);
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--slate-500);
+      line-height: 1.7;
+    }
+
+    /* ============================================================
+       HOW IT WORKS
+    ============================================================ */
+    .how-section {
+      background: linear-gradient(165deg, #f0f7ff 0%, #fefce8 55%, #f0f7ff 100%);
+      border-top: 1px solid rgba(37,99,235,.07);
+      border-bottom: 1px solid rgba(37,99,235,.07);
+    }
+    .steps-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      position: relative;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .steps-row::before {
+      content: '';
+      position: absolute;
+      top: 44px;
+      left: calc(16.67% + 20px);
+      right: calc(16.67% + 20px);
+      height: 2px;
+      background: linear-gradient(90deg, var(--blue-400), var(--amber-300));
+      z-index: 0;
+    }
+    .step {
+      text-align: center;
+      padding: 0 20px;
+      position: relative;
+      z-index: 1;
+    }
+    .step-num {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--blue-600), var(--blue-500));
+      color: var(--white);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      margin: 0 auto 18px;
+      box-shadow: 0 4px 16px rgba(37,99,235,.35);
+      border: 3px solid var(--white);
+    }
+    .step h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--slate-900);
+    }
+    .step p {
+      font-size: 14px;
+      color: var(--slate-500);
+      line-height: 1.65;
+    }
+    .step-emoji { font-size: 22px; margin-bottom: 10px; }
+
+    /* ============================================================
+       USE CASES
+    ============================================================ */
+    .usecases-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .usecase-card {
+      background: var(--white);
+      border: 1.5px solid var(--slate-200);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+      transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .usecase-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--blue-300, #93c5fd);
+    }
+    .usecase-num-badge {
+      flex-shrink: 0;
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, var(--blue-600), var(--blue-500));
+      color: var(--white);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      font-weight: 700;
+      box-shadow: 0 3px 10px rgba(37,99,235,.25);
+    }
+    .usecase-card h3 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 5px;
+      color: var(--slate-900);
+    }
+    .usecase-card p {
+      font-size: 13.5px;
+      color: var(--slate-500);
+      line-height: 1.65;
+    }
+    .usecase-card code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      background: var(--slate-100);
+      padding: 2px 6px;
+      border-radius: 5px;
+      color: var(--blue-600);
+    }
+
+    /* ============================================================
+       SKILLS GALLERY
+    ============================================================ */
+    .skills-section {
+      background: var(--slate-900);
+    }
+    .skills-section .section-eyebrow {
+      background: rgba(37,99,235,.25);
+      border-color: rgba(37,99,235,.4);
+      color: var(--blue-400);
+    }
+    .skills-section .section-title { color: var(--white); }
+    .skills-section .section-sub { color: var(--slate-400); }
+
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 16px;
+    }
+    .skill-card {
+      background: rgba(255,255,255,.04);
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: var(--radius-lg);
+      padding: 28px 20px;
+      text-align: center;
+      cursor: default;
+      transition: transform .2s ease, background .2s ease, border-color .2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .skill-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(37,99,235,.15), rgba(251,191,36,.08));
+      opacity: 0;
+      transition: opacity .2s ease;
+      border-radius: var(--radius-lg);
+    }
+    .skill-card:hover {
+      transform: translateY(-5px) scale(1.02);
+      background: rgba(255,255,255,.07);
+      border-color: rgba(37,99,235,.4);
+    }
+    .skill-card:hover::after { opacity: 1; }
+    .skill-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      display: block;
+      position: relative;
+      z-index: 1;
+    }
+    .skill-card h4 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--white);
+      margin-bottom: 5px;
+      position: relative;
+      z-index: 1;
+    }
+    .skill-card p {
+      font-size: 12px;
+      color: var(--slate-400);
+      position: relative;
+      z-index: 1;
+    }
+    .skill-tag {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      background: rgba(37,99,235,.25);
+      color: var(--blue-400);
+      border-radius: 10px;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ============================================================
+       TECH STACK
+    ============================================================ */
+    .tech-section { background: var(--slate-50); }
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+    }
+    .tech-card {
+      background: var(--white);
+      border: 1.5px solid var(--slate-200);
+      border-radius: var(--radius-md);
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .tech-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+    .tech-badge {
+      width: 40px; height: 40px;
+      background: var(--blue-50);
+      border: 1px solid var(--blue-100);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .tech-card-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--slate-800);
+    }
+    .tech-card-desc {
+      font-size: 12px;
+      color: var(--slate-400);
+    }
+
+    /* ============================================================
+       CTA
+    ============================================================ */
+    .cta-section {
+      position: relative;
+      overflow: hidden;
+      background: var(--slate-900);
+      padding: 100px 24px;
+      text-align: center;
+    }
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      top: -120px; left: 50%;
+      transform: translateX(-50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(37,99,235,.25) 0%, transparent 65%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .cta-section::after {
+      content: '';
+      position: absolute;
+      bottom: -80px; right: -60px;
+      width: 360px; height: 360px;
+      background: radial-gradient(circle, rgba(251,191,36,.12) 0%, transparent 65%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .cta-inner { position: relative; z-index: 1; max-width: 580px; margin: 0 auto; }
+    .cta-paw { font-size: 48px; margin-bottom: 20px; display: block; animation: float 4s ease-in-out infinite 1s; }
+    .cta-section h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 800;
+      color: var(--white);
+      letter-spacing: -1px;
+      margin-bottom: 14px;
+    }
+    .cta-section p {
+      font-size: 17px;
+      color: var(--slate-400);
+      margin-bottom: 36px;
+      line-height: 1.7;
+    }
+    .cta-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-cta-primary {
+      background: var(--blue-600);
+      color: var(--white);
+      padding: 15px 32px;
+      font-size: 16px;
+      box-shadow: 0 6px 24px rgba(37,99,235,.45);
+    }
+    .btn-cta-primary:hover {
+      background: #1d4ed8;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 32px rgba(37,99,235,.55);
+      text-decoration: none;
+    }
+    .btn-cta-secondary {
+      background: rgba(255,255,255,.08);
+      color: var(--white);
+      border: 1.5px solid rgba(255,255,255,.15);
+      padding: 15px 32px;
+      font-size: 16px;
+      backdrop-filter: blur(8px);
+    }
+    .btn-cta-secondary:hover {
+      background: rgba(255,255,255,.13);
+      border-color: rgba(255,255,255,.3);
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+
+    /* ============================================================
+       FOOTER
+    ============================================================ */
+    footer {
+      background: var(--slate-900);
+      border-top: 1px solid rgba(255,255,255,.06);
+      padding: 28px 24px;
+      text-align: center;
+    }
+    .footer-links {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: var(--slate-500);
+    }
+    .footer-links a {
+      color: var(--slate-400);
+      transition: color .15s;
+    }
+    .footer-links a:hover { color: var(--blue-400); text-decoration: none; }
+    .footer-sep { color: var(--slate-700); }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+    @media (max-width: 768px) {
+      .nav { padding: 12px 20px; }
+      .nav-link { display: none; }
+      .steps-row {
+        grid-template-columns: 1fr;
+        gap: 36px;
+      }
+      .steps-row::before { display: none; }
+      .hero { padding: 72px 20px 60px; }
+      .section { padding: 64px 20px; }
+      .section-full { padding: 64px 20px; }
+    }
+    @media (max-width: 480px) {
+      .hero h1 { letter-spacing: -.5px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .usecases-grid { grid-template-columns: 1fr; }
+      .skills-grid { grid-template-columns: repeat(2, 1fr); }
+      .tech-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
 </head>
 <body>
 
-<div class="hero">
-    <div class="hero-badge">순수 Rust. 단일 바이너리. 오픈소스.</div>
-    <h1>코드 없이 자동화하는<br><span>AI 데스크톱 앱</span></h1>
-    <p>스킬 갤러리에서 설치하고, 설정만 채우면 끝.<br>매일 아침 시장 리포트, RSS 뉴스 요약, URL 모니터링... 전부 자동으로.</p>
+<!-- ============================================================
+     NAV
+============================================================ -->
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="nav-brand-paw">🐾</span>
+    KittyPaw
+  </div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link">기능</a>
+    <a href="#skills" class="nav-link">스킬</a>
+    <a href="#tech" class="nav-link">기술</a>
+    <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-paw" role="img" aria-label="고양이 발바닥 아이콘">
+      <div class="paw-toes">
+        <div class="paw-toe"></div>
+        <div class="paw-toe"></div>
+        <div class="paw-toe"></div>
+        <div class="paw-toe"></div>
+      </div>
+      <div class="paw-pad"></div>
+    </div>
+
+    <div class="hero-badge">
+      <span>🦀</span> 순수 Rust · 단일 바이너리 · 오픈소스 MIT
+    </div>
+
+    <h1>
+      코드 없이<br>
+      <span class="accent-warm">AI가 알아서</span><br>
+      자동화합니다
+    </h1>
+    <p class="hero-sub">
+      스킬 갤러리에서 설치하고, 설정만 채우면 끝.<br>
+      매일 아침 시장 리포트, RSS 요약, URL 모니터링&hellip; 전부 자동으로.
+    </p>
+
     <div class="hero-buttons">
-        <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">GitHub에서 받기</a>
-        <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">스킬 갤러리</a>
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">
+        <span>⭐</span> GitHub에서 받기
+      </a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
+        <span>🎨</span> 스킬 갤러리 보기
+      </a>
     </div>
-    <div class="hero-code">
-        <div><span class="prompt">$</span> <span class="cmd">cargo run -p kittypaw-gui</span></div>
+
+    <div class="hero-terminal" role="region" aria-label="터미널 예시">
+      <div class="terminal-bar">
+        <span class="terminal-dot terminal-dot-r"></span>
+        <span class="terminal-dot terminal-dot-y"></span>
+        <span class="terminal-dot terminal-dot-g"></span>
+        <span class="terminal-label">kittypaw — bash</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">cargo run -p kittypaw-gui</span></div>
+        <div class="t-out">   Compiling kittypaw v0.1.0</div>
+        <div class="t-out">    Finished release in 3.2s</div>
+        <div><span class="t-highlight">🐾 KittyPaw started!</span> <span class="t-cursor"></span></div>
+      </div>
     </div>
-    <div class="hero-note">npm 없음. JS 없음. cargo run 한 줄이면 끝.</div>
+    <p class="hero-note">npm 없음 · JS 없음 · cargo run 한 줄이면 끝</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     SOCIAL PROOF STRIP
+============================================================ -->
+<div class="proof-strip">
+  <div class="proof-inner">
+    <div class="proof-item reveal">
+      <span class="proof-dot"></span>
+      오픈소스 프로젝트
+    </div>
+    <div class="proof-item reveal reveal-delay-1">
+      <span class="proof-dot"></span>
+      MIT 라이선스
+    </div>
+    <div class="proof-item reveal reveal-delay-2">
+      <span class="proof-dot"></span>
+      GitHub에서 확인하세요
+    </div>
+    <div class="proof-item reveal reveal-delay-3">
+      <span class="proof-dot"></span>
+      macOS · Linux 지원
+    </div>
+  </div>
 </div>
 
-<div class="section">
-    <h2 class="section-title">왜 KittyPaw인가요?</h2>
-    <p class="section-subtitle">n8n, Zapier 같은 자동화 도구의 데스크톱 네이티브 대안. AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">핵심 기능</span>
+      <h2 class="section-title">왜 KittyPaw인가요?</h2>
+      <p class="section-sub">n8n, Zapier 같은 자동화 도구의 데스크톱 네이티브 대안.<br>AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
+    </div>
     <div class="features-grid">
-        <div class="feature-card">
-            <div class="feature-icon">🎯</div>
-            <h3>코드 없이 자동화</h3>
-            <p>스킬 갤러리에서 원하는 자동화를 설치하고, 텔레그램 토큰만 넣으면 바로 동작합니다.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">💬</div>
-            <h3>AI 채팅</h3>
-            <p>데스크톱 앱에서 바로 Claude와 대화. 질문하고, 분석하고, 자동화를 지시하세요.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">🔒</div>
-            <h3>안전한 실행</h3>
-            <p>모든 스킬은 QuickJS 샌드박스 + OS 커널 격리 (Seatbelt/Landlock) 안에서 실행됩니다.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">🔗</div>
-            <h3>스킬 체이닝</h3>
-            <p>여러 스킬을 순차 파이프라인으로 연결. 데이터 수집 → 요약 → 발송을 한 번에.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">🌐</div>
-            <h3>웹 검색</h3>
-            <p>스킬이 웹을 검색하고, 페이지를 읽고, AI로 요약합니다. 팩트체크도 자동으로.</p>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon">🦀</div>
-            <h3>순수 Rust</h3>
-            <p>JS, CSS, npm 없이 Rust만으로 구축. Dioxus 데스크톱 GUI. 단일 바이너리 배포.</p>
-        </div>
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">🎯</div>
+        <h3>코드 없이 자동화</h3>
+        <p>스킬 갤러리에서 원하는 자동화를 설치하고, 텔레그램 토큰만 넣으면 바로 동작합니다.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">💬</div>
+        <h3>AI 채팅</h3>
+        <p>데스크톱 앱에서 바로 Claude, OpenAI와 대화. 질문하고, 분석하고, 자동화를 지시하세요.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">🔒</div>
+        <h3>안전한 실행</h3>
+        <p>모든 스킬은 QuickJS 샌드박스 + OS 커널 격리 (Seatbelt/Landlock) 안에서 실행됩니다.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="feature-icon-wrap">🔗</div>
+        <h3>스킬 체이닝</h3>
+        <p>여러 스킬을 순차 파이프라인으로 연결. 데이터 수집 → 요약 → 발송을 한 번에.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-5">
+        <div class="feature-icon-wrap">🌐</div>
+        <h3>웹 검색</h3>
+        <p>스킬이 웹을 검색하고, 페이지를 읽고, AI로 요약합니다. 팩트체크도 자동으로.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-6">
+        <div class="feature-icon-wrap">🦀</div>
+        <h3>순수 Rust</h3>
+        <p>JS, CSS, npm 없이 Rust만으로 구축. Dioxus 데스크톱 GUI. 단일 바이너리 배포.</p>
+      </div>
     </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">사용 방법</span>
+      <h2 class="section-title">3단계로 끝납니다</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">설치하고 설정하면 고양이가 알아서 일합니다</p>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">📦</div>
+        <div class="step-num">1</div>
+        <h3>스킬 설치</h3>
+        <p>갤러리에서 원하는 스킬을 선택해 클릭 한 번으로 설치합니다.</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">⚙️</div>
+        <div class="step-num">2</div>
+        <h3>설정 입력</h3>
+        <p>텔레그램 토큰, 스케줄, API 키만 채웁니다. 코드는 건드리지 않아도 됩니다.</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">✨</div>
+        <div class="step-num">3</div>
+        <h3>자동 실행</h3>
+        <p>설정한 일정에 따라 자동으로 실행되고 결과를 알림으로 받습니다.</p>
+      </div>
+    </div>
+  </div>
 </div>
 
-<div class="section usecases">
-    <h2 class="section-title">이렇게 쓸 수 있습니다</h2>
-    <p class="section-subtitle">설치하고 설정만 채우면 바로 동작하는 자동화들</p>
-    <div class="usecase-list">
-        <div class="usecase">
-            <div class="usecase-num">1</div>
-            <div>
-                <h3>매일 아침 시장 리포트</h3>
-                <p>ETF 데이터를 수집하고 AI가 요약해서 텔레그램으로 보내줍니다. 평일 오전 8시 자동 발송.</p>
-            </div>
-        </div>
-        <div class="usecase">
-            <div class="usecase-num">2</div>
-            <div>
-                <h3>RSS 뉴스 요약</h3>
-                <p>Hacker News, TechCrunch 등 RSS 피드의 새 글을 AI가 요약. 이미 본 글은 자동 필터링.</p>
-            </div>
-        </div>
-        <div class="usecase">
-            <div class="usecase-num">3</div>
-            <div>
-                <h3>서비스 다운 알림</h3>
-                <p>내 웹사이트/API를 5분마다 체크. 다운되면 즉시 텔레그램 알림. 복구되면 다시 알림.</p>
-            </div>
-        </div>
-        <div class="usecase">
-            <div class="usecase-num">4</div>
-            <div>
-                <h3>날씨 브리핑</h3>
-                <p>매일 아침 7일 예보를 자연어로 알려줍니다. API 키 불필요 (Open-Meteo 무료 API).</p>
-            </div>
-        </div>
-        <div class="usecase">
-            <div class="usecase-num">5</div>
-            <div>
-                <h3>나만의 자동화 만들기</h3>
-                <p><code>kittypaw teach "매일 로또 당첨번호 확인해서 알려줘"</code> — AI가 코드를 짜고 테스트하고 등록합니다.</p>
-            </div>
-        </div>
+<!-- ============================================================
+     USE CASES
+============================================================ -->
+<section>
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">활용 예시</span>
+      <h2 class="section-title">이렇게 쓸 수 있습니다</h2>
+      <p class="section-sub">설치하고 설정만 채우면 바로 동작하는 자동화들</p>
     </div>
-</div>
+    <div class="usecases-grid">
+      <div class="usecase-card reveal reveal-delay-1">
+        <div class="usecase-num-badge">1</div>
+        <div>
+          <h3>매일 아침 시장 리포트</h3>
+          <p>ETF 데이터를 수집하고 AI가 요약해서 텔레그램으로 보내줍니다. 평일 오전 8시 자동 발송.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-2">
+        <div class="usecase-num-badge">2</div>
+        <div>
+          <h3>RSS 뉴스 요약</h3>
+          <p>Hacker News, TechCrunch 등 RSS 피드의 새 글을 AI가 요약. 이미 본 글은 자동 필터링.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-3">
+        <div class="usecase-num-badge">3</div>
+        <div>
+          <h3>서비스 다운 알림</h3>
+          <p>내 웹사이트/API를 5분마다 체크. 다운되면 즉시 텔레그램 알림. 복구되면 다시 알림.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-4">
+        <div class="usecase-num-badge">4</div>
+        <div>
+          <h3>날씨 브리핑</h3>
+          <p>매일 아침 7일 예보를 자연어로 알려줍니다. API 키 불필요 (Open-Meteo 무료 API).</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-5">
+        <div class="usecase-num-badge">5</div>
+        <div>
+          <h3>나만의 자동화 만들기</h3>
+          <p><code>kittypaw teach "매일 로또 당첨번호 확인해서 알려줘"</code> — AI가 코드를 짜고 테스트하고 등록합니다.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-<div class="section">
-    <h2 class="section-title">내장 스킬 갤러리</h2>
-    <p class="section-subtitle">앱을 열면 바로 쓸 수 있는 5개 스킬이 설치되어 있습니다</p>
+<!-- ============================================================
+     SKILLS GALLERY
+============================================================ -->
+<section id="skills" class="skills-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">내장 스킬</span>
+      <h2 class="section-title">갤러리에서 바로 쓸 수 있어요</h2>
+      <p class="section-sub">앱을 열면 5개 스킬이 이미 설치되어 있습니다</p>
+    </div>
     <div class="skills-grid">
-        <div class="skill-card">
-            <div class="skill-icon">📈</div>
-            <h4>매크로 경제 리포트</h4>
-            <p>ETF + AI 요약</p>
-        </div>
-        <div class="skill-card">
-            <div class="skill-icon">🌤</div>
-            <h4>날씨 브리핑</h4>
-            <p>7일 예보</p>
-        </div>
-        <div class="skill-card">
-            <div class="skill-icon">📰</div>
-            <h4>RSS 뉴스 요약</h4>
-            <p>피드 + LLM 요약</p>
-        </div>
-        <div class="skill-card">
-            <div class="skill-icon">✅</div>
-            <h4>리마인더</h4>
-            <p>채팅 할 일 관리</p>
-        </div>
-        <div class="skill-card">
-            <div class="skill-icon">🔍</div>
-            <h4>URL 모니터</h4>
-            <p>상태 변경 알림</p>
-        </div>
+      <div class="skill-card reveal reveal-delay-1">
+        <span class="skill-icon">📈</span>
+        <h4>매크로 경제 리포트</h4>
+        <p>ETF + AI 요약</p>
+        <span class="skill-tag">매일 자동</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-2">
+        <span class="skill-icon">🌤</span>
+        <h4>날씨 브리핑</h4>
+        <p>7일 예보</p>
+        <span class="skill-tag">API 키 불필요</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-3">
+        <span class="skill-icon">📰</span>
+        <h4>RSS 뉴스 요약</h4>
+        <p>피드 + LLM 요약</p>
+        <span class="skill-tag">중복 필터</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-4">
+        <span class="skill-icon">✅</span>
+        <h4>리마인더</h4>
+        <p>채팅 할 일 관리</p>
+        <span class="skill-tag">AI 채팅</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-5">
+        <span class="skill-icon">🔍</span>
+        <h4>URL 모니터</h4>
+        <p>상태 변경 알림</p>
+        <span class="skill-tag">5분 주기</span>
+      </div>
     </div>
-</div>
+  </div>
+</section>
 
-<div class="section" style="background: #f8fafc;">
-    <h2 class="section-title">기술 스택</h2>
-    <p class="section-subtitle">외부 런타임 없이 Rust만으로. 단일 바이너리로 배포.</p>
-    <div class="tech-pills">
-        <span class="tech-pill">🦀 Rust</span>
-        <span class="tech-pill">Dioxus GUI</span>
-        <span class="tech-pill">QuickJS Sandbox</span>
-        <span class="tech-pill">Claude + OpenAI</span>
-        <span class="tech-pill">SQLite</span>
-        <span class="tech-pill">OS Keychain</span>
-        <span class="tech-pill">Seatbelt / Landlock</span>
-        <span class="tech-pill">TOML 패키지</span>
+<!-- ============================================================
+     TECH STACK
+============================================================ -->
+<section id="tech" class="tech-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">기술 스택</span>
+      <h2 class="section-title">외부 런타임 없이 Rust만으로</h2>
+      <p class="section-sub">단일 바이너리로 배포. npm도 Node도 Python도 필요 없습니다.</p>
     </div>
-</div>
+    <div class="tech-grid">
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🦀</div>
+        <div>
+          <div class="tech-card-name">Rust</div>
+          <div class="tech-card-desc">메모리 안전 · 고성능</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">🖥</div>
+        <div>
+          <div class="tech-card-name">Dioxus GUI</div>
+          <div class="tech-card-desc">네이티브 데스크톱 UI</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-3">
+        <div class="tech-badge">🔐</div>
+        <div>
+          <div class="tech-card-name">QuickJS Sandbox</div>
+          <div class="tech-card-desc">안전한 스킬 실행</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-4">
+        <div class="tech-badge">🤖</div>
+        <div>
+          <div class="tech-card-name">Claude + OpenAI</div>
+          <div class="tech-card-desc">멀티 LLM 지원</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-5">
+        <div class="tech-badge">🗄</div>
+        <div>
+          <div class="tech-card-name">SQLite</div>
+          <div class="tech-card-desc">로컬 데이터 저장</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-6">
+        <div class="tech-badge">🔑</div>
+        <div>
+          <div class="tech-card-name">OS Keychain</div>
+          <div class="tech-card-desc">보안 키 관리</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🛡</div>
+        <div>
+          <div class="tech-card-name">Seatbelt / Landlock</div>
+          <div class="tech-card-desc">커널 레벨 격리</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">📦</div>
+        <div>
+          <div class="tech-card-name">TOML 패키지</div>
+          <div class="tech-card-desc">스킬 배포 포맷</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-<div class="cta">
-    <h2>지금 시작하세요</h2>
-    <p>급할수록 필요한 건, 작고 빠른 고양이손 🐱</p>
-    <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">GitHub에서 받기</a>
-</div>
+<!-- ============================================================
+     CTA
+============================================================ -->
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw" role="img" aria-label="고양이 발바닥">🐾</span>
+    <h2 class="reveal">지금 시작하세요</h2>
+    <p class="reveal reveal-delay-1">
+      급할수록 필요한 건, 작고 빠른 고양이손.<br>
+      cargo run 한 줄로 오늘부터 자동화를 시작하세요.
+    </p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHub에서 받기
+      </a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">
+        🎨 스킬 갤러리
+      </a>
+    </div>
+  </div>
+</section>
 
+<!-- ============================================================
+     FOOTER
+============================================================ -->
 <footer>
-    <p>MIT License · <a href="https://github.com/jinto/kittypaw">GitHub</a> · <a href="https://github.com/kittypaw-skills">스킬 갤러리</a></p>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/jinto/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-skills">스킬 갤러리</a>
+    <span class="footer-sep">·</span>
+    <span>MIT License</span>
+    <span class="footer-sep">·</span>
+    <span>Made with 🦀 &amp; ❤️</span>
+  </div>
 </footer>
+
+<!-- ============================================================
+     SCROLL ANIMATION (progressive enhancement)
+============================================================ -->
+<script>
+(function() {
+  if (!('IntersectionObserver' in window)) {
+    // No JS / old browser: just show everything
+    document.querySelectorAll('.reveal').forEach(function(el) {
+      el.classList.add('visible');
+    });
+    return;
+  }
+
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, {
+    threshold: 0.12,
+    rootMargin: '0px 0px -40px 0px'
+  });
+
+  document.querySelectorAll('.reveal').forEach(function(el) {
+    observer.observe(el);
+  });
+})();
+</script>
 
 </body>
 </html>
