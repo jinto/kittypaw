@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::config::AgentConfig;
 use crate::error::{KittypawError, Result};
 use crate::package::PackagePermissions;
+use crate::skill::SkillPermissions;
 use crate::types::SkillCall;
 
 pub struct CapabilityChecker {
@@ -32,11 +33,10 @@ impl CapabilityChecker {
         Self { allowed_skills }
     }
 
-    /// Create a `CapabilityChecker` from package permissions.
-    /// All declared primitives are allowed with all methods, rate limit 60/min.
-    pub fn from_package_permissions(permissions: &PackagePermissions) -> Self {
+    /// Create from a list of primitive names. All methods allowed, 60 calls/min.
+    fn from_primitives(primitives: &[String]) -> Self {
         let mut allowed_skills = HashMap::new();
-        for name in &permissions.primitives {
+        for name in primitives {
             allowed_skills.insert(
                 name.clone(),
                 SkillPermissionEntry {
@@ -47,6 +47,14 @@ impl CapabilityChecker {
             );
         }
         Self { allowed_skills }
+    }
+
+    pub fn from_package_permissions(permissions: &PackagePermissions) -> Self {
+        Self::from_primitives(&permissions.primitives)
+    }
+
+    pub fn from_skill_permissions(permissions: &SkillPermissions) -> Self {
+        Self::from_primitives(&permissions.primitives)
     }
 
     pub fn check(&mut self, call: &SkillCall) -> Result<()> {

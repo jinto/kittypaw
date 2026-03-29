@@ -185,7 +185,7 @@ async fn run_skill_test(
         let store = store_for_resolver.clone();
         let config = config_for_resolver.clone();
         Box::pin(async move {
-            kittypaw_cli::skill_executor::resolve_skill_call(&call, &config, &store).await
+            kittypaw_cli::skill_executor::resolve_skill_call(&call, &config, &store, None).await
         })
     }));
 

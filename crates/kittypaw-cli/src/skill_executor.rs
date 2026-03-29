@@ -3,19 +3,59 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use kittypaw_core::capability::CapabilityChecker;
 use kittypaw_core::error::{KittypawError, Result};
 use kittypaw_core::types::SkillCall;
 use kittypaw_store::Store;
 
 const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
 
+/// Check capability and log denial. Returns Err(message) if denied.
+fn check_capability(
+    checker: &mut CapabilityChecker,
+    call: &SkillCall,
+) -> std::result::Result<(), String> {
+    if let Err(e) = checker.check(call) {
+        let msg = e.to_string();
+        tracing::warn!(
+            "Capability denied for {}.{}: {}",
+            call.skill_name,
+            call.method,
+            msg
+        );
+        Err(msg)
+    } else {
+        Ok(())
+    }
+}
+
 /// Execute a single skill call inline (for use as a SkillResolver callback).
 /// Returns a string result that flows back to JS during sandbox execution.
+/// When `checker` is provided, the call is verified against the capability allowlist
+/// before execution. If `None`, all calls are permitted (permissive/legacy mode).
 pub async fn resolve_skill_call(
     call: &SkillCall,
     config: &kittypaw_core::config::Config,
     store: &Arc<Mutex<Store>>,
+    checker: Option<&Arc<Mutex<CapabilityChecker>>>,
 ) -> String {
+    if let Some(cap) = checker {
+        match cap.lock() {
+            Ok(mut guard) => {
+                if let Err(msg) = check_capability(&mut guard, call) {
+                    return serde_json::to_string(&serde_json::json!({"error": msg}))
+                        .unwrap_or_else(|_| "null".to_string());
+                }
+            }
+            Err(_) => {
+                return serde_json::to_string(
+                    &serde_json::json!({"error": "capability checker lock poisoned"}),
+                )
+                .unwrap_or_else(|_| "null".to_string());
+            }
+        }
+    }
+
     // File calls are synchronous
     if call.skill_name == "File" {
         return match execute_file(call, None) {
@@ -99,11 +139,14 @@ pub fn resolve_storage_calls(
 /// Each skill call was captured by JS stubs inside QuickJS and is now
 /// executed with real API calls after capability checking.
 /// Storage calls must be pre-resolved via `resolve_storage_calls` and passed as `preresolved`.
+/// When `checker` is provided, each call is verified against the capability allowlist.
+/// If `None`, all calls are permitted (permissive/legacy mode).
 pub async fn execute_skill_calls(
     skill_calls: &[SkillCall],
     config: &kittypaw_core::config::Config,
     preresolved: Vec<Option<SkillResult>>,
     skill_context: Option<&str>,
+    mut checker: Option<&mut CapabilityChecker>,
 ) -> Result<Vec<SkillResult>> {
     let allowed_hosts = &config.sandbox.allowed_hosts;
     // Per-execution LLM call counter (not global, avoids race between concurrent executions)
@@ -115,6 +158,18 @@ pub async fn execute_skill_calls(
         let result = if let Some(r) = precomp {
             r
         } else {
+            if let Some(ref mut cap) = checker {
+                if let Err(msg) = check_capability(cap, call) {
+                    results.push(SkillResult {
+                        skill_name: call.skill_name.clone(),
+                        method: call.method.clone(),
+                        success: false,
+                        result: serde_json::Value::Null,
+                        error: Some(msg),
+                    });
+                    continue;
+                }
+            }
             execute_single_call(call, allowed_hosts, config, skill_context, &llm_call_count).await
         };
         results.push(result);

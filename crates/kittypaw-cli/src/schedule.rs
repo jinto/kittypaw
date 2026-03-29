@@ -197,11 +197,13 @@ pub async fn run_schedule_loop(
                                 &store,
                                 Some(&skill.name),
                             );
+                            let mut checker = kittypaw_core::capability::CapabilityChecker::from_skill_permissions(&skill.permissions);
                             let _ = crate::skill_executor::execute_skill_calls(
                                 &result.skill_calls,
                                 config,
                                 preresolved,
                                 Some(&skill.name),
+                                Some(&mut checker),
                             )
                             .await;
                         }
@@ -265,11 +267,13 @@ pub async fn run_schedule_loop(
                                 &store,
                                 Some(&pkg.meta.id),
                             );
+                            let mut checker = kittypaw_core::capability::CapabilityChecker::from_package_permissions(&pkg.permissions);
                             let _ = crate::skill_executor::execute_skill_calls(
                                 &result.skill_calls,
                                 config,
                                 preresolved,
                                 Some(&pkg.meta.id),
+                                Some(&mut checker),
                             )
                             .await;
                         }
@@ -306,11 +310,13 @@ pub async fn run_schedule_loop(
                                                         &store,
                                                         Some(&chain_pkg.meta.id),
                                                     );
+                                                let mut checker = kittypaw_core::capability::CapabilityChecker::from_package_permissions(&chain_pkg.permissions);
                                                 let _ = crate::skill_executor::execute_skill_calls(
                                                     &chain_result.skill_calls,
                                                     &config,
                                                     preresolved,
                                                     Some(&chain_pkg.meta.id),
+                                                    Some(&mut checker),
                                                 )
                                                 .await;
                                             }

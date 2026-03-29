@@ -1,12 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use kittypaw_core::capability::CapabilityChecker;
-use kittypaw_core::config::AgentConfig;
 use kittypaw_core::error::{KittypawError, Result};
 use kittypaw_core::permission::{PermissionDecision, PermissionRequest};
 use kittypaw_core::types::{
     now_timestamp, AgentState, ConversationTurn, Event, EventType, ExecutionResult, LlmMessage,
-    Role, SkillCall,
+    Role,
 };
 use kittypaw_llm::provider::LlmProvider;
 use kittypaw_sandbox::sandbox::Sandbox;
@@ -134,14 +133,37 @@ pub async fn run_agent_loop(
 
         // Build a SkillResolver so JS skill stubs return real data
         // (Http responses, Storage values, Llm outputs) instead of "null".
+        //
+        // Build a CapabilityChecker from the matching agent config.
+        // If no agent config matches, the checker is None (permissive mode).
+        let checker: Option<Arc<Mutex<CapabilityChecker>>> = {
+            let agent_config = config.agents.iter().find(|a| {
+                a.id == agent_id
+                    || (agent_id.starts_with("telegram-")
+                        && a.channels.iter().any(|c| c == "telegram"))
+                    || (agent_id.starts_with("web-") && a.channels.iter().any(|c| c == "web"))
+                    || (agent_id.starts_with("desktop-")
+                        && a.channels.iter().any(|c| c == "desktop"))
+            });
+            agent_config.map(|ac| Arc::new(Mutex::new(CapabilityChecker::from_agent_config(ac))))
+        };
+
         let store_for_resolver = Arc::clone(&store);
-        let config_for_resolver = config.clone();
+        let config_for_resolver = Arc::new(config.clone());
+        let checker_for_resolver = checker.clone();
         let skill_resolver: Option<kittypaw_sandbox::SkillResolver> =
             Some(Arc::new(move |call: kittypaw_core::types::SkillCall| {
                 let store = Arc::clone(&store_for_resolver);
-                let config = config_for_resolver.clone();
+                let config = Arc::clone(&config_for_resolver);
+                let checker = checker_for_resolver.clone();
                 Box::pin(async move {
-                    crate::skill_executor::resolve_skill_call(&call, &config, &store).await
+                    crate::skill_executor::resolve_skill_call(
+                        &call,
+                        &config,
+                        &store,
+                        checker.as_ref(),
+                    )
+                    .await
                 })
             }));
 
@@ -332,50 +354,4 @@ fn agent_id_for_event(event: &Event) -> String {
             format!("desktop-{workspace}")
         }
     }
-}
-
-/// Filter skill calls through CapabilityChecker for the matching agent config.
-/// If no agent config is found (e.g. stdin mode), all calls pass through.
-/// TODO: integrate into SkillResolver for inline capability checking
-#[allow(dead_code)]
-fn filter_skill_calls(
-    calls: &[SkillCall],
-    agents: &[AgentConfig],
-    agent_id: &str,
-) -> Vec<SkillCall> {
-    // Find the agent config whose id matches or whose channels match the agent_id prefix
-    let agent_config = agents.iter().find(|a| {
-        a.id == agent_id
-            || (agent_id.starts_with("telegram-") && a.channels.iter().any(|c| c == "telegram"))
-            || (agent_id.starts_with("web-") && a.channels.iter().any(|c| c == "web"))
-    });
-
-    let Some(config) = agent_config else {
-        // Default-deny: no agent config means no skill calls allowed
-        if !calls.is_empty() {
-            tracing::warn!(
-                "No agent config for '{}' — denying {} skill calls (default-deny)",
-                agent_id,
-                calls.len()
-            );
-        }
-        return vec![];
-    };
-
-    let mut checker = CapabilityChecker::from_agent_config(config);
-    let mut allowed = Vec::new();
-    for call in calls {
-        match checker.check(call) {
-            Ok(()) => allowed.push(call.clone()),
-            Err(e) => {
-                tracing::warn!(
-                    "Capability check denied {}.{}: {}",
-                    call.skill_name,
-                    call.method,
-                    e
-                );
-            }
-        }
-    }
-    allowed
 }
