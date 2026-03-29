@@ -1,8 +1,8 @@
 [package]
 id = "weather-briefing"
-name = "Weather Briefing"
+name = "날씨 브리핑"
 version = "1.0.0"
-description = "Daily weather summary for a configured city. Fetches forecast data from Open-Meteo and delivers a natural language briefing via Telegram."
+description = "매일 아침 설정한 도시의 날씨 예보를 가져와 자연어로 브리핑해줍니다."
 author = "KittyPaw Team"
 category = "weather"
 tags = ["weather", "telegram", "daily", "llm", "open-meteo"]
@@ -17,13 +17,13 @@ allowed_hosts = ["api.open-meteo.com"]
 
 [[config.fields]]
 key = "telegram_token"
-label = "Telegram Bot Token"
+label = "텔레그램 봇 토큰"
 type = "secret"
 required = true
 
 [[config.fields]]
 key = "chat_id"
-label = "Telegram Chat ID"
+label = "텔레그램 채팅 ID"
 type = "string"
 required = true
 
@@ -36,14 +36,14 @@ default = "Seoul"
 
 [[config.fields]]
 key = "latitude"
-label = "Latitude"
+label = "위도"
 type = "string"
 required = false
 default = "37.57"
 
 [[config.fields]]
 key = "longitude"
-label = "Longitude"
+label = "경도"
 type = "string"
 required = false
 default = "126.98"

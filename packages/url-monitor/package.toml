@@ -1,8 +1,8 @@
 [package]
 id = "url-monitor"
-name = "URL Monitor"
+name = "URL 모니터"
 version = "1.0.0"
-description = "Periodically checks if a URL is reachable. Stores last status in Storage and sends a Telegram alert whenever the status changes."
+description = "주기적으로 URL 접속을 확인하고, 상태가 바뀌면 텔레그램으로 알려줍니다."
 author = "KittyPaw Team"
 category = "devops"
 tags = ["monitoring", "uptime", "telegram", "storage", "alert"]
@@ -17,13 +17,13 @@ allowed_hosts = ["*"]
 
 [[config.fields]]
 key = "telegram_token"
-label = "Telegram Bot Token"
+label = "텔레그램 봇 토큰"
 type = "secret"
 required = true
 
 [[config.fields]]
 key = "chat_id"
-label = "Telegram Chat ID"
+label = "텔레그램 채팅 ID"
 type = "string"
 required = true
 

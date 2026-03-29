@@ -1,8 +1,8 @@
 [package]
 id = "macro-economy-report"
-name = "Macro Economy Report"
+name = "매크로 경제 리포트"
 version = "1.0.0"
-description = "Daily macro-economic briefing: fetches market data for major ETFs, summarizes with LLM, and sends a formatted report to Telegram."
+description = "매일 주요 ETF 시장 데이터를 수집하고 LLM으로 요약하여 텔레그램으로 발송합니다."
 author = "KittyPaw Team"
 category = "finance"
 tags = ["finance", "market", "telegram", "daily", "llm"]
@@ -17,13 +17,13 @@ allowed_hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
 
 [[config.fields]]
 key = "telegram_token"
-label = "Telegram Bot Token"
+label = "텔레그램 봇 토큰"
 type = "secret"
 required = true
 
 [[config.fields]]
 key = "chat_id"
-label = "Telegram Chat ID"
+label = "텔레그램 채팅 ID"
 type = "string"
 required = true
 

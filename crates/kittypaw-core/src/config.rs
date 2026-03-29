@@ -15,6 +15,8 @@ pub struct Config {
     pub admin_chat_ids: Vec<String>,
     #[serde(default)]
     pub freeform_fallback: bool,
+    #[serde(default)]
+    pub models: Vec<ModelConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,19 @@ fn default_model() -> String {
 
 fn default_max_tokens() -> u32 {
     4096
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default)]
+    pub default: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +149,7 @@ impl Default for Config {
             channels: vec![],
             admin_chat_ids: vec![],
             freeform_fallback: false,
+            models: vec![],
         }
     }
 }

@@ -1,5 +1,9 @@
-use crate::state::AppState;
+use std::sync::Arc;
+
 use dioxus::prelude::*;
+use kittypaw_llm::claude::ClaudeProvider;
+
+use crate::state::AppState;
 
 #[component]
 pub fn SettingsDialog(on_close: EventHandler) -> Element {
@@ -64,7 +68,16 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
                                 // Skip masked keys
                                 if !key.starts_with("sk-...") {
                                     let _ = kittypaw_core::secrets::set_secret("settings", "api_key", &key);
-                                    *state.api_key.lock().unwrap() = key;
+                                    *state.api_key.lock().unwrap() = key.clone();
+                                    let mut registry = state.llm_registry.lock().unwrap();
+                                    registry.register(
+                                        "claude-sonnet",
+                                        Arc::new(ClaudeProvider::new(
+                                            key,
+                                            "claude-sonnet-4-20250514".into(),
+                                            4096,
+                                        )),
+                                    );
                                 }
                                 saved.set(true);
                             }

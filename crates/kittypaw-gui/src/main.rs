@@ -4,6 +4,10 @@ mod bundled_packages;
 mod components;
 mod state;
 
+use std::sync::Arc;
+
+use kittypaw_llm::claude::ClaudeProvider;
+use kittypaw_llm::registry::LlmRegistry;
 use kittypaw_store::Store;
 use state::AppState;
 
@@ -29,7 +33,19 @@ fn main() {
         .flatten()
         .unwrap_or_default();
 
-    let app_state = AppState::new(store, persisted_key, packages_dir);
+    let mut llm_registry = LlmRegistry::new();
+    if !persisted_key.is_empty() {
+        llm_registry.register(
+            "claude-sonnet",
+            Arc::new(ClaudeProvider::new(
+                persisted_key.clone(),
+                "claude-sonnet-4-20250514".into(),
+                4096,
+            )),
+        );
+    }
+
+    let app_state = AppState::new(store, persisted_key, packages_dir, llm_registry);
 
     dioxus::LaunchBuilder::desktop()
         .with_context(app_state)

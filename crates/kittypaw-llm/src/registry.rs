@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use kittypaw_core::config::ModelConfig;
+
+use crate::claude::ClaudeProvider;
+use crate::openai::OpenAiProvider;
 use crate::provider::LlmProvider;
 
 pub struct LlmRegistry {
@@ -43,6 +47,47 @@ impl LlmRegistry {
     /// List registered provider names.
     pub fn list(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
+    }
+
+    /// Build a registry from model configs.
+    /// If api_key is empty in config, tries keychain via kittypaw_core::secrets.
+    /// Models without a resolvable API key are skipped.
+    pub fn from_configs(configs: &[ModelConfig]) -> Self {
+        let mut registry = Self::new();
+        for cfg in configs {
+            let api_key = if cfg.api_key.is_empty() {
+                kittypaw_core::secrets::get_secret("models", &cfg.name)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            } else {
+                cfg.api_key.clone()
+            };
+
+            if api_key.is_empty() {
+                continue;
+            }
+
+            let provider: Arc<dyn LlmProvider> = match cfg.provider.as_str() {
+                "claude" | "anthropic" => Arc::new(ClaudeProvider::new(
+                    api_key,
+                    cfg.model.clone(),
+                    cfg.max_tokens,
+                )),
+                "openai" => Arc::new(OpenAiProvider::new(
+                    api_key,
+                    cfg.model.clone(),
+                    cfg.max_tokens,
+                )),
+                _ => continue,
+            };
+
+            registry.register(&cfg.name, provider);
+            if cfg.default {
+                registry.set_default(&cfg.name);
+            }
+        }
+        registry
     }
 }
 
@@ -130,5 +175,19 @@ mod tests {
     fn test_get_nonexistent() {
         let registry = LlmRegistry::new();
         assert!(registry.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_from_configs_skips_empty_key() {
+        let configs = vec![ModelConfig {
+            name: "test".into(),
+            provider: "claude".into(),
+            model: "test-model".into(),
+            api_key: String::new(),
+            max_tokens: 1024,
+            default: false,
+        }];
+        let registry = LlmRegistry::from_configs(&configs);
+        assert!(registry.list().is_empty());
     }
 }

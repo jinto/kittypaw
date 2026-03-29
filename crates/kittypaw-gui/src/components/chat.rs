@@ -1,15 +1,8 @@
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use kittypaw_core::types::{LlmMessage, Role};
-use kittypaw_llm::claude::ClaudeProvider;
-use kittypaw_llm::provider::LlmProvider;
 
 use crate::state::AppState;
-
-/// Default model used for chat. LlmRegistry wiring will replace this once
-/// kittypaw.toml config parsing is added.
-const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
-const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 #[component]
 pub fn ChatPanel() -> Element {
@@ -24,16 +17,22 @@ pub fn ChatPanel() -> Element {
             while let Some(user_msg) = rx.next().await {
                 is_loading.set(true);
 
-                // Get API key
-                let api_key = state.api_key.lock().unwrap().clone();
-                if api_key.is_empty() {
-                    messages.write().push((
-                        "assistant".into(),
-                        "Please set your API key in Settings first.".into(),
-                    ));
-                    is_loading.set(false);
-                    continue;
-                }
+                // Get provider from registry
+                let provider = {
+                    let registry = state.llm_registry.lock().unwrap();
+                    registry.default_provider()
+                };
+                let provider = match provider {
+                    Some(p) => p,
+                    None => {
+                        messages.write().push((
+                            "assistant".into(),
+                            "No LLM configured. Please set your API key in Settings.".into(),
+                        ));
+                        is_loading.set(false);
+                        continue;
+                    }
+                };
 
                 // Build conversation history for context
                 let mut llm_messages = vec![LlmMessage {
@@ -58,9 +57,6 @@ pub fn ChatPanel() -> Element {
                     role: Role::User,
                     content: user_msg,
                 });
-
-                let provider =
-                    ClaudeProvider::new(api_key, DEFAULT_MODEL.to_string(), DEFAULT_MAX_TOKENS);
 
                 match provider.generate(&llm_messages).await {
                     Ok(response) => {
