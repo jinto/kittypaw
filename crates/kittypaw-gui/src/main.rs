@@ -43,6 +43,22 @@ fn main() {
         );
     }
 
+    // If no env var, try keychain
+    if persisted_key.is_empty() {
+        if let Ok(Some(key)) = kittypaw_core::secrets::get_secret("settings", "api_key") {
+            if !key.is_empty() {
+                llm_registry.register(
+                    "claude-sonnet",
+                    Arc::new(ClaudeProvider::new(
+                        key,
+                        "claude-sonnet-4-20250514".into(),
+                        4096,
+                    )),
+                );
+            }
+        }
+    }
+
     let local_url = std::env::var("KITTYPAW_LOCAL_URL").ok();
     let local_model = std::env::var("KITTYPAW_LOCAL_MODEL").ok();
     if let (Some(url), Some(model)) = (local_url, local_model) {
@@ -56,6 +72,25 @@ fn main() {
             )),
         );
         llm_registry.set_default("local");
+    } else {
+        // If no env vars, try keychain
+        if let (Ok(Some(url)), Ok(Some(model))) = (
+            kittypaw_core::secrets::get_secret("local_model", "base_url"),
+            kittypaw_core::secrets::get_secret("local_model", "model_name"),
+        ) {
+            if !url.is_empty() && !model.is_empty() {
+                llm_registry.register(
+                    "local",
+                    Arc::new(OpenAiProvider::with_base_url(
+                        url,
+                        String::new(),
+                        model,
+                        4096,
+                    )),
+                );
+                llm_registry.set_default("local");
+            }
+        }
     }
 
     let app_state = AppState::new(store, persisted_key, packages_dir, llm_registry);

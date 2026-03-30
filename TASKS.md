@@ -98,10 +98,11 @@
 - [x] GitHub Actions 릴리즈 CI 재작성 (kittypaw-gui `.app` 번들 + `.dmg` + CLI 바이너리)
 - [ ] macOS 코드 사이닝 검토 (Apple Developer $99/yr, Gatekeeper 마찰 감소)
 
-### 🟠 P1: 온보딩 UX
+### 🟠 P1: 온보딩 UX ✅
 > v1 타겟: "코딩 인터페이스는 싫어하는 기술 인접 파워유저"
-- [ ] GUI 온보딩 위자드 (API 키 입력 or 로컬 LLM 선택, kittypaw.toml 수동 편집 불필요)
-- [ ] LLM API 키 온보딩 마찰 해결 (로컬 LLM 기본값? 가이드 위자드? 무료 티어?)
+- [x] GUI 온보딩 위자드 (3단계: 환영 → LLM 선택 → 완료)
+- [x] LLM API 키 온보딩: 로컬 LLM(Ollama) or Claude API 선택
+- [x] main.rs 부트스트랩: keychain에서 LLM 설정 로드 (두 번째 실행부터 자동)
 
 ---
 

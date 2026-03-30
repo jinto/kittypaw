@@ -1,10 +1,30 @@
 use dioxus::prelude::*;
 
-use super::{chat, dashboard, settings, sidebar, skill_gallery};
+use super::{chat, dashboard, onboarding, settings, sidebar, skill_gallery};
+use crate::state::AppState;
 
 #[component]
 pub fn App() -> Element {
+    let app_state = use_context::<AppState>();
     let mut active_tab = use_signal(|| "dashboard".to_string());
+    let mut onboarding_done = use_signal(|| false);
+
+    // Check on mount whether onboarding was already completed
+    {
+        let app_state = app_state.clone();
+        use_effect(move || {
+            if let Ok(store) = app_state.store.lock() {
+                if store
+                    .get_user_context("onboarding_completed")
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    onboarding_done.set(true);
+                }
+            }
+        });
+    }
 
     rsx! {
         style { r#"
@@ -12,23 +32,30 @@ pub fn App() -> Element {
             ::-webkit-scrollbar {{ display: none; }}
             * {{ scrollbar-width: none; }}
         "# }
-        div { class: "app",
-            style: "display: flex; height: 100vh; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; bottom: 0;",
 
-            sidebar::Sidebar {
-                active_tab: active_tab(),
-                on_tab_change: move |tab: String| active_tab.set(tab),
+        if !onboarding_done() {
+            onboarding::Onboarding {
+                on_complete: move |_| onboarding_done.set(true),
             }
+        } else {
+            div { class: "app",
+                style: "display: flex; height: 100vh; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; bottom: 0;",
 
-            div { class: "main",
-                style: "flex: 1; display: flex; flex-direction: column; background: #F5F3F0; overflow: hidden; min-height: 0;",
+                sidebar::Sidebar {
+                    active_tab: active_tab(),
+                    on_tab_change: move |tab: String| active_tab.set(tab),
+                }
 
-                match active_tab().as_str() {
-                    "dashboard" => rsx! { dashboard::Dashboard {} },
-                    "skills" => rsx! { skill_gallery::SkillGallery {} },
-                    "chat" => rsx! { chat::ChatPanel {} },
-                    "settings" => rsx! { settings::SettingsPanel {} },
-                    _ => rsx! { dashboard::Dashboard {} },
+                div { class: "main",
+                    style: "flex: 1; display: flex; flex-direction: column; background: #F5F3F0; overflow: hidden; min-height: 0;",
+
+                    match active_tab().as_str() {
+                        "dashboard" => rsx! { dashboard::Dashboard {} },
+                        "skills" => rsx! { skill_gallery::SkillGallery {} },
+                        "chat" => rsx! { chat::ChatPanel {} },
+                        "settings" => rsx! { settings::SettingsPanel {} },
+                        _ => rsx! { dashboard::Dashboard {} },
+                    }
                 }
             }
         }
