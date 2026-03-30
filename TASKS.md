@@ -95,7 +95,7 @@
 
 ### 🟠 P1: 배포 파이프라인
 - [ ] kittypaw.app 도메인 DNS 설정 (Cloudflare → GitHub Pages)
-- [ ] GitHub Actions 릴리즈 CI 재작성 (현재 `oochy` CLI 전용 → Dioxus `.app` 번들 + `.dmg` 패키징)
+- [x] GitHub Actions 릴리즈 CI 재작성 (kittypaw-gui `.app` 번들 + `.dmg` + CLI 바이너리)
 - [ ] macOS 코드 사이닝 검토 (Apple Developer $99/yr, Gatekeeper 마찰 감소)
 
 ### 🟠 P1: 온보딩 UX

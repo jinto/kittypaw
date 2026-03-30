@@ -9,24 +9,97 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
+  build-gui-macos:
+    name: Build KittyPaw.app (${{ matrix.arch }})
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build GUI
+        run: cargo build --release --target ${{ matrix.target }} -p kittypaw-gui
+
+      - name: Create .app bundle
+        run: |
+          APP_DIR="KittyPaw.app/Contents"
+          mkdir -p "$APP_DIR/MacOS"
+          mkdir -p "$APP_DIR/Resources"
+
+          # Copy binary
+          cp "target/${{ matrix.target }}/release/kittypaw-gui" "$APP_DIR/MacOS/KittyPaw"
+
+          # Create Info.plist
+          VERSION="${GITHUB_REF_NAME#v}"
+          cat > "$APP_DIR/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>KittyPaw</string>
+            <key>CFBundleDisplayName</key>
+            <string>KittyPaw</string>
+            <key>CFBundleIdentifier</key>
+            <string>app.kittypaw.desktop</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VERSION}</string>
+            <key>CFBundleExecutable</key>
+            <string>KittyPaw</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Create .dmg
+        run: |
+          DMG_NAME="KittyPaw-${{ matrix.arch }}.dmg"
+          hdiutil create -volname "KittyPaw" -srcfolder "KittyPaw.app" -ov -format UDZO "$DMG_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KittyPaw-${{ matrix.arch }}.dmg
+          path: KittyPaw-${{ matrix.arch }}.dmg
+
+  build-cli:
+    name: Build CLI (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            name: oochy-linux-amd64
+            name: kittypaw-linux-amd64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            name: oochy-linux-arm64
+            name: kittypaw-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            name: oochy-macos-amd64
+            name: kittypaw-macos-amd64
           - target: aarch64-apple-darwin
             os: macos-latest
-            name: oochy-macos-arm64
+            name: kittypaw-macos-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -42,17 +115,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }} -p kittypaw-cli
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
       - name: Package
         run: |
-          cd target/${{ matrix.target }}/release
-          cp oochy ../../../${{ matrix.name }}
-          cd ../../..
-          chmod +x ${{ matrix.name }}
+          cp "target/${{ matrix.target }}/release/kittypaw" "${{ matrix.name }}"
+          chmod +x "${{ matrix.name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -62,7 +133,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [build-gui-macos, build-cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,8 +145,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            oochy-linux-amd64/oochy-linux-amd64
-            oochy-linux-arm64/oochy-linux-arm64
-            oochy-macos-amd64/oochy-macos-amd64
-            oochy-macos-arm64/oochy-macos-arm64
+            KittyPaw-arm64.dmg/KittyPaw-arm64.dmg
+            KittyPaw-amd64.dmg/KittyPaw-amd64.dmg
+            kittypaw-linux-amd64/kittypaw-linux-amd64
+            kittypaw-linux-arm64/kittypaw-linux-arm64
+            kittypaw-macos-amd64/kittypaw-macos-amd64
+            kittypaw-macos-arm64/kittypaw-macos-arm64
           generate_release_notes: true
