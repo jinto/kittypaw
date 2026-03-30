@@ -393,17 +393,19 @@ impl Store {
         result_summary: &str,
         success: bool,
         retry_count: i32,
+        input_params: Option<&str>,
     ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO execution_history \
-                 (skill_id, skill_name, started_at, finished_at, duration_ms, result_summary, success, retry_count) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (skill_id, skill_name, started_at, finished_at, duration_ms, input_params, result_summary, success, retry_count) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 skill_id,
                 skill_name,
                 started_at,
                 finished_at,
                 duration_ms,
+                input_params,
                 result_summary,
                 success as i32,
                 retry_count,
@@ -609,7 +611,10 @@ impl Store {
         for (&base_hour, _) in &hour_counts {
             let window_count: u32 = hours
                 .iter()
-                .filter(|&&h| h.abs_diff(base_hour) <= 1)
+                .filter(|&&h| {
+                    let diff = h.abs_diff(base_hour);
+                    diff.min(24 - diff) <= 1
+                })
                 .count() as u32;
             if window_count >= 3 {
                 // Suggest a daily cron at this hour
@@ -989,6 +994,7 @@ mod tests {
                 "All good",
                 true,
                 0,
+                None,
             )
             .unwrap();
 
@@ -1012,13 +1018,13 @@ mod tests {
         // Insert two successes and one failure with today's datetime
         let today = "2024-06-01 10:00:00";
         store
-            .record_execution("s1", "Skill1", today, today, 100, "", true, 0)
+            .record_execution("s1", "Skill1", today, today, 100, "", true, 0, None)
             .unwrap();
         store
-            .record_execution("s2", "Skill2", today, today, 200, "", true, 1)
+            .record_execution("s2", "Skill2", today, today, 200, "", true, 1, None)
             .unwrap();
         store
-            .record_execution("s3", "Skill3", today, today, 300, "", false, 2)
+            .record_execution("s3", "Skill3", today, today, 300, "", false, 2, None)
             .unwrap();
 
         // Use raw SQL to simulate "today" by querying with a fixed date
@@ -1061,6 +1067,7 @@ mod tests {
                 "",
                 true,
                 0,
+                None,
             )
             .unwrap();
 

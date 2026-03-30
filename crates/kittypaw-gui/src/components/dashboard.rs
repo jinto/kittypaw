@@ -121,7 +121,7 @@ pub fn Dashboard() -> Element {
     });
     let mut recent = use_signal::<Vec<ExecutionRecord>>(Vec::new);
     let mut installed_count = use_signal(|| 0u32);
-    // (skill_id, skill_name, suggested_cron)
+    // (skill_id, skill_name)
     let mut schedule_suggestions = use_signal::<Vec<(String, String)>>(Vec::new);
 
     let packages_dir = app_state.packages_dir.clone();
@@ -256,8 +256,11 @@ pub fn Dashboard() -> Element {
                 for (skill_id, skill_name) in suggestions.iter() {
                     {
                         let skill_id_accept = skill_id.clone();
+                        let skill_id_accept2 = skill_id.clone();
                         let skill_id_dismiss = skill_id.clone();
+                        let app_state_accept = app_state.clone();
                         let app_state_dismiss = app_state.clone();
+                        let mut schedule_suggestions_accept = schedule_suggestions.clone();
                         let mut schedule_suggestions_dismiss = schedule_suggestions.clone();
                         rsx! {
                             div {
@@ -271,7 +274,11 @@ pub fn Dashboard() -> Element {
                                 button {
                                     style: "background: #F59E0B; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #FFFFFF; cursor: pointer; margin-right: 6px;",
                                     onclick: move |_| {
-                                        tracing::info!("Schedule suggestion accepted for skill: {}", skill_id_accept);
+                                        if let Ok(store) = app_state_accept.store.lock() {
+                                            let accept_key = format!("schedule_accepted:{}", skill_id_accept);
+                                            let _ = store.set_user_context(&accept_key, "true", "user");
+                                        }
+                                        schedule_suggestions_accept.write().retain(|(id, _)| id != &skill_id_accept2);
                                     },
                                     "수락"
                                 }

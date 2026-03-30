@@ -5,6 +5,8 @@ use kittypaw_core::skill::Skill;
 use rusqlite::{params, Connection};
 use std::str::FromStr;
 
+const MAX_RESULT_LEN: usize = 500;
+
 /// Validate a cron expression and enforce minimum 5-minute interval.
 pub fn validate_cron(expr: &str) -> Result<(), String> {
     let schedule =
@@ -173,6 +175,53 @@ pub fn reset_failure_count(db_path: &str, skill_name: &str) -> Result<(), String
 
 // --- Schedule loop ---
 
+fn handle_execution_failure(
+    store: &kittypaw_store::Store,
+    db_path: &str,
+    id: &str,
+    name: &str,
+    started_at: chrono::DateTime<chrono::Utc>,
+    error_msg: &str,
+    input_params: Option<&str>,
+    can_disable: bool,
+) {
+    increment_failure_count(db_path, id).ok();
+    let failures = get_failure_count(db_path, id);
+    let finished_at = chrono::Utc::now();
+    let duration_ms = (finished_at - started_at).num_milliseconds();
+    let _ = store.record_execution(
+        id,
+        name,
+        &started_at.to_rfc3339(),
+        &finished_at.to_rfc3339(),
+        duration_ms,
+        &error_msg.chars().take(MAX_RESULT_LEN).collect::<String>(),
+        false,
+        failures as i32,
+        input_params,
+    );
+    if failures >= 3 {
+        if can_disable {
+            tracing::warn!(
+                "Skill '{}' auto-disabled after {} consecutive failures",
+                name,
+                failures
+            );
+            let _ = kittypaw_core::skill::disable_skill(id);
+        } else {
+            tracing::warn!("Package '{}' failed {} consecutive times", name, failures);
+        }
+    } else {
+        set_backoff_delay(db_path, id, failures).ok();
+        tracing::info!(
+            "Skill '{}' will retry in {} seconds (attempt {}/3)",
+            name,
+            60 * (1u32 << failures.min(10)),
+            failures
+        );
+    }
+}
+
 pub async fn run_schedule_loop(
     config: &kittypaw_core::config::Config,
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
@@ -207,6 +256,11 @@ pub async fn run_schedule_loop(
                     "chat_id": "",
                     "skill_name": skill.name,
                 });
+                let skill_input_params = serde_json::to_string(&context).unwrap_or_default();
+                let skill_input_params = skill_input_params
+                    .chars()
+                    .take(MAX_RESULT_LEN)
+                    .collect::<String>();
                 let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
                 let skill_started_at = Utc::now();
                 match sandbox.execute(&wrapped, context).await {
@@ -240,9 +294,14 @@ pub async fn run_schedule_loop(
                             &skill_started_at.to_rfc3339(),
                             &skill_finished_at.to_rfc3339(),
                             duration_ms,
-                            &result.output.chars().take(500).collect::<String>(),
+                            &result
+                                .output
+                                .chars()
+                                .take(MAX_RESULT_LEN)
+                                .collect::<String>(),
                             true,
                             0,
+                            Some(&skill_input_params),
                         );
                         set_last_run(db_path, &skill.name, Utc::now()).ok();
                         reset_failure_count(db_path, &skill.name).ok();
@@ -261,61 +320,30 @@ pub async fn run_schedule_loop(
                             skill.name,
                             result.error
                         );
-                        increment_failure_count(db_path, &skill.name).ok();
-                        let failures = get_failure_count(db_path, &skill.name);
-                        let skill_finished_at = Utc::now();
-                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
-                        let _ = store.record_execution(
+                        let error_msg = result.error.unwrap_or_default();
+                        handle_execution_failure(
+                            &store,
+                            db_path,
                             &skill.name,
                             &skill.name,
-                            &skill_started_at.to_rfc3339(),
-                            &skill_finished_at.to_rfc3339(),
-                            duration_ms,
-                            &result
-                                .error
-                                .unwrap_or_default()
-                                .chars()
-                                .take(500)
-                                .collect::<String>(),
-                            false,
-                            failures as i32,
+                            skill_started_at,
+                            &error_msg,
+                            Some(&skill_input_params),
+                            true,
                         );
-                        if failures >= 3 {
-                            tracing::warn!(
-                                "Skill '{}' auto-disabled after {} consecutive failures",
-                                skill.name,
-                                failures
-                            );
-                            let _ = kittypaw_core::skill::disable_skill(&skill.name);
-                        } else {
-                            set_backoff_delay(db_path, &skill.name, failures).ok();
-                            tracing::info!(
-                                "Skill '{}' retry scheduled with {}s backoff (failure {})",
-                                skill.name,
-                                60 * (1u32 << failures.min(10)),
-                                failures
-                            );
-                        }
                     }
                     Err(e) => {
                         tracing::error!("Scheduled skill '{}' execution error: {e}", skill.name);
-                        increment_failure_count(db_path, &skill.name).ok();
-                        let failures = get_failure_count(db_path, &skill.name);
-                        let skill_finished_at = Utc::now();
-                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
-                        let _ = store.record_execution(
+                        handle_execution_failure(
+                            &store,
+                            db_path,
                             &skill.name,
                             &skill.name,
-                            &skill_started_at.to_rfc3339(),
-                            &skill_finished_at.to_rfc3339(),
-                            duration_ms,
-                            &e.to_string().chars().take(500).collect::<String>(),
-                            false,
-                            failures as i32,
+                            skill_started_at,
+                            &e.to_string(),
+                            Some(&skill_input_params),
+                            true,
                         );
-                        if failures < 3 {
-                            set_backoff_delay(db_path, &skill.name, failures).ok();
-                        }
                     }
                 }
             }
@@ -352,6 +380,11 @@ pub async fn run_schedule_loop(
                     "event_type": "schedule",
                 });
                 let context = pkg.build_context(&config_values, event_payload, None);
+                let pkg_input_params = serde_json::to_string(&config_values).unwrap_or_default();
+                let pkg_input_params = pkg_input_params
+                    .chars()
+                    .take(MAX_RESULT_LEN)
+                    .collect::<String>();
                 let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
                 let pkg_started_at = Utc::now();
                 match sandbox.execute(&wrapped, context).await {
@@ -385,9 +418,14 @@ pub async fn run_schedule_loop(
                             &pkg_started_at.to_rfc3339(),
                             &pkg_finished_at.to_rfc3339(),
                             duration_ms,
-                            &result.output.chars().take(500).collect::<String>(),
+                            &result
+                                .output
+                                .chars()
+                                .take(MAX_RESULT_LEN)
+                                .collect::<String>(),
                             true,
                             0,
+                            Some(&pkg_input_params),
                         );
                         set_last_run(db_path, &pkg.meta.id, Utc::now()).ok();
                         reset_failure_count(db_path, &pkg.meta.id).ok();
@@ -468,60 +506,30 @@ pub async fn run_schedule_loop(
                             pkg.meta.id,
                             result.error
                         );
-                        increment_failure_count(db_path, &pkg.meta.id).ok();
-                        let pkg_failures = get_failure_count(db_path, &pkg.meta.id);
-                        let pkg_finished_at = Utc::now();
-                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
-                        let _ = store.record_execution(
+                        let error_msg = result.error.unwrap_or_default();
+                        handle_execution_failure(
+                            &store,
+                            db_path,
                             &pkg.meta.id,
                             &pkg.meta.name,
-                            &pkg_started_at.to_rfc3339(),
-                            &pkg_finished_at.to_rfc3339(),
-                            duration_ms,
-                            &result
-                                .error
-                                .unwrap_or_default()
-                                .chars()
-                                .take(500)
-                                .collect::<String>(),
+                            pkg_started_at,
+                            &error_msg,
+                            Some(&pkg_input_params),
                             false,
-                            pkg_failures as i32,
                         );
-                        if pkg_failures >= 3 {
-                            tracing::warn!(
-                                "Package '{}' auto-disabled after {} consecutive failures",
-                                pkg.meta.id,
-                                pkg_failures
-                            );
-                        } else {
-                            set_backoff_delay(db_path, &pkg.meta.id, pkg_failures).ok();
-                            tracing::info!(
-                                "Package '{}' retry scheduled with {}s backoff (failure {})",
-                                pkg.meta.id,
-                                60 * (1u32 << pkg_failures.min(10)),
-                                pkg_failures
-                            );
-                        }
                     }
                     Err(e) => {
                         tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
-                        increment_failure_count(db_path, &pkg.meta.id).ok();
-                        let pkg_failures = get_failure_count(db_path, &pkg.meta.id);
-                        let pkg_finished_at = Utc::now();
-                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
-                        let _ = store.record_execution(
+                        handle_execution_failure(
+                            &store,
+                            db_path,
                             &pkg.meta.id,
                             &pkg.meta.name,
-                            &pkg_started_at.to_rfc3339(),
-                            &pkg_finished_at.to_rfc3339(),
-                            duration_ms,
-                            &e.to_string().chars().take(500).collect::<String>(),
+                            pkg_started_at,
+                            &e.to_string(),
+                            Some(&pkg_input_params),
                             false,
-                            pkg_failures as i32,
                         );
-                        if pkg_failures < 3 {
-                            set_backoff_delay(db_path, &pkg.meta.id, pkg_failures).ok();
-                        }
                     }
                 }
             }
