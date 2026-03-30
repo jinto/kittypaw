@@ -171,6 +171,7 @@ pub async fn run_schedule_loop(
                 continue;
             }
         };
+        let _ = store.cleanup_old_executions(30);
         if let Ok(skills) = kittypaw_core::skill::load_all_skills() {
             for (skill, js_code) in &skills {
                 if skill.trigger.trigger_type != "schedule" || !skill.enabled {
@@ -189,6 +190,7 @@ pub async fn run_schedule_loop(
                     "skill_name": skill.name,
                 });
                 let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+                let skill_started_at = Utc::now();
                 match sandbox.execute(&wrapped, context).await {
                     Ok(result) if result.success => {
                         if !result.skill_calls.is_empty() {
@@ -212,6 +214,18 @@ pub async fn run_schedule_loop(
                             skill.name,
                             result.output
                         );
+                        let skill_finished_at = Utc::now();
+                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &skill.name,
+                            &skill.name,
+                            &skill_started_at.to_rfc3339(),
+                            &skill_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &result.output.chars().take(500).collect::<String>(),
+                            true,
+                            0,
+                        );
                         set_last_run(db_path, &skill.name, Utc::now()).ok();
                         reset_failure_count(db_path, &skill.name).ok();
                     }
@@ -223,6 +237,23 @@ pub async fn run_schedule_loop(
                         );
                         increment_failure_count(db_path, &skill.name).ok();
                         let failures = get_failure_count(db_path, &skill.name);
+                        let skill_finished_at = Utc::now();
+                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &skill.name,
+                            &skill.name,
+                            &skill_started_at.to_rfc3339(),
+                            &skill_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &result
+                                .error
+                                .unwrap_or_default()
+                                .chars()
+                                .take(500)
+                                .collect::<String>(),
+                            false,
+                            failures as i32,
+                        );
                         if failures >= 3 {
                             tracing::warn!(
                                 "Skill '{}' auto-disabled after {} consecutive failures",
@@ -235,6 +266,18 @@ pub async fn run_schedule_loop(
                     Err(e) => {
                         tracing::error!("Scheduled skill '{}' execution error: {e}", skill.name);
                         increment_failure_count(db_path, &skill.name).ok();
+                        let skill_finished_at = Utc::now();
+                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &skill.name,
+                            &skill.name,
+                            &skill_started_at.to_rfc3339(),
+                            &skill_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &e.to_string().chars().take(500).collect::<String>(),
+                            false,
+                            get_failure_count(db_path, &skill.name) as i32,
+                        );
                     }
                 }
             }
@@ -259,6 +302,7 @@ pub async fn run_schedule_loop(
                 });
                 let context = pkg.build_context(&config_values, event_payload, None);
                 let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+                let pkg_started_at = Utc::now();
                 match sandbox.execute(&wrapped, context).await {
                     Ok(result) if result.success => {
                         if !result.skill_calls.is_empty() {
@@ -281,6 +325,18 @@ pub async fn run_schedule_loop(
                             "Scheduled package '{}' completed: {}",
                             pkg.meta.id,
                             result.output
+                        );
+                        let pkg_finished_at = Utc::now();
+                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &pkg.meta.id,
+                            &pkg.meta.name,
+                            &pkg_started_at.to_rfc3339(),
+                            &pkg_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &result.output.chars().take(500).collect::<String>(),
+                            true,
+                            0,
                         );
                         set_last_run(db_path, &pkg.meta.id, Utc::now()).ok();
                         reset_failure_count(db_path, &pkg.meta.id).ok();
@@ -354,10 +410,39 @@ pub async fn run_schedule_loop(
                             result.error
                         );
                         increment_failure_count(db_path, &pkg.meta.id).ok();
+                        let pkg_finished_at = Utc::now();
+                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &pkg.meta.id,
+                            &pkg.meta.name,
+                            &pkg_started_at.to_rfc3339(),
+                            &pkg_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &result
+                                .error
+                                .unwrap_or_default()
+                                .chars()
+                                .take(500)
+                                .collect::<String>(),
+                            false,
+                            get_failure_count(db_path, &pkg.meta.id) as i32,
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
                         increment_failure_count(db_path, &pkg.meta.id).ok();
+                        let pkg_finished_at = Utc::now();
+                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
+                        let _ = store.record_execution(
+                            &pkg.meta.id,
+                            &pkg.meta.name,
+                            &pkg_started_at.to_rfc3339(),
+                            &pkg_finished_at.to_rfc3339(),
+                            duration_ms,
+                            &e.to_string().chars().take(500).collect::<String>(),
+                            false,
+                            get_failure_count(db_path, &pkg.meta.id) as i32,
+                        );
                     }
                 }
             }

@@ -1,30 +1,9 @@
+use crate::state::AppState;
 use dioxus::prelude::*;
+use kittypaw_core::package_manager::PackageManager;
+use kittypaw_store::{ExecutionRecord, ExecutionStats};
 
 const SECTION_TITLE_STYLE: &str = "font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #78716C; margin-bottom: 12px;";
-
-#[derive(Clone, PartialEq)]
-enum SkillStatus {
-    Running,
-    Scheduled,
-    Error,
-}
-
-#[derive(Clone)]
-struct SkillRow {
-    status: SkillStatus,
-    name: &'static str,
-    last_result: &'static str,
-    schedule: &'static str,
-    tag: &'static str,
-}
-
-#[derive(Clone)]
-struct ActivityEntry {
-    time: &'static str,
-    skill: &'static str,
-    description: &'static str,
-    is_quiet: bool,
-}
 
 // ── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -86,87 +65,28 @@ fn days_to_ymd_weekday(days: u64) -> (u64, u64, u64, u64) {
     (y, m, d, weekday)
 }
 
-// ── Mock data ────────────────────────────────────────────────────────────────
-
-fn mock_skills() -> Vec<SkillRow> {
-    vec![
-        SkillRow {
-            status: SkillStatus::Running,
-            name: "weather-briefing",
-            last_result: "서울 8°C, 맑음 — 30분 전",
-            schedule: "매일 07:00",
-            tag: "Active",
-        },
-        SkillRow {
-            status: SkillStatus::Running,
-            name: "url-monitor",
-            last_result: "변경 없음 — example.jp — 1시간 전",
-            schedule: "매 2시간",
-            tag: "Active",
-        },
-        SkillRow {
-            status: SkillStatus::Running,
-            name: "rss-digest",
-            last_result: "새 글 3건 요약 완료 — 2시간 전",
-            schedule: "매일 09:00",
-            tag: "Active",
-        },
-        SkillRow {
-            status: SkillStatus::Scheduled,
-            name: "macro-economy-report",
-            last_result: "다음 실행 대기 중",
-            schedule: "매주 월 08:00",
-            tag: "Scheduled",
-        },
-        SkillRow {
-            status: SkillStatus::Error,
-            name: "reminder",
-            last_result: "API 타임아웃 — 자동 재시도 1/3",
-            schedule: "트리거 기반",
-            tag: "Retrying",
-        },
-    ]
-}
-
-fn mock_activity() -> Vec<ActivityEntry> {
-    vec![
-        ActivityEntry {
-            time: "09:12",
-            skill: "rss-digest",
-            description: "Hacker News, TechCrunch, Ars Technica에서 3건 요약",
-            is_quiet: false,
-        },
-        ActivityEntry {
-            time: "08:15",
-            skill: "url-monitor",
-            description: "example.jp 변경 없음",
-            is_quiet: false,
-        },
-        ActivityEntry {
-            time: "07:00",
-            skill: "weather-briefing",
-            description: "서울 8°C 맑음, 오사카 12°C 흐림",
-            is_quiet: false,
-        },
-        ActivityEntry {
-            time: "07:00",
-            skill: "🔇 weather-briefing 위치 자동 적용",
-            description: "\"서울\" 3회 입력 → 기본값으로 설정됨",
-            is_quiet: true,
-        },
-        ActivityEntry {
-            time: "06:30",
-            skill: "reminder",
-            description: "API 타임아웃, 자동 재시도 시작",
-            is_quiet: false,
-        },
-    ]
+/// Extract HH:MM from a started_at string like "2024-06-01 10:30:00"
+fn hhmm_from_started_at(started_at: &str) -> String {
+    // Expected format: "YYYY-MM-DD HH:MM:SS" or ISO "YYYY-MM-DDTHH:MM:SS"
+    let time_part = if let Some(t) = started_at.find('T') {
+        &started_at[t + 1..]
+    } else if let Some(pos) = started_at.find(' ') {
+        &started_at[pos + 1..]
+    } else {
+        started_at
+    };
+    // Take first 5 chars: "HH:MM"
+    if time_part.len() >= 5 {
+        time_part[..5].to_string()
+    } else {
+        time_part.to_string()
+    }
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 #[component]
-fn StatCard(label: &'static str, value: &'static str, accent: bool) -> Element {
+fn StatCard(label: &'static str, value: String, accent: bool) -> Element {
     let card_bg = if accent { "#F0FDF4" } else { "#FFFFFF" };
     let card_border = if accent { "#86EFAC" } else { "#E7E5E4" };
     let value_color = if accent { "#166534" } else { "#1C1917" };
@@ -190,9 +110,38 @@ fn StatCard(label: &'static str, value: &'static str, accent: bool) -> Element {
 
 #[component]
 pub fn Dashboard() -> Element {
+    let app_state = use_context::<AppState>();
     let (greeting, date_str) = greeting_and_date();
-    let skills = mock_skills();
-    let activity = mock_activity();
+
+    let mut stats = use_signal(|| ExecutionStats {
+        total_runs: 0,
+        successful: 0,
+        failed: 0,
+        auto_retries: 0,
+    });
+    let mut recent = use_signal::<Vec<ExecutionRecord>>(Vec::new);
+    let mut installed_count = use_signal(|| 0u32);
+
+    use_effect(move || {
+        if let Ok(store) = app_state.store.lock() {
+            if let Ok(s) = store.today_stats() {
+                stats.set(s);
+            }
+            if let Ok(r) = store.recent_executions(10) {
+                recent.set(r);
+            }
+        }
+        let mgr = PackageManager::new(app_state.packages_dir.clone());
+        if let Ok(pkgs) = mgr.list_installed() {
+            installed_count.set(pkgs.len() as u32);
+        }
+    });
+
+    let active_skills_val = installed_count.read().to_string();
+    let today_runs_val = stats.read().total_runs.to_string();
+    let silent_opts_val = stats.read().auto_retries.to_string();
+    let quiet_count = stats.read().auto_retries;
+    let activity = recent.read();
 
     rsx! {
         div {
@@ -214,66 +163,51 @@ pub fn Dashboard() -> Element {
             // ── Stat Cards ────────────────────────────────────────────────
             div {
                 style: "display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px;",
-                StatCard { label: "Active Skills", value: "5", accent: false }
-                StatCard { label: "Today's Runs", value: "12", accent: false }
-                StatCard { label: "Silent Optimizations", value: "3", accent: true }
+                StatCard { label: "Active Skills", value: active_skills_val, accent: false }
+                StatCard { label: "Today's Runs", value: today_runs_val, accent: false }
+                StatCard { label: "Silent Optimizations", value: silent_opts_val, accent: true }
             }
 
-            // ── Skills section title ───────────────────────────────────────
+            // ── Recent Activity section title ─────────────────────────────
             div {
                 style: "{SECTION_TITLE_STYLE}",
-                "Skills"
+                "Recent Activity"
             }
 
-            // ── Skills list ───────────────────────────────────────────────
-            div {
-                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; overflow: hidden; margin-bottom: 16px;",
-                for (i, row) in skills.iter().enumerate() {
-                    {
-                        let is_last = i == skills.len() - 1;
-                        let row_border = if is_last { "none" } else { "1px solid #E7E5E4" };
-                        let dot_color = match row.status {
-                            SkillStatus::Running   => "#86EFAC",
-                            SkillStatus::Scheduled => "#A8A29E",
-                            SkillStatus::Error     => "#FCA5A5",
-                        };
-                        let dot_shadow = match row.status {
-                            SkillStatus::Running => "0 0 6px rgba(134,239,172,0.5)",
-                            _                    => "none",
-                        };
-                        let (tag_bg, tag_color) = match row.status {
-                            SkillStatus::Running   => ("#F0FDF4", "#166534"),
-                            SkillStatus::Scheduled => ("#F5F5F4", "#78716C"),
-                            SkillStatus::Error     => ("#FEF2F2", "#991B1B"),
-                        };
-                        let name        = row.name;
-                        let last_result = row.last_result;
-                        let schedule    = row.schedule;
-                        let tag         = row.tag;
-                        rsx! {
-                            div {
-                                key: "{i}",
-                                style: "display: grid; grid-template-columns: 8px 1fr 140px 80px; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: {row_border}; font-size: 13px;",
+            // ── Activity log ──────────────────────────────────────────────
+            if activity.is_empty() {
+                div {
+                    style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 32px 20px; text-align: center; color: #A8A29E; font-size: 13px; margin-bottom: 16px;",
+                    "아직 실행 기록이 없습니다. 스킬을 설치하고 실행해보세요."
+                }
+            } else {
+                div {
+                    style: "margin-bottom: 16px;",
+                    for (i, entry) in activity.iter().enumerate() {
+                        {
+                            let is_last = i == activity.len() - 1;
+                            let entry_border = if is_last { "none" } else { "1px solid #E7E5E4" };
+                            let is_quiet = entry.retry_count > 0;
+                            let skill_color = if is_quiet { "#166534" } else { "#1C1917" };
+                            let time = hhmm_from_started_at(&entry.started_at);
+                            let skill = entry.skill_name.clone();
+                            let description = entry.result_summary.clone();
+                            rsx! {
                                 div {
-                                    style: "width: 8px; height: 8px; border-radius: 9999px; background: {dot_color}; box-shadow: {dot_shadow};",
-                                }
-                                div {
-                                    div {
-                                        style: "font-weight: 500; color: #1C1917;",
-                                        "{name}"
+                                    key: "{entry.id}",
+                                    style: "display: flex; align-items: baseline; gap: 12px; padding: 8px 0; font-size: 12px; border-bottom: {entry_border};",
+                                    span {
+                                        style: "font-family: 'Geist Mono', 'SF Mono', monospace; font-size: 11px; color: #A8A29E; flex-shrink: 0; width: 50px;",
+                                        "{time}"
                                     }
-                                    div {
-                                        style: "font-size: 12px; color: #78716C; margin-top: 2px;",
-                                        "{last_result}"
+                                    span {
+                                        style: "color: {skill_color};",
+                                        "{skill} "
+                                        span {
+                                            style: "color: #78716C;",
+                                            "— {description}"
+                                        }
                                     }
-                                }
-                                div {
-                                    style: "font-family: 'Geist Mono', 'SF Mono', monospace; font-size: 11px; color: #78716C;",
-                                    "{schedule}"
-                                }
-                                div {
-                                    style: "font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; background: {tag_bg}; color: {tag_color}; display: inline-block;",
-                                    "{tag}"
                                 }
                             }
                         }
@@ -286,54 +220,16 @@ pub fn Dashboard() -> Element {
                 style: "background: #F0FDF4; border: 1px solid #D1FAE5; border-radius: 10px; padding: 14px 20px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #166534; cursor: pointer; margin-bottom: 24px;",
                 span { style: "font-size: 16px;", "✨" }
                 span {
-                    "이번 주 "
+                    "오늘 "
                     span {
                         style: "font-family: 'Geist Mono', 'SF Mono', monospace; font-weight: 600;",
-                        "8"
+                        "{quiet_count}"
                     }
                     "번의 조용한 개선이 적용됨"
                 }
                 span {
                     style: "margin-left: auto; font-size: 11px; color: #4ADE80; text-decoration: underline;",
                     "자세히 보기 →"
-                }
-            }
-
-            // ── Recent Activity section title ─────────────────────────────
-            div {
-                style: "{SECTION_TITLE_STYLE}",
-                "Recent Activity"
-            }
-
-            // ── Activity log ──────────────────────────────────────────────
-            div {
-                for (i, entry) in activity.iter().enumerate() {
-                    {
-                        let is_last = i == activity.len() - 1;
-                        let entry_border = if is_last { "none" } else { "1px solid #E7E5E4" };
-                        let skill_color = if entry.is_quiet { "#166534" } else { "#1C1917" };
-                        let time        = entry.time;
-                        let skill       = entry.skill;
-                        let description = entry.description;
-                        rsx! {
-                            div {
-                                key: "{i}",
-                                style: "display: flex; align-items: baseline; gap: 12px; padding: 8px 0; font-size: 12px; border-bottom: {entry_border};",
-                                span {
-                                    style: "font-family: 'Geist Mono', 'SF Mono', monospace; font-size: 11px; color: #A8A29E; flex-shrink: 0; width: 50px;",
-                                    "{time}"
-                                }
-                                span {
-                                    style: "color: {skill_color};",
-                                    "{skill} "
-                                    span {
-                                        style: "color: #78716C;",
-                                        "— {description}"
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
