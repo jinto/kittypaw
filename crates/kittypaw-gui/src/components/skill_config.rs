@@ -199,6 +199,7 @@ async fn run_skill_test(
     let context = serde_json::json!({
         "config": config,
         "package_id": pkg_id,
+        "user": {},
     });
     let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
 

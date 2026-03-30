@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use kittypaw_core::{
     error::{KittypawError, Result},
     permission::{
@@ -513,6 +515,25 @@ impl Store {
             .query_map(params![like_pattern], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    /// List user context entries that are shareable across skills.
+    /// Excludes internal keys (default:*, suggest_*, schedule_*, onboarding*).
+    pub fn list_shared_context(&self) -> Result<HashMap<String, String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM user_context \
+             WHERE key NOT LIKE 'default:%' \
+               AND key NOT LIKE 'suggest_%' \
+               AND key NOT LIKE 'schedule_%' \
+               AND key NOT LIKE 'onboarding%'",
+        )?;
+        let map: HashMap<String, String> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(map)
     }
 
     /// Set a user context value

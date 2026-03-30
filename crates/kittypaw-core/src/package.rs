@@ -80,13 +80,21 @@ impl SkillPackage {
     /// Build a sandbox context JSON that includes package config values.
     /// JS code accesses these via `JSON.parse(__context__).config.key_name`.
     /// When running as part of a chain, `prev_output` carries the previous step's output.
+    /// Shared user context is available via `ctx.user.key_name` (e.g. `ctx.user.location`).
     pub fn build_context(
         &self,
         config_values: &HashMap<String, String>,
         event_payload: serde_json::Value,
         prev_output: Option<&str>,
+        user_context: &HashMap<String, String>,
     ) -> serde_json::Value {
         let config_json: serde_json::Value = config_values
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into();
+
+        let user_json: serde_json::Value = user_context
             .iter()
             .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
             .collect::<serde_json::Map<String, serde_json::Value>>()
@@ -96,6 +104,7 @@ impl SkillPackage {
             "event": event_payload,
             "config": config_json,
             "package_id": self.meta.id,
+            "user": user_json,
         });
 
         if let Some(output) = prev_output {
@@ -322,7 +331,7 @@ options = ["us-east-1", "eu-west-1", "ap-northeast-1"]
         config.insert("chat_id".to_string(), "42".to_string());
 
         let event = serde_json::json!({"event_type": "schedule"});
-        let ctx = pkg.build_context(&config, event.clone(), None);
+        let ctx = pkg.build_context(&config, event.clone(), None, &HashMap::new());
 
         assert_eq!(ctx["package_id"], "macro-economy-report");
         assert_eq!(ctx["event"], event);
@@ -335,10 +344,25 @@ options = ["us-east-1", "eu-west-1", "ap-northeast-1"]
         let pkg = parse_package_toml(SAMPLE_TOML).unwrap();
         let config = HashMap::new();
         let event = serde_json::json!({"event_type": "schedule"});
-        let ctx = pkg.build_context(&config, event, None);
+        let ctx = pkg.build_context(&config, event, None, &HashMap::new());
 
         assert_eq!(ctx["package_id"], "macro-economy-report");
         assert!(ctx["config"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_build_context_with_user_context() {
+        let pkg = parse_package_toml(SAMPLE_TOML).unwrap();
+        let config = HashMap::new();
+        let event = serde_json::json!({"event_type": "schedule"});
+        let mut user_ctx = HashMap::new();
+        user_ctx.insert("location".to_string(), "Seoul".to_string());
+        user_ctx.insert("language".to_string(), "ko".to_string());
+        let ctx = pkg.build_context(&config, event, None, &user_ctx);
+
+        assert_eq!(ctx["user"]["location"], "Seoul");
+        assert_eq!(ctx["user"]["language"], "ko");
+        assert_eq!(ctx["package_id"], "macro-economy-report");
     }
 
     #[test]
@@ -386,7 +410,12 @@ package = "send-telegram"
         let pkg = parse_package_toml(SAMPLE_TOML).unwrap();
         let config = HashMap::new();
         let event = serde_json::json!({"event_type": "schedule"});
-        let ctx = pkg.build_context(&config, event, Some("previous step result"));
+        let ctx = pkg.build_context(
+            &config,
+            event,
+            Some("previous step result"),
+            &HashMap::new(),
+        );
 
         assert_eq!(ctx["prev_output"], "previous step result");
         assert_eq!(ctx["package_id"], "macro-economy-report");

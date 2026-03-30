@@ -383,10 +383,11 @@ pub async fn run_schedule_loop(
                 let config_values = pkg_mgr
                     .get_config_with_defaults_and_patterns(&pkg.meta.id, &pattern_defaults)
                     .unwrap_or_default();
+                let shared_ctx = store.list_shared_context().unwrap_or_default();
                 let event_payload = serde_json::json!({
                     "event_type": "schedule",
                 });
-                let context = pkg.build_context(&config_values, event_payload, None);
+                let context = pkg.build_context(&config_values, event_payload, None, &shared_ctx);
                 // Filter out secret fields before recording to execution history
                 let mut safe_config = config_values.clone();
                 safe_config.retain(|k, _| {
@@ -465,6 +466,7 @@ pub async fn run_schedule_loop(
                                         &chain_config,
                                         serde_json::json!({}),
                                         Some(&prev_output),
+                                        &shared_ctx,
                                     );
                                     let chain_wrapped =
                                         format!("const ctx = JSON.parse(__context__);\n{chain_js}");

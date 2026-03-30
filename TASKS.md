@@ -94,7 +94,7 @@
 - [ ] 사용자 리서치 결과에 따라 5개 추가
 
 ### 🟠 P1: 배포 파이프라인
-- [ ] kittypaw.app 도메인 DNS 설정 (Cloudflare → GitHub Pages)
+- [x] kittypaw.app 도메인 DNS 설정 (Cloudflare → GitHub Pages)
 - [x] GitHub Actions 릴리즈 CI 재작성 (kittypaw-gui `.app` 번들 + `.dmg` + CLI 바이너리)
 - [ ] macOS 코드 사이닝 검토 (Apple Developer $99/yr, Gatekeeper 마찰 감소)
 
@@ -108,9 +108,9 @@
 
 ## v2: Deeper Silence (v1 검증 후)
 
-### 스킬 간 컨텍스트 공유
-- [ ] user_context를 모든 스킬이 읽을 수 있게 (위치 → 날씨+출퇴근 공유)
-- [ ] 자동 스킬 제안 (실행 패턴 기반)
+### 스킬 간 컨텍스트 공유 ✅
+- [x] user_context를 모든 스킬이 읽을 수 있게 (ctx.user.location 등)
+- [x] 자동 스킬 제안 (v1 Silent Memory Phase 2에서 detect_time_pattern으로 구현됨)
 
 ### 보이지 않는 자기 개선
 - [ ] 실패한 스킬 자동 수정 (LLM 기반 파라미터 조정 — v1에서 제외한 것)
