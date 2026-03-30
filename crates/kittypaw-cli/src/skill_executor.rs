@@ -843,10 +843,19 @@ async fn execute_llm(
             )
         };
 
+    let provider_lower = provider.to_lowercase();
+
+    if api_key.is_empty() && !matches!(provider_lower.as_str(), "ollama" | "local") {
+        return Err(KittypawError::Skill(format!(
+            "No API key configured for model '{}'",
+            model
+        )));
+    }
+
     let client = reqwest::Client::new();
 
     // Route to provider-specific endpoint
-    let is_openai_compat = matches!(provider.as_str(), "openai" | "ollama" | "local");
+    let is_openai_compat = matches!(provider_lower.as_str(), "openai" | "ollama" | "local");
     let endpoint = if is_openai_compat {
         let url = base_url
             .as_deref()
