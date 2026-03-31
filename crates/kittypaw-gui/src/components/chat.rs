@@ -11,6 +11,7 @@ pub fn ChatPanel() -> Element {
     let mut messages = use_signal::<Vec<(String, String)>>(Vec::new);
     let mut input_text = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
+    let mut is_recording = use_signal(|| false);
 
     let chat_coroutine = use_coroutine(move |mut rx: UnboundedReceiver<String>| {
         let state = app_state.clone();
@@ -106,6 +107,22 @@ pub fn ChatPanel() -> Element {
                                 send_message();
                             }
                         },
+                    }
+                    {
+                        let recording = *is_recording.read();
+                        let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
+                        let mic_label = if recording { "⏹" } else { "🎤" };
+                        rsx! {
+                            button {
+                                style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
+                                onclick: move |_| {
+                                    // TODO: integrate cpal for audio capture
+                                    let cur = *is_recording.read();
+                                    is_recording.set(!cur);
+                                },
+                                "{mic_label}"
+                            }
+                        }
                     }
                     {
                         let loading = *is_loading.read();

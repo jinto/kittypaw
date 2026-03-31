@@ -17,6 +17,8 @@ pub struct Config {
     pub freeform_fallback: bool,
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    #[serde(default)]
+    pub stt: SttConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,20 @@ pub struct ModelConfig {
     pub default: bool,
     #[serde(default)]
     pub base_url: Option<String>,
+}
+
+fn default_stt_language() -> String {
+    "ko".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SttConfig {
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_stt_language")]
+    pub language: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +175,7 @@ impl Default for Config {
             admin_chat_ids: vec![],
             freeform_fallback: false,
             models: vec![],
+            stt: SttConfig::default(),
         }
     }
 }

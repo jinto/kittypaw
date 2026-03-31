@@ -203,6 +203,7 @@ async fn main() {
 
 async fn run_serve(bind_addr: &str) {
     use kittypaw_channels::channel::Channel;
+    use kittypaw_channels::slack::SlackChannel;
     use kittypaw_channels::telegram::TelegramChannel;
     use kittypaw_channels::websocket::ServeWebSocketChannel;
     use kittypaw_core::types::EventType;
@@ -255,6 +256,29 @@ async fn run_serve(bind_addr: &str) {
             }
         });
         eprintln!("Telegram bot polling started.");
+    }
+
+    // Start Slack channel if configured (Socket Mode)
+    let slack_bot_token = std::env::var("KITTYPAW_SLACK_BOT_TOKEN")
+        .ok()
+        .or_else(|| {
+            config
+                .channels
+                .iter()
+                .find(|c| c.channel_type == "slack")
+                .map(|c| c.token.clone())
+        })
+        .unwrap_or_default();
+    let slack_app_token = std::env::var("KITTYPAW_SLACK_APP_TOKEN").unwrap_or_default();
+    if !slack_bot_token.is_empty() && !slack_app_token.is_empty() {
+        let slack_channel = SlackChannel::new(&slack_bot_token, &slack_app_token);
+        let slack_tx = event_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = slack_channel.start(slack_tx).await {
+                tracing::error!("Slack channel error: {e}");
+            }
+        });
+        eprintln!("Slack Socket Mode started.");
     }
 
     eprintln!(
