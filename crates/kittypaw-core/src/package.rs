@@ -44,6 +44,9 @@ pub struct PackageMeta {
     pub category: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Setup notes shown on wizard overview step.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub setup_notes: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +63,9 @@ pub struct ConfigField {
     pub hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<String>>,
+    /// Step-by-step setup guide shown on this field's wizard step.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub setup_guide: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

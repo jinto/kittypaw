@@ -1026,6 +1026,7 @@ mod tests {
                 author: "tester".into(),
                 category: "test".into(),
                 tags: vec![],
+                setup_notes: None,
             },
             config_schema: vec![],
             permissions: PkgPerms {

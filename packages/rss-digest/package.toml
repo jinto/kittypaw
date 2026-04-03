@@ -6,6 +6,7 @@ description = "RSS 피드에서 새 글을 가져와 LLM으로 요약한 뒤 텔
 author = "KittyPaw Team"
 category = "news"
 tags = ["rss", "news", "telegram", "llm", "digest", "storage"]
+setup_notes = "이 스킬을 사용하려면 텔레그램 봇이 필요합니다. 아래 단계를 따라 설정하세요."
 
 [trigger]
 type = "schedule"
@@ -20,12 +21,14 @@ key = "telegram_token"
 label = "텔레그램 봇 토큰"
 type = "secret"
 required = true
+setup_guide = "1. 텔레그램에서 @BotFather 를 검색\n2. /newbot 명령어 입력\n3. 봇 이름과 username 설정\n4. 받은 토큰을 여기에 붙여넣기"
 
 [[config.fields]]
 key = "chat_id"
 label = "텔레그램 채팅 ID"
 type = "string"
 required = true
+setup_guide = "1. 만든 봇에게 아무 메시지를 보내기\n2. @userinfobot 에게 메시지를 보내면 채팅 ID 확인 가능"
 
 [[config.fields]]
 key = "feed_url"

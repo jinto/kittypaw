@@ -149,8 +149,8 @@
 - [ ] 대화 중 자동 모델 교체
 
 ### 스킬 설정 위자드 (pi-wizard 영감)
-- [ ] skill_config.rs를 단계별 위자드로 — 필드를 한 번에 하나씩, 안내 텍스트 포함
-- [ ] 스킬별 setup guide (예: "텔레그램에서 @BotFather → /newbot → 토큰 복사")
+- [x] skill_config.rs를 단계별 위자드로 — 필드를 한 번에 하나씩, 안내 텍스트 포함
+- [x] 스킬별 setup guide (예: "텔레그램에서 @BotFather → /newbot → 토큰 복사")
 
 ### Extension 시스템 (v3+, 검토 필요)
 - [ ] 스킬이 커스텀 UI를 그리거나 도구를 등록할 수 있는 확장 레이어
