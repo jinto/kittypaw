@@ -1032,6 +1032,7 @@ mod tests {
             permissions: PkgPerms {
                 primitives: vec![],
                 allowed_hosts: vec![],
+                allowed_mcp_servers: vec![],
             },
             trigger: Some(SkillTrigger {
                 trigger_type: "schedule".into(),

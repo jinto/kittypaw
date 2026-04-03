@@ -84,6 +84,8 @@ pub struct PackagePermissions {
     pub primitives: Vec<String>,
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    #[serde(default)]
+    pub allowed_mcp_servers: Vec<String>,
 }
 
 impl SkillPackage {

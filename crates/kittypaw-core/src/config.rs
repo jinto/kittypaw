@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::error::{KittypawError, Result};
@@ -21,6 +22,18 @@ pub struct Config {
     pub stt: SttConfig,
     #[serde(default)]
     pub features: FeatureFlags,
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 /// Feature flags / kill switches for runtime behaviour.
@@ -263,6 +276,7 @@ impl Default for Config {
             models: vec![],
             stt: SttConfig::default(),
             features: FeatureFlags::default(),
+            mcp_servers: vec![],
         }
     }
 }

@@ -109,7 +109,20 @@ pub async fn resolve_skill_call(
     checker: Option<&Arc<std::sync::Mutex<CapabilityChecker>>>,
     on_permission: Option<&PermissionCallback>,
 ) -> String {
-    let result = resolve_skill_call_inner(call, config, store, checker, on_permission).await;
+    resolve_skill_call_with_mcp(call, config, store, checker, on_permission, None).await
+}
+
+/// Extended version that also supports MCP tool calls.
+pub async fn resolve_skill_call_with_mcp(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+    store: &Arc<Mutex<Store>>,
+    checker: Option<&Arc<std::sync::Mutex<CapabilityChecker>>>,
+    on_permission: Option<&PermissionCallback>,
+    mcp_registry: Option<&Arc<tokio::sync::Mutex<crate::mcp_registry::McpRegistry>>>,
+) -> String {
+    let result =
+        resolve_skill_call_inner(call, config, store, checker, on_permission, mcp_registry).await;
     if result.len() > MAX_SKILL_RESULT_BYTES {
         return serde_json::to_string(&serde_json::json!({
             "error": format!("Result too large ({} bytes, limit {})", result.len(), MAX_SKILL_RESULT_BYTES),
@@ -126,6 +139,7 @@ async fn resolve_skill_call_inner(
     store: &Arc<Mutex<Store>>,
     checker: Option<&Arc<std::sync::Mutex<CapabilityChecker>>>,
     on_permission: Option<&PermissionCallback>,
+    mcp_registry: Option<&Arc<tokio::sync::Mutex<crate::mcp_registry::McpRegistry>>>,
 ) -> String {
     if let Some(cap) = checker {
         match cap.lock() {
@@ -174,6 +188,37 @@ async fn resolve_skill_call_inner(
             Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
                 .unwrap_or_else(|_| "null".to_string()),
         };
+    }
+
+    // MCP calls delegate to the MCP registry
+    if call.skill_name == "Mcp" {
+        if let Some(registry) = mcp_registry {
+            let mut reg = registry.lock().await;
+            let result = match call.method.as_str() {
+                "call" => {
+                    let server = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+                    let tool = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+                    let args = call.args.get(2).cloned().unwrap_or(serde_json::Value::Null);
+                    reg.call_tool(server, tool, args).await
+                }
+                "listTools" => {
+                    let server = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+                    reg.list_tools(server).await
+                }
+                _ => Err(KittypawError::Skill(format!(
+                    "Unknown Mcp method: {}",
+                    call.method
+                ))),
+            };
+            return match result {
+                Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
+                Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                    .unwrap_or_else(|_| "null".to_string()),
+            };
+        } else {
+            return serde_json::to_string(&serde_json::json!({"error": "MCP not configured"}))
+                .unwrap_or_else(|_| "null".to_string());
+        }
     }
 
     // Storage calls need Store access

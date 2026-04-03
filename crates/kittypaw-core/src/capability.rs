@@ -287,6 +287,7 @@ mod tests {
         let permissions = PackagePermissions {
             primitives: vec!["Http".into(), "Telegram".into()],
             allowed_hosts: vec![],
+            allowed_mcp_servers: vec![],
         };
         let mut checker = CapabilityChecker::from_package_permissions(&permissions);
 
@@ -319,6 +320,7 @@ mod tests {
         let permissions = PackagePermissions {
             primitives: vec!["Http".into()],
             allowed_hosts: vec![],
+            allowed_mcp_servers: vec![],
         };
         let mut checker = CapabilityChecker::from_package_permissions(&permissions);
 
@@ -343,6 +345,7 @@ mod tests {
         let permissions = PackagePermissions {
             primitives: vec!["Http".into()],
             allowed_hosts: vec![],
+            allowed_mcp_servers: vec![],
         };
         let mut checker = CapabilityChecker::from_package_permissions(&permissions);
 
