@@ -63,8 +63,8 @@ fn load_store(path: &Path) -> Result<HashMap<String, String>> {
 
 fn save_store(path: &Path, store: &HashMap<String, String>) -> Result<()> {
     if store.is_empty() {
-        if path.exists() {
-            std::fs::remove_file(path)?;
+        match std::fs::remove_file(path) {
+            Ok(()) | Err(_) => {} // ignore NotFound or any other error
         }
         return Ok(());
     }

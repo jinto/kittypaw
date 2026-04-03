@@ -198,11 +198,10 @@ impl NotificationSender {
             config
                 .channels
                 .iter()
-                .find(|c| c.channel_type == "telegram")
+                .find(|c| c.channel_type == kittypaw_core::config::ChannelType::Telegram)
                 .map(|c| c.token.clone())
                 .filter(|s| !s.is_empty())
         });
-        // chat_id comes only from secrets/env (no per-channel field for it)
         let tg_chat_id = resolve("chat_id", "KITTYPAW_TELEGRAM_CHAT_ID");
         let telegram = match (tg_token, tg_chat_id) {
             (Some(token), Some(chat_id)) => Some((token, chat_id)),
@@ -213,7 +212,7 @@ impl NotificationSender {
             config
                 .channels
                 .iter()
-                .find(|c| c.channel_type == "slack")
+                .find(|c| c.channel_type == kittypaw_core::config::ChannelType::Slack)
                 .map(|c| c.token.clone())
                 .filter(|s| !s.is_empty())
         });
