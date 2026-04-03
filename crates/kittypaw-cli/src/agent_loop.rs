@@ -111,8 +111,21 @@ pub async fn run_agent_loop(
             tracing::info!("Retry attempt {attempt}/{MAX_RETRIES}");
         }
 
-        // Build prompt fresh for this attempt with the appropriate compaction level
-        let compaction = crate::compaction::compaction_for_attempt(attempt);
+        // Build prompt fresh for this attempt with the appropriate compaction level.
+        // Feature flags gate both progressive retry and full 3-stage compaction.
+        let compaction = if !config.features.context_compaction {
+            // context_compaction disabled: use simple recent-only window (no middle/old stages)
+            crate::compaction::CompactionConfig {
+                recent_window: 20,
+                middle_window: 0,
+                truncate_len: 100,
+            }
+        } else if !config.features.progressive_retry {
+            // progressive_retry disabled: always use the default (attempt-0) compaction
+            crate::compaction::CompactionConfig::default()
+        } else {
+            crate::compaction::compaction_for_attempt(attempt)
+        };
         let mut messages = build_prompt(&state, &event_text, &compaction);
         tracing::info!(
             phase = ?LoopPhase::Prompt,

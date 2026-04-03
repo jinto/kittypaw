@@ -19,6 +19,50 @@ pub struct Config {
     pub models: Vec<ModelConfig>,
     #[serde(default)]
     pub stt: SttConfig,
+    #[serde(default)]
+    pub features: FeatureFlags,
+}
+
+/// Feature flags / kill switches for runtime behaviour.
+///
+/// All flags are opt-in or opt-out via `[features]` in `kittypaw.toml`.
+/// Missing fields fall back to the defaults shown below.
+///
+/// Example:
+/// ```toml
+/// [features]
+/// progressive_retry = true
+/// context_compaction = false
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureFlags {
+    /// Progressive prompt compaction on retry (default: enabled).
+    #[serde(default = "default_true")]
+    pub progressive_retry: bool,
+    /// 3-stage context compaction (default: enabled).
+    #[serde(default = "default_true")]
+    pub context_compaction: bool,
+    /// Per-skill automatic model selection — experimental (default: disabled).
+    #[serde(default)]
+    pub model_routing: bool,
+    /// Background agent execution — experimental (default: disabled).
+    #[serde(default)]
+    pub background_agents: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for FeatureFlags {
+    fn default() -> Self {
+        Self {
+            progressive_retry: true,
+            context_compaction: true,
+            model_routing: false,
+            background_agents: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +262,99 @@ impl Default for Config {
             freeform_fallback: false,
             models: vec![],
             stt: SttConfig::default(),
+            features: FeatureFlags::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feature_flags_defaults() {
+        let flags = FeatureFlags::default();
+        assert!(
+            flags.progressive_retry,
+            "progressive_retry should default to true"
+        );
+        assert!(
+            flags.context_compaction,
+            "context_compaction should default to true"
+        );
+        assert!(
+            !flags.model_routing,
+            "model_routing should default to false"
+        );
+        assert!(
+            !flags.background_agents,
+            "background_agents should default to false"
+        );
+    }
+
+    #[test]
+    fn test_feature_flags_missing_section_gives_defaults() {
+        let toml = r#"
+[llm]
+provider = "claude"
+api_key = "test-key"
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse");
+        assert!(config.features.progressive_retry);
+        assert!(config.features.context_compaction);
+        assert!(!config.features.model_routing);
+        assert!(!config.features.background_agents);
+    }
+
+    #[test]
+    fn test_feature_flags_explicit_values() {
+        let toml = r#"
+[llm]
+provider = "claude"
+api_key = "test-key"
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+
+[features]
+progressive_retry = true
+context_compaction = false
+model_routing = true
+background_agents = false
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse");
+        assert!(config.features.progressive_retry);
+        assert!(!config.features.context_compaction);
+        assert!(config.features.model_routing);
+        assert!(!config.features.background_agents);
+    }
+
+    #[test]
+    fn test_feature_flags_partial_section() {
+        // Only some flags specified — rest fall back to defaults
+        let toml = r#"
+[llm]
+provider = "claude"
+api_key = "test-key"
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+
+[features]
+context_compaction = false
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse");
+        // Not specified → defaults
+        assert!(config.features.progressive_retry);
+        assert!(!config.features.model_routing);
+        assert!(!config.features.background_agents);
+        // Explicitly set
+        assert!(!config.features.context_compaction);
     }
 }

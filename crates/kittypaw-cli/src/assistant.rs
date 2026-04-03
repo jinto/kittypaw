@@ -141,7 +141,13 @@ pub async fn run_assistant_turn(ctx: &AssistantContext<'_>) -> Result<AssistantT
 
     // Build messages
     let event_text = extract_text(ctx.event);
-    let messages = build_messages(&state, &event_text, &user_context, ctx.registry_entries);
+    let messages = build_messages(
+        &state,
+        &event_text,
+        &user_context,
+        ctx.registry_entries,
+        ctx.config,
+    );
 
     // Save user turn
     let user_turn = ConversationTurn {
@@ -314,6 +320,7 @@ fn build_messages(
     event_text: &str,
     user_context: &HashMap<String, String>,
     registry_entries: &[RegistryEntry],
+    config: &Config,
 ) -> Vec<LlmMessage> {
     let mut messages = vec![LlmMessage {
         role: Role::System,
@@ -348,14 +355,20 @@ fn build_messages(
         });
     }
 
-    // Add compacted conversation history (3-stage: summary / truncated / full)
+    // Add compacted conversation history (3-stage: summary / truncated / full).
+    // When context_compaction is disabled, use a simple recent-only window.
     {
         use crate::compaction::{compact_turns, CompactionConfig, CompactionMode};
-        let compacted = compact_turns(
-            &state.turns,
-            &CompactionConfig::default(),
-            &CompactionMode::Assistant,
-        );
+        let compaction_cfg = if config.features.context_compaction {
+            CompactionConfig::default()
+        } else {
+            CompactionConfig {
+                recent_window: 20,
+                middle_window: 0,
+                truncate_len: 100,
+            }
+        };
+        let compacted = compact_turns(&state.turns, &compaction_cfg, &CompactionMode::Assistant);
         messages.extend(compacted);
     }
 
