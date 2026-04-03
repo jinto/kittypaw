@@ -184,33 +184,45 @@ struct NotificationSender {
 }
 
 impl NotificationSender {
-    fn new() -> Self {
-        let telegram = match (
-            kittypaw_core::secrets::get_secret("channels", "telegram_token")
+    fn new(config: &kittypaw_core::config::Config) -> Self {
+        // Helper: resolve a value using secrets → env
+        let resolve = |secret_key: &str, env_var: &str| -> Option<String> {
+            kittypaw_core::secrets::get_secret("channels", secret_key)
                 .ok()
                 .flatten()
-                .filter(|s| !s.is_empty()),
-            kittypaw_core::secrets::get_secret("channels", "chat_id")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
-        ) {
+                .filter(|s| !s.is_empty())
+                .or_else(|| std::env::var(env_var).ok().filter(|s| !s.is_empty()))
+        };
+
+        let tg_token = resolve("telegram_token", "KITTYPAW_TELEGRAM_TOKEN").or_else(|| {
+            config
+                .channels
+                .iter()
+                .find(|c| c.channel_type == "telegram")
+                .map(|c| c.token.clone())
+                .filter(|s| !s.is_empty())
+        });
+        // chat_id comes only from secrets/env (no per-channel field for it)
+        let tg_chat_id = resolve("chat_id", "KITTYPAW_TELEGRAM_CHAT_ID");
+        let telegram = match (tg_token, tg_chat_id) {
             (Some(token), Some(chat_id)) => Some((token, chat_id)),
             _ => None,
         };
-        let slack = match (
-            kittypaw_core::secrets::get_secret("channels", "slack_token")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
-            kittypaw_core::secrets::get_secret("channels", "slack_channel")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty()),
-        ) {
+
+        let slack_token = resolve("slack_token", "KITTYPAW_SLACK_TOKEN").or_else(|| {
+            config
+                .channels
+                .iter()
+                .find(|c| c.channel_type == "slack")
+                .map(|c| c.token.clone())
+                .filter(|s| !s.is_empty())
+        });
+        let slack_channel = resolve("slack_channel", "KITTYPAW_SLACK_CHANNEL");
+        let slack = match (slack_token, slack_channel) {
             (Some(token), Some(channel)) => Some((token, channel)),
             _ => None,
         };
+
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -387,7 +399,7 @@ pub async fn run_schedule_loop(
                 continue;
             }
         };
-        let notifier = NotificationSender::new();
+        let notifier = NotificationSender::new(config);
         let _ = store.cleanup_old_executions(30);
         // Clean up execution.jsonl — delete if larger than 10MB
         {

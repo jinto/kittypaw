@@ -88,9 +88,51 @@ fn default_memory_mb() -> u64 {
     64
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelType {
+    Telegram,
+    Slack,
+    Discord,
+    Web,
+    Desktop,
+}
+
+impl std::fmt::Display for ChannelType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ChannelType::Telegram => "telegram",
+            ChannelType::Slack => "slack",
+            ChannelType::Discord => "discord",
+            ChannelType::Web => "web",
+            ChannelType::Desktop => "desktop",
+        };
+        f.write_str(s)
+    }
+}
+
+impl PartialEq<str> for ChannelType {
+    fn eq(&self, other: &str) -> bool {
+        matches!(
+            (self, other),
+            (ChannelType::Telegram, "telegram")
+                | (ChannelType::Slack, "slack")
+                | (ChannelType::Discord, "discord")
+                | (ChannelType::Web, "web")
+                | (ChannelType::Desktop, "desktop")
+        )
+    }
+}
+
+impl PartialEq<&str> for ChannelType {
+    fn eq(&self, other: &&str) -> bool {
+        self == *other
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfig {
-    pub channel_type: String, // "telegram", "discord", "web"
+    pub channel_type: ChannelType,
     #[serde(default)]
     pub token: String,
     #[serde(default)]

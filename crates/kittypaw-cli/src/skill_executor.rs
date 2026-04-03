@@ -226,9 +226,9 @@ async fn execute_single_call(
     model_override: Option<&str>,
 ) -> SkillResult {
     let result = match call.skill_name.as_str() {
-        "Telegram" => execute_telegram(call).await,
-        "Slack" => execute_slack(call).await,
-        "Discord" => execute_discord(call).await,
+        "Telegram" => execute_telegram(call, config).await,
+        "Slack" => execute_slack(call, config).await,
+        "Discord" => execute_discord(call, config).await,
         "Http" => execute_http(call, allowed_hosts).await,
         "Web" => execute_web(call, allowed_hosts).await,
         "Llm" => execute_llm(call, config, llm_call_count, model_override).await,
@@ -243,17 +243,47 @@ async fn execute_single_call(
     make_skill_result(call, result)
 }
 
-async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
+/// Resolve a channel token using the priority chain:
+/// 1. secrets store
+/// 2. environment variable
+/// 3. config.channels[*] where channel_type matches
+fn resolve_channel_token(
+    config: &kittypaw_core::config::Config,
+    channel_type: &str,
+    secret_key: &str,
+    env_var: &str,
+) -> Option<String> {
+    kittypaw_core::secrets::get_secret("channels", secret_key)
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var(env_var).ok().filter(|s| !s.is_empty()))
+        .or_else(|| {
+            config
+                .channels
+                .iter()
+                .find(|c| c.channel_type == channel_type)
+                .map(|c| c.token.clone())
+                .filter(|s| !s.is_empty())
+        })
+}
+
+async fn execute_telegram(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+) -> Result<serde_json::Value> {
     // Token resolution chain (token is NOT passed via args — the JS ABI is
     // Telegram.sendMessage(chatId, text), so args carry only chat content):
     // 1. global channel secret from Settings
     // 2. environment variable fallback
-    let bot_token = kittypaw_core::secrets::get_secret("channels", "telegram_token")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("KITTYPAW_TELEGRAM_TOKEN").ok())
-        .ok_or_else(|| KittypawError::Config("Telegram bot token not configured".into()))?;
+    // 3. config.channels[*] where channel_type == "telegram"
+    let bot_token = resolve_channel_token(
+        config,
+        "telegram",
+        "telegram_token",
+        "KITTYPAW_TELEGRAM_TOKEN",
+    )
+    .ok_or_else(|| KittypawError::Config("Telegram bot token not configured".into()))?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -370,14 +400,14 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
     }
 }
 
-async fn execute_slack(call: &SkillCall) -> Result<serde_json::Value> {
-    // Token resolution: global channel secret from Settings, then env var fallback
-    let bot_token = kittypaw_core::secrets::get_secret("channels", "slack_token")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("KITTYPAW_SLACK_TOKEN").ok())
-        .ok_or_else(|| KittypawError::Config("Slack bot token not configured".into()))?;
+async fn execute_slack(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+) -> Result<serde_json::Value> {
+    // Token resolution: secrets → env → config.channels
+    let bot_token =
+        resolve_channel_token(config, "slack", "slack_token", "KITTYPAW_SLACK_TOKEN")
+            .ok_or_else(|| KittypawError::Config("Slack bot token not configured".into()))?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -432,14 +462,14 @@ async fn execute_slack(call: &SkillCall) -> Result<serde_json::Value> {
     }
 }
 
-async fn execute_discord(call: &SkillCall) -> Result<serde_json::Value> {
-    // Token resolution: global channel secret from Settings, then env var fallback
-    let bot_token = kittypaw_core::secrets::get_secret("channels", "discord_token")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("KITTYPAW_DISCORD_TOKEN").ok())
-        .ok_or_else(|| KittypawError::Config("Discord bot token not configured".into()))?;
+async fn execute_discord(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+) -> Result<serde_json::Value> {
+    // Token resolution: secrets → env → config.channels
+    let bot_token =
+        resolve_channel_token(config, "discord", "discord_token", "KITTYPAW_DISCORD_TOKEN")
+            .ok_or_else(|| KittypawError::Config("Discord bot token not configured".into()))?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

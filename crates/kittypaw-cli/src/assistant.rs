@@ -116,7 +116,7 @@ fn is_admin_event(event: &Event, config: &Config) -> bool {
 
 /// Run one turn of the assistant conversation.
 pub async fn run_assistant_turn(ctx: &AssistantContext<'_>) -> Result<AssistantTurn> {
-    let agent_id = assistant_id_for_event(ctx.event);
+    let agent_id = format!("assistant-{}", ctx.event.session_id());
 
     // Load or create agent state — ensure agent exists in DB before adding turns
     let mut state = {
@@ -460,33 +460,6 @@ fn extract_text(event: &Event) -> String {
         .to_string()
 }
 
-fn assistant_id_for_event(event: &Event) -> String {
-    let suffix = match event.event_type {
-        EventType::Telegram => event
-            .payload
-            .get("chat_id")
-            .map(|v| {
-                v.as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| v.to_string())
-            })
-            .unwrap_or_else(|| "default".to_string()),
-        EventType::WebChat => event
-            .payload
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default")
-            .to_string(),
-        EventType::Desktop => event
-            .payload
-            .get("workspace_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("default")
-            .to_string(),
-    };
-    format!("assistant-{suffix}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,12 +562,18 @@ mod tests {
             event_type: EventType::Telegram,
             payload: serde_json::json!({"chat_id": "12345", "text": "hello"}),
         };
-        assert_eq!(assistant_id_for_event(&event), "assistant-12345");
+        assert_eq!(
+            format!("assistant-{}", event.session_id()),
+            "assistant-12345"
+        );
 
         let event = Event {
             event_type: EventType::Desktop,
             payload: serde_json::json!({"text": "hello"}),
         };
-        assert_eq!(assistant_id_for_event(&event), "assistant-default");
+        assert_eq!(
+            format!("assistant-{}", event.session_id()),
+            "assistant-default"
+        );
     }
 }

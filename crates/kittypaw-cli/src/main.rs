@@ -2,7 +2,7 @@ use std::io::Read;
 use std::sync::{Arc, Mutex};
 
 use clap::{Parser, Subcommand};
-use kittypaw_core::config::{Config, ModelConfig};
+use kittypaw_core::config::{ChannelType, Config, ModelConfig};
 use kittypaw_llm::registry::LlmRegistry;
 use tracing_subscriber::EnvFilter;
 
@@ -243,7 +243,7 @@ async fn run_serve(bind_addr: &str) {
             config
                 .channels
                 .iter()
-                .find(|c| c.channel_type == "telegram")
+                .find(|c| c.channel_type == ChannelType::Telegram)
                 .map(|c| c.token.clone())
         })
         .unwrap_or_default();
@@ -265,7 +265,7 @@ async fn run_serve(bind_addr: &str) {
             config
                 .channels
                 .iter()
-                .find(|c| c.channel_type == "slack")
+                .find(|c| c.channel_type == ChannelType::Slack)
                 .map(|c| c.token.clone())
         })
         .unwrap_or_default();
@@ -533,7 +533,7 @@ async fn send_telegram_message(config: &kittypaw_core::config::Config, chat_id: 
             config
                 .channels
                 .iter()
-                .find(|c| c.channel_type == "telegram")
+                .find(|c| c.channel_type == ChannelType::Telegram)
                 .map(|c| c.token.clone())
                 .unwrap_or_default()
         }

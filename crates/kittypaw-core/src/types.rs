@@ -61,6 +61,35 @@ pub struct Event {
     pub payload: serde_json::Value,
 }
 
+impl Event {
+    /// Extract the session identifier from the event payload (chat_id, session_id, workspace_id).
+    pub fn session_id(&self) -> String {
+        match self.event_type {
+            EventType::Telegram => self
+                .payload
+                .get("chat_id")
+                .map(|v| {
+                    v.as_str()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_else(|| "default".to_string()),
+            EventType::WebChat => self
+                .payload
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
+            EventType::Desktop => self
+                .payload
+                .get("workspace_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum EventType {

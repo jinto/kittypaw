@@ -64,7 +64,11 @@ pub async fn run_agent_loop(
         >,
     >,
 ) -> Result<String> {
-    let agent_id = agent_id_for_event(&event);
+    let agent_id = match event.event_type {
+        EventType::Telegram => format!("telegram-{}", event.session_id()),
+        EventType::WebChat => format!("web-{}", event.session_id()),
+        EventType::Desktop => format!("desktop-{}", event.session_id()),
+    };
 
     // Load or create agent state — ensure agent exists in DB before adding turns.
     let mut state = {
@@ -327,37 +331,4 @@ fn format_exec_result(result: &ExecutionResult) -> String {
         parts.push(format!("skill_calls: [{}]", calls.join(", ")));
     }
     parts.join("; ")
-}
-
-fn agent_id_for_event(event: &Event) -> String {
-    match event.event_type {
-        EventType::Telegram => {
-            let chat_id = event
-                .payload
-                .get("chat_id")
-                .map(|v| {
-                    v.as_str()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| v.to_string())
-                })
-                .unwrap_or_else(|| "default".to_string());
-            format!("telegram-{chat_id}")
-        }
-        EventType::WebChat => {
-            let session = event
-                .payload
-                .get("session_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default");
-            format!("web-{session}")
-        }
-        EventType::Desktop => {
-            let workspace = event
-                .payload
-                .get("workspace_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default");
-            format!("desktop-{workspace}")
-        }
-    }
 }
