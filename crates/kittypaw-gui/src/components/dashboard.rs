@@ -127,8 +127,9 @@ pub fn Dashboard() -> Element {
     let packages_dir = app_state.packages_dir.clone();
     let store_arc = app_state.store.clone();
     use_effect(move || {
-        {
-            let store = store_arc.blocking_lock();
+        let store_arc = store_arc.clone();
+        spawn(async move {
+            let store = store_arc.lock().await;
             if let Ok(s) = store.today_stats() {
                 stats.set(s);
             }
@@ -164,7 +165,7 @@ pub fn Dashboard() -> Element {
                 schedule_suggestions.set(suggestions);
                 recent.set(r);
             }
-        }
+        });
         let mgr = PackageManager::new(packages_dir.clone());
         if let Ok(pkgs) = mgr.list_installed() {
             installed_count.set(pkgs.len() as u32);
@@ -277,11 +278,12 @@ pub fn Dashboard() -> Element {
                                 button {
                                     style: "background: #F59E0B; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #FFFFFF; cursor: pointer; margin-right: 6px;",
                                     onclick: move |_| {
-                                        {
-                                            let store = app_state_accept.store.blocking_lock();
-                                            let accept_key = format!("schedule_accepted:{}", skill_id_accept);
-                                            let _ = store.set_user_context(&accept_key, "true", "user");
-                                        }
+                                        let store = app_state_accept.store.clone();
+                                        let key = format!("schedule_accepted:{}", skill_id_accept);
+                                        spawn(async move {
+                                            let s = store.lock().await;
+                                            let _ = s.set_user_context(&key, "true", "user");
+                                        });
                                         schedule_suggestions_accept.write().retain(|(id, _)| id != &skill_id_accept2);
                                     },
                                     "수락"
@@ -290,10 +292,11 @@ pub fn Dashboard() -> Element {
                                     style: "background: transparent; border: 1px solid #D97706; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #92400E; cursor: pointer;",
                                     onclick: move |_| {
                                         let dismiss_key = format!("suggest_dismissed:{}", skill_id_dismiss);
-                                        {
-                                            let store = app_state_dismiss.store.blocking_lock();
-                                            let _ = store.set_user_context(&dismiss_key, "1", "user");
-                                        }
+                                        let store = app_state_dismiss.store.clone();
+                                        spawn(async move {
+                                            let s = store.lock().await;
+                                            let _ = s.set_user_context(&dismiss_key, "1", "user");
+                                        });
                                         let id_to_remove = skill_id_dismiss.clone();
                                         schedule_suggestions_dismiss.write().retain(|(id, _)| *id != id_to_remove);
                                     },

@@ -155,6 +155,7 @@ fn is_trusted_llm_host(base_url: &str) -> bool {
     is_trusted_domain(host, "openai.com")
         || is_trusted_domain(host, "anthropic.com")
         || is_trusted_domain(host, "azure.com")
+        || is_trusted_domain(host, "openrouter.ai")
 }
 
 fn is_trusted_domain(host: &str, domain: &str) -> bool {
@@ -299,9 +300,12 @@ mod tests {
         assert!(super::is_trusted_llm_host("https://models.azure.com/v1"));
         assert!(!super::is_trusted_llm_host("http://evil.com/v1"));
         assert!(!super::is_trusted_llm_host("http://localhost:11434/v1"));
+        // OpenRouter
+        assert!(super::is_trusted_llm_host("https://openrouter.ai/api/v1"));
         // Subdomain spoofing must not match
         assert!(!super::is_trusted_llm_host("https://evil-openai.com/v1"));
         assert!(!super::is_trusted_llm_host("https://notrealopenai.com/v1"));
+        assert!(!super::is_trusted_llm_host("https://evil-openrouter.ai/v1"));
     }
 
     #[test]

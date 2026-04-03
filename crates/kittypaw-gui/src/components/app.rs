@@ -17,17 +17,20 @@ pub fn App() -> Element {
 
     // Check on mount whether onboarding was already completed
     {
-        let app_state = app_state.clone();
+        let store_arc = app_state.store.clone();
         use_effect(move || {
-            let store = app_state.store.blocking_lock();
-            if store
-                .get_user_context("onboarding_completed")
-                .ok()
-                .flatten()
-                .is_some()
-            {
-                onboarding_done.set(true);
-            }
+            let store_arc = store_arc.clone();
+            spawn(async move {
+                let store = store_arc.lock().await;
+                if store
+                    .get_user_context("onboarding_completed")
+                    .ok()
+                    .flatten()
+                    .is_some()
+                {
+                    onboarding_done.set(true);
+                }
+            });
         });
     }
 
