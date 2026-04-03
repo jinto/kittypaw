@@ -93,6 +93,20 @@ impl KittypawError {
             }
         )
     }
+
+    /// Returns `true` if this error is likely transient and worth retrying.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            KittypawError::Timeout(_) | KittypawError::Io(_) | KittypawError::RateLimitExceeded(_)
+        ) || matches!(
+            self,
+            KittypawError::Llm {
+                kind: LlmErrorKind::RateLimit,
+                ..
+            }
+        )
+    }
 }
 
 #[cfg(feature = "registry")]
@@ -106,5 +120,57 @@ impl From<reqwest::Error> for KittypawError {
 impl From<rusqlite::Error> for KittypawError {
     fn from(e: rusqlite::Error) -> Self {
         KittypawError::Store(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KittypawError, LlmErrorKind};
+
+    #[test]
+    fn test_is_transient_timeout() {
+        assert!(KittypawError::Timeout(30).is_transient());
+    }
+
+    #[test]
+    fn test_is_transient_io() {
+        assert!(KittypawError::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset"
+        ))
+        .is_transient());
+    }
+
+    #[test]
+    fn test_is_transient_rate_limit_exceeded() {
+        assert!(KittypawError::RateLimitExceeded("too fast".into()).is_transient());
+    }
+
+    #[test]
+    fn test_is_transient_llm_rate_limit() {
+        assert!(KittypawError::Llm {
+            kind: LlmErrorKind::RateLimit,
+            message: "429".into(),
+        }
+        .is_transient());
+    }
+
+    #[test]
+    fn test_not_transient_llm_other() {
+        assert!(!KittypawError::Llm {
+            kind: LlmErrorKind::Other,
+            message: "bad".into(),
+        }
+        .is_transient());
+    }
+
+    #[test]
+    fn test_not_transient_skill() {
+        assert!(!KittypawError::Skill("err".into()).is_transient());
+    }
+
+    #[test]
+    fn test_not_transient_config() {
+        assert!(!KittypawError::Config("missing".into()).is_transient());
     }
 }

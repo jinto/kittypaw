@@ -172,11 +172,18 @@ pub async fn run_agent_loop(
                 kind: kittypaw_core::error::LlmErrorKind::TokenLimit,
                 ref message,
             }) => {
+                last_error = Some(message.clone());
+                if attempt >= MAX_RETRIES - 1 {
+                    tracing::warn!(
+                        attempt,
+                        "Token limit at maximum compaction, giving up: {message}"
+                    );
+                    break;
+                }
                 tracing::warn!(
                     attempt,
                     "Token limit hit, retrying with tighter compaction: {message}"
                 );
-                last_error = Some(message.clone());
                 continue;
             }
             Err(kittypaw_core::error::KittypawError::Llm {

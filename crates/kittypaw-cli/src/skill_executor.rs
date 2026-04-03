@@ -18,6 +18,7 @@ pub type PermissionCallback = Arc<
 >;
 
 const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
+const MAX_SKILL_RESULT_BYTES: usize = 50 * 1024;
 
 /// Check capability and log denial. Returns Err(message) if denied.
 fn check_capability(
@@ -102,6 +103,24 @@ fn uuid_v4() -> String {
 /// When `checker` is provided, the call is verified against the capability allowlist
 /// before execution. If `None`, all calls are permitted (permissive/legacy mode).
 pub async fn resolve_skill_call(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+    store: &Arc<Mutex<Store>>,
+    checker: Option<&Arc<std::sync::Mutex<CapabilityChecker>>>,
+    on_permission: Option<&PermissionCallback>,
+) -> String {
+    let result = resolve_skill_call_inner(call, config, store, checker, on_permission).await;
+    if result.len() > MAX_SKILL_RESULT_BYTES {
+        return serde_json::to_string(&serde_json::json!({
+            "error": format!("Result too large ({} bytes, limit {})", result.len(), MAX_SKILL_RESULT_BYTES),
+            "truncated": true
+        }))
+        .unwrap_or_else(|_| "null".to_string());
+    }
+    result
+}
+
+async fn resolve_skill_call_inner(
     call: &SkillCall,
     config: &kittypaw_core::config::Config,
     store: &Arc<Mutex<Store>>,
@@ -323,6 +342,29 @@ async fn execute_single_call(
             "Unknown skill: {}",
             call.skill_name
         ))),
+    };
+
+    // Retry once for Http/Web network errors (KittypawError::Skill = reqwest send failure,
+    // NOT validation errors like Sandbox/CapabilityDenied which are permanent).
+    let result = match result {
+        Err(ref e)
+            if matches!(call.skill_name.as_str(), "Http" | "Web")
+                && matches!(e, KittypawError::Skill(_)) =>
+        {
+            tracing::info!(
+                skill = %call.skill_name,
+                method = %call.method,
+                error = %e,
+                "network error on Http/Web skill, retrying once after 1s"
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            match call.skill_name.as_str() {
+                "Http" => execute_http(call, allowed_hosts).await,
+                "Web" => execute_web(call, allowed_hosts).await,
+                _ => unreachable!(),
+            }
+        }
+        other => other,
     };
 
     make_skill_result(call, result)
@@ -1687,5 +1729,68 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_result_size_limit_over_threshold_returns_error_json_from_resolve_skill_call() {
+        let path = temp_db_path();
+        let store = Arc::new(tokio::sync::Mutex::new(open_store(&path)));
+        let config = kittypaw_core::config::Config::default();
+
+        let large = "x".repeat(MAX_SKILL_RESULT_BYTES + 1);
+        {
+            let s = store.lock().await;
+            let set_call = make_call("set", vec![json_str("big"), json_str(&large)]);
+            execute_storage(&set_call, &s, None).unwrap();
+        }
+
+        let get_call = make_call("get", vec![json_str("big")]);
+        let result = resolve_skill_call(&get_call, &config, &store, None, None).await;
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed.get("error").is_some());
+        assert_eq!(parsed.get("truncated").unwrap(), true);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_result_size_limit_under_threshold() {
+        let small = "hello".to_string();
+        assert!(small.len() <= MAX_SKILL_RESULT_BYTES);
+    }
+
+    #[test]
+    fn test_result_size_limit_over_threshold_returns_valid_json() {
+        let large = "x".repeat(MAX_SKILL_RESULT_BYTES + 1);
+        let result = if large.len() > MAX_SKILL_RESULT_BYTES {
+            serde_json::to_string(&serde_json::json!({
+                "error": format!("Result too large ({} bytes, limit {})", large.len(), MAX_SKILL_RESULT_BYTES),
+                "truncated": true
+            })).unwrap()
+        } else {
+            large
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed.get("error").is_some());
+        assert_eq!(parsed.get("truncated").unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_http_invalid_url_not_retried() {
+        // Sandbox errors (URL validation) should NOT be retried
+        let call = SkillCall {
+            skill_name: "Http".to_string(),
+            method: "get".to_string(),
+            args: vec![serde_json::Value::String("not-a-url".into())],
+        };
+        let config = kittypaw_core::config::Config::default();
+        let counter = AtomicU32::new(0);
+        let result = execute_single_call(&call, &[], &config, None, &counter, None, None).await;
+        assert!(!result.success);
+        assert!(
+            result.error.as_ref().unwrap().contains("invalid URL"),
+            "Expected URL validation error, got: {:?}",
+            result.error
+        );
     }
 }

@@ -375,4 +375,16 @@ mod tests {
             "Expected 코드 실행 2번 in: {summary}"
         );
     }
+
+    #[test]
+    fn test_compaction_at_max_attempt_is_most_aggressive() {
+        let c2 = compaction_for_attempt(2);
+        let c3 = compaction_for_attempt(3);
+        // attempt 2와 3이 동일한 설정 → 추가 재시도가 무의미함을 입증
+        assert_eq!(c2.recent_window, 5);
+        assert_eq!(c2.middle_window, 0);
+        assert_eq!(c2.recent_window, c3.recent_window);
+        assert_eq!(c2.middle_window, c3.middle_window);
+        assert_eq!(c2.truncate_len, c3.truncate_len);
+    }
 }
