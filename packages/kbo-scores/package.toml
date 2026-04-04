@@ -1,0 +1,46 @@
+[package]
+id = "kbo-scores"
+name = "KBO 경기 결과"
+version = "1.0.0"
+description = "KBO 프로야구 경기 결과를 매일 알려줍니다. 내 팀을 설정하면 해당 팀 경기만 하이라이트합니다."
+author = "KittyPaw Team"
+category = "sports"
+tags = ["kbo", "baseball", "sports", "telegram"]
+setup_notes = "이 스킬을 사용하려면 텔레그램 봇이 필요합니다. 아래 단계를 따라 설정하세요."
+
+[trigger]
+type = "schedule"
+cron = "0 22 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Storage"]
+allowed_hosts = ["www.koreabaseball.com"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+setup_guide = "1. 텔레그램에서 @BotFather 를 검색\n2. /newbot 명령어 입력\n3. 봇 이름과 username 설정\n4. 받은 토큰을 여기에 붙여넣기"
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+setup_guide = "1. 만든 봇에게 아무 메시지를 보내기\n2. @userinfobot 에게 메시지를 보내면 채팅 ID 확인 가능"
+
+[[config.fields]]
+key = "my_team"
+label = "내 팀 (예: LG, 삼성, KIA)"
+type = "string"
+required = false
+default = ""
+hint = "응원팀을 설정하면 해당 팀 경기를 하이라이트합니다"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 22 * * *"

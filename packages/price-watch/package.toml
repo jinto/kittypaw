@@ -1,0 +1,50 @@
+[package]
+id = "price-watch"
+name = "가격 알림"
+version = "1.0.0"
+description = "관심 상품의 가격을 주기적으로 확인하고, 목표 가격 이하로 떨어지면 알림을 보냅니다."
+author = "KittyPaw Team"
+category = "shopping"
+tags = ["price", "shopping", "alert", "telegram"]
+
+[trigger]
+type = "schedule"
+cron = "0 */3 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Storage"]
+allowed_hosts = ["*"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "product_url"
+label = "상품 URL"
+type = "string"
+required = true
+setup_guide = "가격을 모니터링할 상품 페이지 URL을 입력하세요."
+
+[[config.fields]]
+key = "target_price"
+label = "목표 가격 (원)"
+type = "string"
+required = true
+default = "0"
+setup_guide = "이 가격 이하로 떨어지면 알림을 보냅니다. 0이면 가격 변동만 추적합니다."
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 */3 * * *"

@@ -1,0 +1,53 @@
+[package]
+id = "transit-arrival"
+name = "지하철/버스 도착정보"
+version = "1.0.0"
+description = "출퇴근 시간에 설정한 역의 실시간 지하철 도착정보를 가져와 텔레그램으로 알려줍니다."
+author = "KittyPaw Team"
+category = "transport"
+tags = ["subway", "metro", "transit", "telegram", "seoul", "commute"]
+setup_notes = "서울 열린데이터광장 API 키와 텔레그램 봇이 필요합니다."
+
+[trigger]
+type = "schedule"
+cron = "0 8,18 * * 1-5"
+
+[permissions]
+primitives = ["Http", "Telegram"]
+allowed_hosts = ["swopenapi.seoul.go.kr"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+setup_guide = "1. 텔레그램에서 @BotFather 를 검색\n2. /newbot 명령어 입력\n3. 봇 이름과 username 설정\n4. 받은 토큰을 여기에 붙여넣기"
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+setup_guide = "1. 만든 봇에게 아무 메시지를 보내기\n2. @userinfobot 에게 메시지를 보내면 채팅 ID 확인 가능"
+
+[[config.fields]]
+key = "api_key"
+label = "서울 열린데이터광장 API 키"
+type = "secret"
+required = true
+setup_guide = "1. data.seoul.go.kr 회원가입\n2. '서울시 지하철 실시간 도착정보' 검색\n3. API 키 발급 (무료)\n4. 받은 키를 여기에 붙여넣기"
+
+[[config.fields]]
+key = "station_name"
+label = "지하철 역 이름"
+type = "string"
+required = false
+default = "강남"
+hint = "역 이름만 입력 (예: 강남, 서울, 잠실, 홍대입구)"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 8,18 * * 1-5"

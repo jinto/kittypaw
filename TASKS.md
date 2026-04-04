@@ -91,7 +91,11 @@
 - [x] rss-digest (RSS 피드 요약)
 - [x] macro-economy-report (거시경제 리포트)
 - [x] reminder (리마인더)
-- [ ] 사용자 리서치 결과에 따라 5개 추가
+- [x] transit-arrival (지하철/버스 도착정보)
+- [x] kbo-scores (KBO 프로야구 결과)
+- [x] price-watch (가격 알림)
+- [x] zipcode-lookup (우편번호 검색)
+- [ ] 사용자 리서치 기반 1개 추가
 
 ### 🟠 P1: 배포 파이프라인
 - [x] kittypaw.app 도메인 DNS 설정 (Cloudflare → GitHub Pages)

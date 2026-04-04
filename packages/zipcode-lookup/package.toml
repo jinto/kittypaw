@@ -1,0 +1,35 @@
+[package]
+id = "zipcode-lookup"
+name = "우편번호 검색"
+version = "1.0.0"
+description = "주소를 입력하면 우편번호를 검색해줍니다. 다른 스킬과 체이닝하여 사용할 수 있습니다."
+author = "KittyPaw Team"
+category = "utility"
+tags = ["zipcode", "address", "korea", "utility"]
+
+[trigger]
+type = "keyword"
+keywords = ["우편번호", "zipcode", "주소검색"]
+
+[permissions]
+primitives = ["Http", "Telegram"]
+allowed_hosts = ["business.juso.go.kr"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "juso_api_key"
+label = "도로명주소 API 키"
+type = "secret"
+required = true
+setup_guide = "1. https://business.juso.go.kr 에서 회원가입\n2. API 신청 (무료)\n3. 발급받은 승인키를 입력"
