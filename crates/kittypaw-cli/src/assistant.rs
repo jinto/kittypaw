@@ -166,11 +166,12 @@ pub async fn run_assistant_turn(ctx: &AssistantContext<'_>) -> Result<AssistantT
     }
 
     // Call LLM
-    let raw_response = if let Some(ref cb) = ctx.on_token {
+    let llm_resp = if let Some(ref cb) = ctx.on_token {
         ctx.provider.generate_stream(&messages, cb.clone()).await?
     } else {
         ctx.provider.generate(&messages).await?
     };
+    let raw_response = llm_resp.content;
 
     tracing::info!(phase = ?LoopPhase::Generate, agent_id = %agent_id, response_len = raw_response.len(), "llm response received");
 
@@ -621,7 +622,11 @@ mod tests {
                     .to_string(),
             },
         ];
-        let raw = provider.generate(&messages).await.expect("LLM call failed");
+        let raw = provider
+            .generate(&messages)
+            .await
+            .expect("LLM call failed")
+            .content;
         let actions = parse_actions(&raw);
         let create_count = actions
             .iter()

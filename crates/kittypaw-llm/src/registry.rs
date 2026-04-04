@@ -8,7 +8,7 @@ use kittypaw_core::types::LlmMessage;
 
 use crate::claude::ClaudeProvider;
 use crate::openai::OpenAiProvider;
-use crate::provider::LlmProvider;
+use crate::provider::{LlmProvider, LlmResponse};
 
 /// Wraps an LlmProvider with a config-overridden context window.
 struct ConfiguredProvider {
@@ -18,7 +18,7 @@ struct ConfiguredProvider {
 
 #[async_trait]
 impl LlmProvider for ConfiguredProvider {
-    async fn generate(&self, messages: &[LlmMessage]) -> Result<String> {
+    async fn generate(&self, messages: &[LlmMessage]) -> Result<LlmResponse> {
         self.inner.generate(messages).await
     }
 
@@ -26,7 +26,7 @@ impl LlmProvider for ConfiguredProvider {
         &self,
         messages: &[LlmMessage],
         on_token: Arc<dyn Fn(String) + Send + Sync>,
-    ) -> Result<String> {
+    ) -> Result<LlmResponse> {
         self.inner.generate_stream(messages, on_token).await
     }
 
@@ -250,8 +250,8 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for MockProvider {
-        async fn generate(&self, _messages: &[LlmMessage]) -> Result<String> {
-            Ok("mock response".into())
+        async fn generate(&self, _messages: &[LlmMessage]) -> Result<LlmResponse> {
+            Ok(LlmResponse::text_only("mock response".into()))
         }
     }
 
@@ -259,8 +259,8 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for MockProviderB {
-        async fn generate(&self, _messages: &[LlmMessage]) -> Result<String> {
-            Ok("mock response B".into())
+        async fn generate(&self, _messages: &[LlmMessage]) -> Result<LlmResponse> {
+            Ok(LlmResponse::text_only("mock response B".into()))
         }
     }
 

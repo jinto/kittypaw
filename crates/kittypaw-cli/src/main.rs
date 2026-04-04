@@ -749,7 +749,7 @@ async fn run_skills_explain(name: &str) {
             }];
 
             match provider.generate(&messages).await {
-                Ok(explanation) => println!("{explanation}"),
+                Ok(resp) => println!("{}", resp.content),
                 Err(e) => eprintln!("Failed to generate explanation: {e}"),
             }
         }

@@ -75,7 +75,7 @@ pub async fn handle_teach(
         },
     ];
 
-    let raw_code = provider.generate(&messages).await?;
+    let raw_code = provider.generate(&messages).await?.content;
     let code = strip_code_fences(&raw_code);
     validate_generated_code(&code)?;
 

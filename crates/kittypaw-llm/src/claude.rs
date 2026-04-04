@@ -5,7 +5,7 @@ use kittypaw_core::types::LlmMessage;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::provider::LlmProvider;
+use crate::provider::{LlmProvider, LlmResponse, TokenUsage};
 use crate::util::{
     classify_reqwest_error, handle_response_status, strip_code_fences, StatusAction,
 };
@@ -57,6 +57,16 @@ struct SseData {
     #[serde(rename = "type")]
     event_type: String,
     delta: Option<SseDelta>,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ClaudeUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
 }
 
 #[derive(Serialize)]
@@ -68,6 +78,8 @@ struct ClaudeMessage {
 #[derive(Deserialize)]
 struct ClaudeResponse {
     content: Vec<ContentBlock>,
+    #[serde(default)]
+    usage: Option<ClaudeUsage>,
 }
 
 #[derive(Deserialize)]
@@ -85,7 +97,7 @@ impl LlmProvider for ClaudeProvider {
         self.max_tokens as usize
     }
 
-    async fn generate(&self, messages: &[LlmMessage]) -> Result<String> {
+    async fn generate(&self, messages: &[LlmMessage]) -> Result<LlmResponse> {
         let system = messages
             .iter()
             .find(|m| m.role == kittypaw_core::types::Role::System)
@@ -151,6 +163,12 @@ impl LlmProvider for ClaudeProvider {
                 message: format!("Response parse error: {e}"),
             })?;
 
+            let usage = body.usage.map(|u| TokenUsage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                model: self.model.clone(),
+            });
+
             let text = body
                 .content
                 .into_iter()
@@ -158,7 +176,10 @@ impl LlmProvider for ClaudeProvider {
                 .collect::<Vec<_>>()
                 .join("");
 
-            return Ok(strip_code_fences(&text));
+            return Ok(LlmResponse {
+                content: strip_code_fences(&text),
+                usage,
+            });
         }
     }
 
@@ -166,7 +187,7 @@ impl LlmProvider for ClaudeProvider {
         &self,
         messages: &[LlmMessage],
         on_token: Arc<dyn Fn(String) + Send + Sync>,
-    ) -> Result<String> {
+    ) -> Result<LlmResponse> {
         let system = messages
             .iter()
             .find(|m| m.role == kittypaw_core::types::Role::System)
@@ -216,6 +237,7 @@ impl LlmProvider for ClaudeProvider {
         }
 
         let mut accumulated = String::new();
+        let mut stream_usage: Option<ClaudeUsage> = None;
         let mut byte_stream = response.bytes_stream();
 
         // SSE line buffer
@@ -252,6 +274,10 @@ impl LlmProvider for ClaudeProvider {
                                     }
                                 }
                             }
+                        } else if sse.event_type == "message_delta" {
+                            if let Some(u) = sse.usage {
+                                stream_usage = Some(u);
+                            }
                         } else if sse.event_type == "message_stop" {
                             break;
                         }
@@ -260,7 +286,16 @@ impl LlmProvider for ClaudeProvider {
             }
         }
 
-        Ok(strip_code_fences(&accumulated))
+        let usage = stream_usage.map(|u| TokenUsage {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            model: self.model.clone(),
+        });
+
+        Ok(LlmResponse {
+            content: strip_code_fences(&accumulated),
+            usage,
+        })
     }
 }
 

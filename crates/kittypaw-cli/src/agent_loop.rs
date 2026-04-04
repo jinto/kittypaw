@@ -7,7 +7,7 @@ use kittypaw_core::types::{
     now_timestamp, AgentState, ConversationTurn, Event, EventType, ExecutionResult, LlmMessage,
     LoopPhase, Role, TransitionReason,
 };
-use kittypaw_llm::provider::LlmProvider;
+use kittypaw_llm::provider::{LlmProvider, TokenUsage};
 use kittypaw_sandbox::sandbox::Sandbox;
 use kittypaw_store::Store;
 use tracing::{info_span, Instrument};
@@ -116,6 +116,7 @@ pub async fn run_agent_loop(params: AgentLoopParams<'_>) -> Result<String> {
     let mut last_error: Option<String> = None;
     let mut active_provider: &dyn LlmProvider = provider;
     let mut fallback_used = false;
+    let mut usage_ledger: Vec<TokenUsage> = Vec::new();
 
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
@@ -195,7 +196,12 @@ pub async fn run_agent_loop(params: AgentLoopParams<'_>) -> Result<String> {
         };
 
         let code = match llm_result {
-            Ok(c) => c,
+            Ok(resp) => {
+                if let Some(u) = resp.usage {
+                    usage_ledger.push(u);
+                }
+                resp.content
+            }
             Err(kittypaw_core::error::KittypawError::Llm {
                 kind: kittypaw_core::error::LlmErrorKind::TokenLimit,
                 ref message,

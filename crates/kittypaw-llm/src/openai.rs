@@ -5,7 +5,7 @@ use kittypaw_core::types::LlmMessage;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::provider::LlmProvider;
+use crate::provider::{LlmProvider, LlmResponse, TokenUsage};
 use crate::util::{
     classify_reqwest_error, handle_response_status, strip_code_fences, StatusAction,
 };
@@ -70,6 +70,14 @@ struct OpenAiMessage {
 #[derive(Deserialize)]
 struct OpenAiResponse {
     choices: Vec<OpenAiChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct OpenAiUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +93,8 @@ struct OpenAiMessageContent {
 #[derive(Deserialize)]
 struct OpenAiStreamChunk {
     choices: Vec<OpenAiStreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Deserialize)]
@@ -136,7 +146,7 @@ impl LlmProvider for OpenAiProvider {
         }
     }
 
-    async fn generate(&self, messages: &[LlmMessage]) -> Result<String> {
+    async fn generate(&self, messages: &[LlmMessage]) -> Result<LlmResponse> {
         let api_messages = build_messages(messages);
 
         let request = OpenAiRequest {
@@ -188,6 +198,12 @@ impl LlmProvider for OpenAiProvider {
                 message: format!("Response parse error: {e}"),
             })?;
 
+            let usage = body.usage.map(|u| TokenUsage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                model: self.model.clone(),
+            });
+
             let text = body
                 .choices
                 .into_iter()
@@ -195,7 +211,10 @@ impl LlmProvider for OpenAiProvider {
                 .and_then(|c| c.message.content)
                 .unwrap_or_default();
 
-            return Ok(strip_code_fences(&text));
+            return Ok(LlmResponse {
+                content: strip_code_fences(&text),
+                usage,
+            });
         }
     }
 
@@ -203,7 +222,7 @@ impl LlmProvider for OpenAiProvider {
         &self,
         messages: &[LlmMessage],
         on_token: Arc<dyn Fn(String) + Send + Sync>,
-    ) -> Result<String> {
+    ) -> Result<LlmResponse> {
         let api_messages = build_messages(messages);
 
         let request = OpenAiStreamRequest {
@@ -238,6 +257,7 @@ impl LlmProvider for OpenAiProvider {
         }
 
         let mut accumulated = String::new();
+        let mut stream_usage: Option<OpenAiUsage> = None;
         let mut byte_stream = response.bytes_stream();
         let mut line_buf = String::new();
 
@@ -262,6 +282,9 @@ impl LlmProvider for OpenAiProvider {
                         break;
                     }
                     if let Ok(chunk) = serde_json::from_str::<OpenAiStreamChunk>(data) {
+                        if let Some(u) = chunk.usage {
+                            stream_usage = Some(u);
+                        }
                         if let Some(choice) = chunk.choices.into_iter().next() {
                             if let Some(content) = choice.delta.content {
                                 accumulated.push_str(&content);
@@ -273,7 +296,16 @@ impl LlmProvider for OpenAiProvider {
             }
         }
 
-        Ok(strip_code_fences(&accumulated))
+        let usage = stream_usage.map(|u| TokenUsage {
+            input_tokens: u.prompt_tokens,
+            output_tokens: u.completion_tokens,
+            model: self.model.clone(),
+        });
+
+        Ok(LlmResponse {
+            content: strip_code_fences(&accumulated),
+            usage,
+        })
     }
 }
 
