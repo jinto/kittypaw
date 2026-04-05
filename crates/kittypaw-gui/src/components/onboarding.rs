@@ -168,8 +168,22 @@ fn StepLlm(on_next: EventHandler) -> Element {
                                 value: "{api_key}",
                                 oninput: move |e| api_key.set(e.value()),
                             }
-                            p { style: "font-size: 11px; color: #A8A29E; margin: 10px 0 0 0; line-height: 1.6; white-space: pre-line;",
-                                "1. openrouter.ai 에서 무료 가입\n2. Dashboard → API Keys → Create Key\n3. 발급된 키를 여기에 붙여넣기"
+                            div { style: "font-size: 11px; color: #A8A29E; margin: 10px 0 0 0; line-height: 1.8;",
+                                "1. "
+                                a {
+                                    href: "https://openrouter.ai/settings/keys",
+                                    style: "color: #86EFAC; text-decoration: underline; cursor: pointer;",
+                                    onclick: move |e| {
+                                        e.prevent_default();
+                                        document::eval(r#"window.open('https://openrouter.ai/settings/keys', '_blank')"#);
+                                    },
+                                    "openrouter.ai"
+                                }
+                                " 에서 무료 가입"
+                                br {}
+                                "2. API Keys → Create Key"
+                                br {}
+                                "3. 발급된 키를 여기에 붙여넣기"
                             }
                         }
                     }
@@ -337,9 +351,9 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                         ol { style: "margin: 0; padding-left: 20px;",
                             li { "텔레그램에서 " strong { "@BotFather" } " 검색" }
                             li { strong { "/newbot" } " 입력 → 봇 이름 설정" }
-                            li { "발급된 토큰 복사 (아래에 붙여넣기)" }
-                            li { "만든 봇에게 아무 메시지 전송" }
-                            li { "봇 토큰으로 getUpdates API 호출하여 chat_id 확인" }
+                            li { "발급된 토큰을 아래에 붙여넣기" }
+                            li { "만든 봇에게 아무 메시지 하나 보내기" }
+                            li { strong { "\"채팅 ID 가져오기\"" } " 버튼 클릭" }
                         }
                     }
 
@@ -355,11 +369,27 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                         }
                         div {
                             label { style: "font-size: 12px; font-weight: 600; color: #78716C; display: block; margin-bottom: 4px;", "채팅 ID" }
-                            input {
-                                style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box;",
-                                placeholder: "-100123456789",
-                                value: "{chat_id}",
-                                oninput: move |e| chat_id.set(e.value()),
+                            div { style: "display: flex; gap: 8px;",
+                                input {
+                                    style: "flex: 1; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box;",
+                                    placeholder: "자동으로 가져옵니다",
+                                    value: "{chat_id}",
+                                    oninput: move |e| chat_id.set(e.value()),
+                                }
+                                button {
+                                    style: "padding: 10px 14px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;",
+                                    disabled: bot_token.read().is_empty(),
+                                    onclick: move |_| {
+                                        let token = bot_token.read().clone();
+                                        spawn(async move {
+                                            match fetch_telegram_chat_id(&token).await {
+                                                Ok(id) => chat_id.set(id),
+                                                Err(e) => chat_id.set(format!("오류: {e}")),
+                                            }
+                                        });
+                                    },
+                                    "채팅 ID 가져오기"
+                                }
                             }
                         }
                     }
@@ -430,4 +460,43 @@ fn StepComplete(on_complete: EventHandler) -> Element {
             }
         }
     }
+}
+
+/// Fetch the most recent chat_id from Telegram Bot API getUpdates.
+async fn fetch_telegram_chat_id(token: &str) -> Result<String, String> {
+    let url = format!("https://api.telegram.org/bot{token}/getUpdates?limit=1&offset=-1");
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("요청 실패: {e}"))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("응답 파싱 실패: {e}"))?;
+
+    if body["ok"].as_bool() != Some(true) {
+        return Err("봇 토큰이 유효하지 않습니다".into());
+    }
+
+    let results = body["result"]
+        .as_array()
+        .ok_or("결과가 비어있습니다. 봇에게 먼저 메시지를 보내주세요")?;
+    if results.is_empty() {
+        return Err("봇에게 먼저 메시지를 보내주세요".into());
+    }
+
+    for result in results {
+        if let Some(id) = result["message"]["chat"]["id"].as_i64() {
+            return Ok(id.to_string());
+        }
+        if let Some(id) = result["channel_post"]["chat"]["id"].as_i64() {
+            return Ok(id.to_string());
+        }
+    }
+
+    Err("채팅 ID를 찾을 수 없습니다. 봇에게 메시지를 보낸 후 다시 시도하세요".into())
 }

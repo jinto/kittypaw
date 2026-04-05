@@ -3150,6 +3150,7 @@ dependencies = [
  "kittypaw-store",
  "kittypaw-workspace",
  "pulldown-cmark",
+ "reqwest",
  "rfd 0.15.4",
  "serde",
  "serde_json",
