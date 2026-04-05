@@ -1,8 +1,11 @@
 mod discord;
 mod env;
 mod file;
+mod git;
 mod http;
 mod llm;
+mod process;
+mod shell;
 mod slack;
 mod storage;
 mod telegram;
@@ -291,6 +294,9 @@ fn is_read_only_skill_call(call: &SkillCall) -> bool {
             | ("File", "read")
             | ("Storage", "get")
             | ("Storage", "list")
+            | ("Git", "status")
+            | ("Git", "diff")
+            | ("Git", "log")
     )
 }
 
@@ -462,6 +468,8 @@ async fn execute_single_call(
             Err(msg) => Err(KittypawError::CapabilityDenied(msg)),
         },
         "Env" => env::execute_env(call, None),
+        "Shell" => shell::execute_shell(call).await,
+        "Git" => git::execute_git(call).await,
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown skill: {}",
             call.skill_name

@@ -43,6 +43,34 @@ pub(super) fn execute_file(call: &SkillCall, data_dir: Option<&Path>) -> Result<
             std::fs::write(&full_path, content)?;
             Ok(serde_json::json!({ "ok": true }))
         }
+        "edit" => {
+            let rel_path = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let old_content = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let new_content = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+            if rel_path.is_empty() {
+                return Err(KittypawError::Sandbox("File.edit: path is required".into()));
+            }
+            if old_content.is_empty() {
+                return Err(KittypawError::Sandbox(
+                    "File.edit: old content is required".into(),
+                ));
+            }
+            let full_path = validate_file_path(data_dir, rel_path)?;
+            let content = std::fs::read_to_string(&full_path)?;
+            if !content.contains(old_content) {
+                return Err(KittypawError::Sandbox(
+                    "File.edit: old content not found in file".into(),
+                ));
+            }
+            let result = content.replacen(old_content, new_content, 1);
+            if result.len() > 10 * 1024 * 1024 {
+                return Err(KittypawError::Sandbox(
+                    "File.edit: result exceeds 10MB limit".into(),
+                ));
+            }
+            std::fs::write(&full_path, &result)?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
         _ => Err(KittypawError::Sandbox(format!(
             "Unknown File method: {}",
             call.method
