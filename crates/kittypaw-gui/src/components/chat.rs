@@ -91,6 +91,26 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"document.getElementById('chat-input')?.focus()"#);
     });
 
+    // Pre-request microphone + speech recognition permissions on mount
+    use_effect(move || {
+        spawn(async {
+            let _ = tokio::process::Command::new("swift")
+                .arg("-e")
+                .arg(
+                    r#"
+                    import Speech; import AVFoundation; import Foundation
+                    SFSpeechRecognizer.requestAuthorization { _ in }
+                    AVCaptureDevice.requestAccess(for: .audio) { _ in exit(0) }
+                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
+                    "#,
+                )
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok();
+        });
+    });
+
     // Register Cmd+Enter (send) and Cmd+R (mic) via JS on the input element
     use_effect(move || {
         document::eval(
@@ -376,17 +396,11 @@ async fn record_and_transcribe() -> Result<String, String> {
     }
 
     // Fallback: macOS native speech recognition via Swift script
+    // Permissions are pre-requested at app launch, so no dialog delay here
     let swift_code = r#"
 import Speech
 import AVFoundation
 import Foundation
-
-SFSpeechRecognizer.requestAuthorization { status in
-    guard status == .authorized else {
-        print("")
-        exit(1)
-    }
-}
 
 let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))!
 let audioEngine = AVAudioEngine()
