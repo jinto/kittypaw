@@ -6,7 +6,7 @@ use crate::state::{AppState, PermissionQueue};
 #[component]
 pub fn App() -> Element {
     let app_state = use_context::<AppState>();
-    let mut active_tab = use_signal(|| "dashboard".to_string());
+    let mut active_tab = use_signal(|| "chat".to_string());
     let mut onboarding_done = use_signal(|| false);
 
     // Provide the reactive permission queue as context so that both the

@@ -90,8 +90,47 @@ pub fn ChatPanel() -> Element {
             div { style: "flex: 1; overflow-y: auto; padding: 20px 24px;",
                 if messages.read().is_empty() {
                     div { style: "display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center;",
-                        h1 { style: "font-size: 24px; font-weight: 600; color: #1e293b; margin: 0 0 10px;", "How can I help you?" }
-                        p { style: "font-size: 15px; color: #64748b;", "I'm KittyPaw, your AI agent. I can run code, automate tasks, and answer questions." }
+                        h1 { style: "font-size: 24px; font-weight: 600; color: #1e293b; margin: 0 0 10px;",
+                            "무엇을 도와드릴까요?"
+                        }
+                        p { style: "font-size: 15px; color: #64748b; margin-bottom: 24px;",
+                            "KittyPaw는 당신의 AI 에이전트입니다."
+                        }
+
+                        div { style: "display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 480px;",
+                            QuickPrompt {
+                                label: "🐱 너는 누구니?",
+                                prompt: "너는 누구니? 어떤 에이전트인지 소개해줘.",
+                                on_click: move |msg: String| {
+                                    messages.write().push(("user".into(), msg.clone()));
+                                    chat_coroutine.send(msg);
+                                },
+                            }
+                            QuickPrompt {
+                                label: "🛠 어떤 일을 할 수 있어?",
+                                prompt: "너는 어떤 일을 할 수 있어? 구체적으로 알려줘.",
+                                on_click: move |msg: String| {
+                                    messages.write().push(("user".into(), msg.clone()));
+                                    chat_coroutine.send(msg);
+                                },
+                            }
+                            QuickPrompt {
+                                label: "📋 지금 무슨 일을 하고 있어?",
+                                prompt: "지금 어떤 스킬들이 등록되어 있고, 무슨 일을 하고 있어?",
+                                on_click: move |msg: String| {
+                                    messages.write().push(("user".into(), msg.clone()));
+                                    chat_coroutine.send(msg);
+                                },
+                            }
+                            QuickPrompt {
+                                label: "✨ 새 스킬 만들어줘",
+                                prompt: "새로운 스킬을 만들고 싶어. 어떻게 시작하면 돼?",
+                                on_click: move |msg: String| {
+                                    messages.write().push(("user".into(), msg.clone()));
+                                    chat_coroutine.send(msg);
+                                },
+                            }
+                        }
                     }
                 } else {
                     for (i, (role, content)) in messages.read().iter().enumerate() {
@@ -170,6 +209,21 @@ fn ChatMessage(role: String, content: String) -> Element {
             div { style: "max-width: 80%; padding: 10px 14px; background: {bg}; border-radius: 12px; font-size: 14px; color: #1e293b; line-height: 1.5; white-space: pre-wrap;",
                 "{content}"
             }
+        }
+    }
+}
+
+#[component]
+fn QuickPrompt(
+    label: &'static str,
+    prompt: &'static str,
+    on_click: EventHandler<String>,
+) -> Element {
+    rsx! {
+        button {
+            style: "padding: 10px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; cursor: pointer; font-size: 13px; color: #334155; transition: all 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.05);",
+            onclick: move |_| on_click.call(prompt.to_string()),
+            "{label}"
         }
     }
 }

@@ -305,7 +305,7 @@ fn StepComplete(on_complete: EventHandler) -> Element {
 
                 p {
                     style: "font-size: 15px; color: #78716C; margin: 0 0 40px 0; line-height: 1.6;",
-                    "대시보드에서 스킬을 설치하고 실행해보세요"
+                    "채팅에서 자유롭게 대화하거나, 스킬을 설치하고 실행해보세요"
                 }
 
                 button {
@@ -318,7 +318,7 @@ fn StepComplete(on_complete: EventHandler) -> Element {
                         });
                         on_complete.call(());
                     },
-                    "대시보드로 이동"
+                    "시작하기"
                 }
             }
         }

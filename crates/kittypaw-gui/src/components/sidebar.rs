@@ -24,7 +24,14 @@ pub fn Sidebar(active_tab: String, on_tab_change: EventHandler<String>) -> Eleme
                 style: "display: flex; flex-direction: column; gap: 2px; flex: 1;",
 
                 NavItem {
-                    label: "Dashboard",
+                    label: "Chat",
+                    icon: "💬",
+                    tab: "chat",
+                    active: active_tab == "chat",
+                    on_click: move |_| on_tab_change.call("chat".into()),
+                }
+                NavItem {
+                    label: "상황판",
                     icon: "📊",
                     tab: "dashboard",
                     active: active_tab == "dashboard",
@@ -36,13 +43,6 @@ pub fn Sidebar(active_tab: String, on_tab_change: EventHandler<String>) -> Eleme
                     tab: "skills",
                     active: active_tab == "skills",
                     on_click: move |_| on_tab_change.call("skills".into()),
-                }
-                NavItem {
-                    label: "Chat",
-                    icon: "💬",
-                    tab: "chat",
-                    active: active_tab == "chat",
-                    on_click: move |_| on_tab_change.call("chat".into()),
                 }
                 NavItem {
                     label: "Settings",
