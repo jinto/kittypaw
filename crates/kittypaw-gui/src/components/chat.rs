@@ -207,10 +207,15 @@ pub fn ChatPanel() -> Element {
                 div { style: "display: flex; gap: 8px; align-items: center;",
                     // Input with clear button
                     div { style: "flex: 1; position: relative;",
-                        input {
-                            id: "chat-input",
-                            style: "width: 100%; padding: 10px 32px 10px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; outline: none; box-sizing: border-box;",
-                            placeholder: "Message KittyPaw...",
+                        {
+                            let recording = *is_recording.read();
+                            let border = if recording { "2px solid #ef4444" } else { "1px solid #d1d5db" };
+                            let placeholder = if recording { "🎙 듣고 있어요..." } else { "Message KittyPaw..." };
+                            rsx! {
+                                input {
+                                    id: "chat-input",
+                                    style: "width: 100%; padding: 10px 32px 10px 14px; border: {border}; border-radius: 10px; font-size: 14px; outline: none; box-sizing: border-box;",
+                                    placeholder: "{placeholder}",
                             value: "{input_text}",
                             autofocus: true,
                             oninput: move |e| input_text.set(e.value()),
@@ -219,6 +224,8 @@ pub fn ChatPanel() -> Element {
                                     send_message();
                                 }
                             },
+                        }
+                            }
                         }
                         if !input_text.read().is_empty() {
                             button {
