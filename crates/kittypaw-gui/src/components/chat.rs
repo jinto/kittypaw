@@ -91,6 +91,35 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"document.getElementById('chat-input')?.focus()"#);
     });
 
+    // Register Cmd+Enter (send) and Cmd+R (mic) via JS on the input element
+    use_effect(move || {
+        document::eval(
+            r#"
+            const input = document.getElementById('chat-input');
+            if (input && !input._kpShortcuts) {
+                input._kpShortcuts = true;
+                input.addEventListener('keydown', (e) => {
+                    if (e.metaKey && e.key === 'Enter') {
+                        e.preventDefault();
+                        const sendBtn = document.getElementById('chat-send');
+                        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+                    }
+                    if (e.metaKey && e.key === 'r') {
+                        e.preventDefault();
+                        const micBtn = document.getElementById('chat-mic');
+                        if (micBtn) micBtn.click();
+                    }
+                    if (e.metaKey && e.key === 'Backspace') {
+                        e.preventDefault();
+                        const clearBtn = document.getElementById('chat-clear');
+                        if (clearBtn) clearBtn.click();
+                    }
+                });
+            }
+        "#,
+        );
+    });
+
     rsx! {
 
         div { style: "flex: 1; display: flex; flex-direction: column; overflow: hidden;",
@@ -174,6 +203,7 @@ pub fn ChatPanel() -> Element {
                         if !input_text.read().is_empty() {
                             button {
                                 style: "position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 14px; padding: 2px 4px; line-height: 1;",
+                                id: "chat-clear",
                                 onclick: move |_| {
                                     input_text.set(String::new());
                                     document::eval(r#"document.getElementById('chat-input')?.focus()"#);
@@ -188,8 +218,9 @@ pub fn ChatPanel() -> Element {
                         let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
                         rsx! {
                             button {
+                                id: "chat-mic",
                                 style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
-                                title: "음성 입력",
+                                title: "음성 입력 (⌘R)",
                                 onclick: move |_| {
                                     let cur = *is_recording.read();
                                     if cur {
@@ -224,9 +255,10 @@ pub fn ChatPanel() -> Element {
                         let btn_bg = if loading { "#94a3b8" } else { "#2563eb" };
                         rsx! {
                             button {
+                                id: "chat-send",
                                 style: "padding: 10px 16px; background: {btn_bg}; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px;",
                                 disabled: loading,
-                                title: "전송 (Enter)",
+                                title: "전송 (⌘↵)",
                                 onclick: move |_| {
                                     send_message();
                                 },
@@ -234,6 +266,12 @@ pub fn ChatPanel() -> Element {
                             }
                         }
                     }
+                }
+                // Shortcut hints
+                div { style: "display: flex; justify-content: flex-end; gap: 12px; margin-top: 4px; padding-right: 4px;",
+                    span { style: "font-size: 10px; color: #b0adb0;", "Enter 전송" }
+                    span { style: "font-size: 10px; color: #b0adb0;", "⌘R 음성" }
+                    span { style: "font-size: 10px; color: #b0adb0;", "⌘⌫ 삭제" }
                 }
             }
         }
