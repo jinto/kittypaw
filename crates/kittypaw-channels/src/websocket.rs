@@ -123,17 +123,26 @@ impl ServeWebSocketChannel {
     }
 
     /// Spawn the axum server as a background task.
+    ///
+    /// If `extra_routes` is provided, those routes are merged into the
+    /// Axum router before binding. The extra router must already have
+    /// its own state applied (i.e. be `Router<()>`).
     pub async fn spawn(
         &self,
         event_tx: mpsc::Sender<Event>,
+        extra_routes: Option<Router>,
     ) -> Result<tokio::task::JoinHandle<()>> {
         let sessions = self.sessions.clone();
 
         let state = AppState { event_tx, sessions };
 
-        let app = Router::new()
+        let mut app = Router::new()
             .route("/ws/chat", get(ws_handler))
             .with_state(state);
+
+        if let Some(extra) = extra_routes {
+            app = app.merge(extra);
+        }
 
         let addr: std::net::SocketAddr = self.bind_addr.parse().map_err(|e| {
             KittypawError::Config(format!("Invalid bind address '{}': {}", self.bind_addr, e))

@@ -33,6 +33,7 @@ fn migrations() -> Migrations<'static> {
     ])
 }
 
+#[derive(serde::Serialize)]
 pub struct ExecutionRecord {
     pub id: i64,
     pub skill_id: String,
@@ -57,6 +58,7 @@ pub fn sum_usage_tokens(json: &str) -> u64 {
         .sum()
 }
 
+#[derive(serde::Serialize)]
 pub struct ExecutionStats {
     pub total_runs: u32,
     pub successful: u32,
