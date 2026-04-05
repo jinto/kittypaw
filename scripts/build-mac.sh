@@ -49,6 +49,10 @@ cat > "${APP_DIR}/Contents/Info.plist" << PLIST
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>KittyPaw uses the microphone for voice input.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>KittyPaw uses speech recognition to convert voice to text.</string>
 </dict>
 </plist>
 PLIST

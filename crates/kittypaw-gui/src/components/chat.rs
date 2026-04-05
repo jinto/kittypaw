@@ -193,9 +193,17 @@ pub fn ChatPanel() -> Element {
                                                     };
                                                     input_text.set(new_val);
                                                 }
-                                                Ok(_) => {}
+                                                Ok(_) => {
+                                                    messages.write().push((
+                                                        "assistant".into(),
+                                                        "음성이 인식되지 않았습니다. 다시 시도해주세요.".into(),
+                                                    ));
+                                                }
                                                 Err(e) => {
-                                                    tracing::warn!("Voice input error: {e}");
+                                                    messages.write().push((
+                                                        "assistant".into(),
+                                                        format!("음성 입력 오류: {e}\n\n`brew install whisperkit-cli`로 WhisperKit을 설치하면 더 정확한 음성 인식이 가능합니다."),
+                                                    ));
                                                 }
                                             }
                                             is_recording.set(false);
