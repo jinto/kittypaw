@@ -23,6 +23,25 @@ for i in 0..<args.count {
     }
 }
 
+// Request permissions (blocks until granted or denied)
+let semaphore = DispatchSemaphore(value: 0)
+
+SFSpeechRecognizer.requestAuthorization { status in
+    if status != .authorized {
+        fputs("ERROR: Speech recognition not authorized\n", stderr)
+    }
+    semaphore.signal()
+}
+semaphore.wait()
+
+AVCaptureDevice.requestAccess(for: .audio) { granted in
+    if !granted {
+        fputs("ERROR: Microphone access not granted\n", stderr)
+    }
+    semaphore.signal()
+}
+semaphore.wait()
+
 // Setup audio engine (16kHz mono, inspired by Whispree AudioService)
 let audioEngine = AVAudioEngine()
 let recognizer = SFSpeechRecognizer(locale: Locale(identifier: lang))!

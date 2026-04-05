@@ -108,25 +108,7 @@ pub fn ChatPanel() -> Element {
         );
     });
 
-    // Pre-request microphone + speech recognition permissions on mount
-    use_effect(move || {
-        spawn(async {
-            let _ = tokio::process::Command::new("swift")
-                .arg("-e")
-                .arg(
-                    r#"
-                    import Speech; import AVFoundation; import Foundation
-                    SFSpeechRecognizer.requestAuthorization { _ in }
-                    AVCaptureDevice.requestAccess(for: .audio) { _ in exit(0) }
-                    RunLoop.main.run(until: Date(timeIntervalSinceNow: 30))
-                    "#,
-                )
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .ok();
-        });
-    });
+    // Permissions are now handled by kittypaw-mic itself (blocks until granted)
 
     // Native OS-level keyboard shortcuts (bypasses WKWebView limitations)
     // Debounce: ignore rapid repeats within 500ms
