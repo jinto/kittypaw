@@ -178,45 +178,28 @@ pub fn ChatPanel() -> Element {
                                 onclick: move |_| {
                                     let cur = *is_recording.read();
                                     if cur {
-                                        // Stop recording
                                         is_recording.set(false);
-                                        document::eval(r#"
-                                            if (window._kpRecognition) {
-                                                window._kpRecognition.stop();
-                                            }
-                                        "#);
                                     } else {
-                                        // Start recording
                                         is_recording.set(true);
-                                        document::eval(r#"
-                                            try {
-                                                const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-                                                if (!SR) { throw new Error('not supported'); }
-                                                const recognition = new SR();
-                                                recognition.lang = navigator.language || 'ko-KR';
-                                                recognition.interimResults = false;
-                                                recognition.maxAlternatives = 1;
-                                                window._kpRecognition = recognition;
-                                                recognition.onresult = (e) => {
-                                                    const text = e.results[0][0].transcript;
-                                                    const input = document.getElementById('chat-input');
-                                                    if (input) {
-                                                        const nativeSet = Object.getOwnPropertyDescriptor(
-                                                            window.HTMLInputElement.prototype, 'value'
-                                                        ).set;
-                                                        nativeSet.call(input, (input.value ? input.value + ' ' : '') + text);
-                                                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                                                    }
-                                                };
-                                                recognition.onerror = () => {};
-                                                recognition.onend = () => {
-                                                    window._kpRecognition = null;
-                                                };
-                                                recognition.start();
-                                            } catch(e) {
-                                                // Speech API not available in this WebView
+                                        // Spawn whisperkit-cli for mic transcription
+                                        spawn(async move {
+                                            match record_and_transcribe().await {
+                                                Ok(text) if !text.is_empty() => {
+                                                    let current = input_text.read().clone();
+                                                    let new_val = if current.is_empty() {
+                                                        text
+                                                    } else {
+                                                        format!("{current} {text}")
+                                                    };
+                                                    input_text.set(new_val);
+                                                }
+                                                Ok(_) => {}
+                                                Err(e) => {
+                                                    tracing::warn!("Voice input error: {e}");
+                                                }
                                             }
-                                        "#);
+                                            is_recording.set(false);
+                                        });
                                     }
                                 },
                                 "{mic_label}"
@@ -315,6 +298,96 @@ fn render_markdown(input: &str) -> String {
     let mut html_output = String::new();
     html::push_html(&mut html_output, parser);
     html_output
+}
+
+/// Record audio from microphone and transcribe using whisperkit-cli.
+/// Falls back to macOS `say` + SFSpeechRecognizer via a tiny Swift script.
+async fn record_and_transcribe() -> Result<String, String> {
+    use std::time::Duration;
+
+    // First try: whisperkit-cli (brew install whisperkit-cli)
+    let whisperkit = tokio::process::Command::new("whisperkit-cli")
+        .args(["transcribe", "--stream", "--max-duration", "10"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+
+    if let Ok(child) = whisperkit {
+        match tokio::time::timeout(Duration::from_secs(15), child.wait_with_output()).await {
+            Ok(Ok(output)) => {
+                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !text.is_empty() {
+                    return Ok(text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback: macOS native speech recognition via Swift script
+    let swift_code = r#"
+import Speech
+import AVFoundation
+import Foundation
+
+SFSpeechRecognizer.requestAuthorization { status in
+    guard status == .authorized else {
+        print("")
+        exit(1)
+    }
+}
+
+let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))!
+let audioEngine = AVAudioEngine()
+let request = SFSpeechAudioBufferRecognitionRequest()
+request.shouldReportPartialResults = false
+
+let node = audioEngine.inputNode
+let format = node.outputFormat(forBus: 0)
+node.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    request.append(buffer)
+}
+
+audioEngine.prepare()
+try! audioEngine.start()
+
+// Record for 5 seconds
+DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+    audioEngine.stop()
+    node.removeTap(onBus: 0)
+    request.endAudio()
+}
+
+recognizer.recognitionTask(with: request) { result, error in
+    if let result = result, result.isFinal {
+        print(result.bestTranscription.formattedString)
+        exit(0)
+    }
+    if error != nil {
+        print("")
+        exit(1)
+    }
+}
+
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 8))
+"#;
+
+    let child = tokio::process::Command::new("swift")
+        .arg("-e")
+        .arg(swift_code)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start speech recognition: {e}"))?;
+
+    match tokio::time::timeout(Duration::from_secs(12), child.wait_with_output()).await {
+        Ok(Ok(output)) => {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(text)
+        }
+        Ok(Err(e)) => Err(format!("Speech recognition failed: {e}")),
+        Err(_) => Err("Speech recognition timed out".into()),
+    }
 }
 
 #[component]
