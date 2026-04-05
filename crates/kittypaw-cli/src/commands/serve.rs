@@ -186,22 +186,161 @@ pub(crate) async fn run_serve(bind_addr: &str) {
                 let event_type = event.event_type.clone();
                 let router = ResponseRouter { ws_channel: &ws_channel, config: &config };
 
-                // Check for /teach command on Telegram
-                let is_teach = event.event_type == EventType::Telegram
-                    && event
-                        .payload
-                        .get("text")
-                        .and_then(|v| v.as_str())
-                        .map(|t| t.starts_with("/teach"))
-                        .unwrap_or(false);
-
-                // Extract raw event text for skill matching
+                // Extract raw event text for command/skill matching
                 let raw_event_text = event
                     .payload
                     .get("text")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+
+                // ── Telegram slash commands ──────────────────────────────
+                if event.event_type == EventType::Telegram {
+                    let text = raw_event_text.trim();
+
+                    // /help, /start — show available commands
+                    if text == "/help" || text == "/start" {
+                        let help = "KittyPaw 명령어:\n\n\
+                            /run <스킬이름> — 스킬 즉시 실행\n\
+                            /status — 오늘 실행 통계\n\
+                            /teach <설명> — 새 스킬 가르치기\n\
+                            /help — 도움말";
+                        send_telegram_message(&config, &session_id, help).await;
+                        continue;
+                    }
+
+                    // /status — today's execution stats
+                    if text == "/status" {
+                        let st = store.lock().await;
+                        match st.today_stats() {
+                            Ok(stats) => {
+                                let msg = format!(
+                                    "📊 오늘 실행: {} (성공 {}, 실패 {})\n토큰: {}",
+                                    stats.total_runs, stats.successful, stats.failed, stats.total_tokens
+                                );
+                                drop(st);
+                                send_telegram_message(&config, &session_id, &msg).await;
+                            }
+                            Err(e) => {
+                                drop(st);
+                                tracing::warn!("Failed to get today_stats: {e}");
+                                send_telegram_message(&config, &session_id, "통계를 가져올 수 없습니다.").await;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // /run <name> — execute a skill or package by name
+                    if let Some(skill_name) = text.strip_prefix("/run ").map(str::trim) {
+                        if skill_name.is_empty() {
+                            send_telegram_message(&config, &session_id, "Usage: /run <스킬이름>").await;
+                            continue;
+                        }
+
+                        // Try user-taught skill first
+                        let found_skill = kittypaw_core::skill::load_skill(skill_name)
+                            .ok()
+                            .flatten();
+
+                        if let Some((skill, js_code)) = found_skill {
+                            let wrapped_code = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+                            let context = serde_json::json!({
+                                "event_type": "telegram",
+                                "event_text": "",
+                                "chat_id": session_id,
+                                "skill_name": skill_name,
+                            });
+                            match sandbox.execute(&wrapped_code, context).await {
+                                Ok(exec_result) => {
+                                    if !exec_result.skill_calls.is_empty() {
+                                        let st = store.lock().await;
+                                        let preresolved = kittypaw_cli::skill_executor::resolve_storage_calls(
+                                            &exec_result.skill_calls, &*st, Some(&skill.name),
+                                        );
+                                        drop(st);
+                                        let mut checker = kittypaw_core::capability::CapabilityChecker::from_skill_permissions(&skill.permissions);
+                                        let _ = kittypaw_cli::skill_executor::execute_skill_calls(
+                                            &exec_result.skill_calls, &config, preresolved,
+                                            Some(&skill.name), Some(&mut checker), None,
+                                        ).await;
+                                    }
+                                    let output = if exec_result.output.is_empty() {
+                                        "(no output)".to_string()
+                                    } else {
+                                        exec_result.output.clone()
+                                    };
+                                    send_telegram_message(&config, &session_id, &output).await;
+                                }
+                                Err(e) => {
+                                    send_telegram_message(&config, &session_id, &format!("스킬 실행 오류: {e}")).await;
+                                }
+                            }
+                            continue;
+                        }
+
+                        // Try installed package
+                        let packages_dir = std::path::PathBuf::from(".kittypaw/packages");
+                        let pkg_mgr = kittypaw_core::package_manager::PackageManager::new(packages_dir.clone());
+                        let found_pkg = pkg_mgr.load_package(skill_name).ok();
+
+                        if let Some(pkg) = found_pkg {
+                            let js_path = packages_dir.join(skill_name).join("main.js");
+                            match std::fs::read_to_string(&js_path) {
+                                Ok(js_code) => {
+                                    let config_values = pkg_mgr.get_config_with_defaults(skill_name).unwrap_or_default();
+                                    let shared_ctx = {
+                                        let st = store.lock().await;
+                                        st.list_shared_context().unwrap_or_default()
+                                    };
+                                    let event_payload = serde_json::json!({
+                                        "event_type": "telegram",
+                                        "chat_id": session_id,
+                                    });
+                                    let context = pkg.build_context(&config_values, event_payload, None, &shared_ctx);
+                                    let wrapped_code = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+
+                                    match sandbox.execute(&wrapped_code, context).await {
+                                        Ok(exec_result) => {
+                                            if !exec_result.skill_calls.is_empty() {
+                                                let st = store.lock().await;
+                                                let preresolved = kittypaw_cli::skill_executor::resolve_storage_calls(
+                                                    &exec_result.skill_calls, &*st, Some(&pkg.meta.id),
+                                                );
+                                                drop(st);
+                                                let mut checker = kittypaw_core::capability::CapabilityChecker::from_package_permissions(&pkg.permissions);
+                                                let _ = kittypaw_cli::skill_executor::execute_skill_calls(
+                                                    &exec_result.skill_calls, &config, preresolved,
+                                                    Some(&pkg.meta.id), Some(&mut checker), None,
+                                                ).await;
+                                            }
+                                            let output = if exec_result.output.is_empty() {
+                                                "(no output)".to_string()
+                                            } else {
+                                                exec_result.output.clone()
+                                            };
+                                            send_telegram_message(&config, &session_id, &output).await;
+                                        }
+                                        Err(e) => {
+                                            send_telegram_message(&config, &session_id, &format!("패키지 실행 오류: {e}")).await;
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    send_telegram_message(&config, &session_id, &format!("패키지 '{skill_name}'의 main.js를 찾을 수 없습니다.")).await;
+                                }
+                            }
+                            continue;
+                        }
+
+                        // Neither skill nor package found
+                        send_telegram_message(&config, &session_id, &format!("스킬 또는 패키지 '{skill_name}'을 찾을 수 없습니다.")).await;
+                        continue;
+                    }
+                }
+
+                // Check for /teach command on Telegram
+                let is_teach = event.event_type == EventType::Telegram
+                    && raw_event_text.starts_with("/teach");
 
                 if is_teach {
                     let teach_text = raw_event_text.strip_prefix("/teach").unwrap_or("").trim();
