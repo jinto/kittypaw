@@ -421,6 +421,15 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                                 let cid = chat_id.read().clone();
                                 let _ = kittypaw_core::secrets::set_secret("telegram", "bot_token", &token);
                                 let _ = kittypaw_core::secrets::set_secret("telegram", "chat_id", &cid);
+                                // Send welcome message to confirm connection
+                                let t = token.clone();
+                                let c = cid.clone();
+                                spawn(async move {
+                                    let _ = kittypaw_core::telegram::send_message(
+                                        &t, &c,
+                                        "🐱 KittyPaw가 연결되었습니다!\n스킬 실행 결과를 여기로 보내드릴게요.",
+                                    ).await;
+                                });
                                 saved.set(true);
                                 on_next.call(());
                             },

@@ -45,3 +45,33 @@ pub async fn fetch_chat_id(token: &str) -> Result<String> {
         "채팅 ID를 찾을 수 없습니다. 봇에게 메시지를 보낸 후 다시 시도하세요".into(),
     ))
 }
+
+/// Send a text message via Telegram Bot API.
+pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<()> {
+    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+        }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Telegram 전송 실패: {e}")))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Telegram 응답 파싱 실패: {e}")))?;
+
+    if body["ok"].as_bool() != Some(true) {
+        return Err(KittypawError::Skill(format!(
+            "Telegram 전송 실패: {}",
+            body["description"].as_str().unwrap_or("unknown error")
+        )));
+    }
+
+    Ok(())
+}

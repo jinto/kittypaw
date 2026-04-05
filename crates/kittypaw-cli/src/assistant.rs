@@ -348,6 +348,39 @@ fn build_messages(
         });
     }
 
+    // Inject configured channel info so LLM knows it can send messages
+    {
+        let mut channels = Vec::new();
+        if let Ok(Some(tg_id)) = kittypaw_core::secrets::get_secret("telegram", "chat_id") {
+            if !tg_id.is_empty() {
+                channels.push(format!(
+                    "- Telegram: 설정됨 (chat_id: {tg_id}). Telegram.sendMessage(\"{tg_id}\", text) 로 메시지를 보낼 수 있습니다."
+                ));
+            }
+        }
+        for ch in &config.channels {
+            match ch.channel_type {
+                kittypaw_core::config::ChannelType::Slack => {
+                    channels.push(
+                        "- Slack: 설정됨. Slack.sendMessage(channel, text) 사용 가능.".into(),
+                    );
+                }
+                kittypaw_core::config::ChannelType::Discord => {
+                    channels.push(
+                        "- Discord: 설정됨. Discord.sendMessage(channel, text) 사용 가능.".into(),
+                    );
+                }
+                _ => {}
+            }
+        }
+        if !channels.is_empty() {
+            messages.push(LlmMessage {
+                role: Role::System,
+                content: format!("## Connected channels\n{}", channels.join("\n")),
+            });
+        }
+    }
+
     // Inject available skills summary
     if !registry_entries.is_empty() {
         let skill_list: Vec<String> = registry_entries
