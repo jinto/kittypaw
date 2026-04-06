@@ -613,21 +613,21 @@ pub(crate) async fn run_serve(bind_addr: &str) {
                     continue;
                 }
 
-                let assistant_ctx = kittypaw_cli::assistant::AssistantContext {
-                    event: &event,
+                let session = kittypaw_cli::agent_loop::AgentSession {
                     provider: &*provider,
-                    store: Arc::clone(&store),
-                    registry_entries: &[],
+                    fallback_provider: None,
                     sandbox: &sandbox,
+                    store: Arc::clone(&store),
                     config: &config,
                     on_token: None,
+                    on_permission_request: None,
                 };
-                match kittypaw_cli::assistant::run_assistant_turn(&assistant_ctx).await {
-                    Ok(turn) => {
-                        router.send_response(&event_type, &session_id, &turn.response_text).await;
+                match session.run(event).await {
+                    Ok(text) => {
+                        router.send_response(&event_type, &session_id, &text).await;
                     }
                     Err(e) => {
-                        tracing::error!("Assistant error for session {session_id}: {e}");
+                        tracing::error!("Agent error for session {session_id}: {e}");
                         router.send_error(&event_type, &session_id, &format!("Error: {e}")).await;
                     }
                 }
