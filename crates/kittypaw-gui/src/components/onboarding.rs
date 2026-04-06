@@ -20,9 +20,9 @@ pub fn Onboarding(on_complete: EventHandler) -> Element {
 
     match step() {
         1 => rsx! { StepWelcome { on_next: move |_| step.set(2) } },
-        2 => rsx! { StepWorkspace { on_next: move |_| step.set(3) } },
-        3 => rsx! { StepLlm { on_next: move |_| step.set(4) } },
-        4 => rsx! { StepTelegram { on_next: move |_| step.set(5) } },
+        2 => rsx! { StepLlm { on_next: move |_| step.set(3) } },
+        3 => rsx! { StepTelegram { on_next: move |_| step.set(4) } },
+        4 => rsx! { StepWorkspace { on_next: move |_| step.set(5) } },
         _ => rsx! { StepComplete { on_complete } },
     }
 }
