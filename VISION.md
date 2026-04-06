@@ -40,11 +40,32 @@ KittyPaw는 다르다. **주인공은 결과다.** 개선 과정은 적극적으
 - 검증 목표: "5분 안에 설치하고, 1주 후 AI가 있다는 걸 잊었는가"
 - 실행 전략: "시작은 3분, 성장은 평생" (이전 버전에서 유지)
 
-### v2: Deeper Silence (v1 검증 후)
+### v2: Engine-Client Architecture (v1 검증 후)
+
+**핵심 전환: 모놀리식 → 엔진-클라이언트 분리**
+
+```
+Engine (순수 Rust, 크로스플랫폼, 상시 실행)
+├── LLM + Sandbox + Store
+├── 채널 폴링 (Telegram/Slack/Discord)
+├── 스케줄 루프
+├── 스킬 관리
+└── HTTP/WS API
+    ↑
+├── GUI (Dioxus — Mac/Win/Linux)
+├── CLI (터미널)
+└── Web (브라우저)
+```
+
+- **엔진**: `cargo build` 하나로 Mac/Linux/Windows 동일 바이너리
+- **클라이언트**: 플랫폼별 UI만 다름 (음성 입력, 알림, 서비스 등록)
+- **서비스 등록**: macOS launchd / Linux systemd / Windows Service
+- **$5 VPS 운영**: 엔진만 서버에 올리면 24시간 자동화
+
+추가 기능:
 - 스킬 간 컨텍스트 공유 (위치, 선호, 패턴)
-- 자동 스킬 제안 (실행 패턴 기반, 사용자에게 보이지 않게)
-- 실패한 스킬 자동 수정 (GEPA 방식이지만 조용히)
-- 멀티채널 (Telegram/Discord/Slack) — "결과 알림"으로, "대화"가 아니라
+- 자동 스킬 제안 (실행 패턴 기반)
+- 실패한 스킬 자동 수정
 - FTS5 전문 검색 + LLM 요약으로 세션간 기억
 
 ### v3: Invisible Infrastructure (v2 안정화 후)
