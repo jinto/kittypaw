@@ -54,8 +54,9 @@ jobs:
           mkdir -p "$APP_DIR/MacOS"
           mkdir -p "$APP_DIR/Resources"
 
-          # Copy binary
+          # Copy binary + icon
           cp "target/${{ matrix.target }}/release/kittypaw-gui" "$APP_DIR/MacOS/KittyPaw"
+          cp assets/KittyPaw.icns "$APP_DIR/Resources/KittyPaw.icns" 2>/dev/null || true
 
           # Create Info.plist
           VERSION="${GITHUB_REF_NAME#v}"
@@ -78,6 +79,8 @@ jobs:
             <string>KittyPaw</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
+            <key>CFBundleIconFile</key>
+            <string>KittyPaw</string>
             <key>LSMinimumSystemVersion</key>
             <string>11.0</string>
             <key>NSHighResolutionCapable</key>

@@ -23,6 +23,11 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 # Copy binary
 cp "${BUILD_DIR}/${BIN_NAME}" "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 
+# Copy icon
+if [ -f "${SCRIPT_DIR}/../assets/KittyPaw.icns" ]; then
+    cp "${SCRIPT_DIR}/../assets/KittyPaw.icns" "${APP_DIR}/Contents/Resources/KittyPaw.icns"
+fi
+
 # Compile and bundle Swift mic helper
 echo "Compiling kittypaw-mic Swift helper..."
 swiftc -O -o "${APP_DIR}/Contents/MacOS/kittypaw-mic" \
@@ -52,6 +57,8 @@ cat > "${APP_DIR}/Contents/Info.plist" << PLIST
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
+    <key>CFBundleIconFile</key>
+    <string>KittyPaw</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
