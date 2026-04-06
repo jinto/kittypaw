@@ -3143,6 +3143,7 @@ dependencies = [
  "dioxus",
  "dirs-next",
  "futures-util",
+ "kittypaw-channels",
  "kittypaw-cli",
  "kittypaw-core",
  "kittypaw-llm",

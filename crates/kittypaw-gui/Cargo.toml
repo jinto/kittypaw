@@ -14,6 +14,7 @@ kittypaw-store = { path = "../kittypaw-store" }
 kittypaw-sandbox = { path = "../kittypaw-sandbox" }
 kittypaw-cli = { path = "../kittypaw-cli" }
 kittypaw-workspace = { path = "../kittypaw-workspace" }
+kittypaw-channels = { path = "../kittypaw-channels" }
 
 dioxus = { version = "0.6", features = ["desktop"] }
 tokio = { workspace = true }

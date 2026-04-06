@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use super::{chat, dashboard, onboarding, permission_dialog, settings, sidebar, skill_gallery};
 use crate::i18n::{I18n, Locale};
 use crate::state::{AppState, PermissionQueue};
+use kittypaw_channels::channel::Channel;
 
 #[component]
 pub fn App() -> Element {
@@ -23,6 +24,100 @@ pub fn App() -> Element {
                 if let Ok(Some(lang)) = store.get_user_context("locale") {
                     let mut i18n = use_context::<Signal<I18n>>();
                     i18n.set(I18n::new(Locale::from_str(&lang)));
+                }
+            });
+        });
+    }
+
+    // Start Telegram polling in background (so bot responds even without `kittypaw serve`)
+    {
+        let state = app_state.clone();
+        use_effect(move || {
+            let state = state.clone();
+            spawn(async move {
+                let config = kittypaw_core::config::Config::load().unwrap_or_default();
+                let tg_token = config
+                    .channels
+                    .iter()
+                    .find(|c| c.channel_type == kittypaw_core::config::ChannelType::Telegram)
+                    .map(|c| c.token.clone())
+                    .or_else(|| {
+                        kittypaw_core::secrets::get_secret("telegram", "bot_token")
+                            .ok()
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                if tg_token.is_empty() {
+                    return;
+                }
+
+                tracing::info!("Starting background Telegram polling from GUI");
+                let channel = kittypaw_channels::telegram::TelegramChannel::new(&tg_token);
+                let (event_tx, mut event_rx) =
+                    tokio::sync::mpsc::channel::<kittypaw_core::types::Event>(64);
+
+                // Spawn polling
+                tokio::spawn(async move {
+                    if let Err(e) = channel.start(event_tx).await {
+                        tracing::error!("Telegram polling error: {e}");
+                    }
+                });
+
+                // Process incoming Telegram messages
+                while let Some(event) = event_rx.recv().await {
+                    let text = event
+                        .payload
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let chat_id = event
+                        .payload
+                        .get("chat_id")
+                        .map(|v| {
+                            v.as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                        .unwrap_or_default();
+
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    // Run agent loop
+                    let provider = {
+                        let registry = state.llm_registry.lock().unwrap();
+                        registry.default_provider()
+                    };
+                    let provider = match provider {
+                        Some(p) => p,
+                        None => continue,
+                    };
+                    let sandbox =
+                        kittypaw_sandbox::sandbox::Sandbox::new_threaded(config.sandbox.clone());
+                    let session = kittypaw_cli::agent_loop::AgentSession {
+                        provider: provider.as_ref(),
+                        fallback_provider: None,
+                        sandbox: &sandbox,
+                        store: state.store.clone(),
+                        config: &config,
+                        on_token: None,
+                        on_permission_request: None,
+                    };
+
+                    let response = match session.run(event).await {
+                        Ok(text) => text,
+                        Err(e) => format!("Error: {e}"),
+                    };
+
+                    // Send response back to Telegram
+                    if let Ok(Some(token)) =
+                        kittypaw_core::secrets::get_secret("telegram", "bot_token")
+                    {
+                        let _ = kittypaw_core::telegram::send_message(&token, &chat_id, &response)
+                            .await;
+                    }
                 }
             });
         });

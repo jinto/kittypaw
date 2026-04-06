@@ -555,6 +555,8 @@ fn StepComplete(on_complete: EventHandler) -> Element {
                             let s = store.lock().await;
                             let _ = s.set_user_context("onboarding_completed", "true", "system");
                         });
+                        // Auto-generate ~/.kittypaw/kittypaw.toml from secrets
+                        generate_kittypaw_toml();
                         // Auto-install daemon (background serve for Telegram/schedule)
                         spawn(async {
                             let exe = std::env::current_exe()
@@ -594,5 +596,58 @@ fn StepComplete(on_complete: EventHandler) -> Element {
                 }
             }
         }
+    }
+}
+
+/// Generate ~/.kittypaw/kittypaw.toml from secrets store values.
+fn generate_kittypaw_toml() {
+    let data_dir = match kittypaw_core::secrets::data_dir() {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let toml_path = data_dir.join("kittypaw.toml");
+    if toml_path.exists() {
+        return;
+    }
+
+    let api_key = kittypaw_core::secrets::get_secret("settings", "api_key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let or_key = kittypaw_core::secrets::get_secret("models", "openrouter")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let tg_token = kittypaw_core::secrets::get_secret("telegram", "bot_token")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let tg_chat_id = kittypaw_core::secrets::get_secret("telegram", "chat_id")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let mut toml = String::from("freeform_fallback = true\n\n");
+    if !tg_chat_id.is_empty() {
+        toml += &format!("admin_chat_ids = [\"{tg_chat_id}\"]\n\n");
+    }
+    if !api_key.is_empty() {
+        toml += &format!(
+            "[llm]\nprovider = \"claude\"\nmodel = \"claude-sonnet-4-20250514\"\napi_key = \"{api_key}\"\nmax_tokens = 4096\n\n"
+        );
+    } else if !or_key.is_empty() {
+        toml += &format!(
+            "[llm]\nprovider = \"openai\"\nmodel = \"qwen/qwen3-235b-a22b:free\"\napi_key = \"{or_key}\"\nmax_tokens = 4096\nbase_url = \"https://openrouter.ai/api/v1\"\n\n"
+        );
+    }
+    if !tg_token.is_empty() {
+        toml += &format!("[[channels]]\nchannel_type = \"telegram\"\ntoken = \"{tg_token}\"\n\n");
+    }
+    toml += "[sandbox]\nallowed_hosts = []\n";
+
+    if let Err(e) = std::fs::write(&toml_path, &toml) {
+        tracing::warn!("Failed to generate kittypaw.toml: {e}");
+    } else {
+        tracing::info!("Generated {}", toml_path.display());
     }
 }
