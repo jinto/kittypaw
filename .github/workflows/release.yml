@@ -109,7 +109,7 @@ jobs:
       - name: Sign app
         if: ${{ env.HAS_CERT == 'true' }}
         run: |
-          codesign --force --deep --options runtime \
+          codesign --force --deep --options runtime --timestamp \
             -s "Developer ID Application: JAE KWON PARK (QN9P7KSSMU)" \
             KittyPaw.app
 
