@@ -555,6 +555,39 @@ fn StepComplete(on_complete: EventHandler) -> Element {
                             let s = store.lock().await;
                             let _ = s.set_user_context("onboarding_completed", "true", "system");
                         });
+                        // Auto-install daemon (background serve for Telegram/schedule)
+                        spawn(async {
+                            let exe = std::env::current_exe()
+                                .ok()
+                                .and_then(|p| p.parent().map(|d| d.parent().unwrap_or(d).parent().unwrap_or(d).join("kittypaw")));
+                            // Try bundled CLI first, then PATH
+                            let result = if let Some(ref cli) = exe {
+                                if cli.exists() {
+                                    tokio::process::Command::new(cli)
+                                        .args(["daemon", "install"])
+                                        .output()
+                                        .await
+                                } else {
+                                    tokio::process::Command::new("kittypaw")
+                                        .args(["daemon", "install"])
+                                        .output()
+                                        .await
+                                }
+                            } else {
+                                tokio::process::Command::new("kittypaw")
+                                    .args(["daemon", "install"])
+                                    .output()
+                                    .await
+                            };
+                            match result {
+                                Ok(out) if out.status.success() => {
+                                    tracing::info!("Daemon installed automatically");
+                                }
+                                _ => {
+                                    tracing::warn!("Daemon auto-install failed (can be done manually: kittypaw daemon install)");
+                                }
+                            }
+                        });
                         on_complete.call(());
                     },
                     "시작하기"
