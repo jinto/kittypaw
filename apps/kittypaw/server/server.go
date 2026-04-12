@@ -20,14 +20,15 @@ import (
 )
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
-// to the agent engine. It owns the chi router, the engine session, and all
-// handler state.
+// to the agent engine. It owns the chi router, the engine session, the
+// scheduler, and all handler state.
 type Server struct {
-	config   *core.Config
-	configMu sync.RWMutex // protects config during hot-reload
-	store    *store.Store
-	session  *engine.Session
-	router   chi.Router
+	config    *core.Config
+	configMu  sync.RWMutex // protects config during hot-reload
+	store     *store.Store
+	session   *engine.Session
+	scheduler *engine.Scheduler
+	router    chi.Router
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
@@ -41,9 +42,10 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 	}
 
 	s := &Server{
-		config:  cfg,
-		store:   st,
-		session: session,
+		config:    cfg,
+		store:     st,
+		session:   session,
+		scheduler: engine.NewScheduler(session),
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -122,8 +124,8 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 	return s.session.Run(ctx, event, nil)
 }
 
-// ListenAndServe starts the HTTP server and blocks until a SIGINT or SIGTERM
-// triggers graceful shutdown.
+// ListenAndServe starts the HTTP server and scheduler, blocking until a
+// SIGINT or SIGTERM triggers graceful shutdown of both.
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
 		Addr:         addr,
@@ -133,12 +135,23 @@ func (s *Server) ListenAndServe(addr string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	// Cancelable context for the scheduler goroutine.
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	go s.scheduler.Start(schedCtx)
+
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-done
 		slog.Info("shutting down server")
+
+		// Stop scheduler tick loop and cancel context, then wait for
+		// in-flight skill goroutines to drain before shutting down HTTP.
+		s.scheduler.Stop()
+		schedCancel()
+		s.scheduler.Wait()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)

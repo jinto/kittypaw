@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jinto/gopaw/core"
@@ -13,8 +14,11 @@ import (
 
 // Scheduler runs scheduled skills at their configured intervals.
 type Scheduler struct {
-	session *Session
-	stop    chan struct{}
+	session  *Session
+	stop     chan struct{}
+	stopOnce sync.Once
+	inflight sync.Map      // skill name → struct{}: prevents concurrent runs of the same skill
+	wg       sync.WaitGroup // tracks in-flight runSkill goroutines for graceful drain
 }
 
 // NewScheduler creates a scheduler that uses the given session for execution.
@@ -44,9 +48,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 	}
 }
 
-// Stop signals the scheduler to exit.
+// Stop signals the scheduler to exit. Safe to call multiple times.
 func (s *Scheduler) Stop() {
-	close(s.stop)
+	s.stopOnce.Do(func() { close(s.stop) })
+}
+
+// Wait blocks until all in-flight skill executions complete.
+func (s *Scheduler) Wait() {
+	s.wg.Wait()
 }
 
 func (s *Scheduler) checkAndRun(ctx context.Context) {
@@ -65,8 +74,17 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 		}
 
 		if s.isDue(&sk.Skill) {
+			if _, loaded := s.inflight.LoadOrStore(sk.Skill.Name, struct{}{}); loaded {
+				slog.Debug("scheduler: skill still running, skipping", "name", sk.Skill.Name)
+				continue
+			}
 			slog.Info("scheduler: running skill", "name", sk.Skill.Name, "trigger", sk.Skill.Trigger.Type)
-			s.runSkill(ctx, &sk)
+			s.wg.Add(1)
+			go func(sk core.SkillWithCode) {
+				defer s.wg.Done()
+				defer s.inflight.Delete(sk.Skill.Name)
+				s.runSkill(ctx, &sk)
+			}(sk)
 		}
 	}
 }
@@ -114,7 +132,11 @@ func (s *Scheduler) isDue(skill *core.Skill) bool {
 }
 
 func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
-	_ = s.session.Store.SetLastRun(sk.Skill.Name, time.Now())
+	if err := s.session.Store.SetLastRun(sk.Skill.Name, time.Now()); err != nil {
+		slog.Error("scheduler: SetLastRun failed, aborting to prevent duplicate execution",
+			"name", sk.Skill.Name, "trigger", sk.Skill.Trigger.Type, "error", err)
+		return
+	}
 
 	// Create a synthetic event
 	payload, _ := json.Marshal(core.ChatPayload{
@@ -133,7 +155,9 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 
 		// Auto-delete one-shot skills even on failure
 		if sk.Skill.Trigger.Type == "once" {
-			_ = core.DeleteSkill(sk.Skill.Name)
+			if delErr := core.DeleteSkill(sk.Skill.Name); delErr != nil {
+				slog.Error("scheduler: failed to delete one-shot skill after failure", "name", sk.Skill.Name, "error", delErr)
+			}
 		}
 		return
 	}
@@ -142,8 +166,11 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 
 	// Delete one-shot skills after successful execution
 	if sk.Skill.Trigger.Type == "once" {
-		_ = core.DeleteSkill(sk.Skill.Name)
-		slog.Info("scheduler: one-shot skill completed and deleted", "name", sk.Skill.Name)
+		if delErr := core.DeleteSkill(sk.Skill.Name); delErr != nil {
+			slog.Error("scheduler: failed to delete one-shot skill after success", "name", sk.Skill.Name, "error", delErr)
+		} else {
+			slog.Info("scheduler: one-shot skill completed and deleted", "name", sk.Skill.Name)
+		}
 	}
 }
 
