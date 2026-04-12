@@ -48,6 +48,13 @@ func WithContextWindow(size int) OpenAIOption {
 	}
 }
 
+// WithHTTPClient overrides the default HTTP client.
+func WithHTTPClient(c *http.Client) OpenAIOption {
+	return func(p *OpenAIProvider) {
+		p.client = c
+	}
+}
+
 // NewOpenAI creates an OpenAIProvider for the given model.
 func NewOpenAI(apiKey, model string, maxTokens int, opts ...OpenAIOption) *OpenAIProvider {
 	p := &OpenAIProvider{
@@ -130,6 +137,9 @@ func (o *OpenAIProvider) buildRequestBody(messages []core.LlmMessage, stream boo
 	}
 	if stream {
 		body["stream"] = true
+		if o.baseURL == openAIDefaultBaseURL {
+			body["stream_options"] = map[string]any{"include_usage": true}
+		}
 	}
 	return body
 }
@@ -225,7 +235,9 @@ func (o *OpenAIProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 			text := chunk.Choices[0].Delta.Content
 			if text != "" {
 				content.WriteString(text)
-				onToken(text)
+				if onToken != nil {
+					onToken(text)
+				}
 			}
 		}
 
