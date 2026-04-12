@@ -159,7 +159,12 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 // Prefers deno for its built-in permission model; falls back to node.
 func pickRuntime(scriptPath string) (string, []string) {
 	if p, err := exec.LookPath("deno"); err == nil {
-		return p, []string{"run", "--no-prompt", scriptPath}
+		return p, []string{
+			"run", "--no-prompt",
+			"--deny-net", "--deny-env", "--deny-run",
+			"--deny-write", "--deny-read", "--deny-ffi",
+			scriptPath,
+		}
 	}
 	if p, err := exec.LookPath("node"); err == nil {
 		slog.Warn("sandbox: using node (no process isolation) — install deno for secure sandboxing")

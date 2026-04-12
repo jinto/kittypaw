@@ -121,7 +121,8 @@ type OrchestrationConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	APIKey string `toml:"api_key"`
+	APIKey         string   `toml:"api_key"`
+	AllowedOrigins []string `toml:"allowed_origins"`
 }
 
 // MCPServerConfig defines an external MCP tool server.

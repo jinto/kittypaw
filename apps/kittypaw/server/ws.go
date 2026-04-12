@@ -26,8 +26,13 @@ const (
 // handleWebSocket upgrades to WebSocket and runs a multi-turn streaming chat session.
 // Auth via ?token= query param or Authorization header.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Auth
-	if s.config.Server.APIKey != "" {
+	// Auth — read config under RLock for reload safety.
+	s.configMu.RLock()
+	apiKey := s.config.Server.APIKey
+	originPatterns := s.config.Server.AllowedOrigins
+	s.configMu.RUnlock()
+
+	if apiKey != "" {
 		token := r.URL.Query().Get("token")
 		if token == "" {
 			auth := r.Header.Get("Authorization")
@@ -35,14 +40,17 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				token = strings.TrimPrefix(auth, "Bearer ")
 			}
 		}
-		if !fixedLenEqual(token, s.config.Server.APIKey) {
+		if !fixedLenEqual(token, apiKey) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 	}
 
+	if len(originPatterns) == 0 {
+		originPatterns = []string{"*"}
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: originPatterns,
 	})
 	if err != nil {
 		slog.Error("ws upgrade failed", "error", err)

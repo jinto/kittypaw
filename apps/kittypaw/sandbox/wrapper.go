@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/jinto/gopaw/core"
 )
 
 // Line-protocol tags written to stdout by the JS wrapper.
@@ -12,42 +14,6 @@ const (
 	tagResult   = "__RESULT__:"
 	tagError    = "__ERROR__:"
 )
-
-// skillPrimitives maps each skill name to its method set.
-// Every method becomes a global: e.g. Http.get(...), File.read(...).
-var skillPrimitives = map[string][]string{
-	"Http":     {"get", "post", "put", "delete", "patch", "head"},
-	"File":     {"read", "write", "append", "delete", "list", "exists", "mkdir"},
-	"Storage":  {"get", "set", "delete", "list"},
-	"Telegram": {"send", "sendMessage", "sendVoice"},
-	"Slack":    {"send"},
-	"Discord":  {"send"},
-	"Shell":    {"exec"},
-	"Git":      {"status", "log", "diff", "add", "commit", "push", "pull"},
-	"Llm":      {"generate"},
-	"Memory":   {"search", "set", "get", "delete", "user"},
-	"Todo":     {"list", "add", "update", "delete"},
-	"Env":      {"get"},
-	"Skill":    {"list", "run", "create", "disable", "rollback"},
-	"Tts":      {"speak"},
-	"Image":    {"generate"},
-	"Vision":   {"analyze"},
-	"Mcp":      {"call"},
-	"Agent":    {"delegate"},
-	"Profile":  {"list", "switch", "create", "update"},
-	"Web":      {"search", "fetch"},
-}
-
-// orderedSkillNames ensures deterministic output order (Go maps iterate randomly).
-var orderedSkillNames = []string{
-	"Http", "File", "Storage",
-	"Telegram", "Slack", "Discord",
-	"Shell", "Git", "Llm",
-	"Memory", "Todo", "Env",
-	"Skill", "Tts", "Image",
-	"Vision", "Mcp", "Agent",
-	"Profile", "Web",
-}
 
 // buildWrapper generates the complete JS source that wraps user code.
 //
@@ -64,16 +30,15 @@ func buildWrapper(userCode string, jsContext map[string]any) (string, error) {
 	// Detect Deno vs Node at runtime and provide synchronous stdin/stdout access.
 	b.WriteString(jsIOHelpers)
 
-	// --- skill stubs ---
-	for _, name := range orderedSkillNames {
-		methods := skillPrimitives[name]
-		b.WriteString(fmt.Sprintf("const %s = {\n", name))
-		for i, method := range methods {
+	// --- skill stubs (generated from core.SkillRegistry) ---
+	for _, skill := range core.SkillRegistry {
+		b.WriteString(fmt.Sprintf("const %s = {\n", skill.Name))
+		for i, method := range skill.Methods {
 			b.WriteString(fmt.Sprintf(
 				"  %s: function(...args) { return __callSkill(%q, %q, args); }",
-				method, name, method,
+				method.Name, skill.Name, method.Name,
 			))
-			if i < len(methods)-1 {
+			if i < len(skill.Methods)-1 {
 				b.WriteByte(',')
 			}
 			b.WriteByte('\n')
