@@ -81,11 +81,15 @@ func (s *SlackChannel) Start(ctx context.Context, eventCh chan<- core.Event) err
 	}
 }
 
-// SendResponse posts a message to the last active Slack channel.
-func (s *SlackChannel) SendResponse(ctx context.Context, agentID, response string) error {
-	s.mu.Lock()
-	ch := s.channelID
-	s.mu.Unlock()
+// SendResponse posts a message to the given Slack channel.
+// Falls back to the most recently cached channel ID if chatID is empty.
+func (s *SlackChannel) SendResponse(ctx context.Context, chatID, response string) error {
+	ch := chatID
+	if ch == "" {
+		s.mu.Lock()
+		ch = s.channelID
+		s.mu.Unlock()
+	}
 
 	if ch == "" {
 		return fmt.Errorf("slack: no channel to respond to")
@@ -179,6 +183,7 @@ func (s *SlackChannel) handleEventPayload(ctx context.Context, env slackEnvelope
 		Text:        evt.Text,
 		FromName:    evt.User,
 		WorkspaceID: "", // TODO: extract team_id if needed
+		SessionID:   evt.User,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

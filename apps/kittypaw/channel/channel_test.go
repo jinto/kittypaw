@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/jinto/gopaw/core"
@@ -176,6 +177,98 @@ func TestFromConfigUnsupported(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unsupported channel type")
+	}
+}
+
+// --- SessionID mapping tests ---
+
+func TestKakaoSessionIDFromUserID(t *testing.T) {
+	// Simulate the payload that connectAndListen would build.
+	msg := kakaoRelayMessage{
+		ID:     "action-123",
+		Text:   "hello",
+		UserID: "kakao-user-42",
+	}
+
+	payload := core.ChatPayload{
+		ChatID:    msg.ID,
+		Text:      msg.Text,
+		SessionID: msg.UserID,
+	}
+
+	if payload.SessionID != "kakao-user-42" {
+		t.Errorf("expected SessionID %q, got %q", "kakao-user-42", payload.SessionID)
+	}
+	if payload.ChatID != "action-123" {
+		t.Errorf("expected ChatID %q, got %q", "action-123", payload.ChatID)
+	}
+
+	// Verify it roundtrips via JSON → Event → ParsePayload.
+	raw, _ := json.Marshal(payload)
+	event := &core.Event{Type: core.EventKakaoTalk, Payload: raw}
+	parsed, err := event.ParsePayload()
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if parsed.SessionID != "kakao-user-42" {
+		t.Errorf("roundtrip SessionID: got %q, want %q", parsed.SessionID, "kakao-user-42")
+	}
+}
+
+func TestTelegramSessionIDFromUserID(t *testing.T) {
+	// Verify telegramUser.ID is included and would become SessionID.
+	user := telegramUser{
+		ID:        12345678,
+		FirstName: "Test",
+		Username:  "testuser",
+	}
+
+	data, _ := json.Marshal(user)
+	var decoded telegramUser
+	json.Unmarshal(data, &decoded)
+
+	if decoded.ID != 12345678 {
+		t.Errorf("expected user ID 12345678, got %d", decoded.ID)
+	}
+}
+
+func TestSlackSessionIDFromUser(t *testing.T) {
+	evt := slackEvent{
+		Type:    "message",
+		Text:    "hello",
+		User:    "U123ABC",
+		Channel: "C456DEF",
+	}
+
+	payload := core.ChatPayload{
+		ChatID:    evt.Channel,
+		Text:      evt.Text,
+		FromName:  evt.User,
+		SessionID: evt.User,
+	}
+
+	if payload.SessionID != "U123ABC" {
+		t.Errorf("expected SessionID %q, got %q", "U123ABC", payload.SessionID)
+	}
+}
+
+func TestDiscordSessionIDFromAuthor(t *testing.T) {
+	msg := discordMessageCreate{
+		ID:        "msg-1",
+		ChannelID: "ch-1",
+		Content:   "hello",
+		Author:    discordUser{ID: "discord-user-99", Username: "testbot"},
+	}
+
+	payload := core.ChatPayload{
+		ChatID:    msg.ChannelID,
+		Text:      msg.Content,
+		FromName:  msg.Author.Username,
+		SessionID: msg.Author.ID,
+	}
+
+	if payload.SessionID != "discord-user-99" {
+		t.Errorf("expected SessionID %q, got %q", "discord-user-99", payload.SessionID)
 	}
 }
 

@@ -129,6 +129,17 @@ type AuditRecord struct {
 	CreatedAt string
 }
 
+// PendingResponse is a response that failed delivery and is queued for retry.
+type PendingResponse struct {
+	ID         int64
+	EventType  string
+	ChatID     string
+	Response   string
+	RetryCount int
+	CreatedAt  string
+	NextRetry  string
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -1182,6 +1193,98 @@ func (s *Store) RecentAuditEvents(limit int) ([]AuditRecord, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Pending Responses
+// ---------------------------------------------------------------------------
+
+const maxPendingRetries = 5
+
+// EnqueueResponse saves a failed response for later retry.
+func (s *Store) EnqueueResponse(eventType, chatID, response string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO pending_responses (event_type, chat_id, response)
+		VALUES (?, ?, ?)`, eventType, chatID, response)
+	return err
+}
+
+// DequeuePendingResponses returns up to limit responses whose next_retry is in the past.
+func (s *Store) DequeuePendingResponses(limit int) ([]PendingResponse, error) {
+	rows, err := s.db.Query(`
+		SELECT id, event_type, chat_id, response, retry_count, created_at, next_retry
+		FROM pending_responses
+		WHERE next_retry <= datetime('now')
+		ORDER BY next_retry ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []PendingResponse
+	for rows.Next() {
+		var p PendingResponse
+		if err := rows.Scan(&p.ID, &p.EventType, &p.ChatID, &p.Response,
+			&p.RetryCount, &p.CreatedAt, &p.NextRetry); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkResponseDelivered removes a successfully delivered pending response.
+func (s *Store) MarkResponseDelivered(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM pending_responses WHERE id = ?`, id)
+	return err
+}
+
+// IncrementResponseRetry bumps the retry count and sets exponential backoff.
+// Returns false if max retries exceeded (row deleted).
+// The SELECT + UPDATE/DELETE is wrapped in a transaction for atomicity.
+func (s *Store) IncrementResponseRetry(id int64) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var count int
+	err = tx.QueryRow(`SELECT retry_count FROM pending_responses WHERE id = ?`, id).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	count++
+	if count >= maxPendingRetries {
+		_, err := tx.Exec(`DELETE FROM pending_responses WHERE id = ?`, id)
+		if err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	}
+	// Exponential backoff: 60s, 120s, 240s, 480s
+	delaySec := 30 * (1 << count)
+	_, err = tx.Exec(`
+		UPDATE pending_responses
+		SET retry_count = ?, next_retry = datetime('now', '+' || ? || ' seconds')
+		WHERE id = ?`, count, delaySec, id)
+	if err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// CleanupExpiredResponses deletes pending responses older than the given hours.
+func (s *Store) CleanupExpiredResponses(hours int) (int, error) {
+	result, err := s.db.Exec(`
+		DELETE FROM pending_responses
+		WHERE created_at < datetime('now', '-' || ? || ' hours')`, hours)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
 }
 
 // ---------------------------------------------------------------------------

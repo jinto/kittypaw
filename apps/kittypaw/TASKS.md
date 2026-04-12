@@ -18,10 +18,17 @@ Plan: `.claude/plans/llm-resilience.md`
 - [x] Handle SSE error events in Claude `parseSSEStream` + tests (0 tokens, N tokens)
 - [x] Handle SSE error events in OpenAI `parseSSEStream` + tests (0 tokens, N tokens)
 
-## Plan 3: E2E Agent Loop Test ← 현재
+## Plan 3: E2E Agent Loop Test
 
 Plan: `.claude/plans/e2e-agent-loop.md`
 
 - [ ] Mock provider + test helper + TestE2ESimpleReturn
 - [ ] TestE2ESkillCall (Storage round-trip via sandbox → resolveSkillCall)
 - [ ] TestE2EErrorRetry (JS error → engine retry → success)
+
+## Plan 4: Channel SessionID + Response Retry ✅
+
+- [x] Map user_id to SessionID in all channel ChatPayloads (KakaoTalk, Telegram, Slack, Discord)
+- [x] Add pending_responses SQLite table + store CRUD (enqueue, dequeue, retry, cleanup)
+- [x] Wire retry loop into serve command (30s poll, exponential backoff, 24h expiry)
+- [x] Tests for SessionID mapping and pending response lifecycle

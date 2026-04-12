@@ -97,11 +97,15 @@ func (d *DiscordChannel) Start(ctx context.Context, eventCh chan<- core.Event) e
 	}
 }
 
-// SendResponse posts a message to the last active Discord channel via REST.
-func (d *DiscordChannel) SendResponse(ctx context.Context, agentID, response string) error {
-	d.mu.Lock()
-	ch := d.channelID
-	d.mu.Unlock()
+// SendResponse posts a message to the given Discord channel via REST.
+// Falls back to the most recently cached channel ID if chatID is empty.
+func (d *DiscordChannel) SendResponse(ctx context.Context, chatID, response string) error {
+	ch := chatID
+	if ch == "" {
+		d.mu.Lock()
+		ch = d.channelID
+		d.mu.Unlock()
+	}
 
 	if ch == "" {
 		return fmt.Errorf("discord: no channel to respond to")
@@ -200,9 +204,10 @@ func (d *DiscordChannel) handleMessage(ctx context.Context, data json.RawMessage
 	d.mu.Unlock()
 
 	payload := core.ChatPayload{
-		ChatID:   msg.ChannelID,
-		Text:     msg.Content,
-		FromName: msg.Author.Username,
+		ChatID:    msg.ChannelID,
+		Text:      msg.Content,
+		FromName:  msg.Author.Username,
+		SessionID: msg.Author.ID,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
