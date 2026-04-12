@@ -94,9 +94,8 @@ func TestE2ESimpleReturn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	// Sandbox JSON.stringify's the return value, so strings come back quoted.
-	if output != `"Hello from agent"` {
-		t.Errorf("output = %q, want %q", output, `"Hello from agent"`)
+	if output != "Hello from agent" {
+		t.Errorf("output = %q, want %q", output, "Hello from agent")
 	}
 }
 
@@ -163,8 +162,8 @@ func TestE2EErrorRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if output != `"recovered"` {
-		t.Errorf("output = %q, want %q", output, `"recovered"`)
+	if output != "recovered" {
+		t.Errorf("output = %q, want %q", output, "recovered")
 	}
 	// The LLM should have been called twice: once for the error, once for recovery.
 	if mock.callIdx != 2 {
