@@ -8,34 +8,34 @@ import (
 
 // Line-protocol tags written to stdout by the JS wrapper.
 const (
-	tagSkillCall = "__SKILL_CALL__:"
-	tagResult    = "__RESULT__:"
-	tagError     = "__ERROR__:"
+	tagSkillReq = "__SKILL_REQ__:"
+	tagResult   = "__RESULT__:"
+	tagError    = "__ERROR__:"
 )
 
 // skillPrimitives maps each skill name to its method set.
 // Every method becomes a global: e.g. Http.get(...), File.read(...).
 var skillPrimitives = map[string][]string{
-	"Http":      {"get", "post", "put", "delete", "patch", "head"},
-	"File":      {"read", "write", "append", "delete", "list", "exists", "mkdir"},
-	"Storage":   {"get", "set", "delete", "list"},
-	"Telegram":  {"send"},
-	"Slack":     {"send"},
-	"Discord":   {"send"},
-	"Shell":     {"exec"},
-	"Git":       {"status", "log", "diff", "add", "commit", "push", "pull"},
-	"Llm":       {"generate"},
-	"Memory":    {"search", "set", "get", "delete"},
-	"Todo":      {"list", "add", "update", "delete"},
-	"Env":       {"get"},
-	"Skill":     {"list", "run", "create", "disable"},
-	"Tts":       {"speak"},
-	"Image":     {"generate"},
-	"Vision":    {"analyze"},
-	"Mcp":       {"call"},
-	"Agent":     {"delegate"},
-	"Profile":   {"list", "switch", "create", "update"},
-	"Web":       {"search", "fetch"},
+	"Http":     {"get", "post", "put", "delete", "patch", "head"},
+	"File":     {"read", "write", "append", "delete", "list", "exists", "mkdir"},
+	"Storage":  {"get", "set", "delete", "list"},
+	"Telegram": {"send", "sendMessage", "sendVoice"},
+	"Slack":    {"send"},
+	"Discord":  {"send"},
+	"Shell":    {"exec"},
+	"Git":      {"status", "log", "diff", "add", "commit", "push", "pull"},
+	"Llm":      {"generate"},
+	"Memory":   {"search", "set", "get", "delete", "user"},
+	"Todo":     {"list", "add", "update", "delete"},
+	"Env":      {"get"},
+	"Skill":    {"list", "run", "create", "disable", "rollback"},
+	"Tts":      {"speak"},
+	"Image":    {"generate"},
+	"Vision":   {"analyze"},
+	"Mcp":      {"call"},
+	"Agent":    {"delegate"},
+	"Profile":  {"list", "switch", "create", "update"},
+	"Web":      {"search", "fetch"},
 }
 
 // orderedSkillNames ensures deterministic output order (Go maps iterate randomly).
@@ -52,26 +52,26 @@ var orderedSkillNames = []string{
 // buildWrapper generates the complete JS source that wraps user code.
 //
 // The wrapper:
-//  1. Defines each skill primitive as a global object whose methods
-//     serialise the call to stdout and return null.
-//  2. Injects `context` as a frozen global from the provided map.
-//  3. Wraps the user code in try/catch, emitting result or error.
+//  1. Defines a synchronous __callSkill helper that writes a tagged request
+//     to stdout and reads the JSON response from stdin (blocking).
+//  2. Defines each skill primitive as a global whose methods call __callSkill.
+//  3. Injects `context` as a frozen global from the provided map.
+//  4. Wraps the user code in try/catch, emitting result or error.
 func buildWrapper(userCode string, jsContext map[string]any) (string, error) {
 	var b strings.Builder
+
+	// --- runtime I/O helpers ---
+	// Detect Deno vs Node at runtime and provide synchronous stdin/stdout access.
+	b.WriteString(jsIOHelpers)
 
 	// --- skill stubs ---
 	for _, name := range orderedSkillNames {
 		methods := skillPrimitives[name]
 		b.WriteString(fmt.Sprintf("const %s = {\n", name))
 		for i, method := range methods {
-			// Each stub prints a tagged JSON line and returns null.
 			b.WriteString(fmt.Sprintf(
-				"  %s: function(...args) {\n"+
-					"    const line = JSON.stringify({skill:%q,method:%q,args});\n"+
-					"    console.log(%q + line);\n"+
-					"    return null;\n"+
-					"  }",
-				method, name, method, tagSkillCall,
+				"  %s: function(...args) { return __callSkill(%q, %q, args); }",
+				method, name, method,
 			))
 			if i < len(methods)-1 {
 				b.WriteByte(',')
@@ -88,10 +88,14 @@ func buildWrapper(userCode string, jsContext map[string]any) (string, error) {
 	}
 	b.WriteString(fmt.Sprintf("const context = Object.freeze(%s);\n\n", ctxJSON))
 
+	// Auto-return: if the code has no return statement, prepend return
+	// to the last non-empty line so bare expressions produce output.
+	wrappedCode := autoReturn(userCode)
+
 	// --- user code wrapped in try/catch ---
 	b.WriteString("try {\n")
 	b.WriteString("  const __result = (function(){\n")
-	b.WriteString(userCode)
+	b.WriteString(wrappedCode)
 	b.WriteByte('\n')
 	b.WriteString("  })();\n")
 	b.WriteString(fmt.Sprintf(
@@ -106,4 +110,76 @@ func buildWrapper(userCode string, jsContext map[string]any) (string, error) {
 	b.WriteString("}\n")
 
 	return b.String(), nil
+}
+
+// jsIOHelpers provides the synchronous I/O bridge for skill calls.
+// Detects Deno vs Node at runtime and uses the appropriate API.
+const jsIOHelpers = `const __isDeno = typeof Deno !== 'undefined';
+
+function __readLine() {
+  if (__isDeno) {
+    const buf = new Uint8Array(1);
+    let line = '';
+    while (true) {
+      const n = Deno.stdin.readSync(buf);
+      if (n === null || n === 0) return line;
+      if (buf[0] === 10) return line;
+      line += String.fromCharCode(buf[0]);
+    }
+  } else {
+    const __fs = require('fs');
+    const buf = Buffer.alloc(1);
+    let line = '';
+    while (true) {
+      try {
+        const n = __fs.readSync(0, buf, 0, 1);
+        if (n === 0) return line;
+      } catch { return line; }
+      if (buf[0] === 10) return line;
+      line += String.fromCharCode(buf[0]);
+    }
+  }
+}
+
+function __writeOut(s) {
+  if (__isDeno) {
+    Deno.stdout.writeSync(new TextEncoder().encode(s));
+  } else {
+    const __fs = require('fs');
+    __fs.writeSync(1, s);
+  }
+}
+
+function __callSkill(skill, method, args) {
+  const req = JSON.stringify({skill, method, args});
+  __writeOut("` + tagSkillReq + `" + req + "\n");
+  const resp = __readLine();
+  try { return JSON.parse(resp); } catch { return null; }
+}
+
+`
+
+// autoReturn adds "return" to the last expression when the code contains no
+// return statement. This handles the common case where the LLM produces a
+// bare expression like `"hello"` or `4` instead of `return "hello"`.
+func autoReturn(code string) string {
+	if strings.Contains(code, "return ") || strings.Contains(code, "return;") {
+		return code
+	}
+	lines := strings.Split(strings.TrimRight(code, " \n\t"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || trimmed == "}" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		// Don't prepend return to statements that can't be expressions.
+		for _, kw := range []string{"throw ", "if ", "if(", "for ", "for(", "while ", "while(", "switch ", "switch(", "try ", "try{", "const ", "let ", "var "} {
+			if strings.HasPrefix(trimmed, kw) {
+				return code
+			}
+		}
+		lines[i] = strings.Replace(lines[i], trimmed, "return "+trimmed, 1)
+		return strings.Join(lines, "\n")
+	}
+	return code
 }
