@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +19,8 @@ import (
 const (
 	openAIDefaultBaseURL = "https://api.openai.com/v1/chat/completions"
 	openAIDefaultWindow  = 128_000
+	openAIMaxRetries     = 3
+	openAIBaseDelay      = 1 * time.Second
 )
 
 // OpenAIProvider implements Provider for the OpenAI Chat Completions API.
@@ -92,30 +96,72 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, messages []core.Llm
 		return nil, fmt.Errorf("openai: marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL, bytes.NewReader(payload))
+	resp, err := o.doWithRetry(ctx, payload)
 	if err != nil {
-		return nil, fmt.Errorf("openai: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if o.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+o.apiKey)
-	}
-
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("openai: http request: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai: API error %d: %s", resp.StatusCode, string(body))
-	}
 
 	if streaming {
 		return o.parseSSEStream(resp.Body, onToken)
 	}
 	return o.parseJSONResponse(resp.Body)
+}
+
+func (o *OpenAIProvider) newRequest(ctx context.Context, payload []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if o.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	}
+	return req, nil
+}
+
+// doWithRetry executes the HTTP request with exponential backoff + jitter on
+// 429 (rate limit) and 503 (service unavailable) responses.
+func (o *OpenAIProvider) doWithRetry(ctx context.Context, payload []byte) (*http.Response, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= openAIMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(float64(openAIBaseDelay) * math.Pow(2, float64(attempt-1)) * (0.5 + rand.Float64()))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		req, err := o.newRequest(ctx, payload)
+		if err != nil {
+			return nil, fmt.Errorf("openai: build request: %w", err)
+		}
+
+		resp, err := o.client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("openai: http request: %w", err)
+			continue
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("openai: server returned %d", resp.StatusCode)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("openai: API error %d: %s", resp.StatusCode, string(body))
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("openai: retries exhausted: %w", lastErr)
 }
 
 // openAIMessage is the wire format for the Chat Completions API.
@@ -187,6 +233,13 @@ func (o *OpenAIProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 //   data: {"choices":[{"delta":{"content":"token"}}]}
 //   data: [DONE]
 
+type openAIStreamError struct {
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+}
+
 type openAIStreamChunk struct {
 	Choices []struct {
 		Delta struct {
@@ -202,6 +255,7 @@ type openAIStreamChunk struct {
 
 func (o *OpenAIProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Response, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
 	var (
 		content      strings.Builder
@@ -220,6 +274,14 @@ func (o *OpenAIProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			break
+		}
+
+		var se openAIStreamError
+		if err := json.Unmarshal([]byte(data), &se); err == nil && se.Error != nil {
+			if n := content.Len(); n > 0 {
+				return nil, fmt.Errorf("openai: stream error (%s): %s [%d bytes received]", se.Error.Type, se.Error.Message, n)
+			}
+			return nil, fmt.Errorf("openai: stream error (%s): %s", se.Error.Type, se.Error.Message)
 		}
 
 		var chunk openAIStreamChunk
