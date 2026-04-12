@@ -118,6 +118,58 @@ func TestOpenAISSEStreamNilCallback(t *testing.T) {
 	}
 }
 
+func TestOpenAISSEErrorAfterZeroTokens(t *testing.T) {
+	sseBody := sseLines(
+		`data: {"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+	)
+
+	_, err := (&OpenAIProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err == nil {
+		t.Fatal("expected error from SSE error event")
+	}
+	if !strings.Contains(err.Error(), "Rate limit exceeded") {
+		t.Errorf("err = %q, want to contain 'Rate limit exceeded'", err.Error())
+	}
+}
+
+func TestOpenAISSEErrorAfterPartialContent(t *testing.T) {
+	sseBody := sseLines(
+		`data: {"choices":[{"delta":{"content":"Hello"}}],"model":"gpt-4"}`,
+		"",
+		`data: {"error":{"message":"Server error","type":"server_error","code":"server_error"}}`,
+	)
+
+	_, err := (&OpenAIProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err == nil {
+		t.Fatal("expected error from SSE error event after partial content")
+	}
+	if !strings.Contains(err.Error(), "Server error") {
+		t.Errorf("err = %q, want to contain 'Server error'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "5 bytes") {
+		t.Errorf("err = %q, want to contain '5 bytes' (partial content length)", err.Error())
+	}
+}
+
+func TestOpenAISSEStreamLargeEvent(t *testing.T) {
+	// A chunk with a ~200KB content payload must parse correctly
+	// (exceeds the default 64KB bufio.Scanner limit).
+	bigText := strings.Repeat("y", 200_000)
+	sseBody := sseLines(
+		fmt.Sprintf(`data: {"choices":[{"delta":{"content":"%s"}}],"model":"gpt-4"}`, bigText),
+		"",
+		"data: [DONE]",
+	)
+
+	resp, err := (&OpenAIProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream(large event) error: %v", err)
+	}
+	if len(resp.Content) != 200_000 {
+		t.Errorf("Content length = %d, want 200000", len(resp.Content))
+	}
+}
+
 func TestOpenAIStreamOptionsPresent(t *testing.T) {
 	// When baseURL is the default OpenAI URL, stream_options must be present.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +240,103 @@ func TestOpenAIStreamOptionsAbsentForOllama(t *testing.T) {
 	// stream itself should still be true
 	if body["stream"] != true {
 		t.Error("stream should be true even for Ollama")
+	}
+}
+
+func TestOpenAIRetryOn429(t *testing.T) {
+	attempts := 0
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1},"model":"gpt-4"}`)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() after retries error: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("Content = %q, want %q", resp.Content, "ok")
+	}
+	if attempts != 3 {
+		t.Errorf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestOpenAIRetryOn503(t *testing.T) {
+	attempts := 0
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1},"model":"gpt-4"}`)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() after 503 retry error: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("Content = %q, want %q", resp.Content, "ok")
+	}
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestOpenAIRetryExhausted(t *testing.T) {
+	attempts := 0
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	defer srv.Close()
+
+	_, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err == nil {
+		t.Fatal("expected error after retry exhaustion")
+	}
+	if !strings.Contains(err.Error(), "retries exhausted") {
+		t.Errorf("err = %q, want to contain 'retries exhausted'", err.Error())
+	}
+	// 1 initial + 3 retries = 4 attempts
+	if attempts != 4 {
+		t.Errorf("attempts = %d, want 4", attempts)
+	}
+}
+
+func TestOpenAIRetryCancelledContext(t *testing.T) {
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := p.Generate(ctx, []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 

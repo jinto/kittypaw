@@ -149,6 +149,79 @@ func TestClaudeSSEStreamNilCallback(t *testing.T) {
 	}
 }
 
+func TestClaudeSSEStreamLargeEvent(t *testing.T) {
+	// A content_block_delta with a ~200KB text payload must parse correctly
+	// (exceeds the default 64KB bufio.Scanner limit).
+	bigText := strings.Repeat("x", 200_000)
+	sseBody := sseLines(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"model":"test","usage":{"input_tokens":1}}}`,
+		"",
+		"event: content_block_delta",
+		fmt.Sprintf(`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}`, bigText),
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","usage":{"output_tokens":1}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	resp, err := (&ClaudeProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream(large event) error: %v", err)
+	}
+	if len(resp.Content) != 200_000 {
+		t.Errorf("Content length = %d, want 200000", len(resp.Content))
+	}
+}
+
+func TestClaudeSSEErrorAfterZeroTokens(t *testing.T) {
+	sseBody := sseLines(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"model":"test","usage":{"input_tokens":1}}}`,
+		"",
+		"event: error",
+		`data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+	)
+
+	_, err := (&ClaudeProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err == nil {
+		t.Fatal("expected error from SSE error event")
+	}
+	if !strings.Contains(err.Error(), "overloaded_error") {
+		t.Errorf("err = %q, want to contain 'overloaded_error'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Overloaded") {
+		t.Errorf("err = %q, want to contain 'Overloaded'", err.Error())
+	}
+}
+
+func TestClaudeSSEErrorAfterPartialContent(t *testing.T) {
+	sseBody := sseLines(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"model":"test","usage":{"input_tokens":1}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`,
+		"",
+		"event: error",
+		`data: {"type":"error","error":{"type":"server_error","message":"Internal error"}}`,
+	)
+
+	_, err := (&ClaudeProvider{}).parseSSEStream(strings.NewReader(sseBody), nil)
+	if err == nil {
+		t.Fatal("expected error from SSE error event after partial content")
+	}
+	if !strings.Contains(err.Error(), "server_error") {
+		t.Errorf("err = %q, want to contain 'server_error'", err.Error())
+	}
+	// Error should mention partial bytes received for debugging.
+	if !strings.Contains(err.Error(), "5 bytes") {
+		t.Errorf("err = %q, want to contain '5 bytes' (partial content length)", err.Error())
+	}
+}
+
 func TestClaudeSystemMessageSplit(t *testing.T) {
 	var receivedBody string
 	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +273,29 @@ func TestClaudeRetryOn429(t *testing.T) {
 	}
 	if attempts != 3 {
 		t.Errorf("attempts = %d, want 3", attempts)
+	}
+}
+
+func TestClaudeRetryCancelledContext(t *testing.T) {
+	// A cancelled context during backoff must return ctx.Err() promptly,
+	// not block until the full delay elapses.
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately so the first backoff sleep is interrupted.
+	cancel()
+
+	_, err := p.Generate(ctx, []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if err != context.Canceled {
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
 

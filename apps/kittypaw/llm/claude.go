@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -166,7 +167,7 @@ func (c *ClaudeProvider) doWithRetry(ctx context.Context, payload []byte) (*http
 
 	for attempt := 0; attempt <= claudeMaxRetries; attempt++ {
 		if attempt > 0 {
-			delay := time.Duration(float64(claudeBaseDelay) * math.Pow(2, float64(attempt-1)))
+			delay := time.Duration(float64(claudeBaseDelay) * math.Pow(2, float64(attempt-1)) * (0.5 + rand.Float64()))
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -244,6 +245,13 @@ func (c *ClaudeProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 //   event: message_delta         -> extract usage
 //   event: message_start         -> extract model + initial usage
 
+type sseError struct {
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 type sseContentDelta struct {
 	Delta struct {
 		Text string `json:"text"`
@@ -267,6 +275,7 @@ type sseMessageDelta struct {
 
 func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Response, error) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
 	var (
 		content      strings.Builder
@@ -312,6 +321,15 @@ func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 			var md sseMessageDelta
 			if err := json.Unmarshal([]byte(data), &md); err == nil {
 				outputTokens = md.Usage.OutputTokens
+			}
+
+		case "error":
+			var se sseError
+			if err := json.Unmarshal([]byte(data), &se); err == nil {
+				if n := content.Len(); n > 0 {
+					return nil, fmt.Errorf("claude: stream error (%s): %s [%d bytes received]", se.Error.Type, se.Error.Message, n)
+				}
+				return nil, fmt.Errorf("claude: stream error (%s): %s", se.Error.Type, se.Error.Message)
 			}
 		}
 	}
