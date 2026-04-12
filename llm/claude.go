@@ -30,22 +30,45 @@ type ClaudeProvider struct {
 	model         string
 	maxTokens     int
 	contextWindow int
+	baseURL       string
 	client        *http.Client
 }
 
+// ClaudeOption is a functional option for NewClaude.
+type ClaudeOption func(*ClaudeProvider)
+
+// WithClaudeHTTPClient overrides the default HTTP client.
+func WithClaudeHTTPClient(c *http.Client) ClaudeOption {
+	return func(p *ClaudeProvider) {
+		p.client = c
+	}
+}
+
+// WithClaudeBaseURL overrides the default Anthropic API endpoint.
+func WithClaudeBaseURL(url string) ClaudeOption {
+	return func(p *ClaudeProvider) {
+		p.baseURL = url
+	}
+}
+
 // NewClaude creates a ClaudeProvider for the given model.
-func NewClaude(apiKey, model string, maxTokens int) *ClaudeProvider {
+func NewClaude(apiKey, model string, maxTokens int, opts ...ClaudeOption) *ClaudeProvider {
 	window := claudeFallbackWindow
 	if isLargeContextModel(model) {
 		window = claudeDefaultWindow
 	}
-	return &ClaudeProvider{
+	p := &ClaudeProvider{
 		apiKey:        apiKey,
 		model:         model,
 		maxTokens:     maxTokens,
 		contextWindow: window,
+		baseURL:       claudeBaseURL,
 		client:        &http.Client{Timeout: 5 * time.Minute},
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // ContextWindow returns the model's context window size in tokens.
@@ -126,7 +149,7 @@ func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage,
 }
 
 func (c *ClaudeProvider) newRequest(ctx context.Context, payload []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, claudeBaseURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +303,7 @@ func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 			if err := json.Unmarshal([]byte(data), &delta); err == nil {
 				text := delta.Delta.Text
 				content.WriteString(text)
-				if text != "" {
+				if text != "" && onToken != nil {
 					onToken(text)
 				}
 			}
