@@ -1,55 +1,27 @@
 package sandbox
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/dop251/goja"
 	"github.com/jinto/gopaw/core"
 )
 
-// run executes JS code in a subprocess using pipe-based I/O.
-// Skill calls are resolved synchronously via stdin/stdout protocol:
-// the JS stub writes a tagged request to stdout and blocks reading stdin;
-// the host reads the request, resolves it through the resolver, and writes
-// the JSON response back to stdin.
+// run executes JS code in an in-process goja VM.
+// Skill calls are resolved synchronously: the JS stub calls a Go function
+// that invokes the resolver and returns the result directly.
 func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map[string]any, resolver SkillResolver) (*core.ExecutionResult, error) {
 	if jsContext == nil {
 		jsContext = map[string]any{}
 	}
 
-	wrapper, err := buildWrapper(code, jsContext)
-	if err != nil {
-		return nil, fmt.Errorf("build wrapper: %w", err)
-	}
+	vm := goja.New()
 
-	// Write the wrapper to a temp file.
-	tmpDir, err := os.MkdirTemp("", "gopaw-sandbox-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	scriptPath := filepath.Join(tmpDir, "run.js")
-	if err := os.WriteFile(scriptPath, []byte(wrapper), 0o600); err != nil {
-		return nil, fmt.Errorf("write script: %w", err)
-	}
-
-	// Choose runtime: deno first, then node.
-	runtime, args := pickRuntime(scriptPath)
-	if runtime == "" {
-		return nil, fmt.Errorf("no JavaScript runtime found: install deno or node")
-	}
-
-	// Apply timeout from config (default 30s).
+	// --- timeout ---
 	timeout := time.Duration(cfg.TimeoutSecs) * time.Second
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -57,139 +29,114 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, runtime, args...)
-	cmd.Dir = tmpDir
-
-	stdinPipe, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-
-	// Capture stderr separately (JS error stack traces, runtime warnings).
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start subprocess: %w", err)
-	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			vm.Interrupt("execution timed out")
+		case <-done:
+		}
+	}()
+	defer close(done)
 
 	result := &core.ExecutionResult{Success: true}
-	var otherLines []string
 
-	// Process stdout line-by-line, resolving skill calls inline.
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // up to 1MB lines
+	// --- console.log capture ---
+	var consoleLogs []string
+	console := vm.NewObject()
+	console.Set("log", func(call goja.FunctionCall) goja.Value {
+		parts := make([]string, len(call.Arguments))
+		for i, arg := range call.Arguments {
+			parts[i] = arg.String()
+		}
+		consoleLogs = append(consoleLogs, strings.Join(parts, " "))
+		return goja.Undefined()
+	})
+	vm.Set("console", console)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		switch {
-		case strings.HasPrefix(line, tagSkillReq):
-			payload := strings.TrimPrefix(line, tagSkillReq)
-			var sc wireSkillCall
-			if err := json.Unmarshal([]byte(payload), &sc); err != nil {
-				stdinPipe.Write([]byte("null\n"))
-				continue
-			}
-			call := sc.toCore()
-			result.SkillCalls = append(result.SkillCalls, call)
-
-			// Resolve the skill call and send the result back.
-			resp := "null"
-			if resolver != nil {
-				if out, err := resolver(ctx, call); err == nil && out != "" {
-					resp = out
-				} else if err != nil {
-					slog.Debug("skill resolver error", "skill", call.SkillName, "method", call.Method, "error", err)
+	// --- skill stubs ---
+	for _, skill := range core.SkillRegistry {
+		obj := vm.NewObject()
+		skillName := skill.Name
+		for _, method := range skill.Methods {
+			methodName := method.Name
+			obj.Set(methodName, func(call goja.FunctionCall) goja.Value {
+				rawArgs := make([]json.RawMessage, len(call.Arguments))
+				for i, arg := range call.Arguments {
+					exported := arg.Export()
+					b, err := json.Marshal(exported)
+					if err != nil {
+						rawArgs[i] = json.RawMessage("null")
+					} else {
+						rawArgs[i] = b
+					}
 				}
-			}
-			stdinPipe.Write([]byte(resp + "\n"))
+				sc := core.SkillCall{
+					SkillName: skillName,
+					Method:    methodName,
+					Args:      rawArgs,
+				}
+				result.SkillCalls = append(result.SkillCalls, sc)
 
-		case strings.HasPrefix(line, tagResult):
-			result.Output = strings.TrimPrefix(line, tagResult)
+				if resolver != nil {
+					resp, err := resolver(ctx, sc)
+					if err == nil && resp != "" {
+						var parsed any
+						if json.Unmarshal([]byte(resp), &parsed) == nil {
+							return vm.ToValue(parsed)
+						}
+					}
+				}
+				return goja.Null()
+			})
+		}
+		vm.Set(skillName, obj)
+	}
 
-		case strings.HasPrefix(line, tagError):
+	// --- inject context ---
+	vm.Set("context", jsContext)
+
+	// --- execute ---
+	wrapped := autoReturn(code)
+	script := fmt.Sprintf("(function(){\n%s\n})()", wrapped)
+
+	val, err := vm.RunString(script)
+
+	if err != nil {
+		// goja wraps JS exceptions in *goja.Exception.
+		if ex, ok := err.(*goja.Exception); ok {
 			result.Success = false
-			result.Error = strings.TrimPrefix(line, tagError)
-
-		default:
-			if t := strings.TrimSpace(line); t != "" {
-				otherLines = append(otherLines, t)
-			}
-		}
-	}
-
-	stdinPipe.Close()
-	execErr := cmd.Wait()
-
-	// Append untagged console.log output.
-	if len(otherLines) > 0 {
-		extra := strings.Join(otherLines, "\n")
-		if result.Output == "" {
-			result.Output = extra
-		} else {
-			result.Output = extra + "\n" + result.Output
-		}
-	}
-
-	// Stderr may contain stack traces from uncaught errors.
-	if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" && result.Error == "" {
-		result.Success = false
-		result.Error = stderr
-	}
-
-	// Process-level failure (timeout, signal, non-zero exit).
-	if execErr != nil && result.Error == "" {
-		result.Success = false
-		if ctx.Err() == context.DeadlineExceeded {
+			result.Error = ex.Value().String()
+		} else if err.Error() == "execution timed out" || ctx.Err() != nil {
+			result.Success = false
 			result.Error = "execution timed out"
 		} else {
-			result.Error = execErr.Error()
+			result.Success = false
+			result.Error = err.Error()
 		}
+		if len(consoleLogs) > 0 {
+			result.Output = strings.Join(consoleLogs, "\n")
+		}
+		return result, nil
+	}
+
+	// --- build output ---
+	var jsonResult string
+	if val != nil && !goja.IsUndefined(val) && !goja.IsNull(val) {
+		exported := val.Export()
+		b, marshalErr := json.Marshal(exported)
+		if marshalErr == nil {
+			jsonResult = string(b)
+		}
+	}
+
+	if len(consoleLogs) > 0 && jsonResult != "" {
+		result.Output = strings.Join(consoleLogs, "\n") + "\n" + jsonResult
+	} else if len(consoleLogs) > 0 {
+		result.Output = strings.Join(consoleLogs, "\n")
+	} else {
+		result.Output = jsonResult
 	}
 
 	return result, nil
-}
-
-// pickRuntime returns the binary name and arguments for running a JS file.
-// Prefers deno for its built-in permission model; falls back to node.
-func pickRuntime(scriptPath string) (string, []string) {
-	if p, err := exec.LookPath("deno"); err == nil {
-		return p, []string{
-			"run", "--no-prompt",
-			"--deny-net", "--deny-env", "--deny-run",
-			"--deny-write", "--deny-read", "--deny-ffi",
-			scriptPath,
-		}
-	}
-	if p, err := exec.LookPath("node"); err == nil {
-		slog.Warn("sandbox: using node (no process isolation) — install deno for secure sandboxing")
-		return p, []string{scriptPath}
-	}
-	return "", nil
-}
-
-// wireSkillCall matches the JSON shape emitted by the JS stubs.
-type wireSkillCall struct {
-	Skill  string        `json:"skill"`
-	Method string        `json:"method"`
-	Args   []interface{} `json:"args"`
-}
-
-func (w wireSkillCall) toCore() core.SkillCall {
-	rawArgs := make([]json.RawMessage, 0, len(w.Args))
-	for _, a := range w.Args {
-		if b, err := json.Marshal(a); err == nil {
-			rawArgs = append(rawArgs, b)
-		}
-	}
-	return core.SkillCall{
-		SkillName: w.Skill,
-		Method:    w.Method,
-		Args:      rawArgs,
-	}
 }

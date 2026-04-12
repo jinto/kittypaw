@@ -2,33 +2,13 @@ package sandbox
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/jinto/gopaw/core"
 )
 
-func hasRuntime() bool {
-	if _, err := exec.LookPath("deno"); err == nil {
-		return true
-	}
-	if _, err := exec.LookPath("node"); err == nil {
-		return true
-	}
-	return false
-}
-
-func skipWithoutRuntime(t *testing.T) {
-	t.Helper()
-	if !hasRuntime() {
-		t.Skip("no JS runtime (deno or node) available")
-	}
-}
-
 func TestExecuteSimpleReturn(t *testing.T) {
-	skipWithoutRuntime(t)
-
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	result, err := sb.Execute(context.Background(), `return 1 + 2;`, nil)
 	if err != nil {
@@ -43,7 +23,7 @@ func TestExecuteSimpleReturn(t *testing.T) {
 }
 
 func TestExecuteConsoleLog(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	result, err := sb.Execute(context.Background(), `console.log("hello world");`, nil)
@@ -59,7 +39,7 @@ func TestExecuteConsoleLog(t *testing.T) {
 }
 
 func TestExecuteSkillCall(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	code := `
@@ -93,7 +73,7 @@ func TestExecuteSkillCall(t *testing.T) {
 }
 
 func TestExecuteWithContext(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	jsCtx := map[string]any{"user": "alice", "count": 42}
@@ -111,7 +91,7 @@ func TestExecuteWithContext(t *testing.T) {
 }
 
 func TestExecuteError(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	result, err := sb.Execute(context.Background(), `throw new Error("boom");`, nil)
@@ -127,7 +107,7 @@ func TestExecuteError(t *testing.T) {
 }
 
 func TestExecuteWithResolver(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	var resolved []core.SkillCall
@@ -159,23 +139,8 @@ func TestExecuteWithResolver(t *testing.T) {
 	}
 }
 
-func TestBuildWrapperDeterministic(t *testing.T) {
-	// buildWrapper should produce identical output on repeated calls.
-	a, err := buildWrapper("return 1;", map[string]any{"x": 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := buildWrapper("return 1;", map[string]any{"x": 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a != b {
-		t.Error("buildWrapper produced non-deterministic output")
-	}
-}
-
 func TestSynchronousResolver(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 
@@ -203,7 +168,7 @@ func TestSynchronousResolver(t *testing.T) {
 }
 
 func TestAutoReturn(t *testing.T) {
-	skipWithoutRuntime(t)
+
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	// Code without return — autoReturn should add it.
