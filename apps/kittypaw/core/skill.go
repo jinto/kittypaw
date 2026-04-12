@@ -119,6 +119,9 @@ func SaveSkill(skill *Skill, jsCode string) error {
 
 // LoadSkill loads a single skill by name. Returns nil, nil if not found.
 func LoadSkill(name string) (*Skill, string, error) {
+	if err := ValidateSkillName(name); err != nil {
+		return nil, "", err
+	}
 	dir, err := SkillsDir()
 	if err != nil {
 		return nil, "", err
@@ -163,6 +166,9 @@ type SkillWithCode struct {
 
 // DisableSkill sets enabled=false for a skill on disk.
 func DisableSkill(name string) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
 	skill, code, err := LoadSkill(name)
 	if err != nil {
 		return err
@@ -176,6 +182,9 @@ func DisableSkill(name string) error {
 
 // DeleteSkill removes a skill directory entirely.
 func DeleteSkill(name string) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
 	dir, err := SkillsDir()
 	if err != nil {
 		return err
@@ -185,6 +194,9 @@ func DeleteSkill(name string) error {
 
 // RollbackSkill restores the most recent archived version of a skill.
 func RollbackSkill(name string) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
 	dir, err := SkillsDir()
 	if err != nil {
 		return err

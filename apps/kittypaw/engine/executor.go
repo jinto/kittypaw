@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jinto/gopaw/core"
 )
@@ -146,7 +147,7 @@ func validateHTTPTarget(urlStr string, allowedHosts []string) error {
 
 func webSearch(ctx context.Context, query string) (string, error) {
 	// Use DuckDuckGo HTML search as a free search backend
-	url := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", strings.ReplaceAll(query, " ", "+"))
+	url := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
@@ -542,7 +543,7 @@ func executeTodo(_ context.Context, call core.SkillCall, s *Session) (string, er
 		}
 		var text string
 		json.Unmarshal(call.Args[0], &text)
-		id := fmt.Sprintf("todo-%d", len(text)%10000+int(core.NowTimestamp()[len(core.NowTimestamp())-4:][0]))
+		id := fmt.Sprintf("todo-%d", time.Now().UnixNano())
 		if err := s.Store.StorageSet(ns, id, text); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -827,7 +828,7 @@ func isPathAllowed(path string, allowedPaths []string) bool {
 		if resolved, err := filepath.EvalSymlinks(absAllowed); err == nil {
 			absAllowed = resolved
 		}
-		if strings.HasPrefix(absPath, absAllowed) {
+		if absPath == absAllowed || strings.HasPrefix(absPath, absAllowed+string(filepath.Separator)) {
 			return true
 		}
 	}

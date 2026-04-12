@@ -17,14 +17,6 @@ const (
 	AutonomyFull       AutonomyLevel = "full"
 )
 
-// ModelRoutingTier classifies models by purpose.
-type ModelRoutingTier string
-
-const (
-	TierAutomation ModelRoutingTier = "automation"
-	TierAnalysis   ModelRoutingTier = "analysis"
-)
-
 // ChannelType identifies a messaging channel backend.
 type ChannelType string
 
@@ -77,7 +69,7 @@ type ModelConfig struct {
 	Default       bool              `toml:"default"`
 	BaseURL       string            `toml:"base_url"`
 	ContextWindow uint32            `toml:"context_window"`
-	Tier          *ModelRoutingTier `toml:"tier"`
+	Tier          *ModelTier        `toml:"tier"`
 }
 
 // SandboxConfig controls the JavaScript execution sandbox.
