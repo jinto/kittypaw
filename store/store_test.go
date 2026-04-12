@@ -26,8 +26,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 14 {
-		t.Fatalf("expected 14 migrations, got %d", count)
+	if count != 15 {
+		t.Fatalf("expected 15 migrations, got %d", count)
 	}
 }
 
@@ -673,6 +673,136 @@ func TestScheduling(t *testing.T) {
 	fc, _ = st.GetFailureCount("cron-skill")
 	if fc != 0 {
 		t.Errorf("failure count after reset: got %d, want 0", fc)
+	}
+}
+
+func TestPendingResponsesRoundTrip(t *testing.T) {
+	st := openTestStore(t)
+
+	// Empty queue returns nil.
+	pending, err := st.DequeuePendingResponses(10)
+	if err != nil {
+		t.Fatalf("dequeue empty: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("expected 0, got %d", len(pending))
+	}
+
+	// Enqueue two responses.
+	if err := st.EnqueueResponse("telegram", "chat-1", "Hello!"); err != nil {
+		t.Fatalf("enqueue 1: %v", err)
+	}
+	if err := st.EnqueueResponse("slack", "chat-2", "World!"); err != nil {
+		t.Fatalf("enqueue 2: %v", err)
+	}
+
+	// Dequeue returns both (next_retry defaults to now).
+	pending, err = st.DequeuePendingResponses(10)
+	if err != nil {
+		t.Fatalf("dequeue: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("expected 2, got %d", len(pending))
+	}
+	if pending[0].EventType != "telegram" || pending[0].ChatID != "chat-1" || pending[0].Response != "Hello!" {
+		t.Errorf("pending[0] mismatch: %+v", pending[0])
+	}
+	if pending[1].EventType != "slack" || pending[1].Response != "World!" {
+		t.Errorf("pending[1] mismatch: %+v", pending[1])
+	}
+
+	// MarkResponseDelivered removes entry.
+	if err := st.MarkResponseDelivered(pending[0].ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	remaining, _ := st.DequeuePendingResponses(10)
+	if len(remaining) != 1 {
+		t.Fatalf("expected 1 after delivery, got %d", len(remaining))
+	}
+}
+
+func TestPendingResponseRetryIncrement(t *testing.T) {
+	st := openTestStore(t)
+
+	st.EnqueueResponse("discord", "ch-1", "retry-me")
+	pending, _ := st.DequeuePendingResponses(1)
+	id := pending[0].ID
+
+	// First retry: kept=true, retry_count becomes 1.
+	kept, err := st.IncrementResponseRetry(id)
+	if err != nil {
+		t.Fatalf("increment 1: %v", err)
+	}
+	if !kept {
+		t.Fatal("expected kept=true on first retry")
+	}
+
+	// Manually reset next_retry so we can dequeue again.
+	st.db.Exec(`UPDATE pending_responses SET next_retry = datetime('now') WHERE id = ?`, id)
+
+	pending, _ = st.DequeuePendingResponses(1)
+	if len(pending) != 1 || pending[0].RetryCount != 1 {
+		t.Fatalf("expected retry_count=1, got %+v", pending)
+	}
+}
+
+func TestPendingResponseMaxRetries(t *testing.T) {
+	st := openTestStore(t)
+
+	st.EnqueueResponse("kakao_talk", "ch-1", "will-expire")
+	pending, _ := st.DequeuePendingResponses(1)
+	id := pending[0].ID
+
+	// Exhaust retries (maxPendingRetries = 5).
+	for i := 0; i < maxPendingRetries-1; i++ {
+		kept, err := st.IncrementResponseRetry(id)
+		if err != nil {
+			t.Fatalf("increment %d: %v", i, err)
+		}
+		if !kept {
+			t.Fatalf("expected kept=true at retry %d", i)
+		}
+		// Reset next_retry for next dequeue.
+		st.db.Exec(`UPDATE pending_responses SET next_retry = datetime('now') WHERE id = ?`, id)
+	}
+
+	// Final retry should delete the row.
+	kept, err := st.IncrementResponseRetry(id)
+	if err != nil {
+		t.Fatalf("final increment: %v", err)
+	}
+	if kept {
+		t.Fatal("expected kept=false after max retries")
+	}
+
+	// Row should be gone.
+	remaining, _ := st.DequeuePendingResponses(10)
+	if len(remaining) != 0 {
+		t.Fatalf("expected 0 after max retries, got %d", len(remaining))
+	}
+}
+
+func TestCleanupExpiredResponses(t *testing.T) {
+	st := openTestStore(t)
+
+	// Insert a response with old timestamp.
+	st.db.Exec(`
+		INSERT INTO pending_responses (event_type, chat_id, response, created_at, next_retry)
+		VALUES ('web_chat', 'ch-1', 'old msg', datetime('now', '-25 hours'), datetime('now'))`)
+	st.EnqueueResponse("web_chat", "ch-2", "fresh msg")
+
+	n, err := st.CleanupExpiredResponses(24)
+	if err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 cleaned, got %d", n)
+	}
+
+	// Fresh one remains.
+	remaining, _ := st.DequeuePendingResponses(10)
+	if len(remaining) != 1 || remaining[0].Response != "fresh msg" {
+		t.Errorf("unexpected remaining: %+v", remaining)
 	}
 }
 

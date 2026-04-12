@@ -20,7 +20,8 @@ type Channel interface {
 	Start(ctx context.Context, eventCh chan<- core.Event) error
 
 	// SendResponse sends a text response back to the channel.
-	SendResponse(ctx context.Context, agentID, response string) error
+	// chatID identifies the destination (e.g., Telegram chat ID, Slack channel ID).
+	SendResponse(ctx context.Context, chatID, response string) error
 
 	// Name returns the channel identifier (e.g., "telegram", "slack").
 	Name() string

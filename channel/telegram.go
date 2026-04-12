@@ -57,6 +57,7 @@ type telegramChat struct {
 
 // telegramUser represents the sender of a message.
 type telegramUser struct {
+	ID        int64  `json:"id"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 	Username  string `json:"username"`
@@ -183,10 +184,17 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 
 			chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
 
+			// Use user ID as SessionID for per-user session continuity.
+			sessionID := chatIDStr
+			if msg.From != nil && msg.From.ID != 0 {
+				sessionID = strconv.FormatInt(msg.From.ID, 10)
+			}
+
 			payload := core.ChatPayload{
-				ChatID:   chatIDStr,
-				Text:     text,
-				FromName: fromName,
+				ChatID:    chatIDStr,
+				Text:      text,
+				FromName:  fromName,
+				SessionID: sessionID,
 			}
 			raw, err := json.Marshal(payload)
 			if err != nil {

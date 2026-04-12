@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -162,9 +163,18 @@ func runServe(_ *cobra.Command, _ []string) error {
 					"chat_id", payload.ChatID,
 					"error", err,
 				)
+				// Kakao uses ephemeral action IDs — retry is futile.
+				if event.Type != core.EventKakaoTalk {
+					if qErr := st.EnqueueResponse(string(event.Type), payload.ChatID, response); qErr != nil {
+						slog.Error("channel event: enqueue response failed", "error", qErr)
+					}
+				}
 			}
 		}
 	}()
+
+	// Background retry loop for failed response deliveries.
+	go retryPendingResponses(ctx, st, channels)
 
 	// Start HTTP server (blocks until shutdown signal).
 	slog.Info("gopaw serving", "bind", flagBind)
@@ -773,6 +783,59 @@ func runDaemonStatus(_ *cobra.Command, _ []string) error {
 		os.Remove(pidPath)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Response retry
+// ---------------------------------------------------------------------------
+
+// retryPendingResponses periodically retries failed response deliveries.
+func retryPendingResponses(ctx context.Context, st *store.Store, channels map[core.EventType]channel.Channel) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	cleanupTicker := time.NewTicker(1 * time.Hour)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pending, err := st.DequeuePendingResponses(10)
+			if err != nil {
+				slog.Warn("retry: dequeue failed", "error", err)
+				continue
+			}
+			for _, p := range pending {
+				ch, ok := channels[core.EventType(p.EventType)]
+				if !ok {
+					// Channel no longer configured — drop the entry.
+					_ = st.MarkResponseDelivered(p.ID)
+					continue
+				}
+				if err := ch.SendResponse(ctx, p.ChatID, p.Response); err != nil {
+					slog.Warn("retry: send failed",
+						"id", p.ID, "retry", p.RetryCount, "error", err)
+					if kept, rErr := st.IncrementResponseRetry(p.ID); rErr != nil {
+						slog.Error("retry: increment failed", "id", p.ID, "error", rErr)
+					} else if !kept {
+						slog.Warn("retry: max retries exceeded, dropping", "id", p.ID)
+					}
+				} else {
+					slog.Info("retry: delivered pending response",
+						"id", p.ID, "chat_id", p.ChatID)
+					_ = st.MarkResponseDelivered(p.ID)
+				}
+			}
+		case <-cleanupTicker.C:
+			if n, err := st.CleanupExpiredResponses(24); err != nil {
+				slog.Warn("retry: cleanup failed", "error", err)
+			} else if n > 0 {
+				slog.Info("retry: cleaned up expired responses", "count", n)
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -139,8 +139,9 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 		}
 
 		payload := core.ChatPayload{
-			ChatID: msg.ID,
-			Text:   msg.Text,
+			ChatID:    msg.ID,
+			Text:      msg.Text,
+			SessionID: msg.UserID,
 		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
