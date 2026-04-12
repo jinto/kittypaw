@@ -53,12 +53,40 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 
 // setupRoutes builds the full route tree. API routes live under /api/v1 and
 // are optionally gated by an API key. The WebSocket endpoint sits at /ws.
+// Setup and bootstrap endpoints are unauthenticated so the onboarding
+// wizard can run before an API key exists.
 func (s *Server) setupRoutes() chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(s.corsMiddleware)
+
+	// Bootstrap (unauthenticated — returns api_key + ws_url to the GUI).
+	r.Get("/api/bootstrap", s.handleBootstrap)
+
+	// Setup / onboarding routes (unauthenticated).
+	r.Route("/api/setup", func(r chi.Router) {
+		// Always accessible.
+		r.Get("/status", s.handleSetupStatus)
+		r.Get("/kakao/pair-status", s.handleSetupKakaoPairStatus)
+
+		// Localhost only.
+		r.Post("/reset", s.handleSetupReset)
+
+		// Guarded — localhost only, blocked after onboarding is complete.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireLocalhost)
+			r.Use(s.requireOnboardingIncomplete)
+			r.Post("/llm", s.handleSetupLlm)
+			r.Post("/telegram", s.handleSetupTelegram)
+			r.Post("/telegram/chat-id", s.handleSetupTelegramChatID)
+			r.Post("/kakao/register", s.handleSetupKakaoRegister)
+			r.Post("/workspace", s.handleSetupWorkspace)
+			r.Post("/http-access", s.handleSetupHttpAccess)
+			r.Post("/complete", s.handleSetupComplete)
+		})
+	})
 
 	r.Route("/api/v1", func(r chi.Router) {
 		if s.config.Server.APIKey != "" {
@@ -113,6 +141,9 @@ func (s *Server) setupRoutes() chi.Router {
 
 	// WebSocket sits outside /api/v1 — auth is done via query param or header.
 	r.HandleFunc("/ws", s.handleWebSocket)
+
+	// Static web assets with SPA fallback — must be last (catch-all).
+	r.Handle("/*", staticHandler())
 
 	return r
 }

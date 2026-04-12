@@ -29,9 +29,11 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // decodeBody deserialises the request body into dst and reports errors.
+// Limits request body to 1 MB to prevent memory exhaustion.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return false
 	}
 	return true
