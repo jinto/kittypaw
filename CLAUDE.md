@@ -8,7 +8,7 @@ Go port of KittyPaw — an AI agent framework with JavaScript sandbox execution,
 cmd/gopaw/     CLI binary (Cobra)
 core/          Types, config, skill management, WebSocket protocol
 llm/           LLM provider abstraction (Claude, OpenAI, Ollama)
-sandbox/       JavaScript execution sandbox (subprocess-based)
+sandbox/       JavaScript execution sandbox (in-process goja VM)
 store/         SQLite persistence with 14 migrations (WAL mode)
 engine/        Agent loop state machine, skill executor, compaction, scheduling
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
@@ -27,7 +27,7 @@ go build ./cmd/gopaw
 ## Key Design Decisions (vs Rust original)
 
 - **No CGO**: Uses `modernc.org/sqlite` (pure Go) instead of sqlite3
-- **Subprocess sandbox**: Uses `deno run` (or `node`) instead of fork+Seatbelt+QuickJS
+- **In-process sandbox**: Uses `goja` (pure Go JS engine) instead of fork+Seatbelt+QuickJS
 - **Official SDKs**: Raw HTTP for Anthropic/OpenAI APIs (with SSE streaming)
 - **Goroutines**: Replace tokio async with goroutines + channels
 - **Chi router**: Replaces Axum for HTTP routing
