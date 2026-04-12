@@ -57,6 +57,7 @@ type LLMConfig struct {
 	APIKey    string `toml:"api_key"`
 	Model     string `toml:"model"`
 	MaxTokens uint32 `toml:"max_tokens"`
+	BaseURL   string `toml:"base_url,omitempty"`
 }
 
 // ModelConfig defines an additional named model.

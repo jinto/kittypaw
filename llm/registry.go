@@ -75,7 +75,11 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 
 // NewProviderFromConfig creates a Provider from an LLMConfig.
 func NewProviderFromConfig(cfg core.LLMConfig) (Provider, error) {
-	return NewProvider(cfg.Provider, cfg.APIKey, cfg.Model, int(cfg.MaxTokens))
+	var opts []Option
+	if cfg.BaseURL != "" {
+		opts = append(opts, WithProviderBaseURL(cfg.BaseURL))
+	}
+	return NewProvider(cfg.Provider, cfg.APIKey, cfg.Model, int(cfg.MaxTokens), opts...)
 }
 
 // NewProviderFromModelConfig creates a Provider from a ModelConfig.

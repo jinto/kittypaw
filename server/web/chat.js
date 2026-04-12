@@ -1,0 +1,329 @@
+// GoPaw Chat Panel — WS streaming + permission modal + reconnect
+
+const Chat = {
+  ws: null,
+  container: null,
+  messagesEl: null,
+  inputEl: null,
+  sessionId: null,
+  currentBubble: null,
+  reconnectAttempts: 0,
+  maxReconnectAttempts: 10,
+  reconnectTimer: null,
+  busy: false,
+  permissionQueue: [],
+  permissionActive: false,
+
+  mount(container) {
+    this.container = container;
+    container.innerHTML = `
+      <div class="chat-container">
+        <div class="chat-status" id="chat-status"></div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-area">
+          <textarea class="chat-input" id="chat-input"
+            placeholder="Type a message..." rows="1"></textarea>
+          <button class="btn btn--primary btn--sm chat-send" id="chat-send">Send</button>
+        </div>
+      </div>
+      <div class="permission-overlay" id="perm-overlay" style="display:none">
+        <div class="permission-modal">
+          <h3>Permission Request</h3>
+          <p id="perm-desc"></p>
+          <p class="hint" id="perm-resource"></p>
+          <div class="flex gap-8 mt-16">
+            <button class="btn btn--primary btn--sm" id="perm-allow">Allow</button>
+            <button class="btn btn--ghost btn--sm" id="perm-deny">Deny</button>
+          </div>
+        </div>
+      </div>`;
+
+    this.messagesEl = document.getElementById('chat-messages');
+    this.inputEl = document.getElementById('chat-input');
+
+    document.getElementById('chat-send').addEventListener('click', () => this.send());
+    this.inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.send();
+      }
+    });
+    this.inputEl.addEventListener('input', () => this._autoResize());
+
+    document.getElementById('perm-allow').addEventListener('click', () => this._respondPermit(true));
+    document.getElementById('perm-deny').addEventListener('click', () => this._respondPermit(false));
+
+    this.connect();
+  },
+
+  connect() {
+    if (!App.wsUrl) {
+      // Construct from current location if no wsUrl from bootstrap.
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      App.wsUrl = `${proto}//${location.host}/ws`;
+    }
+
+    // Tear down any existing connection.
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.close();
+      this.ws = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.currentBubble = null;
+    this.busy = false;
+    this.permissionQueue = [];
+    this.permissionActive = false;
+
+    this._setStatus('connecting', 'Connecting...');
+
+    let url = App.wsUrl;
+    if (App.apiKey) {
+      url += `?token=${encodeURIComponent(App.apiKey)}`;
+    }
+    this.ws = new WebSocket(url);
+    this._bindWs();
+  },
+
+  _bindWs() {
+    this.ws.onopen = () => {
+      this.reconnectAttempts = 0;
+      this._setStatus('connected', 'Connected');
+      this.inputEl.disabled = false;
+    };
+
+    this.ws.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+      this._handleMessage(msg);
+    };
+
+    this.ws.onclose = () => {
+      this.inputEl.disabled = true;
+      this.sessionId = null;
+      this._setStatus('disconnected', 'Disconnected');
+      this._scheduleReconnect();
+    };
+
+    this.ws.onerror = () => {
+      this._setStatus('error', 'Connection error');
+    };
+  },
+
+  _handleMessage(msg) {
+    switch (msg.type) {
+      case 'session':
+        this.sessionId = msg.id;
+        break;
+
+      case 'token':
+        if (this.currentBubble) {
+          this.currentBubble._rawText = (this.currentBubble._rawText || '') + msg.text;
+          this.currentBubble.innerHTML = renderMarkdown(this.currentBubble._rawText);
+          this._scrollToBottom();
+        }
+        break;
+
+      case 'done':
+        if (this.currentBubble) {
+          this.currentBubble._rawText = msg.full_text;
+          this.currentBubble.innerHTML = renderMarkdown(msg.full_text);
+          this.currentBubble.classList.remove('streaming');
+          this.currentBubble = null;
+          this._scrollToBottom();
+        }
+        this.busy = false;
+        this.inputEl.disabled = false;
+        this.inputEl.focus();
+        break;
+
+      case 'error':
+        this._addSystemBubble(msg.message, 'error');
+        this.busy = false;
+        this.inputEl.disabled = false;
+        break;
+
+      case 'permission':
+        this.permissionQueue.push(msg);
+        if (!this.permissionActive) this._showNextPermission();
+        break;
+    }
+  },
+
+  send() {
+    const text = this.inputEl.value.trim();
+    if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN || this.busy) return;
+
+    this.busy = true;
+    this._addUserBubble(text);
+    this.currentBubble = this._addAssistantBubble();
+    this.inputEl.value = '';
+    this._autoResize();
+    this.inputEl.disabled = true;
+
+    this.ws.send(JSON.stringify({ type: 'chat', text }));
+  },
+
+  // ── UI helpers ────────────────────────────────────────
+
+  _addUserBubble(text) {
+    const el = document.createElement('div');
+    el.className = 'chat-bubble chat-bubble--user';
+    el.textContent = text;
+    this.messagesEl.appendChild(el);
+    this._scrollToBottom();
+  },
+
+  _addAssistantBubble() {
+    const el = document.createElement('div');
+    el.className = 'chat-bubble chat-bubble--assistant streaming';
+    el._rawText = '';
+    this.messagesEl.appendChild(el);
+    this._scrollToBottom();
+    return el;
+  },
+
+  _addSystemBubble(text, type) {
+    const el = document.createElement('div');
+    el.className = `chat-bubble chat-bubble--system ${type || ''}`;
+    el.textContent = text;
+    this.messagesEl.appendChild(el);
+    this._scrollToBottom();
+  },
+
+  _scrollToBottom() {
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  },
+
+  _autoResize() {
+    this.inputEl.style.height = 'auto';
+    this.inputEl.style.height = Math.min(this.inputEl.scrollHeight, 120) + 'px';
+  },
+
+  _setStatus(state, text) {
+    const el = document.getElementById('chat-status');
+    if (!el) return;
+    el.className = `chat-status chat-status--${state}`;
+    el.textContent = text;
+  },
+
+  // ── Permission modal ──────────────────────────────────
+
+  _showNextPermission() {
+    if (!this.permissionQueue.length) {
+      this.permissionActive = false;
+      return;
+    }
+    this.permissionActive = true;
+    const perm = this.permissionQueue[0];
+    document.getElementById('perm-desc').textContent = perm.description;
+    document.getElementById('perm-resource').textContent = perm.resource;
+    document.getElementById('perm-overlay').style.display = 'flex';
+  },
+
+  _respondPermit(ok) {
+    this.permissionQueue.shift();
+    document.getElementById('perm-overlay').style.display = 'none';
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'permit', ok }));
+    }
+
+    this._showNextPermission();
+  },
+
+  // ── Reconnect ─────────────────────────────────────────
+
+  _scheduleReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this._setStatus('error', 'Connection lost');
+      this._addSystemBubble('Connection lost. Click to reconnect.', 'error');
+      const reconnectBtn = document.createElement('button');
+      reconnectBtn.className = 'btn btn--ghost btn--sm mt-12';
+      reconnectBtn.textContent = 'Reconnect';
+      reconnectBtn.addEventListener('click', () => {
+        this.reconnectAttempts = 0;
+        this.connect();
+      });
+      this.messagesEl.appendChild(reconnectBtn);
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    this.reconnectAttempts++;
+    this._setStatus('connecting', `Reconnecting in ${Math.round(delay / 1000)}s...`);
+
+    this.reconnectTimer = setTimeout(async () => {
+      await App.bootstrap();
+      this.connect();
+    }, delay);
+  },
+};
+
+// ── Markdown renderer (lightweight, XSS-safe) ───────────
+
+function renderMarkdown(text) {
+  if (!text) return '';
+
+  const lines = text.split('\n');
+  let html = '';
+  let inCodeBlock = false;
+  let codeContent = '';
+  let codeLang = '';
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        html += `<pre><code class="lang-${escAttr(codeLang)}">${esc(codeContent)}</code></pre>`;
+        codeContent = '';
+        codeLang = '';
+        inCodeBlock = false;
+      } else {
+        codeLang = line.slice(3).trim();
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeContent += (codeContent ? '\n' : '') + line;
+      continue;
+    }
+
+    html += renderInline(line) + '\n';
+  }
+
+  if (inCodeBlock) {
+    html += `<pre><code>${esc(codeContent)}</code></pre>`;
+  }
+
+  return html;
+}
+
+function renderInline(line) {
+  const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
+  if (headingMatch) {
+    return `<strong>${esc(headingMatch[2])}</strong>`;
+  }
+
+  if (line.match(/^[-*]\s+/)) {
+    const content = line.replace(/^[-*]\s+/, '');
+    return `<span class="md-li">${inlineFormat(content)}</span>`;
+  }
+
+  return inlineFormat(line);
+}
+
+function inlineFormat(text) {
+  let result = esc(text);
+  result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  result = result.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  return result;
+}
+
+function escAttr(s) {
+  return s.replace(/[^a-zA-Z0-9_-]/g, '');
+}
