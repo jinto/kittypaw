@@ -18,7 +18,10 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 				key = strings.TrimPrefix(auth, "Bearer ")
 			}
 		}
-		if !fixedLenEqual(key, s.config.Server.APIKey) {
+		s.configMu.RLock()
+		apiKey := s.config.Server.APIKey
+		s.configMu.RUnlock()
+		if !fixedLenEqual(key, apiKey) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -42,15 +45,38 @@ func fixedLenEqual(a, b string) bool {
 	return hmac.Equal(ha.Sum(nil), hb.Sum(nil))
 }
 
-// corsMiddleware sets permissive CORS headers and short-circuits OPTIONS preflight.
-func corsMiddleware(next http.Handler) http.Handler {
+// corsMiddleware reads AllowedOrigins from config on every request so that
+// hot-reloads via /api/v1/reload take effect without a server restart.
+// When no origins are configured, all origins are permitted (dev mode).
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			s.configMu.RLock()
+			allowedOrigins := s.config.Server.AllowedOrigins
+			s.configMu.RUnlock()
+
+			allowed := len(allowedOrigins) == 0
+			for _, o := range allowedOrigins {
+				if o == "*" || o == origin {
+					allowed = true
+					break
+				}
+			}
+			if allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key")
+				w.Header().Set("Vary", "Origin")
+			}
+			if r.Method == http.MethodOptions {
+				if !allowed {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

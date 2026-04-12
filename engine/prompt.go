@@ -29,7 +29,6 @@ const SystemPrompt = `You are GoPaw, an AI agent that helps users by writing Jav
 - Do NOT use: require(), import, fetch(), Node.js APIs, await.
 
 {{SKILLS_SECTION}}
-- console.log(...args) — Log output (for debugging)
 
 ## When to create a skill
 If the user asks for something recurring ("매일", "every day", "주기적으로"), create a skill with a schedule trigger.
@@ -127,33 +126,19 @@ func BuildPrompt(
 	return messages
 }
 
-// buildSkillsSection generates the available skills documentation.
-func buildSkillsSection(config *core.Config) string {
-	skills := []string{
-		"## Available skill globals",
-		"- Http.get(url), Http.post(url, body), Http.put(url, body), Http.delete(url), Http.patch(url, body), Http.head(url)",
-		"- File.read(path), File.write(path, content), File.append(path, content), File.delete(path), File.list(dir), File.exists(path), File.mkdir(path)",
-		"- Storage.get(key), Storage.set(key, value), Storage.delete(key), Storage.list()",
-		"- Telegram.sendMessage(text), Telegram.sendVoice(path)",
-		"- Slack.send(text)",
-		"- Discord.send(text)",
-		"- Shell.exec(command)",
-		"- Git.status(), Git.log(n), Git.diff(), Git.add(path), Git.commit(msg), Git.push(), Git.pull()",
-		"- Llm.generate(prompt) — returns {text, model, usage}",
-		"- Memory.search(query), Memory.user(key, value), Memory.get(key), Memory.delete(key)",
-		"- Todo.list(), Todo.add(text), Todo.update(id, text), Todo.delete(id)",
-		"- Env.get(name)",
-		"- Skill.list(), Skill.run(name), Skill.create(name, desc, code, triggerType, schedule), Skill.disable(name), Skill.update(name, description), Skill.rollback(name)",
-		"- Tts.speak(text) — returns {path}",
-		"- Image.generate(prompt) — returns {url}",
-		"- Vision.analyze(imageUrl, prompt) — returns {text}",
-		"- Mcp.call(server, tool, args) — calls an MCP tool",
-		"- Agent.delegate(profileId, task) — delegates task to another agent",
-		"- Profile.list(), Profile.switch(id), Profile.create(id, desc), Profile.update(id, desc)",
-		"- Web.search(query) — returns {results: [{title, url, snippet}]}",
-		"- Web.fetch(url) — returns {text, status}",
+// buildSkillsSection generates the available skills documentation
+// from the canonical core.SkillRegistry.
+func buildSkillsSection(_ *core.Config) string {
+	lines := []string{"## Available skill globals"}
+	for _, skill := range core.SkillRegistry {
+		var sigs []string
+		for _, m := range skill.Methods {
+			sigs = append(sigs, m.Signature)
+		}
+		lines = append(lines, "- "+strings.Join(sigs, ", "))
 	}
-	return strings.Join(skills, "\n")
+	lines = append(lines, "- console.log(...args) — Log output (for debugging)")
+	return strings.Join(lines, "\n")
 }
 
 // ParseAtMention extracts @profile_id from the start of user text.

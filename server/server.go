@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,10 +23,11 @@ import (
 // to the agent engine. It owns the chi router, the engine session, and all
 // handler state.
 type Server struct {
-	config  *core.Config
-	store   *store.Store
-	session *engine.Session
-	router  chi.Router
+	config   *core.Config
+	configMu sync.RWMutex // protects config during hot-reload
+	store    *store.Store
+	session  *engine.Session
+	router   chi.Router
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
@@ -54,7 +56,7 @@ func (s *Server) setupRoutes() chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
-	r.Use(corsMiddleware)
+	r.Use(s.corsMiddleware)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		if s.config.Server.APIKey != "" {

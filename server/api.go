@@ -718,9 +718,11 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	// Swap the live config. The session shares the pointer so it sees the new
-	// values on the next Run() call.
+	// Swap the live config under lock. The session shares the pointer so it
+	// sees the new values on the next Run() call.
+	s.configMu.Lock()
 	*s.config = *cfg
+	s.configMu.Unlock()
 	slog.Info("config reloaded")
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
