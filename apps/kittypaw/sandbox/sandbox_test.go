@@ -85,8 +85,8 @@ func TestExecuteWithContext(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected success, got error: %s", result.Error)
 	}
-	if result.Output != `"alice:42"` {
-		t.Errorf("expected %q, got %q", `"alice:42"`, result.Output)
+	if result.Output != "alice:42" {
+		t.Errorf("expected %q, got %q", "alice:42", result.Output)
 	}
 }
 
@@ -162,8 +162,8 @@ func TestSynchronousResolver(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected success, got error: %s", result.Error)
 	}
-	if result.Output != `"test-path"` {
-		t.Errorf("expected %q, got %q", `"test-path"`, result.Output)
+	if result.Output != "test-path" {
+		t.Errorf("expected %q, got %q", "test-path", result.Output)
 	}
 }
 
@@ -179,7 +179,7 @@ func TestAutoReturn(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("expected success, got error: %s", result.Error)
 	}
-	if result.Output != `"hello from auto-return"` {
-		t.Errorf("expected %q, got %q", `"hello from auto-return"`, result.Output)
+	if result.Output != "hello from auto-return" {
+		t.Errorf("expected %q, got %q", "hello from auto-return", result.Output)
 	}
 }

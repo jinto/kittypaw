@@ -124,9 +124,14 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 	var jsonResult string
 	if val != nil && !goja.IsUndefined(val) && !goja.IsNull(val) {
 		exported := val.Export()
-		b, marshalErr := json.Marshal(exported)
-		if marshalErr == nil {
-			jsonResult = string(b)
+		switch v := exported.(type) {
+		case string:
+			jsonResult = v
+		default:
+			b, marshalErr := json.Marshal(exported)
+			if marshalErr == nil {
+				jsonResult = string(b)
+			}
 		}
 	}
 
