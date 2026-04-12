@@ -1,0 +1,444 @@
+package channel
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime/multipart"
+	"net/http"
+	"os"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/jinto/gopaw/core"
+)
+
+const (
+	telegramAPI       = "https://api.telegram.org/bot"
+	telegramFileAPI   = "https://api.telegram.org/file/bot"
+	telegramMaxChunk  = 4096
+	telegramPollSecs  = 30
+	whisperAPI        = "https://api.openai.com/v1/audio/transcriptions"
+	maxBackoff        = 60 * time.Second
+	initialBackoff    = 1 * time.Second
+)
+
+// --- Telegram API DTOs ---
+
+// telegramResponse wraps all Telegram Bot API responses.
+type telegramResponse[T any] struct {
+	OK          bool   `json:"ok"`
+	Result      *T     `json:"result,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// telegramUpdate is a single update from getUpdates.
+type telegramUpdate struct {
+	UpdateID int64            `json:"update_id"`
+	Message  *telegramMessage `json:"message,omitempty"`
+}
+
+// telegramMessage is the message object inside an update.
+type telegramMessage struct {
+	Chat  telegramChat  `json:"chat"`
+	Text  string        `json:"text"`
+	From  *telegramUser `json:"from,omitempty"`
+	Voice *telegramVoice `json:"voice,omitempty"`
+}
+
+// telegramChat identifies a Telegram chat.
+type telegramChat struct {
+	ID int64 `json:"id"`
+}
+
+// telegramUser represents the sender of a message.
+type telegramUser struct {
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+}
+
+// displayName returns a human-readable name for the user.
+func (u *telegramUser) displayName() string {
+	if u == nil {
+		return "unknown"
+	}
+	if u.FirstName != "" && u.LastName != "" {
+		return u.FirstName + " " + u.LastName
+	}
+	if u.FirstName != "" {
+		return u.FirstName
+	}
+	if u.Username != "" {
+		return u.Username
+	}
+	return "unknown"
+}
+
+// telegramVoice holds voice message metadata.
+type telegramVoice struct {
+	FileID string `json:"file_id"`
+}
+
+// telegramFile is the response from getFile.
+type telegramFile struct {
+	FilePath string `json:"file_path"`
+}
+
+// --- TelegramChannel ---
+
+// TelegramChannel implements Channel using the Telegram Bot API.
+// It uses long polling via getUpdates and raw HTTP (no SDK).
+type TelegramChannel struct {
+	botToken string
+	client   *http.Client
+	chatID   int64 // last chat_id for responses
+	offset   int64 // next update_id to request
+	mu       sync.Mutex
+}
+
+// NewTelegram creates a TelegramChannel with the given bot token.
+func NewTelegram(botToken string) *TelegramChannel {
+	return &TelegramChannel{
+		botToken: botToken,
+		client: &http.Client{
+			Timeout: time.Duration(telegramPollSecs+10) * time.Second,
+		},
+	}
+}
+
+func (t *TelegramChannel) Name() string { return "telegram" }
+
+// Start long-polls the Telegram Bot API for updates. It blocks until
+// ctx is cancelled, emitting core.Event values on eventCh.
+func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) error {
+	slog.Info("telegram: starting long-poll loop")
+	backoff := initialBackoff
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("telegram: shutting down")
+			return ctx.Err()
+		default:
+		}
+
+		updates, err := t.getUpdates(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			slog.Warn("telegram: getUpdates failed, backing off",
+				"error", err, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+		backoff = initialBackoff
+
+		for _, upd := range updates {
+			t.mu.Lock()
+			if upd.UpdateID >= t.offset {
+				t.offset = upd.UpdateID + 1
+			}
+			t.mu.Unlock()
+
+			if upd.Message == nil {
+				continue
+			}
+
+			msg := upd.Message
+			t.mu.Lock()
+			t.chatID = msg.Chat.ID
+			t.mu.Unlock()
+
+			text := msg.Text
+
+			// Voice message: download and transcribe via Whisper.
+			if msg.Voice != nil && text == "" {
+				transcribed, err := t.transcribeVoice(ctx, msg.Voice.FileID)
+				if err != nil {
+					slog.Warn("telegram: voice transcription failed", "error", err)
+					continue
+				}
+				text = transcribed
+			}
+
+			if text == "" {
+				continue
+			}
+
+			fromName := ""
+			if msg.From != nil {
+				fromName = msg.From.displayName()
+			}
+
+			chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
+
+			payload := core.ChatPayload{
+				ChatID:   chatIDStr,
+				Text:     text,
+				FromName: fromName,
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				slog.Error("telegram: marshal payload", "error", err)
+				continue
+			}
+
+			event := core.Event{
+				Type:    core.EventTelegram,
+				Payload: raw,
+			}
+
+			select {
+			case eventCh <- event:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
+
+// SendResponse sends a text response to a Telegram chat.
+// The chatIDStr parameter is the numeric chat ID as a string (from ChatPayload.ChatID).
+// Falls back to the most recently cached chat ID if parsing fails.
+// Long messages are split into chunks of telegramMaxChunk characters.
+func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response string) error {
+	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+	if err != nil {
+		// Fall back to cached chat ID.
+		t.mu.Lock()
+		chatID = t.chatID
+		t.mu.Unlock()
+	}
+
+	if chatID == 0 {
+		return fmt.Errorf("telegram: no chat_id to respond to")
+	}
+
+	// Send typing indicator.
+	_ = t.sendChatAction(ctx, chatID, "typing")
+
+	// Split into chunks.
+	chunks := core.SplitChunks(response, telegramMaxChunk)
+	for _, chunk := range chunks {
+		if err := t.sendMessage(ctx, chatID, chunk); err != nil {
+			return fmt.Errorf("telegram: sendMessage: %w", err)
+		}
+	}
+	return nil
+}
+
+// --- internal helpers ---
+
+func (t *TelegramChannel) apiURL(method string) string {
+	return telegramAPI + t.botToken + "/" + method
+}
+
+func (t *TelegramChannel) getUpdates(ctx context.Context) ([]telegramUpdate, error) {
+	t.mu.Lock()
+	offset := t.offset
+	t.mu.Unlock()
+
+	body := map[string]any{
+		"offset":  offset,
+		"timeout": telegramPollSecs,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.apiURL("getUpdates"), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result telegramResponse[[]telegramUpdate]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode getUpdates: %w", err)
+	}
+	if !result.OK {
+		return nil, fmt.Errorf("getUpdates: %s", result.Description)
+	}
+	if result.Result == nil {
+		return nil, nil
+	}
+	return *result.Result, nil
+}
+
+func (t *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text string) error {
+	body := map[string]any{
+		"chat_id": chatID,
+		"text":    text,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.apiURL("sendMessage"), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result telegramResponse[json.RawMessage]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode sendMessage: %w", err)
+	}
+	if !result.OK {
+		return fmt.Errorf("sendMessage: %s", result.Description)
+	}
+	return nil
+}
+
+func (t *TelegramChannel) sendChatAction(ctx context.Context, chatID int64, action string) error {
+	body := map[string]any{
+		"chat_id": chatID,
+		"action":  action,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.apiURL("sendChatAction"), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+// transcribeVoice downloads a Telegram voice file and sends it to
+// the OpenAI Whisper API for speech-to-text transcription.
+func (t *TelegramChannel) transcribeVoice(ctx context.Context, fileID string) (string, error) {
+	// Step 1: get the file path from Telegram.
+	filePath, err := t.getFilePath(ctx, fileID)
+	if err != nil {
+		return "", fmt.Errorf("getFile: %w", err)
+	}
+
+	// Step 2: download the file bytes.
+	fileURL := telegramFileAPI + t.botToken + "/" + filePath
+	fileReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return "", err
+	}
+	fileResp, err := t.client.Do(fileReq)
+	if err != nil {
+		return "", fmt.Errorf("download voice file: %w", err)
+	}
+	defer fileResp.Body.Close()
+
+	audioData, err := io.ReadAll(fileResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read voice file: %w", err)
+	}
+
+	// Step 3: send to Whisper API.
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("OPENAI_API_KEY not set for voice transcription")
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	part, err := w.CreateFormFile("file", "voice.ogg")
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(audioData); err != nil {
+		return "", err
+	}
+	_ = w.WriteField("model", "whisper-1")
+	_ = w.WriteField("language", "ko")
+	w.Close()
+
+	whisperReq, err := http.NewRequestWithContext(ctx, http.MethodPost, whisperAPI, &buf)
+	if err != nil {
+		return "", err
+	}
+	whisperReq.Header.Set("Authorization", "Bearer "+apiKey)
+	whisperReq.Header.Set("Content-Type", w.FormDataContentType())
+
+	whisperResp, err := t.client.Do(whisperReq)
+	if err != nil {
+		return "", fmt.Errorf("whisper request: %w", err)
+	}
+	defer whisperResp.Body.Close()
+
+	var whisperResult struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(whisperResp.Body).Decode(&whisperResult); err != nil {
+		return "", fmt.Errorf("decode whisper response: %w", err)
+	}
+
+	slog.Info("telegram: transcribed voice message",
+		"length", len(audioData), "text_length", len(whisperResult.Text))
+	return whisperResult.Text, nil
+}
+
+func (t *TelegramChannel) getFilePath(ctx context.Context, fileID string) (string, error) {
+	body := map[string]any{"file_id": fileID}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.apiURL("getFile"), bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result telegramResponse[telegramFile]
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decode getFile: %w", err)
+	}
+	if !result.OK || result.Result == nil {
+		return "", fmt.Errorf("getFile: %s", result.Description)
+	}
+	return result.Result.FilePath, nil
+}
+

@@ -1,0 +1,36 @@
+# Binaries
+/gopaw
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.txt
+
+# Build
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Profiling
+*.profraw
+*.prof
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+
+# Temp
+/tmp/
