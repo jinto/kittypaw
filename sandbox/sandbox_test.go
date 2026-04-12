@@ -174,34 +174,47 @@ func TestBuildWrapperDeterministic(t *testing.T) {
 	}
 }
 
-func TestParseOutputSkillCallAndResult(t *testing.T) {
-	raw := tagSkillCall + `{"skill":"Http","method":"get","args":["https://x.com"]}` + "\n" +
-		tagResult + `"ok"` + "\n"
-	result, err := parseOutput(raw, nil)
+func TestSynchronousResolver(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		if call.SkillName == "Env" && call.Method == "get" {
+			return `{"value":"test-path"}`, nil
+		}
+		return `null`, nil
+	}
+
+	code := `
+		const result = Env.get("PATH");
+		return result.value;
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, resolver)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !result.Success {
 		t.Fatalf("expected success, got error: %s", result.Error)
 	}
-	if len(result.SkillCalls) != 1 {
-		t.Fatalf("expected 1 skill call, got %d", len(result.SkillCalls))
-	}
-	if result.Output != `"ok"` {
-		t.Errorf("expected output %q, got %q", `"ok"`, result.Output)
+	if result.Output != `"test-path"` {
+		t.Errorf("expected %q, got %q", `"test-path"`, result.Output)
 	}
 }
 
-func TestParseOutputError(t *testing.T) {
-	raw := tagError + "ReferenceError: x is not defined\n"
-	result, err := parseOutput(raw, nil)
+func TestAutoReturn(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+	// Code without return — autoReturn should add it.
+	result, err := sb.Execute(context.Background(), `"hello from auto-return"`, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Success {
-		t.Fatal("expected failure")
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
 	}
-	if !strings.Contains(result.Error, "ReferenceError") {
-		t.Errorf("expected error with ReferenceError, got %q", result.Error)
+	if result.Output != `"hello from auto-return"` {
+		t.Errorf("expected %q, got %q", `"hello from auto-return"`, result.Output)
 	}
 }
