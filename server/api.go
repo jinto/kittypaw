@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -726,11 +725,3 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
-// ---------------------------------------------------------------------------
-// runEvent is a small internal helper used by ws.go to run an event through
-// the engine session.
-// ---------------------------------------------------------------------------
-
-func (s *Server) runEvent(ctx context.Context, event core.Event) (string, error) {
-	return s.session.Run(ctx, event, nil)
-}

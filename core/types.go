@@ -39,8 +39,7 @@ const (
 	PhaseInit     LoopPhase = "init"
 	PhasePrompt   LoopPhase = "prompt"
 	PhaseGenerate LoopPhase = "generate"
-	PhaseExecute  LoopPhase = "execute"
-	PhaseRetry    LoopPhase = "retry"
+	PhaseRetry LoopPhase = "retry"
 	PhaseFinish   LoopPhase = "finish"
 )
 
@@ -81,20 +80,6 @@ type LlmMessage struct {
 	Content string `json:"content"`
 }
 
-// SkillDefinition describes a skill's interface for the LLM.
-type SkillDefinition struct {
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Parameters  []SkillParameter `json:"parameters"`
-}
-
-// SkillParameter is one parameter in a skill definition.
-type SkillParameter struct {
-	Name        string `json:"name"`
-	ParamType   string `json:"param_type"`
-	Description string `json:"description"`
-}
-
 // SkillCall represents a skill invocation captured from sandbox execution.
 type SkillCall struct {
 	SkillName string            `json:"skill_name"`
@@ -108,18 +93,6 @@ type ExecutionResult struct {
 	Output     string      `json:"output"`
 	SkillCalls []SkillCall `json:"skill_calls"`
 	Error      string      `json:"error,omitempty"`
-}
-
-// TransitionReason records why the agent loop moved between phases.
-type TransitionReason struct {
-	Reason       string `json:"reason"`
-	MessageCount int    `json:"message_count,omitempty"`
-	CodeLen      int    `json:"code_len,omitempty"`
-	OutputLen    int    `json:"output_len,omitempty"`
-	SkillCalls   int    `json:"skill_calls,omitempty"`
-	Error        string `json:"error,omitempty"`
-	Attempt      int    `json:"attempt,omitempty"`
-	ActionCount  int    `json:"action_count,omitempty"`
 }
 
 // ToEventType maps a channel configuration type to its corresponding event type.
