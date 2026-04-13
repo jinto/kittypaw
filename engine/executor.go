@@ -801,15 +801,7 @@ func executeTTS(_ context.Context, _ core.SkillCall, _ *Session) (string, error)
 	return jsonResult(map[string]any{"error": "TTS not yet implemented"})
 }
 
-func executeImage(_ context.Context, _ core.SkillCall, _ *Session) (string, error) {
-	// TODO: implement image generation
-	return jsonResult(map[string]any{"error": "Image generation not yet implemented"})
-}
-
-func executeVision(_ context.Context, _ core.SkillCall, _ *Session) (string, error) {
-	// TODO: implement vision analysis
-	return jsonResult(map[string]any{"error": "Vision not yet implemented"})
-}
+// executeImage and executeVision are in vision.go.
 
 func executeMCP(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	if s.McpRegistry == nil {
