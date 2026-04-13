@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -164,6 +165,58 @@ func TestSynchronousResolver(t *testing.T) {
 	}
 	if result.Output != "test-path" {
 		t.Errorf("expected %q, got %q", "test-path", result.Output)
+	}
+}
+
+func TestResolverErrorThrows(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		return "", fmt.Errorf("path not allowed")
+	}
+
+	// JS catches the exception — proves it's a throw, not a null return.
+	code := `
+		try {
+			File.read("/forbidden");
+			return "should not reach";
+		} catch(e) {
+			return "caught:" + e;
+		}
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success (catch should handle), got error: %s", result.Error)
+	}
+	if !strings.Contains(result.Output, "caught:") || !strings.Contains(result.Output, "path not allowed") {
+		t.Errorf("expected caught error, got %q", result.Output)
+	}
+}
+
+func TestResolverErrorUncaughtFails(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		return "", fmt.Errorf("access denied")
+	}
+
+	// No try/catch — exception should cause result.Success = false.
+	code := `
+		const data = File.read("/forbidden");
+		return "unreachable";
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Success {
+		t.Fatal("expected failure from uncaught resolver error")
+	}
+	if !strings.Contains(result.Error, "access denied") {
+		t.Errorf("expected error containing 'access denied', got %q", result.Error)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -1016,6 +1017,117 @@ func (s *Store) ApplyFix(fixID int64, currentCode string) (bool, error) {
 func (s *Store) RevertFix(fixID int64) error {
 	_, err := s.db.Exec("UPDATE skill_fixes SET applied = 0 WHERE id = ?", fixID)
 	return err
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+// Workspace represents a registered workspace directory.
+type Workspace struct {
+	ID           string
+	Name         string
+	RootPath     string
+	CreatedAt    string
+	LastOpenedAt string
+}
+
+// SaveWorkspace upserts a workspace. The root_path UNIQUE constraint prevents
+// duplicate paths under different IDs.
+func (s *Store) SaveWorkspace(ws *Workspace) error {
+	_, err := s.db.Exec(`
+		INSERT INTO workspaces (id, name, root_path)
+		VALUES (?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name          = excluded.name,
+			root_path     = excluded.root_path,
+			last_opened_at = datetime('now')`,
+		ws.ID, ws.Name, ws.RootPath)
+	return err
+}
+
+// GetWorkspace returns a workspace by ID.
+func (s *Store) GetWorkspace(id string) (*Workspace, error) {
+	var ws Workspace
+	err := s.db.QueryRow(`
+		SELECT id, name, root_path, created_at, last_opened_at
+		FROM workspaces WHERE id = ?`, id).
+		Scan(&ws.ID, &ws.Name, &ws.RootPath, &ws.CreatedAt, &ws.LastOpenedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &ws, nil
+}
+
+// ListWorkspaces returns all registered workspaces ordered by creation time.
+func (s *Store) ListWorkspaces() ([]Workspace, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, root_path, created_at, last_opened_at
+		FROM workspaces ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Workspace
+	for rows.Next() {
+		var ws Workspace
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.RootPath, &ws.CreatedAt, &ws.LastOpenedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+// DeleteWorkspace removes a workspace by ID. Idempotent.
+func (s *Store) DeleteWorkspace(id string) error {
+	_, err := s.db.Exec("DELETE FROM workspaces WHERE id = ?", id)
+	return err
+}
+
+// ListWorkspaceRootPaths returns just the root_path column for all workspaces.
+// This is the hot path used by isPathAllowed.
+func (s *Store) ListWorkspaceRootPaths() ([]string, error) {
+	rows, err := s.db.Query("SELECT root_path FROM workspaces ORDER BY created_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SeedWorkspacesFromConfig inserts TOML-configured paths into the workspaces
+// table if they don't already exist. Paths are cleaned before insertion.
+// Idempotent.
+func (s *Store) SeedWorkspacesFromConfig(paths []string) error {
+	ts := time.Now().UnixNano()
+	for i, p := range paths {
+		p = filepath.Clean(p)
+		// Use root_path as a natural dedup key.
+		var exists int
+		s.db.QueryRow("SELECT COUNT(*) FROM workspaces WHERE root_path = ?", p).Scan(&exists)
+		if exists > 0 {
+			continue
+		}
+		id := fmt.Sprintf("ws-seed-%d-%d", ts, i)
+		if _, err := s.db.Exec(
+			"INSERT INTO workspaces (id, name, root_path) VALUES (?, ?, ?)",
+			id, p, p,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

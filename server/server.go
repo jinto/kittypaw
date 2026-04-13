@@ -35,6 +35,13 @@ type Server struct {
 // New wires together all dependencies and returns a ready-to-serve Server.
 // mcpReg may be nil when no MCP servers are configured.
 func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry) *Server {
+	// Seed TOML-configured workspace paths into DB (idempotent).
+	if len(cfg.Sandbox.AllowedPaths) > 0 {
+		if err := st.SeedWorkspacesFromConfig(cfg.Sandbox.AllowedPaths); err != nil {
+			slog.Error("seed workspaces from config", "error", err)
+		}
+	}
+
 	session := &engine.Session{
 		Provider:         provider,
 		FallbackProvider: fallback,
@@ -42,6 +49,9 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		Store:            st,
 		Config:           cfg,
 		McpRegistry:      mcpReg,
+	}
+	if err := session.RefreshAllowedPaths(); err != nil {
+		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
 	}
 
 	s := &Server{
@@ -153,6 +163,11 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Get("/persona/evolution", s.handleEvolutionList)
 		r.Post("/persona/evolution/{id}/approve", s.handleEvolutionApprove)
 		r.Post("/persona/evolution/{id}/reject", s.handleEvolutionReject)
+
+		// Workspaces
+		r.Get("/workspaces", s.handleWorkspacesList)
+		r.Post("/workspaces", s.handleWorkspacesCreate)
+		r.Delete("/workspaces/{id}", s.handleWorkspacesDelete)
 	})
 
 	// WebSocket sits outside /api/v1 — auth is done via query param or header.

@@ -3,7 +3,11 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jinto/gopaw/core"
@@ -168,5 +172,63 @@ func TestE2EErrorRetry(t *testing.T) {
 	// The LLM should have been called twice: once for the error, once for recovery.
 	if mock.callIdx != 2 {
 		t.Errorf("mock.callIdx = %d, want 2", mock.callIdx)
+	}
+}
+
+func TestE2EFileAccessGating(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	// Setup: create a real temp directory as the workspace.
+	allowedDir := t.TempDir()
+	forbiddenDir := t.TempDir()
+
+	// Write a file in the allowed directory.
+	allowedFile := filepath.Join(allowedDir, "data.txt")
+	os.WriteFile(allowedFile, []byte("allowed content"), 0o644)
+
+	// Write a file in the forbidden directory.
+	forbiddenFile := filepath.Join(forbiddenDir, "secret.txt")
+	os.WriteFile(forbiddenFile, []byte("secret"), 0o644)
+
+	// LLM response: try to read the allowed file, then the forbidden file.
+	code := fmt.Sprintf(`
+		try {
+			const allowed = File.read(%q);
+			const forbidden = File.read(%q);
+			return "should not reach: " + forbidden;
+		} catch(e) {
+			return "blocked:" + e;
+		}
+	`, allowedFile, forbiddenFile)
+
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	// Register only the allowed dir as a workspace in DB.
+	st.SaveWorkspace(&store.Workspace{
+		ID: "ws-test", Name: "test", RootPath: allowedDir,
+	})
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider: &mockProvider{responses: []*llm.Response{mockResp(code)}},
+		Sandbox:  sandbox.New(cfg.Sandbox),
+		Store:    st,
+		Config:   &cfg,
+	}
+	sess.RefreshAllowedPaths()
+
+	event := webChatEvent("read files")
+	output, err := sess.Run(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+
+	// The forbidden read should have thrown, caught by try/catch.
+	if !strings.Contains(output, "blocked:") || !strings.Contains(output, "path not allowed") {
+		t.Errorf("expected blocked output, got %q", output)
 	}
 }
