@@ -97,10 +97,14 @@ func TestDelegateTask_ProfileNotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLoadSOUL_MissingFile(t *testing.T) {
-	// Should return empty string, not error.
+	// When SOUL.md is missing, loadSOUL returns the default preset fallback.
+	// This matches the persona preset system behavior (AC5: fallback + warn log).
 	content := loadSOUL("definitely-nonexistent-profile")
-	if content != "" {
-		t.Fatalf("expected empty string for missing SOUL.md, got %q", content)
+	if content == "" {
+		t.Fatal("expected default preset fallback, got empty string")
+	}
+	if content != core.Presets["default-assistant"].Soul {
+		t.Fatalf("expected default-assistant preset, got %q", content)
 	}
 }
 

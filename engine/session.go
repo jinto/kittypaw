@@ -122,6 +122,9 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		return channelName + "-" + channelUserID
 	}()
 
+	// Store agentID in context for skill handlers (e.g., Profile.switch).
+	ctx = ContextWithAgentID(ctx, agentID)
+
 	// Load or create agent state
 	state, err := s.Store.LoadState(agentID)
 	if err != nil {
@@ -140,12 +143,13 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 	slog.Info("agent state ready", "phase", core.PhaseInit, "agent_id", agentID)
 
 	// Parse @mention routing
-	profileOverride, eventText := "", rawEventText
+	var mentionOverride string
+	eventText := rawEventText
 	if pid, remaining, matched := ParseAtMention(rawEventText); matched {
 		meta, ok, _ := s.Store.GetProfileMeta(pid)
 		if ok && meta.Active {
 			slog.Info("@mention routing", "profile_id", pid)
-			profileOverride = pid
+			mentionOverride = pid
 			eventText = remaining
 		}
 	}
@@ -214,8 +218,12 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		// Build compaction config based on attempt and feature flags
 		compaction := s.compactionForAttempt(attempt)
 
+		// Resolve and load profile.
+		profileName := ResolveProfileName(s.Config, channelName, agentID, mentionOverride, s.Store)
+		profile := loadProfileForPrompt(profileName, s.Config)
+
 		// Build prompt
-		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profileOverride, memoryContext, mcpToolsSection)
+		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection)
 
 		slog.Info("prompt built",
 			"phase", core.PhasePrompt,
@@ -409,6 +417,66 @@ func (s *Session) compactionForAttempt(attempt int) CompactionConfig {
 		return DefaultCompaction()
 	}
 	return CompactionForAttempt(attempt)
+}
+
+// ResolveProfileName determines which profile to use for this request.
+// Priority: mentionOverride > session override > channel binding > default.
+func ResolveProfileName(
+	config *core.Config,
+	channelType string,
+	agentID string,
+	mentionOverride string,
+	st *store.Store,
+) string {
+	// 1. @mention override (highest priority).
+	if mentionOverride != "" {
+		return mentionOverride
+	}
+
+	// 2. Session override from Profile.switch (stored in user_context).
+	if st != nil {
+		key := fmt.Sprintf("active_profile:%s", agentID)
+		if val, ok, err := st.GetUserContext(key); err == nil && ok && val != "" {
+			return val
+		}
+	}
+
+	// 3. Channel binding from config.
+	for _, pc := range config.Profiles {
+		for _, ch := range pc.Channels {
+			if ch == channelType {
+				return pc.ID
+			}
+		}
+	}
+
+	// 4. Default profile.
+	if config.DefaultProfile != "" {
+		return config.DefaultProfile
+	}
+	return "default"
+}
+
+// loadProfileForPrompt loads a profile from disk and enriches it with config nick.
+func loadProfileForPrompt(profileName string, config *core.Config) *core.Profile {
+	base, err := core.ConfigDir()
+	if err != nil {
+		slog.Warn("failed to get config dir for profile", "error", err)
+		return &core.Profile{ID: profileName, Soul: core.Presets["default-assistant"].Soul}
+	}
+	p, err := core.LoadProfile(base, profileName)
+	if err != nil {
+		slog.Warn("failed to load profile", "name", profileName, "error", err)
+		return &core.Profile{ID: profileName, Soul: core.Presets["default-assistant"].Soul}
+	}
+	// Enrich with nick from config.
+	for _, pc := range config.Profiles {
+		if pc.ID == profileName {
+			p.Nick = pc.Nick
+			break
+		}
+	}
+	return p
 }
 
 func sessionIDFromEvent(event *core.Event) string {

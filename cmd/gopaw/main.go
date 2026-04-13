@@ -69,6 +69,7 @@ func newRootCmd() *cobra.Command {
 		newLogCmd(),
 		newDaemonCmd(),
 		newPackagesCmd(),
+		newPersonaCmd(),
 	)
 
 	return cmd
@@ -165,6 +166,12 @@ func runInit(_ *cobra.Command, _ []string) error {
 	} else {
 		fmt.Printf("  exists:    %s\n", configPath)
 	}
+
+	// Create default profile with SOUL.md.
+	if err := core.EnsureDefaultProfile(gopawDir); err != nil {
+		return fmt.Errorf("ensure default profile: %w", err)
+	}
+	fmt.Printf("  profile:   %s\n", filepath.Join(gopawDir, "profiles", "default", "SOUL.md"))
 
 	fmt.Println("\ngopaw initialized. Edit config.toml to set your LLM API key.")
 	return nil
@@ -753,6 +760,112 @@ func runDaemonStatus(_ *cobra.Command, _ []string) error {
 		fmt.Printf("Daemon is not running (stale pid %d).\n", pid)
 		os.Remove(pidPath)
 	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// persona
+// ---------------------------------------------------------------------------
+
+func newPersonaCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "persona",
+		Short: "Manage persona presets",
+	}
+	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd())
+	return cmd
+}
+
+func newPersonaListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List profiles with preset status",
+		RunE:  runPersonaList,
+	}
+}
+
+func runPersonaList(_ *cobra.Command, _ []string) error {
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	base, err := core.ConfigDir()
+	if err != nil {
+		return err
+	}
+
+	profiles, err := st.ListActiveProfiles()
+	if err != nil {
+		return fmt.Errorf("list profiles: %w", err)
+	}
+
+	if len(profiles) == 0 {
+		fmt.Println("No profiles found. Run 'gopaw init' to create a default profile.")
+		return nil
+	}
+
+	fmt.Printf("%-20s %-30s %-12s %s\n", "ID", "DESCRIPTION", "STATUS", "PRESET")
+	fmt.Println(strings.Repeat("-", 75))
+
+	for _, pm := range profiles {
+		status := core.PresetStatus(base, pm.ID)
+		statusStr := "unknown"
+		presetStr := "-"
+		switch status.Kind {
+		case core.StatusPreset:
+			statusStr = "preset"
+			presetStr = status.PresetID
+		case core.StatusCustom:
+			statusStr = "custom"
+			presetStr = status.PresetID + " (modified)"
+		}
+		desc := pm.Description
+		if len(desc) > 28 {
+			desc = desc[:28] + ".."
+		}
+		fmt.Printf("%-20s %-30s %-12s %s\n", pm.ID, desc, statusStr, presetStr)
+	}
+	return nil
+}
+
+func newPersonaApplyCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "apply <preset-id> [profile-id]",
+		Short: "Apply a preset to a profile (default: 'default')",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE:  runPersonaApply,
+	}
+}
+
+func runPersonaApply(_ *cobra.Command, args []string) error {
+	presetID := args[0]
+	profileID := "default"
+	if len(args) > 1 {
+		profileID = args[1]
+	}
+
+	// Validate preset exists.
+	preset, ok := core.Presets[presetID]
+	if !ok {
+		fmt.Printf("Unknown preset %q. Available presets:\n", presetID)
+		for id, p := range core.Presets {
+			fmt.Printf("  %-25s %s\n", id, p.Description)
+		}
+		return fmt.Errorf("preset %q not found", presetID)
+	}
+
+	base, err := core.ConfigDir()
+	if err != nil {
+		return err
+	}
+
+	if err := core.ApplyPreset(base, profileID, presetID); err != nil {
+		return fmt.Errorf("apply preset: %w", err)
+	}
+
+	fmt.Printf("Applied preset %q (%s) to profile %q.\n", presetID, preset.Description, profileID)
 	return nil
 }
 

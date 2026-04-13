@@ -100,7 +100,7 @@ func BuildPrompt(
 	compaction CompactionConfig,
 	config *core.Config,
 	channelName string,
-	profileOverride string,
+	profile *core.Profile,
 	memoryContext string,
 	mcpToolsSection string,
 ) []core.LlmMessage {
@@ -113,9 +113,17 @@ func BuildPrompt(
 		sysPrompt += "\n\n" + mcpToolsSection
 	}
 
-	// Add profile override context
-	if profileOverride != "" {
-		sysPrompt += fmt.Sprintf("\n\n## Active Profile: %s\nYou are operating as the %q profile.", profileOverride, profileOverride)
+	// Inject profile identity from SOUL.md / USER.md
+	if profile != nil {
+		if profile.Soul != "" {
+			sysPrompt += "\n\n## Your Identity (SOUL.md)\n" + profile.Soul
+		}
+		if profile.Nick != "" {
+			sysPrompt += "\n\nYour name/nickname is: " + profile.Nick
+		}
+		if profile.UserMD != "" {
+			sysPrompt += "\n\n## User Profile (USER.md)\n" + profile.UserMD
+		}
 	}
 
 	// Add memory context

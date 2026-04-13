@@ -162,3 +162,51 @@ func TestBuildMCPToolsSectionCap(t *testing.T) {
 		t.Error("expected truncation message")
 	}
 }
+
+// --- BuildPrompt with Profile ---
+
+func TestBuildPrompt_WithSoul(t *testing.T) {
+	state := &core.AgentState{AgentID: "test", SystemPrompt: SystemPrompt}
+	profile := &core.Profile{ID: "mybot", Soul: "I am a cheerful assistant."}
+	msgs := BuildPrompt(state, "hello", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", profile, "", "")
+
+	sys := msgs[0].Content
+	if !strings.Contains(sys, "## Your Identity (SOUL.md)") {
+		t.Error("missing SOUL.md header in system prompt")
+	}
+	if !strings.Contains(sys, "I am a cheerful assistant.") {
+		t.Error("soul content not injected")
+	}
+}
+
+func TestBuildPrompt_WithNickAndUserMD(t *testing.T) {
+	state := &core.AgentState{AgentID: "test", SystemPrompt: SystemPrompt}
+	profile := &core.Profile{
+		ID:     "bot",
+		Nick:   "Paw",
+		Soul:   "soul",
+		UserMD: "User likes hiking.",
+	}
+	msgs := BuildPrompt(state, "hi", CompactionConfig{RecentWindow: 5}, &core.Config{}, "slack", profile, "", "")
+
+	sys := msgs[0].Content
+	if !strings.Contains(sys, "Your name/nickname is: Paw") {
+		t.Error("nick not injected")
+	}
+	if !strings.Contains(sys, "## User Profile (USER.md)") {
+		t.Error("missing USER.md header")
+	}
+	if !strings.Contains(sys, "User likes hiking.") {
+		t.Error("user md content not injected")
+	}
+}
+
+func TestBuildPrompt_NilProfile(t *testing.T) {
+	state := &core.AgentState{AgentID: "test", SystemPrompt: SystemPrompt}
+	msgs := BuildPrompt(state, "hey", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "")
+
+	sys := msgs[0].Content
+	if strings.Contains(sys, "## Your Identity") {
+		t.Error("nil profile should not inject identity section")
+	}
+}

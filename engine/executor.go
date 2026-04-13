@@ -17,6 +17,23 @@ import (
 	"github.com/jinto/gopaw/core"
 )
 
+type contextKey string
+
+const ctxKeyAgentID contextKey = "agentID"
+
+// ContextWithAgentID stores the agent ID in context for use by skill handlers.
+func ContextWithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, ctxKeyAgentID, agentID)
+}
+
+// AgentIDFromContext retrieves the agent ID from context.
+func AgentIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyAgentID).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // resolveSkillCall dispatches a single skill call to the appropriate handler.
 func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, permFn PermissionCallback) (string, error) {
 	slog.Debug("resolving skill call", "skill", call.SkillName, "method", call.Method)
@@ -759,7 +776,7 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, _ *Session) (strin
 
 // --- Profile Management ---
 
-func executeProfile(_ context.Context, call core.SkillCall, s *Session) (string, error) {
+func executeProfile(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	switch call.Method {
 	case "list":
 		profiles, err := s.Store.ListActiveProfiles()
@@ -773,8 +790,29 @@ func executeProfile(_ context.Context, call core.SkillCall, s *Session) (string,
 			return jsonResult(map[string]any{"error": "profile id required"})
 		}
 		var id string
-		json.Unmarshal(call.Args[0], &id)
-		// TODO: implement profile switching
+		if err := json.Unmarshal(call.Args[0], &id); err != nil {
+			return jsonResult(map[string]any{"error": "invalid profile id argument"})
+		}
+		if err := core.ValidateProfileID(id); err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
+		// Verify profile exists on disk.
+		base, err := core.ConfigDir()
+		if err != nil {
+			return jsonResult(map[string]any{"error": "config dir: " + err.Error()})
+		}
+		if _, err := core.LoadProfile(base, id); err != nil {
+			return jsonResult(map[string]any{"error": fmt.Sprintf("profile %q not found", id)})
+		}
+		// Store active_profile:{agentID} so next message uses this profile.
+		agentID := AgentIDFromContext(ctx)
+		if agentID == "" {
+			agentID = "default"
+		}
+		key := fmt.Sprintf("active_profile:%s", agentID)
+		if err := s.Store.SetUserContext(key, id, "agent"); err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
 		return jsonResult(map[string]any{"success": true, "profile": id})
 
 	case "create":
@@ -782,8 +820,15 @@ func executeProfile(_ context.Context, call core.SkillCall, s *Session) (string,
 			return jsonResult(map[string]any{"error": "id and description required"})
 		}
 		var id, desc string
-		json.Unmarshal(call.Args[0], &id)
-		json.Unmarshal(call.Args[1], &desc)
+		if err := json.Unmarshal(call.Args[0], &id); err != nil {
+			return jsonResult(map[string]any{"error": "invalid id argument"})
+		}
+		if err := json.Unmarshal(call.Args[1], &desc); err != nil {
+			return jsonResult(map[string]any{"error": "invalid description argument"})
+		}
+		if err := core.ValidateProfileID(id); err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
 		if err := s.Store.UpsertProfileMeta(id, desc, "[]", "agent"); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}

@@ -147,6 +147,18 @@ Spec: `.ina/specs/20260413-2239-think-channel-hot-reload.md`
 - [x] API + onboarding — `handleReload` Reconcile + `GET /api/v1/channels` + `handleSetupTelegram` TrySpawn + `handleSetupComplete` Reconcile (AC1, AC3)
 - [x] main.go migration — Remove channel startup (119-143), dispatch loop (146-190), `retryPendingResponses` (834-880) + wire `srv.StartChannels`
 
+## Plan 15: Persona Preset System ✅
+
+Plan: `.claude/plans/persona-preset-system.md`
+Spec: `.ina/specs/20260413-2330-think-persona-preset-system.md`
+
+- [x] T1: core/profile.go — Profile struct + presets + LoadProfile + EnsureDefaultProfile + tests
+- [x] T2: core/profile.go — ApplyPreset + DetectDirty + PresetStatus + tests
+- [x] T3: engine/prompt.go — BuildPrompt takes *core.Profile + tests
+- [x] T4: engine/session.go — ResolveProfileName + orchestration.go loadSOUL refactor + tests
+- [x] T5: engine/executor.go — Profile.switch via user_context DB + tests
+- [x] T6: server/api_profile.go + cmd/gopaw persona + init integration
+
 ## Backlog: Workspace Indexer (Full-text Search)
 
 KittyPaw `kittypaw-workspace` 크레이트 대응. 개발자 도구 유스케이스에 필요.

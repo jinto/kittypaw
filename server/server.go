@@ -171,6 +171,11 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/persona/evolution/{id}/approve", s.handleEvolutionApprove)
 		r.Post("/persona/evolution/{id}/reject", s.handleEvolutionReject)
 
+		// Profiles
+		r.Get("/profiles", s.handleProfileList)
+		r.Post("/profiles", s.handleProfileCreate)
+		r.Post("/profiles/{id}/activate", s.handleProfileActivate)
+
 		// Workspaces
 		r.Get("/workspaces", s.handleWorkspacesList)
 		r.Post("/workspaces", s.handleWorkspacesCreate)
