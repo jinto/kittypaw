@@ -13,6 +13,31 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// WorkspaceFile is a file entry in the workspace index.
+type WorkspaceFile struct {
+	ID          int64
+	WorkspaceID string
+	AbsPath     string
+	RelPath     string
+	Filename    string
+	Extension   string
+	Size        int64
+	ModifiedAt  string
+	HasContent  bool
+}
+
+// WorkspaceFTSRow is a search result from the workspace FTS5 index.
+type WorkspaceFTSRow struct {
+	FileID    int64
+	AbsPath   string
+	RelPath   string
+	Filename  string
+	Extension string
+	Size      int64
+	Score     float64
+	Snippet   string
+}
+
 // ---------------------------------------------------------------------------
 // DTO structs
 // ---------------------------------------------------------------------------
@@ -1649,4 +1674,319 @@ func scanExecutions(rows *sql.Rows) ([]ExecutionRecord, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// Workspace File Index (FTS5)
+// ---------------------------------------------------------------------------
+
+// UpsertWorkspaceFile inserts or replaces a file metadata entry. Returns the
+// row ID for linking to the FTS5 index. The indexed_at timestamp is always
+// refreshed so callers can use it for stale-entry cleanup after reindex.
+func (s *Store) UpsertWorkspaceFile(f *WorkspaceFile) (int64, error) {
+	hasContent := 0
+	if f.HasContent {
+		hasContent = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO workspace_files (workspace_id, abs_path, rel_path, filename, extension, size, modified_at, has_content, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		ON CONFLICT(workspace_id, abs_path) DO UPDATE SET
+			rel_path     = excluded.rel_path,
+			filename     = excluded.filename,
+			extension    = excluded.extension,
+			size         = excluded.size,
+			modified_at  = excluded.modified_at,
+			has_content  = excluded.has_content,
+			indexed_at   = datetime('now')`,
+		f.WorkspaceID, f.AbsPath, f.RelPath, f.Filename, f.Extension, f.Size, f.ModifiedAt, hasContent)
+	if err != nil {
+		return 0, err
+	}
+	// Always query the actual id — LastInsertId is unreliable for ON CONFLICT
+	// DO UPDATE (SQLite may return a stale or auto-incremented phantom value).
+	var id int64
+	err = s.db.QueryRow(
+		"SELECT id FROM workspace_files WHERE workspace_id = ? AND abs_path = ?",
+		f.WorkspaceID, f.AbsPath,
+	).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// UpsertWorkspaceFTS replaces the FTS5 entry for a given file. For standalone
+// FTS5 tables (no content= option), regular DELETE + INSERT is used.
+func (s *Store) UpsertWorkspaceFTS(fileID int64, filename, body string) error {
+	// Delete old entry if it exists. Standalone FTS5 supports regular DELETE.
+	_, _ = s.db.Exec("DELETE FROM workspace_fts WHERE rowid = ?", fileID)
+	_, err := s.db.Exec(
+		"INSERT INTO workspace_fts(rowid, filename, body) VALUES(?, ?, ?)",
+		fileID, filename, body)
+	return err
+}
+
+// DeleteWorkspaceIndex removes all file metadata and FTS5 entries for a
+// workspace atomically within a single transaction.
+func (s *Store) DeleteWorkspaceIndex(wsID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM workspace_fts
+		WHERE rowid IN (SELECT id FROM workspace_files WHERE workspace_id = ?)`, wsID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM workspace_files WHERE workspace_id = ?", wsID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteStaleWorkspaceFiles removes workspace_files entries (and their FTS5
+// counterparts) whose indexed_at is older than the given cutoff string
+// (format: "2006-01-02 15:04:05"). Runs atomically in a single transaction.
+func (s *Store) DeleteStaleWorkspaceFiles(wsID string, cutoff string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM workspace_fts
+		WHERE rowid IN (
+			SELECT id FROM workspace_files
+			WHERE workspace_id = ? AND indexed_at < ?
+		)`, wsID, cutoff); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"DELETE FROM workspace_files WHERE workspace_id = ? AND indexed_at < ?",
+		wsID, cutoff); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SearchWorkspaceFTS performs a full-text search across workspace files.
+// Returns matching rows and the total count (independent of limit/offset).
+// An empty query returns an error.
+func (s *Store) SearchWorkspaceFTS(query, pathPrefix, ext string, limit, offset int) ([]WorkspaceFTSRow, int, error) {
+	if query == "" {
+		return nil, 0, fmt.Errorf("empty search query")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Sanitize query to prevent FTS5 syntax abuse.
+	safeQuery := sanitizeFTSQuery(query)
+	if safeQuery == "" {
+		return nil, 0, fmt.Errorf("empty search query after sanitization")
+	}
+
+	// Build WHERE clauses.
+	where := "WHERE workspace_fts MATCH ?"
+	args := []any{safeQuery}
+	if pathPrefix != "" {
+		where += " AND wf.rel_path LIKE ? ESCAPE '\\'"
+		args = append(args, escapeLIKE(pathPrefix)+"%")
+	}
+	if ext != "" {
+		where += " AND wf.extension = ?"
+		args = append(args, ext)
+	}
+
+	// Count total matches.
+	countSQL := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM workspace_fts
+		JOIN workspace_files wf ON wf.id = workspace_fts.rowid
+		%s`, where)
+	var total int
+	if err := s.db.QueryRow(countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("search count: %w", err)
+	}
+
+	// Fetch results — copy args to avoid mutating the original slice.
+	searchSQL := fmt.Sprintf(`
+		SELECT wf.id, wf.abs_path, wf.rel_path, wf.filename, wf.extension, wf.size,
+		       rank,
+		       snippet(workspace_fts, 1, '', '', '…', 64)
+		FROM workspace_fts
+		JOIN workspace_files wf ON wf.id = workspace_fts.rowid
+		%s
+		ORDER BY rank
+		LIMIT ? OFFSET ?`, where)
+	searchArgs := make([]any, len(args)+2)
+	copy(searchArgs, args)
+	searchArgs[len(args)] = limit
+	searchArgs[len(args)+1] = offset
+
+	rows, err := s.db.Query(searchSQL, searchArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WorkspaceFTSRow
+	for rows.Next() {
+		var r WorkspaceFTSRow
+		if err := rows.Scan(&r.FileID, &r.AbsPath, &r.RelPath, &r.Filename,
+			&r.Extension, &r.Size, &r.Score, &r.Snippet); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, r)
+	}
+	return out, total, rows.Err()
+}
+
+// AggregateWorkspaceFiles returns statistics about indexed workspace files.
+// If pathPrefix is non-empty, only files under that relative path are counted.
+func (s *Store) AggregateWorkspaceFiles(pathPrefix string) (
+	totalFiles, indexedFiles int,
+	totalSize int64,
+	byExt map[string][2]int64, // [count, size]
+	latestAt string,
+	err error,
+) {
+	byExt = make(map[string][2]int64)
+
+	where := ""
+	var args []any
+	if pathPrefix != "" {
+		where = " WHERE rel_path LIKE ? ESCAPE '\\'"
+		args = append(args, escapeLIKE(pathPrefix)+"%")
+	}
+
+	// Totals.
+	totalsSQL := fmt.Sprintf(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN has_content = 1 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(size), 0), COALESCE(MAX(indexed_at), '')
+		FROM workspace_files%s`, where)
+	if err = s.db.QueryRow(totalsSQL, args...).Scan(
+		&totalFiles, &indexedFiles, &totalSize, &latestAt,
+	); err != nil {
+		return
+	}
+
+	// By extension.
+	extSQL := fmt.Sprintf(`
+		SELECT extension, COUNT(*), COALESCE(SUM(size), 0)
+		FROM workspace_files%s
+		GROUP BY extension
+		ORDER BY COUNT(*) DESC`, where)
+	rows, qErr := s.db.Query(extSQL, args...)
+	if qErr != nil {
+		err = qErr
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ext string
+		var cnt, sz int64
+		if err = rows.Scan(&ext, &cnt, &sz); err != nil {
+			return
+		}
+		byExt[ext] = [2]int64{cnt, sz}
+	}
+	err = rows.Err()
+	return
+}
+
+// BeginTx starts a new database transaction. Used by the indexer for chunked
+// batch inserts.
+func (s *Store) BeginTx() (*sql.Tx, error) {
+	return s.db.Begin()
+}
+
+// UpsertWorkspaceFileTx is the transactional variant of UpsertWorkspaceFile.
+func (s *Store) UpsertWorkspaceFileTx(tx *sql.Tx, f *WorkspaceFile) (int64, error) {
+	hasContent := 0
+	if f.HasContent {
+		hasContent = 1
+	}
+	_, err := tx.Exec(`
+		INSERT INTO workspace_files (workspace_id, abs_path, rel_path, filename, extension, size, modified_at, has_content, indexed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		ON CONFLICT(workspace_id, abs_path) DO UPDATE SET
+			rel_path     = excluded.rel_path,
+			filename     = excluded.filename,
+			extension    = excluded.extension,
+			size         = excluded.size,
+			modified_at  = excluded.modified_at,
+			has_content  = excluded.has_content,
+			indexed_at   = datetime('now')`,
+		f.WorkspaceID, f.AbsPath, f.RelPath, f.Filename, f.Extension, f.Size, f.ModifiedAt, hasContent)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = tx.QueryRow(
+		"SELECT id FROM workspace_files WHERE workspace_id = ? AND abs_path = ?",
+		f.WorkspaceID, f.AbsPath,
+	).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// UpsertWorkspaceFTSTx is the transactional variant of UpsertWorkspaceFTS.
+func (s *Store) UpsertWorkspaceFTSTx(tx *sql.Tx, fileID int64, filename, body string) error {
+	_, _ = tx.Exec("DELETE FROM workspace_fts WHERE rowid = ?", fileID)
+	_, err := tx.Exec(
+		"INSERT INTO workspace_fts(rowid, filename, body) VALUES(?, ?, ?)",
+		fileID, filename, body)
+	return err
+}
+
+// SQLiteNow returns the current time from SQLite's datetime('now') function.
+// Used to ensure clock consistency with indexed_at timestamps.
+func (s *Store) SQLiteNow() (string, error) {
+	var now string
+	err := s.db.QueryRow("SELECT datetime('now')").Scan(&now)
+	return now, err
+}
+
+// sanitizeFTSQuery strips FTS5 special operators from a user-provided query,
+// quoting each term as a literal to prevent query syntax abuse.
+func sanitizeFTSQuery(query string) string {
+	terms := strings.Fields(query)
+	safe := make([]string, 0, len(terms))
+	for _, t := range terms {
+		// Strip FTS5 operators and special syntax characters.
+		t = strings.Map(func(r rune) rune {
+			switch r {
+			case '"', '*', '^', '{', '}', ':', '(', ')':
+				return -1
+			}
+			return r
+		}, t)
+		t = strings.TrimSpace(t)
+		// Skip FTS5 boolean keywords.
+		upper := strings.ToUpper(t)
+		if t == "" || upper == "AND" || upper == "OR" || upper == "NOT" || upper == "NEAR" {
+			continue
+		}
+		safe = append(safe, `"`+t+`"`)
+	}
+	return strings.Join(safe, " ")
+}
+
+// escapeLIKE escapes SQL LIKE wildcards (%, _) in a string.
+// Use with ESCAPE '\' in the SQL clause.
+func escapeLIKE(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }

@@ -27,7 +27,7 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 16 {
+	if count != 17 {
 		t.Fatalf("expected 16 migrations, got %d", count)
 	}
 }
@@ -1145,5 +1145,305 @@ func TestAudit(t *testing.T) {
 	}
 	if recent[1].EventType != "exec" {
 		t.Errorf("second event type: got %q, want %q", recent[1].EventType, "exec")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Workspace File Index (FTS5) tests
+// ---------------------------------------------------------------------------
+
+func TestWorkspaceFTS_UpsertAndSearch(t *testing.T) {
+	st := openTestStore(t)
+
+	// Insert two files.
+	f1 := &WorkspaceFile{
+		WorkspaceID: "ws-1", AbsPath: "/ws/src/main.go", RelPath: "src/main.go",
+		Filename: "main.go", Extension: ".go", Size: 1024,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	}
+	id1, err := st.UpsertWorkspaceFile(f1)
+	if err != nil {
+		t.Fatalf("upsert f1: %v", err)
+	}
+	if id1 == 0 {
+		t.Fatal("expected non-zero id for f1")
+	}
+
+	if err := st.UpsertWorkspaceFTS(id1, "main.go", "package main\n\nfunc handleSearch(query string) {\n\tfmt.Println(query)\n}"); err != nil {
+		t.Fatalf("upsert fts f1: %v", err)
+	}
+
+	f2 := &WorkspaceFile{
+		WorkspaceID: "ws-1", AbsPath: "/ws/src/util.go", RelPath: "src/util.go",
+		Filename: "util.go", Extension: ".go", Size: 512,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	}
+	id2, err := st.UpsertWorkspaceFile(f2)
+	if err != nil {
+		t.Fatalf("upsert f2: %v", err)
+	}
+	if err := st.UpsertWorkspaceFTS(id2, "util.go", "package main\n\nfunc formatOutput(s string) string {\n\treturn s\n}"); err != nil {
+		t.Fatalf("upsert fts f2: %v", err)
+	}
+
+	// Search for "handleSearch" — should match f1 only.
+	results, total, err := st.SearchWorkspaceFTS("handleSearch", "", "", 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("total: got %d, want 1", total)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results: got %d, want 1", len(results))
+	}
+	if results[0].Filename != "main.go" {
+		t.Errorf("filename: got %q, want %q", results[0].Filename, "main.go")
+	}
+
+	// Search for "package" — should match both.
+	results, total, err = st.SearchWorkspaceFTS("package", "", "", 20, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total: got %d, want 2", total)
+	}
+}
+
+func TestWorkspaceFTS_PathAndExtFilters(t *testing.T) {
+	st := openTestStore(t)
+
+	// File in src/
+	id1, _ := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-1", AbsPath: "/ws/src/app.go", RelPath: "src/app.go",
+		Filename: "app.go", Extension: ".go", Size: 100,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	})
+	st.UpsertWorkspaceFTS(id1, "app.go", "func runApp() { log.Println(\"start\") }")
+
+	// File in docs/
+	id2, _ := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-1", AbsPath: "/ws/docs/guide.md", RelPath: "docs/guide.md",
+		Filename: "guide.md", Extension: ".md", Size: 200,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	})
+	st.UpsertWorkspaceFTS(id2, "guide.md", "This guide explains how to runApp properly")
+
+	// Search with path prefix "src/" — only app.go.
+	results, total, _ := st.SearchWorkspaceFTS("runApp", "src/", "", 20, 0)
+	if total != 1 {
+		t.Errorf("path filter total: got %d, want 1", total)
+	}
+	if len(results) == 1 && results[0].Filename != "app.go" {
+		t.Errorf("filename: got %q, want %q", results[0].Filename, "app.go")
+	}
+
+	// Search with extension filter ".md" — only guide.md.
+	results, total, _ = st.SearchWorkspaceFTS("runApp", "", ".md", 20, 0)
+	if total != 1 {
+		t.Errorf("ext filter total: got %d, want 1", total)
+	}
+	if len(results) == 1 && results[0].Filename != "guide.md" {
+		t.Errorf("filename: got %q, want %q", results[0].Filename, "guide.md")
+	}
+}
+
+func TestWorkspaceFTS_EmptyQuery(t *testing.T) {
+	st := openTestStore(t)
+	_, _, err := st.SearchWorkspaceFTS("", "", "", 20, 0)
+	if err == nil {
+		t.Fatal("expected error for empty query")
+	}
+}
+
+func TestWorkspaceFTS_DeleteByWorkspace(t *testing.T) {
+	st := openTestStore(t)
+
+	id1, _ := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-del", AbsPath: "/ws/a.go", RelPath: "a.go",
+		Filename: "a.go", Extension: ".go", Size: 50,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	})
+	st.UpsertWorkspaceFTS(id1, "a.go", "func alpha() {}")
+
+	// Verify it's searchable.
+	results, _, _ := st.SearchWorkspaceFTS("alpha", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Fatalf("pre-delete search: got %d, want 1", len(results))
+	}
+
+	// Delete workspace index.
+	if err := st.DeleteWorkspaceIndex("ws-del"); err != nil {
+		t.Fatalf("delete index: %v", err)
+	}
+
+	// Verify file metadata is gone.
+	var count int
+	st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = 'ws-del'").Scan(&count)
+	if count != 0 {
+		t.Errorf("workspace_files count after delete: got %d, want 0", count)
+	}
+
+	// Verify FTS is gone — search should return 0 results.
+	results, total, _ := st.SearchWorkspaceFTS("alpha", "", "", 20, 0)
+	if total != 0 {
+		t.Errorf("post-delete search total: got %d, want 0", total)
+	}
+}
+
+func TestWorkspaceFTS_DeleteStale(t *testing.T) {
+	st := openTestStore(t)
+
+	// Insert a file.
+	id1, _ := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-stale", AbsPath: "/ws/old.go", RelPath: "old.go",
+		Filename: "old.go", Extension: ".go", Size: 100,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	})
+	st.UpsertWorkspaceFTS(id1, "old.go", "func oldFunc() {}")
+
+	// Record the time after the first insert.
+	cutoff := time.Now().Add(1 * time.Second)
+
+	// Wait and insert a newer file.
+	time.Sleep(10 * time.Millisecond)
+	id2, _ := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-stale", AbsPath: "/ws/new.go", RelPath: "new.go",
+		Filename: "new.go", Extension: ".go", Size: 100,
+		ModifiedAt: "2026-04-14T22:01:00Z", HasContent: true,
+	})
+	st.UpsertWorkspaceFTS(id2, "new.go", "func newFunc() {}")
+
+	// Both inserted within the same second, so SQLite datetime('now') may be the same.
+	// Use a future cutoff to test the mechanism: delete files older than "now + 2s".
+	// Actually, let's use the real mechanism: manually set old.go's indexed_at to the past.
+	st.db.Exec("UPDATE workspace_files SET indexed_at = '2020-01-01 00:00:00' WHERE abs_path = '/ws/old.go'")
+	_ = cutoff
+
+	// Delete stale files before now.
+	if err := st.DeleteStaleWorkspaceFiles("ws-stale", time.Now().UTC().Format("2006-01-02 15:04:05")); err != nil {
+		t.Fatalf("delete stale: %v", err)
+	}
+
+	// old.go should be gone, new.go should remain.
+	var count int
+	st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = 'ws-stale'").Scan(&count)
+	if count != 1 {
+		t.Errorf("files remaining: got %d, want 1", count)
+	}
+
+	// FTS for old.go should be gone.
+	results, _, _ := st.SearchWorkspaceFTS("oldFunc", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("stale FTS result: got %d, want 0", len(results))
+	}
+	// FTS for new.go should remain.
+	results, _, _ = st.SearchWorkspaceFTS("newFunc", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Errorf("fresh FTS result: got %d, want 1", len(results))
+	}
+}
+
+func TestWorkspaceFTS_Aggregate(t *testing.T) {
+	st := openTestStore(t)
+
+	for i, f := range []WorkspaceFile{
+		{WorkspaceID: "ws-agg", AbsPath: fmt.Sprintf("/ws/f%d.go", 1), RelPath: "f1.go", Filename: "f1.go", Extension: ".go", Size: 100, ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true},
+		{WorkspaceID: "ws-agg", AbsPath: fmt.Sprintf("/ws/f%d.go", 2), RelPath: "f2.go", Filename: "f2.go", Extension: ".go", Size: 200, ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true},
+		{WorkspaceID: "ws-agg", AbsPath: fmt.Sprintf("/ws/f%d.md", 3), RelPath: "f3.md", Filename: "f3.md", Extension: ".md", Size: 50, ModifiedAt: "2026-04-14T22:00:00Z", HasContent: false},
+	} {
+		ff := f
+		_, err := st.UpsertWorkspaceFile(&ff)
+		if err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+	}
+
+	total, indexed, totalSize, byExt, latestAt, err := st.AggregateWorkspaceFiles("")
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("total: got %d, want 3", total)
+	}
+	if indexed != 2 {
+		t.Errorf("indexed: got %d, want 2", indexed)
+	}
+	if totalSize != 350 {
+		t.Errorf("totalSize: got %d, want 350", totalSize)
+	}
+	goStat, ok := byExt[".go"]
+	if !ok {
+		t.Fatal("missing .go in byExt")
+	}
+	if goStat[0] != 2 || goStat[1] != 300 {
+		t.Errorf(".go stat: got count=%d size=%d, want count=2 size=300", goStat[0], goStat[1])
+	}
+	if latestAt == "" {
+		t.Error("latestAt should not be empty")
+	}
+}
+
+func TestWorkspaceFTS_UpsertUpdatesExisting(t *testing.T) {
+	st := openTestStore(t)
+
+	f := &WorkspaceFile{
+		WorkspaceID: "ws-up", AbsPath: "/ws/x.go", RelPath: "x.go",
+		Filename: "x.go", Extension: ".go", Size: 100,
+		ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+	}
+	id1, _ := st.UpsertWorkspaceFile(f)
+	st.UpsertWorkspaceFTS(id1, "x.go", "func oldVersion() {}")
+
+	// Upsert same file with different content.
+	f.Size = 200
+	id2, _ := st.UpsertWorkspaceFile(f)
+	st.UpsertWorkspaceFTS(id2, "x.go", "func newVersion() {}")
+
+	// IDs should match (upsert, not insert).
+	if id1 != id2 {
+		t.Errorf("expected same id on upsert: got %d and %d", id1, id2)
+	}
+
+	// Old content should not be searchable.
+	results, _, _ := st.SearchWorkspaceFTS("oldVersion", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("old content still searchable: got %d results", len(results))
+	}
+	// New content should be searchable.
+	results, _, _ = st.SearchWorkspaceFTS("newVersion", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Errorf("new content not searchable: got %d results", len(results))
+	}
+}
+
+func TestWorkspaceFTS_Pagination(t *testing.T) {
+	st := openTestStore(t)
+
+	// Insert 5 files, all containing "common_token".
+	for i := range 5 {
+		f := &WorkspaceFile{
+			WorkspaceID: "ws-pg", AbsPath: fmt.Sprintf("/ws/f%d.go", i), RelPath: fmt.Sprintf("f%d.go", i),
+			Filename: fmt.Sprintf("f%d.go", i), Extension: ".go", Size: 100,
+			ModifiedAt: "2026-04-14T22:00:00Z", HasContent: true,
+		}
+		id, _ := st.UpsertWorkspaceFile(f)
+		st.UpsertWorkspaceFTS(id, f.Filename, fmt.Sprintf("func f%d() { common_token }", i))
+	}
+
+	// Page 1: limit 2, offset 0.
+	results, total, _ := st.SearchWorkspaceFTS("common_token", "", "", 2, 0)
+	if total != 5 {
+		t.Errorf("total: got %d, want 5", total)
+	}
+	if len(results) != 2 {
+		t.Errorf("page 1 results: got %d, want 2", len(results))
+	}
+
+	// Page 3: limit 2, offset 4 — should return 1.
+	results, _, _ = st.SearchWorkspaceFTS("common_token", "", "", 2, 4)
+	if len(results) != 1 {
+		t.Errorf("page 3 results: got %d, want 1", len(results))
 	}
 }

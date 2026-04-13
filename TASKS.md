@@ -159,10 +159,49 @@ Spec: `.ina/specs/20260413-2330-think-persona-preset-system.md`
 - [x] T5: engine/executor.go — Profile.switch via user_context DB + tests
 - [x] T6: server/api_profile.go + cmd/gopaw persona + init integration
 
-## Backlog: Workspace Indexer (Full-text Search)
+## Plan 16: Workspace Indexer v1 (FTS5 Full-text Search) ✅
 
-KittyPaw `kittypaw-workspace` 크레이트 대응. 개발자 도구 유스케이스에 필요.
+Plan: `.claude/plans/workspace-indexer.md`
+Spec: `.ina/specs/20260414-2200-think-workspace-indexer.md`
 
-- [ ] 키워드 검색 — bleve 기반 파일명 + 내용 인덱싱, `File.search` 스킬
-- [ ] 시맨틱 검색 — LLM ranking (파일 미리보기 → 관련도 순위) — 스코프 미확정
+- [x] T1: Migration + Store — `017_workspace_fts.sql` (workspace_files + workspace_fts) + Store CRUD (Upsert, Delete, Search, Aggregate, DeleteStale) + tests
+- [x] T2: Indexer core — `engine/indexer.go` Indexer interface + FTS5Indexer (Index, Remove, file walk, binary detection, exclude patterns, chunked tx) + tests
+- [x] T3: Search + Stats + Reindex — FTS5 query + snippet/line extraction + StatsOptions + upsert-based reindex + tests
+- [x] T4: Skill metadata + Executor — `core/skillmeta.go` search/stats/reindex entries + `executor.go` early dispatch + AllowedPaths post-filter + tests
+- [x] T5: Session + Server wiring — Session.Indexer field + server.New indexer creation + async startup indexing + API triggers (create→Index, delete→Remove) + tests
+
+### v2 후보 (향후 검토)
+
+- [ ] bleve 백엔드 전환 — camelCase 토크나이징, 한국어 형태소, BM25 랭킹 필요 시
+- [ ] 시맨틱 검색 — LLM ranking / 임베딩 벡터 — 스코프 미확정
+- [ ] 실시간 파일 감시 — fsnotify 또는 File.write 훅으로 인덱스 자동 갱신
+- [ ] File.summary(path) — LLM 기반 파일 요약 + 캐시
 - [ ] Permission Checker — 에이전트 파일 접근 규칙 엔진 — 스코프 미확정
+
+## Backlog: MoA (Mixture of Agents) 🟡 중간 / 작업량 중
+
+KittyPaw `skill_executor/moa.rs` 대응 — 복수 모델 병렬 질의 + 결과 합성.
+config `[[models]]`에 등록된 모든 모델에 동시 질의 후, 기본 모델이 응답을 종합하여 최종 답변 생성.
+goroutine 기반 병렬 실행. KittyPaw 원본이 ~100줄 수준으로 비교적 가벼움.
+
+- [ ] `Moa.query` 스킬 — 복수 모델 병렬 질의 (goroutine fan-out)
+- [ ] 합성 레이어 — 기본 모델이 복수 응답을 종합
+- [ ] sandbox wrapper + executor 등록
+
+## Backlog: Skill/Package Remote Install 🟢 낮음 / 작업량 소
+
+KittyPaw CLI `install SOURCE` 대응 — GitHub URL에서 직접 스킬/패키지 설치.
+현재 `gopaw packages install`은 로컬 디렉토리만 지원. GitHub URL → git clone → 로컬 설치 파이프라인 추가.
+
+- [ ] GitHub URL 파싱 + git clone (임시 디렉토리)
+- [ ] 기존 `PackageManager.Install` 재사용
+- [ ] CLI `gopaw packages install <github-url>` 확장
+
+## Backlog: Desktop GUI 🟢 낮음 / 작업량 대
+
+KittyPaw `kittypaw-gui/` 대응 — Tao/Wry/Muda 네이티브 데스크톱 앱.
+Go에서는 Wails 또는 Fyne 등으로 대체 가능. CLI + Web API로 충분한 현 시점에서 우선순위 낮음.
+
+- [ ] 프레임워크 선정 (Wails vs Fyne vs 기타)
+- [ ] 데몬 자동 실행 + WebView 기반 채팅 UI
+- [ ] 번들 패키지 첫 실행 자동 설치

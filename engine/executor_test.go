@@ -1,9 +1,14 @@
 package engine
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jinto/gopaw/core"
+	"github.com/jinto/gopaw/store"
 )
 
 func TestIsPathAllowed(t *testing.T) {
@@ -255,5 +260,160 @@ func TestExtractSearchResultsMaxTen(t *testing.T) {
 	results := extractSearchResults(html)
 	if len(results) > 10 {
 		t.Errorf("expected at most 10 results, got %d", len(results))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// File index dispatch tests
+// ---------------------------------------------------------------------------
+
+func TestExecuteFileSearch_Dispatch(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+	ix.Index(context.Background(), "ws-exec", dir)
+
+	s := &Session{Store: st, Indexer: ix}
+	// Pre-load allowed paths with workspace dir.
+	paths := []string{dir}
+	s.allowedPaths.Store(&paths)
+
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "search",
+		Args:      []json.RawMessage{json.RawMessage(`"handleSearch"`)},
+	}
+	result, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if result == "" {
+		t.Fatal("expected non-empty result")
+	}
+
+	// Parse result.
+	var sr SearchResult
+	if err := json.Unmarshal([]byte(result), &sr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if sr.Total < 1 {
+		t.Errorf("total: got %d, want >= 1", sr.Total)
+	}
+}
+
+func TestExecuteFileSearch_NilIndexer(t *testing.T) {
+	s := &Session{}
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "search",
+		Args:      []json.RawMessage{json.RawMessage(`"test"`)},
+	}
+	_, err := executeFile(context.Background(), call, s)
+	if err == nil {
+		t.Fatal("expected error for nil indexer")
+	}
+}
+
+func TestExecuteFileSearch_AllowedPathsFilter(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+	ix.Index(context.Background(), "ws-filter", dir)
+
+	s := &Session{Store: st, Indexer: ix}
+	// Set AllowedPaths to a non-matching path — all results should be filtered out.
+	paths := []string{"/some/other/path"}
+	s.allowedPaths.Store(&paths)
+
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "search",
+		Args:      []json.RawMessage{json.RawMessage(`"handleSearch"`)},
+	}
+	result, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	var sr SearchResult
+	json.Unmarshal([]byte(result), &sr)
+	if len(sr.Files) != 0 {
+		t.Errorf("expected 0 files after filter, got %d", len(sr.Files))
+	}
+}
+
+func TestExecuteFileStats_Dispatch(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+	ix.Index(context.Background(), "ws-stats-exec", dir)
+
+	s := &Session{Store: st, Indexer: ix}
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "stats",
+	}
+	result, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+
+	var stats IndexStats
+	if err := json.Unmarshal([]byte(result), &stats); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if stats.TotalFiles < 1 {
+		t.Errorf("total_files: got %d, want >= 1", stats.TotalFiles)
+	}
+}
+
+func TestExecuteFileReindex_Dispatch(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+	ix.Index(context.Background(), "ws-reindex-exec", dir)
+
+	// Register workspace in store.
+	st.SaveWorkspace(&store.Workspace{ID: "ws-reindex-exec", Name: "test", RootPath: dir})
+
+	s := &Session{Store: st, Indexer: ix}
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "reindex",
+	}
+	result, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+
+	var ir IndexResult
+	if err := json.Unmarshal([]byte(result), &ir); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ir.Indexed < 1 {
+		t.Errorf("indexed: got %d, want >= 1", ir.Indexed)
+	}
+}
+
+func TestExecuteFileRead_StillWorks(t *testing.T) {
+	st := openTestStore(t)
+	dir := setupTestWorkspace(t)
+	s := &Session{Store: st}
+	// Resolve the path to handle macOS /private/var symlink.
+	resolvedDir := resolveForValidation(dir)
+	paths := []string{resolvedDir}
+	s.allowedPaths.Store(&paths)
+
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "read",
+		Args:      []json.RawMessage{json.RawMessage(`"` + filepath.Join(dir, "main.go") + `"`)},
+	}
+	result, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if result == "" {
+		t.Fatal("expected content from File.read")
 	}
 }

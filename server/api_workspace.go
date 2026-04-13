@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -80,6 +81,15 @@ func (s *Server) handleWorkspacesCreate(w http.ResponseWriter, r *http.Request) 
 		slog.Error("workspace create: cache refresh failed", "error", err)
 	}
 
+	// Trigger async background indexing.
+	if s.session.Indexer != nil {
+		go func() {
+			if _, err := s.session.Indexer.Index(context.Background(), id, canonical); err != nil {
+				slog.Warn("workspace create: indexing failed", "id", id, "error", err)
+			}
+		}()
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": id, "name": name, "root_path": canonical,
 	})
@@ -94,6 +104,13 @@ func (s *Server) handleWorkspacesDelete(w http.ResponseWriter, r *http.Request) 
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "workspace id is required")
 		return
+	}
+
+	// Remove index before deleting workspace.
+	if s.session.Indexer != nil {
+		if err := s.session.Indexer.Remove(id); err != nil {
+			slog.Warn("workspace delete: index removal failed", "id", id, "error", err)
+		}
 	}
 
 	if err := s.store.DeleteWorkspace(id); err != nil {

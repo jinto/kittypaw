@@ -40,6 +40,7 @@ type Session struct {
 	Config           *core.Config
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
+	Indexer          Indexer            // nil when workspace indexer is not initialized
 	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 }
 
