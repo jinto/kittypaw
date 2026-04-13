@@ -36,7 +36,8 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
-	McpRegistry      *mcpreg.Registry // nil when no MCP servers configured
+	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
+	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
 }
 
 // Run processes a single event through the agent loop.
@@ -123,6 +124,23 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 			return "", fmt.Errorf("daily token limit reached (%d/%d)",
 				stats.TotalTokens, s.Config.Features.DailyTokenLimit)
 		}
+	}
+
+	// Orchestration gate: PM agent may delegate to profiles.
+	if response, handled, orchErr := OrchestrateRequest(
+		ctx, eventText, s.Provider, s.Store, &s.Config.Orchestration, s.Budget,
+	); orchErr != nil {
+		slog.Warn("orchestration error, falling through", "error", orchErr)
+	} else if handled {
+		assistantTurn := core.ConversationTurn{
+			Role:      core.RoleAssistant,
+			Content:   response,
+			Timestamp: core.NowTimestamp(),
+		}
+		state.Turns = append(state.Turns, assistantTurn)
+		_ = s.Store.AddTurn(agentID, &assistantTurn)
+		_ = s.Store.SaveState(state)
+		return response, nil
 	}
 
 	// Load memory context once before retry loop.

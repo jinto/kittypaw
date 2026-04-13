@@ -26,7 +26,7 @@ func TestParseCronInterval(t *testing.T) {
 		{"", 0},
 		{"  ", 0},
 		{"invalid", 0},
-		{"0 9 * * *", 0}, // Standard cron not supported yet
+		{"0 9 * * *", 24 * time.Hour}, // Daily at 9am → 24h interval
 	}
 	for _, tt := range tests {
 		got := parseCronInterval(tt.input)
@@ -41,7 +41,7 @@ func TestParseCronInterval(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSchedulerStopMultipleCalls(t *testing.T) {
-	sched := NewScheduler(&Session{})
+	sched := NewScheduler(&Session{}, nil, nil)
 	sched.Stop()
 	sched.Stop() // must not panic
 	sched.Stop()
@@ -65,7 +65,7 @@ func newTestScheduler(t *testing.T) (*Scheduler, *store.Store) {
 	t.Helper()
 	st := newTestStore(t)
 	session := &Session{Store: st, Config: &core.Config{}}
-	return NewScheduler(session), st
+	return NewScheduler(session, nil, nil), st
 }
 
 func TestIsDue_ScheduleFirstRun(t *testing.T) {

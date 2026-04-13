@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jinto/gopaw/core"
@@ -409,15 +410,43 @@ func (s *Server) handleFixApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applied, err := s.store.ApplyFix(fixID)
+	// Load fix to get skill_id and new code.
+	fix, err := s.store.GetFix(fixID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusNotFound, "fix not found")
+		return
+	}
+
+	// Load current disk code and skill metadata for stale check.
+	skill, currentCode, loadErr := core.LoadSkill(fix.SkillID)
+	if loadErr != nil || skill == nil {
+		writeError(w, http.StatusNotFound, "skill not found on disk")
+		return
+	}
+
+	applied, err := s.store.ApplyFix(fixID, currentCode)
+	if err != nil {
+		if strings.Contains(err.Error(), "stale") {
+			writeError(w, http.StatusConflict, "code has changed since fix was generated")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "fix application failed")
 		return
 	}
 	if !applied {
 		writeError(w, http.StatusNotFound, "fix not found or already applied")
 		return
 	}
+
+	// Apply the new code to disk using the already-loaded skill.
+	skill.Version++
+	if saveErr := core.SaveSkill(skill, fix.NewCode); saveErr != nil {
+		// Revert DB state since disk write failed.
+		_ = s.store.RevertFix(fixID)
+		writeError(w, http.StatusInternalServerError, "failed to save fix to disk")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 

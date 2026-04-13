@@ -824,9 +824,49 @@ func executeMCP(ctx context.Context, call core.SkillCall, s *Session) (string, e
 	}
 }
 
-func executeDelegate(_ context.Context, _ core.SkillCall, _ *Session) (string, error) {
-	// TODO: implement agent delegation
-	return jsonResult(map[string]any{"error": "Agent delegation not yet implemented"})
+func executeDelegate(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	switch call.Method {
+	case "delegate":
+		// Agent.delegate(task, profileId, background)
+		if len(call.Args) < 2 {
+			return jsonResult(map[string]any{"error": "Agent.delegate requires (task, profileId)"})
+		}
+		var task, profileID string
+		if err := json.Unmarshal(call.Args[0], &task); err != nil {
+			return jsonResult(map[string]any{"error": "invalid task argument"})
+		}
+		if err := json.Unmarshal(call.Args[1], &profileID); err != nil {
+			return jsonResult(map[string]any{"error": "invalid profileId argument"})
+		}
+		var background bool
+		if len(call.Args) > 2 {
+			_ = json.Unmarshal(call.Args[2], &background)
+		}
+
+		if len(task) > maxDelegateTaskLen {
+			return jsonResult(map[string]any{
+				"error":   fmt.Sprintf("task too long (%d > %d chars)", len(task), maxDelegateTaskLen),
+				"success": false,
+			})
+		}
+
+		// Execute delegation.
+		spec := PMTaskSpec{ProfileID: profileID, Task: task, Background: background}
+		maxDepth := 3
+		if s.Config.Orchestration.MaxDepth > 0 {
+			maxDepth = int(s.Config.Orchestration.MaxDepth)
+		}
+
+		result := executeDelegateTask(ctx, spec, s.Provider, s.Store, nil, 1, maxDepth)
+		return jsonResult(map[string]any{
+			"result":      result.Result,
+			"success":     result.Success,
+			"token_usage": result.TokenUsage,
+		})
+
+	default:
+		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Agent method: %s", call.Method)})
+	}
 }
 
 // --- Helpers ---

@@ -64,3 +64,51 @@ Plan: `.claude/plans/mcp-registry.md`
 - [x] Skill metadata (Mcp.listTools) + executeMCP implementation + tests (AC1, AC2)
 - [x] MCP tools prompt injection (BuildMCPToolsSection) + tests (AC3, AC4)
 - [x] Wiring — Session, Server, CLI + nil-safety tests + verification
+
+## Plan 8: SharedTokenBudget + Auto-Fix Loop ✅
+
+Plan: `.claude/plans/tier1-features.md` (Plan 1)
+Spec: `.ina/specs/20260413-2100-think-tier1-features.md`
+
+- [x] Migration 016 — `ALTER TABLE skill_schedule ADD COLUMN fix_attempts` + store methods (`ClaimFixAttempt`, `ResetFixAttempts`, `GetFixAttempts`)
+- [x] `engine/budget.go` — `SharedTokenBudget` (sync/atomic CAS) + remove old `TokenBudget` from orchestration.go + `budget_test.go`
+- [x] Store updates — `RecordFix` 5th param `applied bool` + `ApplyFix` stale check + `GetFix` + update callers + tests
+- [x] `engine/auto_fix.go` — `AttemptAutoFix` (generateCode direct call, manual TeachResult, autonomy gate) + `buildFixPrompt`
+- [x] Wire auto-fix into `schedule.go` `runSkill()` failure path — DB-level CAS via `ClaimFixAttempt`, package skip, disable after 2x
+- [x] `engine/auto_fix_test.go` + `budget_test.go` — 13 tests: concurrent CAS, autonomy gate, stale check, cap, supervised mode
+
+## Plan 9: Agent Delegation ✅
+
+Plan: `.claude/plans/tier1-features.md` (Plan 2)
+
+- [x] Rewrite `OrchestrateRequest` — JSON PM format + `json.Unmarshal` + wire `SharedTokenBudget`
+- [x] Implement `executeDelegate` in executor.go — validate, load SOUL.md (fallback to description), generate, budget check
+- [x] Parallel fan-out with `errgroup` — per-child timeout, Depth+1, budget exhaustion cancels remaining
+- [x] PM Synthesize — all success / partial fail / all fail modes
+- [x] Wire `OrchestrateRequest` gate into `session.go` `runAgentLoop()` + pass budget through Session
+- [x] `engine/orchestration_test.go` — 12 tests: JSON parse, depth, synthesize, SOUL.md fallback, budget, disabled config
+
+## Plan 10: Reflection System ✅
+
+Plan: `.claude/plans/tier1-features.md` (Plan 3)
+
+- [x] Store methods — `ListTopicPreferences`, `DeleteExpiredReflection`, `DeleteUserContextPrefix`
+- [x] `engine/reflection.go` — `RunReflectionCycle`, `IntentHash`, `BuildWeeklyReport`
+- [x] `engine/evolution.go` — `TriggerEvolution`, `ApproveEvolution`, `RejectEvolution`
+- [x] `server/api_reflection.go` — 6 endpoints (list, approve, reject, clear, run, weekly-report)
+- [x] `server/api_persona.go` — 3 endpoints (list evolution, approve, reject)
+- [x] Wire reflection cron into scheduler — built-in periodic task, configurable schedule
+- [x] Tests — reflection cycle, JSON skip, TTL, weekly report, evolution approve/reject, zero messages
+
+## Plan 11: Package System ✅
+
+Plan: `.claude/plans/tier1-features.md` (Plan 4)
+Note: CEO 권장 — Plans 8-10 배치 후 별도 PR로 진행
+
+- [x] `core/package.go` — type definitions + `LoadPackageToml` + ID validation
+- [x] `core/secrets.go` — `SecretsStore` (CRUD, 0600 perms, log masking)
+- [x] `core/package_manager.go` — Install, Uninstall, List, Load, GetConfig, SetConfig, LoadChain
+- [x] `core/registry.go` — `RegistryClient` (FetchIndex, DownloadPackage, SSRF defense)
+- [x] Wire packages into scheduler + chain execution (prev_output, model priority, can_disable=false)
+- [x] Cron upgrade (`robfig/cron/v3`) + CLI commands (`gopaw packages {install,uninstall,list,search,config,run}`)
+- [x] Tests — TOML parse, ID validation, secrets masking, chain loading, registry SSRF, schedule integration

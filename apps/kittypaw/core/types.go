@@ -173,6 +173,20 @@ func ValidateSkillName(name string) error {
 	return nil
 }
 
+// ValidateProfileID checks that a profile ID contains only safe characters.
+func ValidateProfileID(id string) error {
+	if id == "" {
+		return fmt.Errorf("profile ID is empty")
+	}
+	if strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("profile ID contains path traversal characters: %q", id)
+	}
+	if !validSkillName.MatchString(id) {
+		return fmt.Errorf("profile ID contains invalid characters: %q (allowed: a-z, A-Z, 0-9, _, -)", id)
+	}
+	return nil
+}
+
 // IsSecretEnvVar returns true if the variable name likely contains a secret.
 func IsSecretEnvVar(name string) bool {
 	upper := strings.ToUpper(name)

@@ -27,8 +27,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 15 {
-		t.Fatalf("expected 15 migrations, got %d", count)
+	if count != 16 {
+		t.Fatalf("expected 16 migrations, got %d", count)
 	}
 }
 
@@ -603,11 +603,11 @@ func TestCheckpoints(t *testing.T) {
 func TestSkillFixes(t *testing.T) {
 	st := openTestStore(t)
 
-	// Record two fixes.
-	if err := st.RecordFix("sk-1", "nil pointer", "old1", "new1"); err != nil {
+	// Record two fixes — second arg (applied) is false by default.
+	if err := st.RecordFix("sk-1", "nil pointer", "old1", "new1", false); err != nil {
 		t.Fatalf("record fix 1: %v", err)
 	}
-	if err := st.RecordFix("sk-1", "timeout", "old2", "new2"); err != nil {
+	if err := st.RecordFix("sk-1", "timeout", "old2", "new2", false); err != nil {
 		t.Fatalf("record fix 2: %v", err)
 	}
 
@@ -625,8 +625,8 @@ func TestSkillFixes(t *testing.T) {
 		t.Errorf("unexpected fix messages: %v", msgs)
 	}
 
-	// ApplyFix.
-	applied, err := st.ApplyFix(fixes[0].ID)
+	// ApplyFix with matching current code succeeds.
+	applied, err := st.ApplyFix(fixes[0].ID, fixes[0].OldCode)
 	if err != nil {
 		t.Fatalf("apply fix: %v", err)
 	}
@@ -634,13 +634,35 @@ func TestSkillFixes(t *testing.T) {
 		t.Error("expected apply to return true")
 	}
 
-	// ApplyFix again is idempotent (returns false).
-	applied, err = st.ApplyFix(fixes[0].ID)
+	// ApplyFix again is idempotent (returns false — already applied).
+	applied, err = st.ApplyFix(fixes[0].ID, fixes[0].OldCode)
 	if err != nil {
 		t.Fatalf("apply fix again: %v", err)
 	}
 	if applied {
 		t.Error("expected second apply to return false")
+	}
+
+	// ApplyFix with stale code fails.
+	_, err = st.ApplyFix(fixes[1].ID, "totally-different-code")
+	if err == nil {
+		t.Fatal("expected stale check error, got nil")
+	}
+}
+
+func TestRecordFixPreApplied(t *testing.T) {
+	st := openTestStore(t)
+
+	// Record a fix that is already applied (auto-fix full mode).
+	if err := st.RecordFix("sk-2", "err", "old", "new", true); err != nil {
+		t.Fatalf("record pre-applied fix: %v", err)
+	}
+	fixes, err := st.ListFixes("sk-2")
+	if err != nil {
+		t.Fatalf("list fixes: %v", err)
+	}
+	if len(fixes) != 1 || !fixes[0].Applied {
+		t.Fatalf("expected 1 pre-applied fix, got %d (applied=%v)", len(fixes), fixes[0].Applied)
 	}
 }
 

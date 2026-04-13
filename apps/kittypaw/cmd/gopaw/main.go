@@ -69,6 +69,7 @@ func newRootCmd() *cobra.Command {
 		newAgentCmd(),
 		newLogCmd(),
 		newDaemonCmd(),
+		newPackagesCmd(),
 	)
 
 	return cmd
@@ -875,6 +876,190 @@ func retryPendingResponses(ctx context.Context, st *store.Store, channels map[co
 				slog.Info("retry: cleaned up expired responses", "count", n)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// packages
+// ---------------------------------------------------------------------------
+
+func newPackagesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "packages",
+		Aliases: []string{"pkg"},
+		Short:   "Manage skill packages",
+	}
+	cmd.AddCommand(
+		newPkgInstallCmd(),
+		newPkgUninstallCmd(),
+		newPkgListCmd(),
+		newPkgConfigCmd(),
+		newPkgRunCmd(),
+	)
+	return cmd
+}
+
+func newPkgInstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "install <path>",
+		Short: "Install a package from a local directory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+			pkg, err := pm.Install(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed package %q (%s) v%s\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
+			return nil
+		},
+	}
+}
+
+func newPkgUninstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall <id>",
+		Short: "Uninstall a package",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+			if err := pm.Uninstall(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Package %q uninstalled.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newPkgListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List installed packages",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+			packages, err := pm.ListInstalled()
+			if err != nil {
+				return err
+			}
+			if len(packages) == 0 {
+				fmt.Println("No packages installed.")
+				return nil
+			}
+			fmt.Printf("%-20s %-30s %-10s %s\n", "ID", "NAME", "VERSION", "CRON")
+			fmt.Println(strings.Repeat("-", 75))
+			for _, p := range packages {
+				cronStr := p.Meta.Cron
+				if cronStr == "" {
+					cronStr = "-"
+				}
+				name := p.Meta.Name
+				if len(name) > 28 {
+					name = name[:28] + ".."
+				}
+				fmt.Printf("%-20s %-30s %-10s %s\n", p.Meta.ID, name, p.Meta.Version, cronStr)
+			}
+			return nil
+		},
+	}
+}
+
+func newPkgConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config <id> [key] [value]",
+		Short: "Get or set package configuration",
+		Args:  cobra.RangeArgs(1, 3),
+		RunE: func(_ *cobra.Command, args []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+
+			id := args[0]
+			if len(args) == 1 {
+				// Show all config.
+				cfg, err := pm.GetConfig(id)
+				if err != nil {
+					return err
+				}
+				if len(cfg) == 0 {
+					fmt.Println("No configuration fields.")
+					return nil
+				}
+				for k, v := range cfg {
+					fmt.Printf("  %s = %s\n", k, v)
+				}
+				return nil
+			}
+			if len(args) == 3 {
+				// Set config.
+				return pm.SetConfig(id, args[1], args[2])
+			}
+			return fmt.Errorf("usage: gopaw packages config <id> [key value]")
+		},
+	}
+	return cmd
+}
+
+func newPkgRunCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "run <id>",
+		Short: "Run a package manually",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+			pkg, code, err := pm.LoadPackage(args[0])
+			if err != nil {
+				return err
+			}
+
+			cfg, st, provider, sbox, err := bootstrap()
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+
+			session := &engine.Session{
+				Provider: provider,
+				Sandbox:  sbox,
+				Store:    st,
+				Config:   cfg,
+			}
+
+			payload, _ := json.Marshal(core.ChatPayload{
+				Text:   "skill:pkg:" + pkg.Meta.ID,
+				ChatID: "cli",
+			})
+			event := core.Event{
+				Type:    core.EventDesktop,
+				Payload: payload,
+			}
+
+			_ = code // code is available but session.Run loads it via skill matching
+			resp, err := session.Run(context.Background(), event, nil)
+			if err != nil {
+				return fmt.Errorf("run package %q: %w", args[0], err)
+			}
+			fmt.Println(resp)
+			return nil
+		},
 	}
 }
 
