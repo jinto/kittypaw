@@ -125,3 +125,21 @@ Note: CEO 권장 — Plans 8-10 배치 후 별도 PR로 진행
 - [x] Wire packages into scheduler + chain execution (prev_output, model priority, can_disable=false)
 - [x] Cron upgrade (`robfig/cron/v3`) + CLI commands (`gopaw packages {install,uninstall,list,search,config,run}`)
 - [x] Tests — TOML parse, ID validation, secrets masking, chain loading, registry SSRF, schedule integration
+
+## Plan 13: Vision / Image Skills ← 현재
+
+Plan: `.claude/plans/vision-image-skills.md`
+Spec: `.ina/specs/20260413-2055-think-vision-image-skills.md`
+
+- [x] Provider resolution + image download helper + tests
+- [x] Vision.analyze — 3 providers (Claude, OpenAI, Gemini) + arg validation + tests
+- [x] Image.generate — 2 providers (OpenAI, Gemini) + Claude error + tests
+- [x] Edge cases + acceptance criteria verification
+
+## Backlog: Workspace Indexer (Full-text Search)
+
+KittyPaw `kittypaw-workspace` 크레이트 대응. 개발자 도구 유스케이스에 필요.
+
+- [ ] 키워드 검색 — bleve 기반 파일명 + 내용 인덱싱, `File.search` 스킬
+- [ ] 시맨틱 검색 — LLM ranking (파일 미리보기 → 관련도 순위) — 스코프 미확정
+- [ ] Permission Checker — 에이전트 파일 접근 규칙 엔진 — 스코프 미확정
