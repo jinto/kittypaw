@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/jinto/gopaw/channel"
 	"github.com/jinto/gopaw/core"
 )
 
@@ -179,6 +180,18 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 	s.store.SetUserContext("setup:telegram_bot_token", body.BotToken, "setup")
 	s.store.SetUserContext("setup:telegram_chat_id", body.ChatID, "setup")
 
+	// Immediately spawn the Telegram channel so the user gets instant
+	// feedback during onboarding — no reload required (AC3).
+	if s.spawner != nil {
+		chCfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: body.BotToken}
+		ch, err := channel.FromConfig(chCfg)
+		if err != nil {
+			slog.Warn("setup: telegram channel create failed", "error", err)
+		} else if err := s.spawner.TrySpawn(ch, chCfg); err != nil {
+			slog.Warn("setup: telegram channel spawn failed", "error", err)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 
@@ -301,6 +314,14 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 		*s.config = *cfg
 		s.configMu.Unlock()
 		slog.Info("setup: config reloaded after onboarding")
+
+		// Reconcile channels with the generated config. TrySpawn is idempotent,
+		// so channels already started by handleSetupTelegram are safely skipped.
+		if s.spawner != nil {
+			if rErr := s.spawner.Reconcile(cfg.Channels); rErr != nil {
+				slog.Warn("setup: channel reconcile partial failure", "error", rErr)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})

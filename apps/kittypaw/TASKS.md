@@ -26,7 +26,7 @@ Plan: `.claude/plans/e2e-agent-loop.md`
 - [x] TestE2ESkillCall (Storage round-trip via sandbox → resolveSkillCall)
 - [x] TestE2EErrorRetry (JS error → engine retry → success)
 
-## Plan 12: Workspace Hardening ← 현재
+## Plan 12: Workspace Hardening ✅
 
 Plan: `.claude/plans/workspace-hardening.md`
 Spec: `.ina/specs/20260413-2230-think-workspace-hardening.md`
@@ -126,7 +126,7 @@ Note: CEO 권장 — Plans 8-10 배치 후 별도 PR로 진행
 - [x] Cron upgrade (`robfig/cron/v3`) + CLI commands (`gopaw packages {install,uninstall,list,search,config,run}`)
 - [x] Tests — TOML parse, ID validation, secrets masking, chain loading, registry SSRF, schedule integration
 
-## Plan 13: Vision / Image Skills ← 현재
+## Plan 13: Vision / Image Skills ✅
 
 Plan: `.claude/plans/vision-image-skills.md`
 Spec: `.ina/specs/20260413-2055-think-vision-image-skills.md`
@@ -135,6 +135,17 @@ Spec: `.ina/specs/20260413-2055-think-vision-image-skills.md`
 - [x] Vision.analyze — 3 providers (Claude, OpenAI, Gemini) + arg validation + tests
 - [x] Image.generate — 2 providers (OpenAI, Gemini) + Claude error + tests
 - [x] Edge cases + acceptance criteria verification
+
+## Plan 14: Channel Hot-Reload ✅
+
+Plan: `.claude/plans/channel-hot-reload.md`
+Spec: `.ina/specs/20260413-2239-think-channel-hot-reload.md`
+
+- [x] ChannelSpawner core — `TrySpawn`, `Stop`, `GetChannel`, `List` + stub channel + unit tests (AC1, AC2, AC4)
+- [x] Reconcile + ReplaceSpawn + StopAll — diff algorithm, serialized reconcile, parallel StopAll, best-effort errors + tests (AC5, AC6)
+- [x] Server integration — `spawner` field, `eventCh`, `StartChannels`, `dispatchLoop`, `retryPendingResponses` (no-drop semantics) + shutdown wiring
+- [x] API + onboarding — `handleReload` Reconcile + `GET /api/v1/channels` + `handleSetupTelegram` TrySpawn + `handleSetupComplete` Reconcile (AC1, AC3)
+- [x] main.go migration — Remove channel startup (119-143), dispatch loop (146-190), `retryPendingResponses` (834-880) + wire `srv.StartChannels`
 
 ## Backlog: Workspace Indexer (Full-text Search)
 
