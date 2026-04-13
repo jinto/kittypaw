@@ -22,7 +22,7 @@ import (
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
 // to the agent engine. It owns the chi router, the engine session, the
-// scheduler, and all handler state.
+// scheduler, channel spawner, and all handler state.
 type Server struct {
 	config    *core.Config
 	configMu  sync.RWMutex // protects config during hot-reload
@@ -30,10 +30,13 @@ type Server struct {
 	session   *engine.Session
 	scheduler *engine.Scheduler
 	router    chi.Router
+	spawner   *ChannelSpawner // manages channel lifecycle for hot-reload
+	eventCh   chan core.Event  // shared event channel between channels and dispatch loop
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
 // mcpReg may be nil when no MCP servers are configured.
+// Call StartChannels before ListenAndServe to activate messaging channels.
 func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry) *Server {
 	// Seed TOML-configured workspace paths into DB (idempotent).
 	if len(cfg.Sandbox.AllowedPaths) > 0 {
@@ -59,6 +62,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		store:     st,
 		session:   session,
 		scheduler: engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
+		eventCh:   make(chan core.Event, 64),
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -143,6 +147,9 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Get("/config/check", s.handleConfigCheck)
 		r.Post("/reload", s.handleReload)
 
+		// Channels
+		r.Get("/channels", s.handleChannels)
+
 		// Memory
 		r.Get("/memory/search", s.handleMemorySearch)
 
@@ -193,6 +200,127 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 	return s.session.Run(ctx, event, nil)
 }
 
+// StartChannels creates the ChannelSpawner, reconciles the initial channel
+// configs, and starts the dispatch and retry goroutines.
+// Must be called before ListenAndServe.
+func (s *Server) StartChannels(ctx context.Context, configs []core.ChannelConfig) {
+	s.spawner = NewChannelSpawner(ctx, s.eventCh)
+	if err := s.spawner.Reconcile(configs); err != nil {
+		slog.Warn("initial channel reconcile: some channels failed", "error", err)
+	}
+	go s.dispatchLoop(ctx)
+	go s.retryPendingResponses(ctx)
+}
+
+// dispatchLoop reads events from the shared eventCh, processes them through
+// the engine, and routes responses back via the spawner.
+func (s *Server) dispatchLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-s.eventCh:
+			if !ok {
+				return
+			}
+			payload, err := event.ParsePayload()
+			if err != nil {
+				slog.Warn("channel event: bad payload", "type", event.Type, "error", err)
+				continue
+			}
+
+			slog.Info("processing channel event",
+				"type", event.Type,
+				"chat_id", payload.ChatID,
+				"from", payload.FromName,
+			)
+
+			response, err := s.ProcessEvent(ctx, event)
+			if err != nil {
+				slog.Error("channel event: engine error",
+					"type", event.Type,
+					"chat_id", payload.ChatID,
+					"error", err,
+				)
+				continue
+			}
+
+			ch, ok := s.spawner.GetChannel(event.Type)
+			if !ok {
+				slog.Warn("channel event: no channel for response routing, enqueuing for retry", "type", event.Type)
+				if event.Type != core.EventKakaoTalk {
+					_ = s.store.EnqueueResponse(string(event.Type), payload.ChatID, response)
+				}
+				continue
+			}
+
+			if err := ch.SendResponse(ctx, payload.ChatID, response); err != nil {
+				slog.Error("channel event: send response failed",
+					"type", event.Type,
+					"chat_id", payload.ChatID,
+					"error", err,
+				)
+				// Kakao uses ephemeral action IDs — retry is futile.
+				if event.Type != core.EventKakaoTalk {
+					if qErr := s.store.EnqueueResponse(string(event.Type), payload.ChatID, response); qErr != nil {
+						slog.Error("channel event: enqueue response failed", "error", qErr)
+					}
+				}
+			}
+		}
+	}
+}
+
+// retryPendingResponses periodically retries failed response deliveries.
+// Uses no-drop semantics: if a channel is absent (e.g., mid-ReplaceSpawn),
+// the response stays in the queue for the next tick.
+func (s *Server) retryPendingResponses(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	cleanupTicker := time.NewTicker(1 * time.Hour)
+	defer cleanupTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pending, err := s.store.DequeuePendingResponses(10)
+			if err != nil {
+				slog.Warn("retry: dequeue failed", "error", err)
+				continue
+			}
+			for _, p := range pending {
+				ch, ok := s.spawner.GetChannel(core.EventType(p.EventType))
+				if !ok {
+					// Channel absent — do NOT drop. Leave in queue for next tick.
+					continue
+				}
+				if err := ch.SendResponse(ctx, p.ChatID, p.Response); err != nil {
+					slog.Warn("retry: send failed",
+						"id", p.ID, "retry", p.RetryCount, "error", err)
+					if kept, rErr := s.store.IncrementResponseRetry(p.ID); rErr != nil {
+						slog.Error("retry: increment failed", "id", p.ID, "error", rErr)
+					} else if !kept {
+						slog.Warn("retry: max retries exceeded, dropping", "id", p.ID)
+					}
+				} else {
+					slog.Info("retry: delivered pending response",
+						"id", p.ID, "chat_id", p.ChatID)
+					_ = s.store.MarkResponseDelivered(p.ID)
+				}
+			}
+		case <-cleanupTicker.C:
+			if n, err := s.store.CleanupExpiredResponses(24); err != nil {
+				slog.Warn("retry: cleanup failed", "error", err)
+			} else if n > 0 {
+				slog.Info("retry: cleaned up expired responses", "count", n)
+			}
+		}
+	}
+}
+
 // ListenAndServe starts the HTTP server and scheduler, blocking until a
 // SIGINT or SIGTERM triggers graceful shutdown of both.
 func (s *Server) ListenAndServe(addr string) error {
@@ -214,6 +342,11 @@ func (s *Server) ListenAndServe(addr string) error {
 	go func() {
 		<-done
 		slog.Info("shutting down server")
+
+		// Stop all channels first (parallel cancel + wait).
+		if s.spawner != nil {
+			s.spawner.StopAll()
+		}
 
 		// Stop scheduler tick loop and cancel context, then wait for
 		// in-flight skill goroutines to drain before shutting down HTTP.

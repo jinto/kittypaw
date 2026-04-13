@@ -758,6 +758,27 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	*s.config = *cfg
 	s.configMu.Unlock()
 	slog.Info("config reloaded")
-	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+
+	// Reconcile channels with the new config.
+	result := map[string]any{"success": true}
+	if s.spawner != nil {
+		if err := s.spawner.Reconcile(cfg.Channels); err != nil {
+			slog.Warn("reload: channel reconcile partial failure", "error", err)
+			result["warnings"] = []string{err.Error()}
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/channels
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleChannels(w http.ResponseWriter, _ *http.Request) {
+	if s.spawner == nil {
+		writeJSON(w, http.StatusOK, []ChannelStatus{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.spawner.List())
 }
 
