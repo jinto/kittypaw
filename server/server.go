@@ -48,7 +48,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		config:    cfg,
 		store:     st,
 		session:   session,
-		scheduler: engine.NewScheduler(session),
+		scheduler: engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -140,6 +140,19 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/users/link", s.handleUsersLink)
 		r.Get("/users/{id}/identities", s.handleUsersIdentities)
 		r.Delete("/users/{id}/identities/{channel}", s.handleUsersUnlink)
+
+		// Reflection
+		r.Get("/reflection", s.handleReflectionList)
+		r.Post("/reflection/{key}/approve", s.handleReflectionApprove)
+		r.Post("/reflection/{key}/reject", s.handleReflectionReject)
+		r.Post("/reflection/clear", s.handleReflectionClear)
+		r.Post("/reflection/run", s.handleReflectionRun)
+		r.Get("/reflection/weekly-report", s.handleWeeklyReport)
+
+		// Persona evolution
+		r.Get("/persona/evolution", s.handleEvolutionList)
+		r.Post("/persona/evolution/{id}/approve", s.handleEvolutionApprove)
+		r.Post("/persona/evolution/{id}/reject", s.handleEvolutionReject)
 	})
 
 	// WebSocket sits outside /api/v1 — auth is done via query param or header.
@@ -149,6 +162,13 @@ func (s *Server) setupRoutes() chi.Router {
 	r.Handle("/*", staticHandler())
 
 	return r
+}
+
+// getConfig returns the current server config under RWMutex for hot-reload safety.
+func (s *Server) getConfig() *core.Config {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.config
 }
 
 // ProcessEvent runs a single event through the engine session and returns

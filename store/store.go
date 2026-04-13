@@ -758,6 +758,42 @@ func (s *Store) DeleteUserContext(key string) (bool, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Reflection / Evolution
+// ---------------------------------------------------------------------------
+
+// DeleteExpiredReflection removes user_context rows whose keys start with
+// "reflection:" and whose updated_at is older than ttlDays days ago.
+// Returns the number of deleted rows.
+//
+// Note: This performs a LIKE scan on user_context which is acceptable at
+// current scale (<10K rows). If the table grows significantly, consider
+// adding a partial index on the "reflection:" key prefix.
+func (s *Store) DeleteExpiredReflection(ttlDays int) (int, error) {
+	res, err := s.db.Exec(`
+		DELETE FROM user_context
+		WHERE key LIKE 'reflection:%'
+		  AND updated_at <= datetime('now', ?)`,
+		fmt.Sprintf("-%d days", ttlDays))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// DeleteUserContextPrefix removes all user_context rows matching a key prefix.
+// Returns the number of deleted rows.
+func (s *Store) DeleteUserContextPrefix(prefix string) (int, error) {
+	res, err := s.db.Exec(
+		"DELETE FROM user_context WHERE key LIKE ?", prefix+"%")
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// ---------------------------------------------------------------------------
 // Cross-Channel Identity
 // ---------------------------------------------------------------------------
 
@@ -894,13 +930,29 @@ func (s *Store) ListCheckpoints(agentID string) ([]Checkpoint, error) {
 // Skill Fixes
 // ---------------------------------------------------------------------------
 
-// RecordFix stores a skill code correction.
-func (s *Store) RecordFix(skillID, errorMsg, oldCode, newCode string) error {
+// RecordFix stores a skill code correction. When applied is true the fix is
+// marked as already applied (auto-fix in full autonomy mode).
+func (s *Store) RecordFix(skillID, errorMsg, oldCode, newCode string, applied bool) error {
 	_, err := s.db.Exec(`
-		INSERT INTO skill_fixes (skill_id, error_msg, old_code, new_code)
-		VALUES (?, ?, ?, ?)`,
-		skillID, errorMsg, oldCode, newCode)
+		INSERT INTO skill_fixes (skill_id, error_msg, old_code, new_code, applied)
+		VALUES (?, ?, ?, ?, ?)`,
+		skillID, errorMsg, oldCode, newCode, boolToInt(applied))
 	return err
+}
+
+// GetFix returns a single fix by ID.
+func (s *Store) GetFix(fixID int64) (*SkillFix, error) {
+	var f SkillFix
+	var applied int
+	err := s.db.QueryRow(`
+		SELECT id, skill_id, error_msg, old_code, new_code, applied, created_at
+		FROM skill_fixes WHERE id = ?`, fixID,
+	).Scan(&f.ID, &f.SkillID, &f.ErrorMsg, &f.OldCode, &f.NewCode, &applied, &f.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	f.Applied = applied != 0
+	return &f, nil
 }
 
 // ListFixes returns all fixes for a skill, most recent first.
@@ -928,9 +980,27 @@ func (s *Store) ListFixes(skillID string) ([]SkillFix, error) {
 	return out, rows.Err()
 }
 
-// ApplyFix marks a fix as applied. Returns true if the row existed and was
-// not already applied.
-func (s *Store) ApplyFix(fixID int64) (bool, error) {
+// ApplyFix marks a fix as applied after a stale-code check.
+// It loads the fix row, compares old_code against currentCode (the code
+// currently on disk), and rejects the fix if they differ.
+// Returns (applied, error). Errors include ErrFixStale when the underlying
+// code has changed since the fix was generated.
+func (s *Store) ApplyFix(fixID int64, currentCode string) (bool, error) {
+	var oldCode string
+	var applied int
+	err := s.db.QueryRow(
+		"SELECT old_code, applied FROM skill_fixes WHERE id = ?", fixID,
+	).Scan(&oldCode, &applied)
+	if err != nil {
+		return false, err
+	}
+	if applied != 0 {
+		return false, nil // already applied
+	}
+	if oldCode != currentCode {
+		return false, fmt.Errorf("fix %d is stale: code changed since fix was generated", fixID)
+	}
+
 	res, err := s.db.Exec(
 		"UPDATE skill_fixes SET applied = 1 WHERE id = ? AND applied = 0",
 		fixID)
@@ -939,6 +1009,13 @@ func (s *Store) ApplyFix(fixID int64) (bool, error) {
 	}
 	n, err := res.RowsAffected()
 	return n > 0, err
+}
+
+// RevertFix resets the applied flag back to 0. Used when the disk write
+// fails after ApplyFix has already updated the DB, to keep DB/disk in sync.
+func (s *Store) RevertFix(fixID int64) error {
+	_, err := s.db.Exec("UPDATE skill_fixes SET applied = 0 WHERE id = ?", fixID)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1321,57 @@ func (s *Store) ResetFailureCount(skillName string) error {
 	_, err := s.db.Exec(`
 		UPDATE skill_schedule SET failure_count = 0
 		WHERE skill_name = ?`, skillName)
+	return err
+}
+
+// GetFixAttempts returns the number of auto-fix attempts for a scheduled skill.
+func (s *Store) GetFixAttempts(skillName string) (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT fix_attempts FROM skill_schedule WHERE skill_name = ?",
+		skillName,
+	).Scan(&n)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return n, err
+}
+
+// ClaimFixAttempt atomically increments fix_attempts only if still under the
+// cap. Returns true if the claim succeeded (this goroutine should proceed with
+// the fix). Uses UPDATE ... WHERE to prevent double-trigger races.
+func (s *Store) ClaimFixAttempt(skillName string, maxAttempts int) (bool, error) {
+	res, err := s.db.Exec(`
+		UPDATE skill_schedule
+		SET fix_attempts = fix_attempts + 1
+		WHERE skill_name = ? AND fix_attempts < ?`,
+		skillName, maxAttempts)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// ResetFixAttempts sets the fix attempt counter back to zero (called when the
+// skill succeeds after a fix).
+func (s *Store) ResetFixAttempts(skillName string) error {
+	_, err := s.db.Exec(`
+		UPDATE skill_schedule SET fix_attempts = 0
+		WHERE skill_name = ?`, skillName)
+	return err
+}
+
+// UpdateFailureAndFixAttempts atomically increments failure_count and
+// fix_attempts in a single statement to prevent crash-inconsistency.
+func (s *Store) UpdateFailureAndFixAttempts(skillName string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO skill_schedule (skill_name, failure_count, fix_attempts)
+		VALUES (?, 1, 1)
+		ON CONFLICT(skill_name) DO UPDATE SET
+			failure_count = skill_schedule.failure_count + 1,
+			fix_attempts = skill_schedule.fix_attempts + 1`,
+		skillName)
 	return err
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE skill_schedule ADD COLUMN fix_attempts INTEGER NOT NULL DEFAULT 0;

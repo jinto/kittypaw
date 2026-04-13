@@ -5,22 +5,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/llm"
 	"github.com/jinto/gopaw/store"
+	"golang.org/x/sync/errgroup"
 )
 
-// OrchestrateRequest routes a user message through the PM (Project Manager) agent
-// which decides whether to handle directly or delegate to specialized profiles.
-// Returns (response, nil) if orchestrated, ("", nil) if should fall through to default loop.
+// maxDelegateTaskLen caps task description size to prevent prompt explosion.
+const maxDelegateTaskLen = 4096
+
+// backgroundTokenCap is the hard cap for background delegate tasks.
+const backgroundTokenCap = 2048
+
+// ---------------------------------------------------------------------------
+// PM decision types (JSON format)
+// ---------------------------------------------------------------------------
+
+// PMDecision is the JSON response from the PM agent.
+type PMDecision struct {
+	Kind   string       `json:"kind"`   // "direct" or "delegate"
+	Reason string       `json:"reason"` // why this routing was chosen
+	Tasks  []PMTaskSpec `json:"tasks"`  // non-empty when kind=="delegate"
+}
+
+// PMTaskSpec describes a single delegation target.
+type PMTaskSpec struct {
+	ProfileID  string `json:"profile_id"`
+	Task       string `json:"task"`
+	Background bool   `json:"background,omitempty"`
+}
+
+// DelegateCtx holds context for agent delegation within the skill executor.
+type DelegateCtx struct {
+	Provider llm.Provider
+	Store    *store.Store
+	Config   *core.Config
+	Budget   *SharedTokenBudget
+	Depth    int
+	MaxDepth int
+}
+
+// DelegateResult holds the outcome of a single delegation.
+type DelegateResult struct {
+	ProfileID  string `json:"profile_id"`
+	Task       string `json:"task"`
+	Result     string `json:"result"`
+	Success    bool   `json:"success"`
+	TokenUsage int64  `json:"token_usage"`
+}
+
+// ---------------------------------------------------------------------------
+// OrchestrateRequest
+// ---------------------------------------------------------------------------
+
+// OrchestrateRequest routes a user message through the PM (Project Manager)
+// agent which decides whether to handle directly or delegate to profiles.
+// Returns (response, handled, error). When handled is false, the caller
+// should fall through to the default agent loop.
 func OrchestrateRequest(
 	ctx context.Context,
 	text string,
 	provider llm.Provider,
 	st *store.Store,
 	config *core.OrchestrationConfig,
+	budget *SharedTokenBudget,
 ) (string, bool, error) {
 	if !config.Enabled {
 		return "", false, nil
@@ -31,7 +84,51 @@ func OrchestrateRequest(
 		return "", false, nil
 	}
 
-	// Build PM prompt
+	// PM decision.
+	decision, err := pmDecide(ctx, text, profiles, provider)
+	if err != nil {
+		slog.Warn("orchestration: PM decision failed", "error", err)
+		return "", false, nil
+	}
+
+	if decision.Kind == "direct" {
+		return "", false, nil
+	}
+
+	if len(decision.Tasks) == 0 {
+		return "", false, nil
+	}
+
+	maxDepth := int(config.MaxDepth)
+	if maxDepth == 0 {
+		maxDepth = 3 // default
+	}
+
+	// Execute delegations in parallel.
+	results, err := fanOutDelegations(ctx, decision.Tasks, provider, st, budget, maxDepth, config)
+	if err != nil {
+		return "", false, fmt.Errorf("delegation fan-out: %w", err)
+	}
+
+	// Synthesize results.
+	response, err := pmSynthesize(ctx, decision.Tasks, results, provider)
+	if err != nil {
+		return "", false, fmt.Errorf("synthesis: %w", err)
+	}
+
+	return response, true, nil
+}
+
+// ---------------------------------------------------------------------------
+// PM Decision (JSON)
+// ---------------------------------------------------------------------------
+
+func pmDecide(
+	ctx context.Context,
+	text string,
+	profiles []store.ProfileMeta,
+	provider llm.Provider,
+) (*PMDecision, error) {
 	var profileList strings.Builder
 	for _, p := range profiles {
 		profileList.WriteString(fmt.Sprintf("- %s: %s\n", p.ID, p.Description))
@@ -43,13 +140,13 @@ func OrchestrateRequest(
 
 Available specialist profiles:
 %s
+Respond with a JSON object (no markdown fences):
+- If the request is simple or doesn't need a specialist:
+  {"kind":"direct","reason":"..."}
+- If one or more specialists should handle it:
+  {"kind":"delegate","reason":"...","tasks":[{"profile_id":"...","task":"..."}]}
 
-Decide how to handle this request:
-1. If the request clearly matches a specialist profile, respond with: DELEGATE:<profile_id>:<task description>
-2. If the request is simple and doesn't need a specialist, respond with: DIRECT
-3. If the request needs multiple specialists, respond with: PARALLEL:<profile_id1>:<task1>|<profile_id2>:<task2>
-
-Respond with ONLY one of the above formats, nothing else.`, text, profileList.String())
+Output ONLY valid JSON.`, text, profileList.String())
 
 	messages := []core.LlmMessage{
 		{Role: core.RoleUser, Content: pmPrompt},
@@ -57,124 +154,227 @@ Respond with ONLY one of the above formats, nothing else.`, text, profileList.St
 
 	resp, err := provider.Generate(ctx, messages)
 	if err != nil {
-		slog.Warn("orchestration: PM call failed", "error", err)
-		return "", false, nil // Fall through to default
+		return nil, err
 	}
 
-	decision := strings.TrimSpace(resp.Content)
+	raw := strings.TrimSpace(resp.Content)
+	raw = stripFences(raw)
 
-	switch {
-	case decision == "DIRECT":
-		return "", false, nil
-
-	case strings.HasPrefix(decision, "DELEGATE:"):
-		parts := strings.SplitN(decision, ":", 3)
-		if len(parts) < 3 {
-			return "", false, nil
-		}
-		profileID := parts[1]
-		task := parts[2]
-		slog.Info("orchestration: delegating", "profile", profileID, "task", task)
-
-		// Execute as the delegated profile
-		result, err := executeDelegateProfile(ctx, profileID, task, provider, st)
-		if err != nil {
-			return "", false, fmt.Errorf("delegate %s: %w", profileID, err)
-		}
-		return result, true, nil
-
-	case strings.HasPrefix(decision, "PARALLEL:"):
-		// Parse parallel tasks
-		taskParts := strings.Split(strings.TrimPrefix(decision, "PARALLEL:"), "|")
-		var results []string
-		for _, tp := range taskParts {
-			parts := strings.SplitN(tp, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			profileID := parts[0]
-			task := parts[1]
-
-			result, err := executeDelegateProfile(ctx, profileID, task, provider, st)
-			if err != nil {
-				results = append(results, fmt.Sprintf("[%s] error: %s", profileID, err))
-			} else {
-				results = append(results, fmt.Sprintf("[%s] %s", profileID, result))
-			}
-		}
-		return strings.Join(results, "\n\n"), true, nil
-
-	default:
-		return "", false, nil
+	var decision PMDecision
+	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
+		slog.Warn("orchestration: JSON parse failed, falling through", "raw", raw, "error", err)
+		return &PMDecision{Kind: "direct", Reason: "JSON parse failure"}, nil
 	}
+
+	return &decision, nil
 }
 
-func executeDelegateProfile(
+// ---------------------------------------------------------------------------
+// Fan-Out Delegations
+// ---------------------------------------------------------------------------
+
+func fanOutDelegations(
 	ctx context.Context,
-	profileID, task string,
+	tasks []PMTaskSpec,
 	provider llm.Provider,
 	st *store.Store,
-) (string, error) {
-	meta, ok, err := st.GetProfileMeta(profileID)
-	if err != nil || !ok {
-		return "", fmt.Errorf("profile %q not found", profileID)
+	budget *SharedTokenBudget,
+	maxDepth int,
+	config *core.OrchestrationConfig,
+) ([]DelegateResult, error) {
+	maxDelegates := int(config.MaxDelegates)
+	if maxDelegates == 0 {
+		maxDelegates = 5
+	}
+	if len(tasks) > maxDelegates {
+		tasks = tasks[:maxDelegates]
 	}
 
-	// Build a profile-specific prompt
-	profilePrompt := fmt.Sprintf("You are the %q profile. %s\n\nTask: %s\n\nRespond directly with the result.",
-		profileID, meta.Description, task)
+	results := make([]DelegateResult, len(tasks))
+
+	// Wrap context so we can cancel all siblings when budget is exhausted.
+	allCtx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
+
+	g, gCtx := errgroup.WithContext(allCtx)
+
+	for i, task := range tasks {
+		g.Go(func() error {
+			// Per-child timeout.
+			childCtx, cancel := context.WithTimeout(gCtx, 60*time.Second)
+			defer cancel()
+
+			result := executeDelegateTask(childCtx, task, provider, st, budget, 1, maxDepth)
+			results[i] = result
+
+			// If budget exhausted, cancel all remaining siblings.
+			if budget != nil && budget.Remaining() == 0 {
+				slog.Warn("orchestration: budget exhausted, cancelling remaining", "profile", task.ProfileID)
+				cancelAll()
+			}
+
+			return nil // never fail the group — we collect results
+		})
+	}
+
+	_ = g.Wait()
+	return results, nil
+}
+
+// executeDelegateTask runs a single delegation against a profile.
+func executeDelegateTask(
+	ctx context.Context,
+	task PMTaskSpec,
+	provider llm.Provider,
+	st *store.Store,
+	budget *SharedTokenBudget,
+	depth, maxDepth int,
+) DelegateResult {
+	result := DelegateResult{
+		ProfileID: task.ProfileID,
+		Task:      task.Task,
+	}
+
+	// Validate inputs.
+	if err := core.ValidateProfileID(task.ProfileID); err != nil {
+		result.Result = fmt.Sprintf("invalid profile ID: %s", err)
+		return result
+	}
+	if len(task.Task) > maxDelegateTaskLen {
+		result.Result = fmt.Sprintf("task too long (%d > %d chars)", len(task.Task), maxDelegateTaskLen)
+		return result
+	}
+	if depth >= maxDepth {
+		result.Result = fmt.Sprintf("max delegation depth reached (%d)", maxDepth)
+		return result
+	}
+
+	// Load profile.
+	meta, ok, err := st.GetProfileMeta(task.ProfileID)
+	if err != nil || !ok {
+		result.Result = fmt.Sprintf("profile %q not found", task.ProfileID)
+		return result
+	}
+
+	// Build system prompt: try SOUL.md, fallback to description.
+	systemPrompt := loadSOUL(task.ProfileID)
+	if systemPrompt == "" {
+		systemPrompt = fmt.Sprintf("You are the %q profile. %s", meta.ID, meta.Description)
+	}
+
+	if provider == nil {
+		result.Result = "no LLM provider available"
+		return result
+	}
 
 	messages := []core.LlmMessage{
-		{Role: core.RoleUser, Content: profilePrompt},
+		{Role: core.RoleSystem, Content: systemPrompt + "\n\nRespond directly with the result."},
+		{Role: core.RoleUser, Content: task.Task},
+	}
+
+	// Determine token cap for background tasks.
+	var maxTokens int
+	if task.Background {
+		maxTokens = backgroundTokenCap
+	}
+	_ = maxTokens // TODO: pass to provider when token limit per-call is supported
+
+	resp, err := provider.Generate(ctx, messages)
+	if err != nil {
+		result.Result = fmt.Sprintf("LLM error: %s", err)
+		return result
+	}
+
+	// Budget check.
+	if budget != nil && resp.Usage != nil {
+		if !budget.TrySpendFromUsage(resp.Usage) {
+			result.Result = "token budget exhausted"
+			return result
+		}
+		result.TokenUsage = resp.Usage.InputTokens + resp.Usage.OutputTokens
+	}
+
+	result.Result = resp.Content
+	result.Success = true
+	return result
+}
+
+// loadSOUL reads ~/.gopaw/profiles/{id}/SOUL.md. Returns "" on any failure.
+func loadSOUL(profileID string) string {
+	if core.ValidateProfileID(profileID) != nil {
+		return ""
+	}
+	dir, err := core.ConfigDir()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "profiles", profileID, "SOUL.md"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// ---------------------------------------------------------------------------
+// PM Synthesize
+// ---------------------------------------------------------------------------
+
+// pmSynthesize combines delegation results into a single response.
+func pmSynthesize(
+	ctx context.Context,
+	tasks []PMTaskSpec,
+	results []DelegateResult,
+	provider llm.Provider,
+) (string, error) {
+	// Count successes and failures.
+	successCount := 0
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		}
+	}
+
+	// All failed: return error directly, no LLM call.
+	if successCount == 0 {
+		var errs strings.Builder
+		for _, r := range results {
+			errs.WriteString(fmt.Sprintf("[%s] %s\n", r.ProfileID, r.Result))
+		}
+		return fmt.Sprintf("All delegations failed:\n%s", errs.String()), nil
+	}
+
+	// Single task: return directly without synthesis.
+	if len(results) == 1 && results[0].Success {
+		return results[0].Result, nil
+	}
+
+	// Build synthesis prompt.
+	var sections strings.Builder
+	for _, r := range results {
+		marker := ""
+		if !r.Success {
+			marker = " [FAILED]"
+		}
+		sections.WriteString(fmt.Sprintf("--- %s (%s)%s ---\n%s\n\n",
+			r.ProfileID, r.Task, marker, r.Result))
+	}
+
+	synthPrompt := fmt.Sprintf(`You are synthesizing results from multiple specialists.
+Combine these results into a single coherent response for the user.
+If any section is marked [FAILED], acknowledge the failure briefly.
+
+%s
+Provide a unified, natural response.`, sections.String())
+
+	messages := []core.LlmMessage{
+		{Role: core.RoleUser, Content: synthPrompt},
 	}
 
 	resp, err := provider.Generate(ctx, messages)
 	if err != nil {
-		return "", err
+		// Fallback: return raw sections.
+		return sections.String(), nil
 	}
 
 	return resp.Content, nil
 }
-
-// DelegateCtx holds context for agent delegation within the skill executor.
-type DelegateCtx struct {
-	Provider llm.Provider
-	Store    *store.Store
-	Config   *core.Config
-	Depth    int
-	MaxDepth int
-}
-
-// TokenBudget tracks shared token consumption across delegated agents.
-type TokenBudget struct {
-	Limit uint64
-	Used  uint64
-}
-
-// NewTokenBudget creates a budget with the given limit.
-func NewTokenBudget(limit uint64) *TokenBudget {
-	return &TokenBudget{Limit: limit}
-}
-
-// Spend deducts tokens. Returns false if budget exceeded.
-func (b *TokenBudget) Spend(tokens uint64) bool {
-	if b.Limit == 0 {
-		return true // Unlimited
-	}
-	if b.Used+tokens > b.Limit {
-		return false
-	}
-	b.Used += tokens
-	return true
-}
-
-// SpendFromUsage deducts from a TokenUsage.
-func (b *TokenBudget) SpendFromUsage(usage *llm.TokenUsage) bool {
-	if usage == nil {
-		return true
-	}
-	return b.Spend(uint64(usage.InputTokens + usage.OutputTokens))
-}
-
-// Used only to suppress "declared and not used" for json import
-var _ = json.Marshal
