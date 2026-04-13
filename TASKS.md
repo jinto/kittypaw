@@ -32,3 +32,15 @@ Plan: `.claude/plans/e2e-agent-loop.md`
 - [x] Add pending_responses SQLite table + store CRUD (enqueue, dequeue, retry, cleanup)
 - [x] Wire retry loop into serve command (30s poll, exponential backoff, 24h expiry)
 - [x] Tests for SessionID mapping and pending response lifecycle
+
+## Plan 5: Teach Loop — Skill Generation from Natural Language ✅
+
+Plan: `.claude/plans/teach-loop.md`
+
+- [x] Pure pipeline helpers + tests (stripFences, slugify, detectPermissions, inferTrigger)
+- [x] syntaxCheck + tests (goja parse validation, 64KB cap)
+- [x] generateCode + TEACH_PROMPT + tests (mock LLM, SkillRegistry-driven prompt)
+- [x] HandleTeach orchestration + tests (full pipeline, edge cases)
+- [x] ApproveSkill + tests (cron validation, SaveSkill roundtrip)
+- [x] Wire CLI entry points (commands.go + main.go)
+- [x] Wire API endpoints (server/api.go — structured JSON response)

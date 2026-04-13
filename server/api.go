@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jinto/gopaw/core"
+	"github.com/jinto/gopaw/engine"
 )
 
 // ---------------------------------------------------------------------------
@@ -182,19 +183,12 @@ func (s *Server) handleSkillsTeach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload := core.ChatPayload{
-		ChatID: "api",
-		Text:   "/teach " + body.Description,
-	}
-	raw, _ := json.Marshal(payload)
-	event := core.Event{Type: core.EventWebChat, Payload: raw}
-
-	output, err := s.session.Run(r.Context(), event, nil)
+	result, err := engine.HandleTeach(r.Context(), body.Description, "api", s.session)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"output": output})
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---------------------------------------------------------------------------
@@ -221,18 +215,27 @@ func (s *Server) handleTeachApprove(w http.ResponseWriter, r *http.Request) {
 	if trigger == "" {
 		trigger = "manual"
 	}
-	skill := &core.Skill{
-		Name:        body.Name,
-		Version:     1,
-		Description: body.Description,
-		Enabled:     true,
-		Format:      core.SkillFormatNative,
-		Trigger: core.SkillTrigger{
-			Type: trigger,
-			Cron: body.Schedule,
-		},
+	validTriggers := map[string]bool{"manual": true, "schedule": true, "keyword": true, "once": true, "natural": true}
+	if !validTriggers[trigger] {
+		writeError(w, http.StatusBadRequest, "invalid trigger type: "+trigger)
+		return
 	}
-	if err := core.SaveSkill(skill, body.Code); err != nil {
+	// Validate syntax before saving — don't trust client-supplied code.
+	ok, syntaxErr := engine.SyntaxCheck(r.Context(), body.Code, nil)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "syntax check failed: "+syntaxErr)
+		return
+	}
+
+	result := &engine.TeachResult{
+		SkillName:   body.Name,
+		Code:        body.Code,
+		SyntaxOK:    true,
+		Description: body.Description,
+		Trigger:     core.SkillTrigger{Type: trigger, Cron: body.Schedule},
+		Permissions: engine.DetectPermissions(body.Code),
+	}
+	if err := engine.ApproveSkill(result); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
