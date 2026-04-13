@@ -2,10 +2,12 @@ package engine
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/jinto/gopaw/core"
+	mcpreg "github.com/jinto/gopaw/mcp"
 )
 
 func TestBuildSkillsSection(t *testing.T) {
@@ -88,5 +90,75 @@ func TestFormatExecResult(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("FormatExecResult(%+v) = %q, want %q", tt.result, got, tt.want)
 		}
+	}
+}
+
+func TestBuildMCPToolsSection(t *testing.T) {
+	tools := map[string][]mcpreg.ToolInfo{
+		"browser": {
+			{Name: "run_session", Description: "Run a browser session"},
+			{Name: "get_result", Description: "Get session result"},
+		},
+		"filesystem": {
+			{Name: "read_file", Description: "Read a file"},
+		},
+	}
+	section := BuildMCPToolsSection(tools)
+	if !strings.HasPrefix(section, "## MCP Tools") {
+		t.Error("missing ## MCP Tools header")
+	}
+	if !strings.Contains(section, "### browser") {
+		t.Error("missing ### browser section")
+	}
+	if !strings.Contains(section, "### filesystem") {
+		t.Error("missing ### filesystem section")
+	}
+	if !strings.Contains(section, "- run_session: Run a browser session") {
+		t.Error("missing run_session tool line")
+	}
+	if !strings.Contains(section, "- read_file: Read a file") {
+		t.Error("missing read_file tool line")
+	}
+}
+
+func TestBuildMCPToolsSectionEmpty(t *testing.T) {
+	if got := BuildMCPToolsSection(nil); got != "" {
+		t.Errorf("expected empty string for nil, got %q", got)
+	}
+	if got := BuildMCPToolsSection(map[string][]mcpreg.ToolInfo{}); got != "" {
+		t.Errorf("expected empty string for empty map, got %q", got)
+	}
+}
+
+func TestBuildMCPToolsSectionSorted(t *testing.T) {
+	tools := map[string][]mcpreg.ToolInfo{
+		"zebra": {{Name: "z_tool", Description: "Z"}},
+		"alpha": {{Name: "a_tool", Description: "A"}},
+		"mid":   {{Name: "m_tool", Description: "M"}},
+	}
+	section := BuildMCPToolsSection(tools)
+	alphaIdx := strings.Index(section, "### alpha")
+	midIdx := strings.Index(section, "### mid")
+	zebraIdx := strings.Index(section, "### zebra")
+	if alphaIdx >= midIdx || midIdx >= zebraIdx {
+		t.Errorf("servers not in alpha order: alpha=%d, mid=%d, zebra=%d", alphaIdx, midIdx, zebraIdx)
+	}
+}
+
+func TestBuildMCPToolsSectionCap(t *testing.T) {
+	// Create many tools that exceed 2000 chars
+	tools := map[string][]mcpreg.ToolInfo{}
+	for i := 0; i < 100; i++ {
+		tools["server"] = append(tools["server"], mcpreg.ToolInfo{
+			Name:        fmt.Sprintf("tool_%03d", i),
+			Description: "A moderately long description for testing the budget cap",
+		})
+	}
+	section := BuildMCPToolsSection(tools)
+	if len(section) > 2100 { // allow small overhead for omitted message
+		t.Errorf("section too long: %d chars", len(section))
+	}
+	if !strings.Contains(section, "more tools omitted") {
+		t.Error("expected truncation message")
 	}
 }

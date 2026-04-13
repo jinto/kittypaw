@@ -785,9 +785,43 @@ func executeVision(_ context.Context, _ core.SkillCall, _ *Session) (string, err
 	return jsonResult(map[string]any{"error": "Vision not yet implemented"})
 }
 
-func executeMCP(_ context.Context, _ core.SkillCall, _ *Session) (string, error) {
-	// TODO: implement MCP tool calls
-	return jsonResult(map[string]any{"error": "MCP not yet implemented"})
+func executeMCP(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	if s.McpRegistry == nil {
+		return jsonResult(map[string]any{"error": "MCP not configured"})
+	}
+	switch call.Method {
+	case "call":
+		if len(call.Args) < 3 {
+			return jsonResult(map[string]any{"error": "Mcp.call requires (server, tool, args)"})
+		}
+		var server, tool string
+		if err := json.Unmarshal(call.Args[0], &server); err != nil {
+			return jsonResult(map[string]any{"error": "invalid server argument"})
+		}
+		if err := json.Unmarshal(call.Args[1], &tool); err != nil {
+			return jsonResult(map[string]any{"error": "invalid tool argument"})
+		}
+		var args any
+		if err := json.Unmarshal(call.Args[2], &args); err != nil {
+			return jsonResult(map[string]any{"error": "invalid args argument"})
+		}
+		return s.McpRegistry.CallTool(ctx, server, tool, args)
+	case "listTools":
+		if len(call.Args) < 1 {
+			return jsonResult(map[string]any{"error": "Mcp.listTools requires (server)"})
+		}
+		var server string
+		if err := json.Unmarshal(call.Args[0], &server); err != nil {
+			return jsonResult(map[string]any{"error": "invalid server argument"})
+		}
+		tools, err := s.McpRegistry.ListTools(ctx, server)
+		if err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
+		return jsonResult(map[string]any{"tools": tools})
+	default:
+		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Mcp method: %s", call.Method)})
+	}
 }
 
 func executeDelegate(_ context.Context, _ core.SkillCall, _ *Session) (string, error) {

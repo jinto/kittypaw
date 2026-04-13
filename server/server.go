@@ -15,6 +15,7 @@ import (
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/engine"
 	"github.com/jinto/gopaw/llm"
+	mcpreg "github.com/jinto/gopaw/mcp"
 	"github.com/jinto/gopaw/sandbox"
 	"github.com/jinto/gopaw/store"
 )
@@ -32,13 +33,15 @@ type Server struct {
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
-func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox) *Server {
+// mcpReg may be nil when no MCP servers are configured.
+func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry) *Server {
 	session := &engine.Session{
 		Provider:         provider,
 		FallbackProvider: fallback,
 		Sandbox:          sb,
 		Store:            st,
 		Config:           cfg,
+		McpRegistry:      mcpReg,
 	}
 
 	s := &Server{
@@ -182,6 +185,11 @@ func (s *Server) ListenAndServe(addr string) error {
 		s.scheduler.Stop()
 		schedCancel()
 		s.scheduler.Wait()
+
+		// Close MCP server connections (CommandTransport handles 5s → SIGTERM).
+		if s.session.McpRegistry != nil {
+			s.session.McpRegistry.Shutdown()
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

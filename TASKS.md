@@ -53,3 +53,14 @@ Plan: `.claude/plans/eager-wondering-quasar.md`
 - [x] Sanitize user-supplied values for prompt injection and token explosion prevention
 - [x] Wire memory context loading outside retry loop in `session.go`
 - [x] Tests: empty, populated, partial, cap, 24h window, sanitization
+
+## Plan 7: MCP Registry ✅
+
+Plan: `.claude/plans/mcp-registry.md`
+
+- [x] MCPRegistry scaffold — types, NewRegistry, ValidateConfig, IsConnected + tests (AC7, AC8)
+- [x] MCPRegistry Connect + ListTools + AllTools + tests (AC2, AC5)
+- [x] MCPRegistry CallTool + Shutdown + tests (AC1, AC6)
+- [x] Skill metadata (Mcp.listTools) + executeMCP implementation + tests (AC1, AC2)
+- [x] MCP tools prompt injection (BuildMCPToolsSection) + tests (AC3, AC4)
+- [x] Wiring — Session, Server, CLI + nil-safety tests + verification
