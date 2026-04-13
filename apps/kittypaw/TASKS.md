@@ -44,3 +44,12 @@ Plan: `.claude/plans/teach-loop.md`
 - [x] ApproveSkill + tests (cron validation, SaveSkill roundtrip)
 - [x] Wire CLI entry points (commands.go + main.go)
 - [x] Wire API endpoints (server/api.go — structured JSON response)
+
+## Plan 6: Memory Context → LLM Prompt Injection ✅
+
+Plan: `.claude/plans/eager-wondering-quasar.md`
+
+- [x] Add `MemoryContextLines()` to Store (facts cap 20, failures 24h cap 5, today's stats)
+- [x] Sanitize user-supplied values for prompt injection and token explosion prevention
+- [x] Wire memory context loading outside retry loop in `session.go`
+- [x] Tests: empty, populated, partial, cap, 24h window, sanitization

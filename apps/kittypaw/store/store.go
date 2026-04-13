@@ -659,6 +659,93 @@ func (s *Store) ListUserContextPrefix(prefix string) ([]KeyValue, error) {
 	return out, rows.Err()
 }
 
+// MemoryContextLines builds context sections for LLM prompt injection.
+// Returns user facts, recent failures, and today's stats as markdown sections.
+// Sections with no data are omitted entirely.
+func (s *Store) MemoryContextLines() ([]string, error) {
+	var sections []string
+
+	// --- Remembered Facts (user_context, cap 20, most recent first) ---
+	rows, err := s.db.Query(`
+		SELECT key, value FROM user_context
+		ORDER BY updated_at DESC
+		LIMIT 20`)
+	if err != nil {
+		return nil, fmt.Errorf("memory context facts: %w", err)
+	}
+	var factLines []string
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("memory context scan fact: %w", err)
+		}
+		factLines = append(factLines, fmt.Sprintf("- %s: %s", sanitizeForPrompt(k, 100), sanitizeForPrompt(v, 500)))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory context facts iter: %w", err)
+	}
+	if len(factLines) > 0 {
+		sections = append(sections, "### Remembered Facts\n"+strings.Join(factLines, "\n"))
+	}
+
+	// --- Recent Failures (last 24h UTC, cap 5) ---
+	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	rows, err = s.db.Query(`
+		SELECT skill_name, COALESCE(result_summary, ''), started_at
+		FROM execution_history
+		WHERE success = 0
+		  AND started_at >= ?
+		ORDER BY started_at DESC
+		LIMIT 5`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("memory context failures: %w", err)
+	}
+	defer rows.Close()
+
+	var failLines []string
+	for rows.Next() {
+		var name, summary, ts string
+		if err := rows.Scan(&name, &summary, &ts); err != nil {
+			return nil, fmt.Errorf("memory context scan failure: %w", err)
+		}
+		failLines = append(failLines, fmt.Sprintf("- %s: %s (%s)", name, sanitizeForPrompt(summary, 200), ts))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory context failures iter: %w", err)
+	}
+	if len(failLines) > 0 {
+		sections = append(sections, "### Recent Failures\n"+strings.Join(failLines, "\n"))
+	}
+
+	// --- Today's Stats ---
+	stats, err := s.TodayStats()
+	if err != nil {
+		return nil, fmt.Errorf("memory context stats: %w", err)
+	}
+	if stats.TotalRuns > 0 {
+		section := fmt.Sprintf(
+			"### Today's Stats\n- Runs: %d (success: %d, failed: %d)\n- Retries: %d\n- Tokens used: %d",
+			stats.TotalRuns, stats.Successful, stats.Failed, stats.AutoRetries, stats.TotalTokens,
+		)
+		sections = append(sections, section)
+	}
+
+	return sections, nil
+}
+
+// sanitizeForPrompt strips newlines and caps length to prevent prompt injection
+// and token explosion from user-supplied or skill-generated content.
+func sanitizeForPrompt(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
+}
+
 // DeleteUserContext removes a user context key. Returns true if a row was
 // actually deleted.
 func (s *Store) DeleteUserContext(key string) (bool, error) {

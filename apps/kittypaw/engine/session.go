@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jinto/gopaw/core"
@@ -122,6 +123,14 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		}
 	}
 
+	// Load memory context once before retry loop.
+	memoryContext := ""
+	if lines, err := s.Store.MemoryContextLines(); err != nil {
+		slog.Warn("failed to load memory context", "error", err)
+	} else if len(lines) > 0 {
+		memoryContext = strings.Join(lines, "\n\n")
+	}
+
 	// Main retry loop
 	var lastError string
 	activeProvider := s.Provider
@@ -134,9 +143,6 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 
 		// Build compaction config based on attempt and feature flags
 		compaction := s.compactionForAttempt(attempt)
-
-		// Get memory context
-		memoryContext := "" // TODO: load from store
 
 		// Build prompt
 		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profileOverride, memoryContext)
