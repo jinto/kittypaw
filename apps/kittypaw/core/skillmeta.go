@@ -100,6 +100,7 @@ var SkillRegistry = []SkillMeta{
 	}},
 	{Name: "Mcp", Methods: []SkillMethodMeta{
 		{Name: "call", Signature: "Mcp.call(server, tool, args) — calls an MCP tool"},
+		{Name: "listTools", Signature: "Mcp.listTools(server) — lists tools on an MCP server"},
 	}},
 	{Name: "Agent", Methods: []SkillMethodMeta{
 		{Name: "delegate", Signature: "Agent.delegate(profileId, task) — delegates task to another agent"},

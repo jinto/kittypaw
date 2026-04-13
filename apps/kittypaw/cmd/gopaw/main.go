@@ -22,6 +22,7 @@ import (
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/engine"
 	"github.com/jinto/gopaw/llm"
+	mcpreg "github.com/jinto/gopaw/mcp"
 	"github.com/jinto/gopaw/sandbox"
 	"github.com/jinto/gopaw/server"
 	"github.com/jinto/gopaw/store"
@@ -100,12 +101,26 @@ func runServe(_ *cobra.Command, _ []string) error {
 		fallback, _ = llm.NewProviderFromModelConfig(*m)
 	}
 
+	// Connect to configured MCP servers.
+	var mcpReg *mcpreg.Registry
+	if len(cfg.MCPServers) > 0 {
+		if err := mcpreg.ValidateConfig(cfg.MCPServers); err != nil {
+			return fmt.Errorf("MCP config: %w", err)
+		}
+		mcpReg = mcpreg.NewRegistry(cfg.MCPServers)
+		connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
+			slog.Warn("some MCP servers failed to connect", "failures", len(errs))
+		}
+		connectCancel()
+	}
+
 	// Start configured channels.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	// The server owns the engine session internally.
-	srv := server.New(cfg, st, provider, fallback, sbox)
+	srv := server.New(cfg, st, provider, fallback, sbox, mcpReg)
 
 	eventCh := make(chan core.Event, 64)
 

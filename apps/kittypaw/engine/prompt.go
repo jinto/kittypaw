@@ -3,9 +3,11 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jinto/gopaw/core"
+	mcpreg "github.com/jinto/gopaw/mcp"
 )
 
 // SystemPrompt is the base prompt that instructs the LLM to generate JavaScript code.
@@ -100,10 +102,16 @@ func BuildPrompt(
 	channelName string,
 	profileOverride string,
 	memoryContext string,
+	mcpToolsSection string,
 ) []core.LlmMessage {
 	// Build system prompt with skills section
 	skillsSection := buildSkillsSection(config)
 	sysPrompt := strings.Replace(SystemPrompt, "{{SKILLS_SECTION}}", skillsSection, 1)
+
+	// Add MCP tools section
+	if mcpToolsSection != "" {
+		sysPrompt += "\n\n" + mcpToolsSection
+	}
 
 	// Add profile override context
 	if profileOverride != "" {
@@ -139,6 +147,84 @@ func buildSkillsSection(_ *core.Config) string {
 	}
 	lines = append(lines, "- console.log(...args) — Log output (for debugging)")
 	return strings.Join(lines, "\n")
+}
+
+// BuildMCPToolsSection generates a prompt section listing MCP tools from all
+// connected servers. Servers are sorted alphabetically, tools within each server
+// are sorted by name. The output is capped at 2000 bytes; excess tools are
+// counted and reported as "[N more tools omitted]".
+// Tool names and descriptions are sanitized to prevent prompt injection.
+// Returns "" if allTools is nil or empty.
+func BuildMCPToolsSection(allTools map[string][]mcpreg.ToolInfo) string {
+	if len(allTools) == 0 {
+		return ""
+	}
+
+	servers := make([]string, 0, len(allTools))
+	for name := range allTools {
+		servers = append(servers, name)
+	}
+	sort.Strings(servers)
+
+	const budget = 2000
+	header := "## MCP Tools\n\n"
+	var b strings.Builder
+	b.WriteString(header)
+	remaining := budget - len(header)
+	omitted := 0
+
+outer:
+	for si, srv := range servers {
+		tools := make([]mcpreg.ToolInfo, len(allTools[srv]))
+		copy(tools, allTools[srv])
+		sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+
+		srvHeader := fmt.Sprintf("### %s\n", sanitizeMCPField(srv, 64))
+		if remaining < len(srvHeader)+30 {
+			for _, s := range servers[si:] {
+				omitted += len(allTools[s])
+			}
+			break
+		}
+		b.WriteString(srvHeader)
+		remaining -= len(srvHeader)
+
+		for ti, tool := range tools {
+			line := fmt.Sprintf("- %s: %s\n",
+				sanitizeMCPField(tool.Name, 64),
+				sanitizeMCPField(tool.Description, 200))
+			if remaining < len(line) {
+				omitted += len(tools) - ti
+				for _, s := range servers[si+1:] {
+					omitted += len(allTools[s])
+				}
+				break outer
+			}
+			b.WriteString(line)
+			remaining -= len(line)
+		}
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "[%d more tools omitted]\n", omitted)
+	}
+	return b.String()
+}
+
+// sanitizeMCPField strips newlines and markdown control characters from
+// MCP server-supplied strings to prevent prompt injection via tool metadata.
+func sanitizeMCPField(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.Map(func(r rune) rune {
+		if r == '#' || r == '`' {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > maxLen {
+		return s[:maxLen]
+	}
+	return s
 }
 
 // ParseAtMention extracts @profile_id from the start of user text.

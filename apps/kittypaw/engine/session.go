@@ -10,6 +10,7 @@ import (
 
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/llm"
+	mcpreg "github.com/jinto/gopaw/mcp"
 	"github.com/jinto/gopaw/sandbox"
 	"github.com/jinto/gopaw/store"
 )
@@ -35,6 +36,7 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
+	McpRegistry      *mcpreg.Registry // nil when no MCP servers configured
 }
 
 // Run processes a single event through the agent loop.
@@ -131,6 +133,12 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		memoryContext = strings.Join(lines, "\n\n")
 	}
 
+	// Build MCP tools section once (AllTools returns cached data).
+	var mcpToolsSection string
+	if s.McpRegistry != nil {
+		mcpToolsSection = BuildMCPToolsSection(s.McpRegistry.AllTools())
+	}
+
 	// Main retry loop
 	var lastError string
 	activeProvider := s.Provider
@@ -145,7 +153,7 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		compaction := s.compactionForAttempt(attempt)
 
 		// Build prompt
-		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profileOverride, memoryContext)
+		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profileOverride, memoryContext, mcpToolsSection)
 
 		slog.Info("prompt built",
 			"phase", core.PhasePrompt,
