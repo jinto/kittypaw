@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -299,20 +297,18 @@ func executeDelegateTask(
 	return result
 }
 
-// loadSOUL reads ~/.gopaw/profiles/{id}/SOUL.md. Returns "" on any failure.
+// loadSOUL reads ~/.gopaw/profiles/{id}/SOUL.md via core.LoadProfile.
+// Returns "" on any failure.
 func loadSOUL(profileID string) string {
-	if core.ValidateProfileID(profileID) != nil {
-		return ""
-	}
-	dir, err := core.ConfigDir()
+	base, err := core.ConfigDir()
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "profiles", profileID, "SOUL.md"))
+	p, err := core.LoadProfile(base, profileID)
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	return p.Soul
 }
 
 // ---------------------------------------------------------------------------

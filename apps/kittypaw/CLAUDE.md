@@ -6,7 +6,7 @@ Go port of KittyPaw — an AI agent framework with JavaScript sandbox execution,
 
 ```
 cmd/gopaw/     CLI binary (Cobra)
-core/          Types, config, skill management, WebSocket protocol
+core/          Types, config, skill management, persona profiles/presets, WebSocket protocol
 llm/           LLM provider abstraction (Claude, OpenAI, Ollama)
 mcp/           MCP client registry (external tool server connections)
 sandbox/       JavaScript execution sandbox (in-process goja VM)
