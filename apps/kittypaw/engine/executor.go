@@ -190,65 +190,91 @@ func webFetch(ctx context.Context, url string) (string, error) {
 
 // --- File ---
 
+const maxFileReadSize = 10 * 1024 * 1024 // 10MB — protects LLM context from huge files.
+
 func executeFile(_ context.Context, call core.SkillCall, s *Session) (string, error) {
 	if len(call.Args) == 0 {
-		return jsonResult(map[string]any{"error": "path argument required"})
+		return "", fmt.Errorf("path argument required")
 	}
-	var path string
-	if err := json.Unmarshal(call.Args[0], &path); err != nil {
-		return jsonResult(map[string]any{"error": "invalid path"})
+	var rawPath string
+	if err := json.Unmarshal(call.Args[0], &rawPath); err != nil {
+		return "", fmt.Errorf("invalid path argument")
 	}
 
-	// Validate path is within allowed paths
-	if !isPathAllowed(path, s.Config.Sandbox.AllowedPaths) {
-		return jsonResult(map[string]any{"error": "path not allowed"})
+	// Resolve the path once and use it for both validation and all file operations.
+	// This eliminates the TOCTOU race between validation and filesystem access.
+	absPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("path not allowed")
+	}
+	resolvedPath := resolveForValidation(absPath)
+
+	if !isPathAllowedResolved(resolvedPath, s.AllowedPaths()) {
+		return "", fmt.Errorf("path not allowed")
 	}
 
 	switch call.Method {
 	case "read":
-		data, err := os.ReadFile(path)
+		// Open + fstat + limited read on the same fd to prevent TOCTOU size bypass.
+		f, err := os.Open(resolvedPath)
 		if err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+			return "", fmt.Errorf("file read: %w", err)
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return "", fmt.Errorf("file read: %w", err)
+		}
+		if info.Size() > maxFileReadSize {
+			return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxFileReadSize)
+		}
+		data, err := io.ReadAll(io.LimitReader(f, maxFileReadSize+1))
+		if err != nil {
+			return "", fmt.Errorf("file read: %w", err)
 		}
 		return jsonResult(map[string]any{"content": string(data)})
 
 	case "write":
 		if len(call.Args) < 2 {
-			return jsonResult(map[string]any{"error": "content argument required"})
+			return "", fmt.Errorf("content argument required")
 		}
 		var content string
-		json.Unmarshal(call.Args[1], &content)
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+		if err := json.Unmarshal(call.Args[1], &content); err != nil {
+			return "", fmt.Errorf("invalid content argument")
+		}
+		if err := os.WriteFile(resolvedPath, []byte(content), 0o644); err != nil {
+			return "", fmt.Errorf("file write: %w", err)
 		}
 		return jsonResult(map[string]any{"success": true})
 
 	case "append":
 		if len(call.Args) < 2 {
-			return jsonResult(map[string]any{"error": "content argument required"})
+			return "", fmt.Errorf("content argument required")
 		}
 		var content string
-		json.Unmarshal(call.Args[1], &content)
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err := json.Unmarshal(call.Args[1], &content); err != nil {
+			return "", fmt.Errorf("invalid content argument")
+		}
+		f, err := os.OpenFile(resolvedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+			return "", fmt.Errorf("file append: %w", err)
 		}
 		defer f.Close()
 		if _, err := f.WriteString(content); err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+			return "", fmt.Errorf("file append: %w", err)
 		}
 		return jsonResult(map[string]any{"success": true})
 
 	case "delete":
-		if err := os.Remove(path); err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+		if err := os.Remove(resolvedPath); err != nil {
+			return "", fmt.Errorf("file delete: %w", err)
 		}
 		return jsonResult(map[string]any{"success": true})
 
 	case "list":
-		entries, err := os.ReadDir(path)
+		entries, err := os.ReadDir(resolvedPath)
 		if err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+			return "", fmt.Errorf("file list: %w", err)
 		}
 		var names []string
 		for _, e := range entries {
@@ -257,12 +283,12 @@ func executeFile(_ context.Context, call core.SkillCall, s *Session) (string, er
 		return jsonResult(map[string]any{"files": names})
 
 	case "exists":
-		_, err := os.Stat(path)
+		_, err := os.Stat(resolvedPath)
 		return jsonResult(map[string]any{"exists": err == nil})
 
 	case "mkdir":
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return jsonResult(map[string]any{"error": err.Error()})
+		if err := os.MkdirAll(resolvedPath, 0o755); err != nil {
+			return "", fmt.Errorf("file mkdir: %w", err)
 		}
 		return jsonResult(map[string]any{"success": true})
 
@@ -882,31 +908,73 @@ func jsonResult(v any) (string, error) {
 	return string(data), nil
 }
 
+// isPathAllowed resolves both the target path and the allowed paths, then
+// checks containment. Used by tests and callers with raw (unresolved) paths.
+// The production hot path in executeFile uses isPathAllowedResolved with
+// pre-resolved paths from the Session cache.
 func isPathAllowed(path string, allowedPaths []string) bool {
 	if len(allowedPaths) == 0 {
-		return false // Deny by default when no paths are configured
+		return false
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	// Resolve symlinks to prevent escaping allowed directories.
-	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
-		absPath = resolved
-	}
-	for _, allowed := range allowedPaths {
-		absAllowed, err := filepath.Abs(allowed)
+	resolved := resolveForValidation(absPath)
+	resolvedAllowed := make([]string, 0, len(allowedPaths))
+	for _, a := range allowedPaths {
+		abs, err := filepath.Abs(a)
 		if err != nil {
 			continue
 		}
-		if resolved, err := filepath.EvalSymlinks(absAllowed); err == nil {
-			absAllowed = resolved
-		}
-		if absPath == absAllowed || strings.HasPrefix(absPath, absAllowed+string(filepath.Separator)) {
+		resolvedAllowed = append(resolvedAllowed, resolveForValidation(abs))
+	}
+	return isPathAllowedResolved(resolved, resolvedAllowed)
+}
+
+// isPathAllowedResolved checks an already-resolved absolute path against the
+// allowed paths list. The allowed paths are expected to be pre-resolved
+// (stored that way by RefreshAllowedPaths).
+func isPathAllowedResolved(resolvedPath string, allowedPaths []string) bool {
+	if len(allowedPaths) == 0 {
+		return false
+	}
+	for _, allowed := range allowedPaths {
+		if resolvedPath == allowed || strings.HasPrefix(resolvedPath, allowed+string(filepath.Separator)) {
 			return true
 		}
 	}
 	return false
+}
+
+// resolveForValidation resolves symlinks for path validation. When the file
+// doesn't exist (e.g., write to new file), it walks up to find the deepest
+// existing ancestor, resolves that, and re-appends the remaining path segments.
+// This prevents symlink-in-parent-dir attacks for non-existent target files.
+func resolveForValidation(absPath string) string {
+	// Fast path: file/dir exists — resolve directly.
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		return resolved
+	}
+	// Walk up to find the deepest existing ancestor.
+	current := absPath
+	var trail []string
+	for {
+		parent := filepath.Dir(current)
+		trail = append(trail, filepath.Base(current))
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			// Reconstruct: resolved ancestor + unresolved tail segments.
+			for i := len(trail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, trail[i])
+			}
+			return resolved
+		}
+		if parent == current {
+			break // reached filesystem root
+		}
+		current = parent
+	}
+	return absPath
 }
 
 func extractSearchResults(html string) []map[string]string {

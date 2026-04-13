@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jinto/gopaw/core"
@@ -38,6 +40,48 @@ type Session struct {
 	Config           *core.Config
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
+	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
+}
+
+// AllowedPaths returns the cached list of workspace root paths.
+// Returns nil when no workspaces are registered (deny-all by default).
+func (s *Session) AllowedPaths() []string {
+	if p := s.allowedPaths.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// ClearAllowedPaths sets the cache to empty, denying all file operations.
+// Used as a fail-closed fallback when RefreshAllowedPaths fails after a delete.
+func (s *Session) ClearAllowedPaths() {
+	empty := []string{}
+	s.allowedPaths.Store(&empty)
+}
+
+// RefreshAllowedPaths reloads workspace root paths from the database into the
+// atomic cache. Paths are pre-resolved (Abs + EvalSymlinks) so isPathAllowedResolved
+// can do a fast prefix match without syscalls. Call after any workspace CRUD.
+// Returns an error so callers (e.g., delete handler) can fail-closed.
+func (s *Session) RefreshAllowedPaths() error {
+	raw, err := s.Store.ListWorkspaceRootPaths()
+	if err != nil {
+		slog.Error("failed to refresh allowed paths", "error", err)
+		return err
+	}
+	resolved := make([]string, 0, len(raw))
+	for _, p := range raw {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = r
+		}
+		resolved = append(resolved, abs)
+	}
+	s.allowedPaths.Store(&resolved)
+	return nil
 }
 
 // Run processes a single event through the agent loop.

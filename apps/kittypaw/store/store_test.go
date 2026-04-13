@@ -666,15 +666,131 @@ func TestRecordFixPreApplied(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCRUD(t *testing.T) {
+	st := openTestStore(t)
+
+	// List empty.
+	wss, err := st.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("list empty: %v", err)
+	}
+	if len(wss) != 0 {
+		t.Fatalf("expected 0 workspaces, got %d", len(wss))
+	}
+
+	// Save.
+	ws := &Workspace{ID: "ws-1", Name: "project-a", RootPath: "/home/user/project-a"}
+	if err := st.SaveWorkspace(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Get.
+	got, err := st.GetWorkspace("ws-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Name != "project-a" || got.RootPath != "/home/user/project-a" {
+		t.Errorf("get: got %+v", got)
+	}
+
+	// Get non-existent.
+	_, err = st.GetWorkspace("ws-999")
+	if err == nil {
+		t.Fatal("expected error for non-existent workspace")
+	}
+
+	// Save another.
+	ws2 := &Workspace{ID: "ws-2", Name: "project-b", RootPath: "/home/user/project-b"}
+	if err := st.SaveWorkspace(ws2); err != nil {
+		t.Fatalf("save ws-2: %v", err)
+	}
+
+	// List all.
+	wss, err = st.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(wss) != 2 {
+		t.Fatalf("expected 2 workspaces, got %d", len(wss))
+	}
+
+	// ListWorkspaceRootPaths.
+	paths, err := st.ListWorkspaceRootPaths()
+	if err != nil {
+		t.Fatalf("list root paths: %v", err)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths, got %d", len(paths))
+	}
+
+	// Upsert (same ID, different name).
+	ws.Name = "project-a-renamed"
+	if err := st.SaveWorkspace(ws); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	got, _ = st.GetWorkspace("ws-1")
+	if got.Name != "project-a-renamed" {
+		t.Errorf("upsert: name = %q, want %q", got.Name, "project-a-renamed")
+	}
+
+	// Duplicate root_path (different ID) should fail.
+	wsDup := &Workspace{ID: "ws-3", Name: "dup", RootPath: "/home/user/project-a"}
+	if err := st.SaveWorkspace(wsDup); err == nil {
+		t.Fatal("expected error for duplicate root_path")
+	}
+
+	// Delete.
+	if err := st.DeleteWorkspace("ws-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	wss, _ = st.ListWorkspaces()
+	if len(wss) != 1 {
+		t.Fatalf("expected 1 workspace after delete, got %d", len(wss))
+	}
+
+	// Delete non-existent (idempotent).
+	if err := st.DeleteWorkspace("ws-999"); err != nil {
+		t.Fatalf("delete non-existent: %v", err)
+	}
+}
+
+func TestSeedWorkspacesFromConfig(t *testing.T) {
+	st := openTestStore(t)
+
+	// Seed two paths.
+	if err := st.SeedWorkspacesFromConfig([]string{"/tmp/ws1", "/tmp/ws2"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	paths, _ := st.ListWorkspaceRootPaths()
+	if len(paths) != 2 {
+		t.Fatalf("expected 2 paths after seed, got %d", len(paths))
+	}
+
+	// Seed again (idempotent — same paths, no duplicates).
+	if err := st.SeedWorkspacesFromConfig([]string{"/tmp/ws1", "/tmp/ws2", "/tmp/ws3"}); err != nil {
+		t.Fatalf("seed again: %v", err)
+	}
+	paths, _ = st.ListWorkspaceRootPaths()
+	if len(paths) != 3 {
+		t.Fatalf("expected 3 paths after second seed, got %d", len(paths))
+	}
+
+	// Empty config does nothing.
+	if err := st.SeedWorkspacesFromConfig(nil); err != nil {
+		t.Fatalf("seed empty: %v", err)
+	}
+	paths, _ = st.ListWorkspaceRootPaths()
+	if len(paths) != 3 {
+		t.Fatalf("expected 3 paths after empty seed, got %d", len(paths))
+	}
+}
+
 func TestPermissions(t *testing.T) {
 	st := openTestStore(t)
 	ws := "ws-1"
 
 	// Create the workspace that permission rules reference via FK.
-	_, err := st.db.Exec(
-		`INSERT INTO workspaces (id, name, root_path) VALUES (?, ?, ?)`,
-		ws, "test workspace", "/tmp/test")
-	if err != nil {
+	if err := st.SaveWorkspace(&Workspace{ID: ws, Name: "test workspace", RootPath: "/tmp/test"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 

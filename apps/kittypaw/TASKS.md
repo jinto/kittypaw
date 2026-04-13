@@ -18,13 +18,26 @@ Plan: `.claude/plans/llm-resilience.md`
 - [x] Handle SSE error events in Claude `parseSSEStream` + tests (0 tokens, N tokens)
 - [x] Handle SSE error events in OpenAI `parseSSEStream` + tests (0 tokens, N tokens)
 
-## Plan 3: E2E Agent Loop Test
+## Plan 3: E2E Agent Loop Test ✅
 
 Plan: `.claude/plans/e2e-agent-loop.md`
 
-- [ ] Mock provider + test helper + TestE2ESimpleReturn
-- [ ] TestE2ESkillCall (Storage round-trip via sandbox → resolveSkillCall)
-- [ ] TestE2EErrorRetry (JS error → engine retry → success)
+- [x] Mock provider + test helper + TestE2ESimpleReturn
+- [x] TestE2ESkillCall (Storage round-trip via sandbox → resolveSkillCall)
+- [x] TestE2EErrorRetry (JS error → engine retry → success)
+
+## Plan 12: Workspace Hardening ← 현재
+
+Plan: `.claude/plans/workspace-hardening.md`
+Spec: `.ina/specs/20260413-2230-think-workspace-hardening.md`
+
+- [x] Store: Workspace CRUD + ListWorkspaceRootPaths + TOML seed + tests
+- [x] Engine: Fix isPathAllowed (parent symlink walk) + resolveForValidation + symlink tests
+- [x] Engine: Session.AllowedPaths atomic cache + RefreshAllowedPaths + wiring
+- [x] Engine: File size limit (10MB read) + error contract (Go error, not JSON) + tests
+- [x] Sandbox: Throw JS exception on resolver error + test
+- [x] Server: Workspace CRUD API (GET/POST/DELETE) + api_workspace.go + route wiring
+- [x] E2E: File access gating integration test (mock LLM → File.read → isPathAllowed)
 
 ## Plan 4: Channel SessionID + Response Retry ✅
 

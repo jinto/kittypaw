@@ -80,7 +80,10 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 
 				if resolver != nil {
 					resp, err := resolver(ctx, sc)
-					if err == nil && resp != "" {
+					if err != nil {
+						panic(vm.ToValue(err.Error()))
+					}
+					if resp != "" {
 						var parsed any
 						if json.Unmarshal([]byte(resp), &parsed) == nil {
 							return vm.ToValue(parsed)
