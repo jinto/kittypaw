@@ -505,14 +505,39 @@ func runTeach(_ *cobra.Command, args []string) error {
 		Config:   cfg,
 	}
 
-	event := desktopEvent(fmt.Sprintf("/teach %s", description))
 	ctx := context.Background()
 
-	resp, err := session.Run(ctx, event, nil)
+	result, err := engine.HandleTeach(ctx, description, "cli", session)
 	if err != nil {
 		return fmt.Errorf("teach skill: %w", err)
 	}
-	fmt.Println(resp)
+
+	// Print preview
+	fmt.Printf("스킬명: %s\n", result.SkillName)
+	fmt.Printf("설명:  %s\n", result.Description)
+	fmt.Printf("트리거: %s\n", result.Trigger.Type)
+	if len(result.Permissions) > 0 {
+		fmt.Printf("권한:  %s\n", strings.Join(result.Permissions, ", "))
+	}
+	fmt.Printf("\n--- 생성된 코드 ---\n%s\n--- 코드 끝 ---\n\n", result.Code)
+
+	if !result.SyntaxOK {
+		return fmt.Errorf("구문 오류: %s", result.SyntaxError)
+	}
+
+	// Interactive approval
+	fmt.Print("이 스킬을 저장하시겠습니까? (y/n): ")
+	var answer string
+	fmt.Scanln(&answer)
+	if answer != "y" && answer != "Y" {
+		fmt.Println("취소되었습니다.")
+		return nil
+	}
+
+	if err := engine.ApproveSkill(result); err != nil {
+		return fmt.Errorf("스킬 저장 실패: %w", err)
+	}
+	fmt.Printf("스킬 '%s' 저장 완료!\n", result.SkillName)
 	return nil
 }
 

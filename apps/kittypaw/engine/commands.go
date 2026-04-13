@@ -10,7 +10,7 @@ import (
 
 // tryHandleCommand checks if the event text is a slash command.
 // Returns (response, true) if handled, ("", false) otherwise.
-func tryHandleCommand(_ context.Context, text string, s *Session) (string, bool) {
+func tryHandleCommand(ctx context.Context, text string, s *Session) (string, bool) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/") {
 		return "", false
@@ -33,7 +33,7 @@ func tryHandleCommand(_ context.Context, text string, s *Session) (string, bool)
 		return "사용법: /run <skill-name>", true
 	case "/teach":
 		if len(parts) > 1 {
-			return handleTeach(strings.Join(parts[1:], " ")), true
+			return handleTeach(ctx, strings.Join(parts[1:], " "), s), true
 		}
 		return "사용법: /teach <설명>", true
 	default:
@@ -86,7 +86,34 @@ func handleRun(name string) string {
 	return fmt.Sprintf("스킬 '%s' 실행 요청됨", name)
 }
 
-func handleTeach(description string) string {
-	// TODO: LLM-based skill generation
-	return fmt.Sprintf("스킬 학습 요청됨: %s", description)
+func handleTeach(ctx context.Context, description string, s *Session) string {
+	result, err := HandleTeach(ctx, description, "chat", s)
+	if err != nil {
+		return fmt.Sprintf("스킬 학습 실패: %s", err)
+	}
+	if !result.SyntaxOK {
+		return fmt.Sprintf("생성된 코드에 구문 오류가 있습니다: %s\n\n코드:\n%s", result.SyntaxError, result.Code)
+	}
+
+	// Block auto-approve for skills using dangerous permissions
+	for _, perm := range result.Permissions {
+		if perm == "Shell" || perm == "File" || perm == "Git" {
+			return fmt.Sprintf("생성된 스킬이 위험한 권한(%s)을 사용합니다. API /skills/teach/approve를 통해 수동 승인이 필요합니다.\n\n코드:\n%s", perm, result.Code)
+		}
+	}
+
+	// Auto-approve for chat entry point (no interactive mechanism for safe skills)
+	if err := ApproveSkill(result); err != nil {
+		return fmt.Sprintf("스킬 저장 실패: %s", err)
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "스킬 '%s' 생성 완료!\n", result.SkillName)
+	fmt.Fprintf(&sb, "설명: %s\n", result.Description)
+	fmt.Fprintf(&sb, "트리거: %s\n", result.Trigger.Type)
+	if len(result.Permissions) > 0 {
+		fmt.Fprintf(&sb, "권한: %s\n", strings.Join(result.Permissions, ", "))
+	}
+	fmt.Fprintf(&sb, "\n코드:\n%s", result.Code)
+	return sb.String()
 }
