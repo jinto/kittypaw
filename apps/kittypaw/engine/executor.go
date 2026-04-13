@@ -209,7 +209,17 @@ func webFetch(ctx context.Context, url string) (string, error) {
 
 const maxFileReadSize = 10 * 1024 * 1024 // 10MB — protects LLM context from huge files.
 
-func executeFile(_ context.Context, call core.SkillCall, s *Session) (string, error) {
+func executeFile(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	// Index-based methods dispatch early — they don't take a file path.
+	switch call.Method {
+	case "search":
+		return executeFileSearch(ctx, call, s)
+	case "stats":
+		return executeFileStats(ctx, call, s)
+	case "reindex":
+		return executeFileReindex(ctx, call, s)
+	}
+
 	if len(call.Args) == 0 {
 		return "", fmt.Errorf("path argument required")
 	}
@@ -312,6 +322,107 @@ func executeFile(_ context.Context, call core.SkillCall, s *Session) (string, er
 	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown File method: %s", call.Method)})
 	}
+}
+
+// --- File index methods ---
+
+func executeFileSearch(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	if s.Indexer == nil {
+		return "", fmt.Errorf("workspace indexer not available")
+	}
+	if len(call.Args) == 0 {
+		return "", fmt.Errorf("query argument required")
+	}
+	var query string
+	if err := json.Unmarshal(call.Args[0], &query); err != nil {
+		return "", fmt.Errorf("invalid query argument")
+	}
+	if query == "" {
+		return "", fmt.Errorf("empty search query")
+	}
+
+	var opts SearchOptions
+	if len(call.Args) > 1 {
+		json.Unmarshal(call.Args[1], &opts)
+	}
+
+	result, err := s.Indexer.Search(ctx, query, opts)
+	if err != nil {
+		return "", fmt.Errorf("file search: %w", err)
+	}
+
+	// Post-filter by AllowedPaths (defense-in-depth).
+	allowed := s.AllowedPaths()
+	if allowed != nil {
+		filtered := make([]SearchHit, 0, len(result.Files))
+		for _, hit := range result.Files {
+			resolved := resolveForValidation(hit.Path)
+			if isPathAllowedResolved(resolved, allowed) {
+				filtered = append(filtered, hit)
+			}
+		}
+		result.Files = filtered
+	}
+
+	return jsonResult(result)
+}
+
+func executeFileStats(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	if s.Indexer == nil {
+		return "", fmt.Errorf("workspace indexer not available")
+	}
+	var opts StatsOptions
+	if len(call.Args) > 0 {
+		var path string
+		if err := json.Unmarshal(call.Args[0], &path); err == nil {
+			opts.Path = path
+		}
+	}
+	result, err := s.Indexer.Stats(ctx, opts)
+	if err != nil {
+		return "", fmt.Errorf("file stats: %w", err)
+	}
+	return jsonResult(result)
+}
+
+func executeFileReindex(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	if s.Indexer == nil {
+		return "", fmt.Errorf("workspace indexer not available")
+	}
+
+	// Determine which workspace(s) to reindex.
+	var targetPath string
+	if len(call.Args) > 0 {
+		json.Unmarshal(call.Args[0], &targetPath)
+	}
+
+	wss, err := s.Store.ListWorkspaces()
+	if err != nil {
+		return "", fmt.Errorf("list workspaces: %w", err)
+	}
+
+	var totalResult IndexResult
+	for _, ws := range wss {
+		// If a path is given, only reindex matching workspace.
+		if targetPath != "" {
+			absTarget, _ := filepath.Abs(targetPath)
+			if !strings.HasPrefix(absTarget, ws.RootPath) {
+				continue
+			}
+		}
+		result, reErr := s.Indexer.Reindex(ctx, ws.ID, ws.RootPath)
+		if reErr != nil {
+			slog.Warn("reindex failed", "workspace", ws.ID, "error", reErr)
+			totalResult.Errors++
+			continue
+		}
+		totalResult.Indexed += result.Indexed
+		totalResult.Skipped += result.Skipped
+		totalResult.Errors += result.Errors
+		totalResult.DurationMs += result.DurationMs
+	}
+
+	return jsonResult(totalResult)
 }
 
 // --- Storage ---

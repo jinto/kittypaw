@@ -33,6 +33,9 @@ var SkillRegistry = []SkillMeta{
 		{Name: "list", Signature: "File.list(dir)"},
 		{Name: "exists", Signature: "File.exists(path)"},
 		{Name: "mkdir", Signature: "File.mkdir(path)"},
+		{Name: "search", Signature: "File.search(query, options?) — search workspace files by keyword. options: {path, ext, limit, offset}"},
+		{Name: "stats", Signature: "File.stats(path?) — workspace file statistics"},
+		{Name: "reindex", Signature: "File.reindex(path?) — rebuild workspace file index"},
 	}},
 	{Name: "Storage", Methods: []SkillMethodMeta{
 		{Name: "get", Signature: "Storage.get(key)"},

@@ -57,6 +57,23 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
 	}
 
+	// Create workspace indexer and trigger initial background indexing.
+	indexer := engine.NewFTS5Indexer(st)
+	session.Indexer = indexer
+	go func() {
+		wss, err := st.ListWorkspaces()
+		if err != nil {
+			slog.Warn("startup: failed to list workspaces for indexing", "error", err)
+			return
+		}
+		for _, ws := range wss {
+			if _, err := indexer.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
+				slog.Warn("startup: workspace indexing failed",
+					"workspace_id", ws.ID, "root_path", ws.RootPath, "error", err)
+			}
+		}
+	}()
+
 	s := &Server{
 		config:    cfg,
 		store:     st,
