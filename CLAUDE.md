@@ -17,19 +17,6 @@ server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload
 client/        REST/WS client + DaemonConn (thin client: auto daemon discovery/start)
 ```
 
-## Build & Run
-
-```bash
-go build ./cmd/kittypaw
-./kittypaw init                # interactive 4-step wizard (LLM, Telegram, workspace, HTTP)
-./kittypaw serve --bind :3000
-```
-
-Non-interactive setup for CI:
-```bash
-./kittypaw init --provider anthropic --api-key $ANTHROPIC_API_KEY
-```
-
 ## Key Design Decisions (vs Rust original)
 
 - **No CGO**: Uses `modernc.org/sqlite` (pure Go) instead of sqlite3
@@ -40,13 +27,7 @@ Non-interactive setup for CI:
 - **Cobra CLI**: Replaces Clap for command-line parsing
 - **Multi-tenant BaseDir**: All filesystem operations use `Session.BaseDir` via `*From(baseDir, ...)` function variants, enabling per-tenant data isolation without engine/handler changes
 
-## Skill Install
-
-```bash
-kittypaw install https://github.com/owner/repo   # install from GitHub
-kittypaw install /path/to/local/skill             # install from local directory
-kittypaw search <keyword>                          # search skill registry
-```
+## Skill Install Internals
 
 Supports two source formats:
 - **SKILL.md** (agentskills.io standard) — YAML frontmatter + markdown body. Installed in prompt mode (LLM executes with permission-scoped tools) by default, or `--mode native` for JS conversion via teach pipeline.
@@ -61,31 +42,12 @@ Chat channels that implement `channel.Confirmer` (currently Telegram) show an in
 Config: `[permissions]` section in `config.toml` — `require_approval` (operation list) + `timeout_seconds`.
 Callback responses route through channel-internal `sync.Map` (not `eventCh`) to prevent dispatchLoop deadlock.
 
-## Config
+## Config Internals
 
 TOML config at `~/.kittypaw/config.toml`. See `core/config.go` for all options.
 Server-wide settings (bind, master API key, tenants) go in `~/.kittypaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
 
-Registry URL (default: GitHub `kittypaw/skills`):
-```toml
-[registry]
-url = "https://raw.githubusercontent.com/kittypaw/skills/main"
-```
-
 ## Release
-
-Tag-triggered CI via GoReleaser + GitHub Actions. Produces static binaries for linux/darwin/windows × amd64/arm64.
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-# → .github/workflows/release.yml builds and uploads to GitHub Releases
-```
-
-User install:
-```bash
-curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
-```
 
 Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints it.
 
