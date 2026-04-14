@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KittyPaw — 알아서 일하고, 쓸수록 나를 알아가는 AI</title>
-  <meta name="description" content="코드 없이 자동화. 반복 패턴을 감지하고 스킬을 먼저 제안합니다. Go · CLI + HTTP · 로컬 LLM 지원 · 오픈소스.">
+  <meta name="description" content="코드 없이 자동화. 반복 패턴을 감지하고 스킬을 먼저 제안합니다. Go · CLI + HTTP · 로컬 LLM 지원 · 소스 공개.">
   <link rel="canonical" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
@@ -73,7 +73,7 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> 로컬 LLM 지원 · 멀티채널 · 오픈소스
+        <span>🏠</span> 로컬 LLM 지원 · 멀티채널 · 소스 공개
       </div>
     </div>
 
@@ -87,8 +87,9 @@
     </p>
 
     <div class="install-box">
+      <span class="install-prompt">$</span>
       <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
-      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent)" aria-label="복사">📋</button>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="복사">📋</button>
     </div>
     <p class="install-hint">macOS · Linux — 터미널에 붙여넣기</p>
     <div class="hero-buttons">
@@ -485,7 +486,7 @@
   <div class="section section-center">
     <div class="reveal">
       <h2 class="section-title">KittyPaw만의 강점</h2>
-      <p class="section-sub">오픈소스 · 무료 · 셀프호스팅</p>
+      <p class="section-sub">소스 공개 · 무료 · 셀프호스팅</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
