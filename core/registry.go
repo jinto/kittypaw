@@ -28,11 +28,12 @@ type RegistryEntry struct {
 
 // RegistryClient fetches package listings and downloads from a remote registry.
 type RegistryClient struct {
-	baseURL       string
-	allowedHost   string // exact host match for SSRF defense
-	allowedScheme string // "https" enforced at construction
-	client        *http.Client
-	cacheDir      string
+	baseURL         string
+	allowedHost     string // exact host match for SSRF defense
+	allowedScheme   string // "https" enforced at construction
+	allowedBasePath string // path prefix from base URL for SSRF defense
+	client          *http.Client
+	cacheDir        string
 }
 
 // NewRegistryClient creates a client pointing at the given registry URL.
@@ -52,9 +53,10 @@ func NewRegistryClient(baseURL string) (*RegistryClient, error) {
 	}
 
 	return &RegistryClient{
-		baseURL:       strings.TrimSuffix(baseURL, "/"),
-		allowedHost:   parsed.Host,
-		allowedScheme: parsed.Scheme,
+		baseURL:         strings.TrimSuffix(baseURL, "/"),
+		allowedHost:     parsed.Host,
+		allowedScheme:   parsed.Scheme,
+		allowedBasePath: parsed.Path,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -78,9 +80,13 @@ func (rc *RegistryClient) FetchIndex() ([]RegistryEntry, error) {
 		return rc.loadCachedIndex()
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2MB max
+	const maxIndexSize = 2 << 20 // 2MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexSize+1))
 	if err != nil {
 		return rc.loadCachedIndex()
+	}
+	if len(body) > maxIndexSize {
+		return nil, fmt.Errorf("registry index too large (>%d bytes)", maxIndexSize)
 	}
 
 	var entries []RegistryEntry
@@ -153,11 +159,14 @@ func (rc *RegistryClient) validateURL(rawURL string) error {
 	if strings.Contains(parsed.Path, "..") {
 		return fmt.Errorf("download: URL contains path traversal: %s", rawURL)
 	}
+	if rc.allowedBasePath != "" && !strings.HasPrefix(parsed.Path, rc.allowedBasePath) {
+		return fmt.Errorf("download URL path %q not under allowed base %q", parsed.Path, rc.allowedBasePath)
+	}
 	return nil
 }
 
 // errHTTPNotFound indicates a 404 response.
-var errHTTPNotFound = fmt.Errorf("HTTP 404")
+var errHTTPNotFound = errors.New("HTTP 404")
 
 // isHTTPNotFound reports whether err wraps errHTTPNotFound.
 func isHTTPNotFound(err error) bool {
@@ -208,6 +217,20 @@ func FilterEntries(entries []RegistryEntry, query string) []RegistryEntry {
 		}
 	}
 	return out
+}
+
+// FindEntry fetches the registry index and returns the entry matching the given ID.
+func (rc *RegistryClient) FindEntry(id string) (*RegistryEntry, error) {
+	entries, err := rc.FetchIndex()
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].ID == id {
+			return &entries[i], nil
+		}
+	}
+	return nil, fmt.Errorf("package %q not found in registry", id)
 }
 
 // SearchEntries fetches the registry index and filters by query.
