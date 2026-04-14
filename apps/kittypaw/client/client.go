@@ -221,6 +221,19 @@ func (c *Client) TeachApprove(name, description, code, trigger, schedule string)
 	})
 }
 
+// Install installs a skill from a source (GitHub URL or local path).
+func (c *Client) Install(source, mdMode string) (map[string]any, error) {
+	return c.post("/api/v1/install", map[string]string{
+		"source":  source,
+		"md_mode": mdMode,
+	})
+}
+
+// Search searches the registry for packages matching a keyword.
+func (c *Client) Search(keyword string) (map[string]any, error) {
+	return c.get("/api/v1/search?q=" + url.QueryEscape(keyword))
+}
+
 func (c *Client) get(path string) (map[string]any, error) {
 	req, err := http.NewRequest("GET", c.baseURL+path, nil)
 	if err != nil {

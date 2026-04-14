@@ -24,6 +24,7 @@ type RegistryEntry struct {
 	Description string `json:"description"`
 	Author      string `json:"author"`
 	URL         string `json:"url"`
+	Hash        string `json:"hash,omitempty"` // SHA256 content hash for verification
 }
 
 // RegistryClient fetches package listings and downloads from a remote registry.
@@ -268,4 +269,22 @@ func registryCacheDir() (string, error) {
 		return "", err
 	}
 	return cacheDir, nil
+}
+
+// SearchEntries filters registry entries by keyword, matching against ID, Name,
+// and Description (case-insensitive).
+func SearchEntries(entries []RegistryEntry, keyword string) []RegistryEntry {
+	if keyword == "" {
+		return entries
+	}
+	kw := strings.ToLower(keyword)
+	var results []RegistryEntry
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.ID), kw) ||
+			strings.Contains(strings.ToLower(e.Name), kw) ||
+			strings.Contains(strings.ToLower(e.Description), kw) {
+			results = append(results, e)
+		}
+	}
+	return results
 }

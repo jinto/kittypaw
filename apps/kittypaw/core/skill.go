@@ -38,6 +38,12 @@ type Skill struct {
 	Permissions SkillPermissions `toml:"permissions" json:"permissions"`
 	Format      SkillFormat      `toml:"format"      json:"format"`
 	ModelTier   *ModelTier       `toml:"model_tier"  json:"model_tier,omitempty"`
+
+	// Provenance fields — track the original source of installed skills.
+	// Empty for skills created via the teach pipeline.
+	SourceURL  string `toml:"source_url,omitempty"  json:"source_url,omitempty"`
+	SourceHash string `toml:"source_hash,omitempty" json:"source_hash,omitempty"` // SHA256
+	SourceText string `toml:"source_text,omitempty" json:"source_text,omitempty"` // original SKILL.md content
 }
 
 // SkillTrigger defines how a skill is activated.

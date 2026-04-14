@@ -86,6 +86,12 @@ type Config struct {
 	Evolution       EvolutionConfig     `toml:"evolution"`
 	Orchestration   OrchestrationConfig `toml:"orchestration"`
 	Registry        RegistryConfig      `toml:"registry"`
+	SkillInstall    SkillInstallConfig  `toml:"skill_install"`
+}
+
+// SkillInstallConfig controls skill installation behavior.
+type SkillInstallConfig struct {
+	MdExecutionMode string `toml:"md_execution_mode"` // "prompt" or "native", empty = ask user
 }
 
 // LLMConfig holds the primary LLM provider settings.

@@ -10,12 +10,28 @@ import (
 
 // PackageManager handles installation, configuration, and loading of skill packages.
 type PackageManager struct {
+	baseDir string // if empty, falls back to global ConfigDir
 	secrets *SecretsStore
 }
 
 // NewPackageManager creates a PackageManager backed by the given secrets store.
+// Uses the global ConfigDir for package storage.
 func NewPackageManager(secrets *SecretsStore) *PackageManager {
 	return &PackageManager{secrets: secrets}
+}
+
+// NewPackageManagerFrom creates a PackageManager with an explicit base directory
+// for multi-tenant isolation.
+func NewPackageManagerFrom(baseDir string, secrets *SecretsStore) *PackageManager {
+	return &PackageManager{baseDir: baseDir, secrets: secrets}
+}
+
+// packagesDir returns the packages directory, using baseDir if set.
+func (pm *PackageManager) packagesDir() (string, error) {
+	if pm.baseDir != "" {
+		return PackagesDirFrom(pm.baseDir)
+	}
+	return PackagesDir()
 }
 
 // Install validates and copies a package from sourcePath to ~/.gopaw/packages/<id>/.
@@ -43,7 +59,7 @@ func (pm *PackageManager) Install(sourcePath string) (*SkillPackage, error) {
 		return nil, fmt.Errorf("install: main.js is required but missing in %s", sourcePath)
 	}
 
-	pkgDir, err := PackagesDir()
+	pkgDir, err := pm.packagesDir()
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +114,7 @@ func (pm *PackageManager) Uninstall(id string) error {
 		return err
 	}
 
-	pkgDir, err := PackagesDir()
+	pkgDir, err := pm.packagesDir()
 	if err != nil {
 		return err
 	}
@@ -122,7 +138,7 @@ func (pm *PackageManager) Uninstall(id string) error {
 
 // ListInstalled returns all installed packages.
 func (pm *PackageManager) ListInstalled() ([]SkillPackage, error) {
-	pkgDir, err := PackagesDir()
+	pkgDir, err := pm.packagesDir()
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +172,7 @@ func (pm *PackageManager) LoadPackage(id string) (*SkillPackage, string, error) 
 		return nil, "", err
 	}
 
-	pkgDir, err := PackagesDir()
+	pkgDir, err := pm.packagesDir()
 	if err != nil {
 		return nil, "", err
 	}
@@ -187,7 +203,7 @@ func (pm *PackageManager) GetConfig(id string) (map[string]string, error) {
 	result := make(map[string]string)
 
 	// Load package-local config.toml if it exists.
-	pkgDir, _ := PackagesDir()
+	pkgDir, _ := pm.packagesDir()
 	localConfig := make(map[string]string)
 	configPath := filepath.Join(pkgDir, id, "config.toml")
 	if data, err := os.ReadFile(configPath); err == nil {
@@ -239,7 +255,7 @@ func (pm *PackageManager) SetConfig(id, key, value string) error {
 	}
 
 	// Non-secret: write to config.toml.
-	pkgDir, err := PackagesDir()
+	pkgDir, err := pm.packagesDir()
 	if err != nil {
 		return err
 	}

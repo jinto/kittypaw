@@ -401,3 +401,41 @@ func writeFile(t *testing.T, dir, name, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestSearchEntries(t *testing.T) {
+	entries := []RegistryEntry{
+		{ID: "weather", Name: "Weather Skill", Description: "Get weather info"},
+		{ID: "todo", Name: "Todo Manager", Description: "Manage tasks"},
+		{ID: "daily-news", Name: "Daily News", Description: "Fetch daily weather and news"},
+	}
+
+	// Match by ID
+	results := SearchEntries(entries, "weather")
+	if len(results) != 2 { // "weather" by ID and "daily-news" by description
+		t.Errorf("search 'weather' got %d results, want 2", len(results))
+	}
+
+	// Match by name
+	results = SearchEntries(entries, "todo")
+	if len(results) != 1 {
+		t.Errorf("search 'todo' got %d results, want 1", len(results))
+	}
+
+	// No match
+	results = SearchEntries(entries, "nonexistent")
+	if len(results) != 0 {
+		t.Errorf("search 'nonexistent' got %d results, want 0", len(results))
+	}
+
+	// Empty keyword returns all
+	results = SearchEntries(entries, "")
+	if len(results) != 3 {
+		t.Errorf("empty search got %d results, want 3", len(results))
+	}
+
+	// Case insensitive
+	results = SearchEntries(entries, "WEATHER")
+	if len(results) != 2 {
+		t.Errorf("case insensitive search got %d results, want 2", len(results))
+	}
+}

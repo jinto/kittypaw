@@ -40,6 +40,20 @@ Non-interactive setup for CI:
 - **Cobra CLI**: Replaces Clap for command-line parsing
 - **Multi-tenant BaseDir**: All filesystem operations use `Session.BaseDir` via `*From(baseDir, ...)` function variants, enabling per-tenant data isolation without engine/handler changes
 
+## Skill Install
+
+```bash
+gopaw install https://github.com/owner/repo   # install from GitHub
+gopaw install /path/to/local/skill             # install from local directory
+gopaw search <keyword>                          # search skill registry
+```
+
+Supports two source formats:
+- **SKILL.md** (agentskills.io standard) — YAML frontmatter + markdown body. Installed in prompt mode (LLM executes with permission-scoped tools) by default, or `--mode native` for JS conversion via teach pipeline.
+- **Native** (`package.toml` + `main.js`) — installed directly via PackageManager.
+
+Provenance tracked via `SourceURL`, `SourceHash`, `SourceText` fields on Skill. SHA256 verification for registry packages.
+
 ## Config
 
 TOML config at `~/.gopaw/config.toml`. See `core/config.go` for all options.
