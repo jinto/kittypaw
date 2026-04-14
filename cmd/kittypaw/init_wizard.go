@@ -376,23 +376,58 @@ func promptLine(scanner *bufio.Scanner, prompt, defaultVal string) string {
 	return line
 }
 
-// promptPassword reads input with echo suppressed on a TTY.
+// promptPassword reads input showing * for each character typed.
 func promptPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
-	if isTTY() {
-		b, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println() // newline after hidden input
+	if !isTTY() {
+		// Fallback for non-TTY (piped input).
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			return "", nil
+		}
+		return strings.TrimSpace(scanner.Text()), nil
+	}
+
+	fd := int(syscall.Stdin)
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		// Fall back to hidden input if raw mode fails.
+		b, err := term.ReadPassword(fd)
+		fmt.Println()
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(string(b)), nil
 	}
-	// Fallback for non-TTY (piped input).
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
-		return "", nil
+	defer term.Restore(fd, oldState)
+
+	var buf []byte
+	var b [1]byte
+	for {
+		if _, err := os.Stdin.Read(b[:]); err != nil {
+			break
+		}
+		switch b[0] {
+		case '\r', '\n': // Enter
+			fmt.Print("\r\n")
+			return strings.TrimSpace(string(buf)), nil
+		case 3: // Ctrl+C
+			fmt.Print("\r\n")
+			return "", nil
+		case 127, 8: // DEL, Backspace
+			if len(buf) > 0 {
+				buf = buf[:len(buf)-1]
+				fmt.Print("\b \b")
+			}
+		default:
+			if b[0] >= 32 { // printable
+				buf = append(buf, b[0])
+				fmt.Print("*")
+			}
+		}
 	}
-	return strings.TrimSpace(scanner.Text()), nil
+	fmt.Print("\r\n")
+	return strings.TrimSpace(string(buf)), nil
 }
 
 // maskKey returns a masked version of an API key, e.g. "sk-ant-...x2f4".
