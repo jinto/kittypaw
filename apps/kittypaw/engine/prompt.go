@@ -10,16 +10,18 @@ import (
 	mcpreg "github.com/jinto/kittypaw/mcp"
 )
 
-// SystemPrompt is the base prompt that instructs the LLM to generate JavaScript code.
-const SystemPrompt = `You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
+// IdentityBlock defines who KittyPaw is and how it operates.
+const IdentityBlock = `You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
 
 ## How you work
 1. You receive an event (message, command, etc.)
-2. You write JavaScript code to handle it
-3. Your code is executed in a sandbox
-4. The result is returned to the user
+2. Understand what the user actually wants — not just the literal words. Think about the most useful outcome.
+3. You write JavaScript code to handle it
+4. Your code is executed in a sandbox
+5. The result is returned to the user`
 
-## Rules
+// ExecutionBlock defines the JavaScript code generation rules.
+const ExecutionBlock = `## Rules
 - Write ONLY valid JavaScript (ES2020) code. No markdown fences, no explanations.
 - ALWAYS use ` + "`return`" + ` to produce output. Without return, nothing is sent back.
   - Simple answer: ` + "`return \"4\"`" + `
@@ -30,9 +32,31 @@ const SystemPrompt = `You are KittyPaw, an AI agent that helps users by writing 
 - Handle errors with try/catch.
 - Do NOT use: require(), import, fetch(), Node.js APIs, await.
 
-{{SKILLS_SECTION}}
+## Web.search query quality
+- NEVER pass a single generic word like "뉴스" or "news". Always add context: topic, date, or specifics.
+  BAD:  Web.search("뉴스")  → returns news portal homepages, useless
+  GOOD: Web.search("오늘 주요 뉴스 2026")  → returns actual articles
+  GOOD: Web.search("한국 경제 뉴스 오늘")  → returns relevant results
+- If the user's request is vague, infer a reasonable topic or ask. "뉴스 검색해줘" → search for today's top headlines.
+- When the user communicates in a specific language (e.g. Korean), generate queries in that SAME language.`
 
-## When to create a skill
+// QualityBlock enforces tool execution, result quality, and code-level persistence.
+const QualityBlock = `## Execution quality
+For ANY request involving external information, you MUST generate code that calls available tools.
+Never answer from memory — always fetch real data first.
+
+WRONG: return "AI is advancing rapidly..."  ← fabricated, no tool call
+RIGHT: const r = Web.search("AI news today"); return r.results.map(...)  ← real data
+
+If results are insufficient, your code should try additional steps:
+- Search results too brief → fetch detail from top result URLs
+- First query returns nothing → try alternative keywords
+- Combine multiple tool calls in one code block for thorough answers
+
+If all tool calls fail, return "검색 결과를 가져오지 못했습니다" and stop — never fabricate data.`
+
+// SkillCreationBlock guides when and how to create scheduled or one-shot skills.
+const SkillCreationBlock = `## When to create a skill
 If the user asks for something recurring ("매일", "every day", "주기적으로"), create a skill with a schedule trigger.
 For one-time delayed requests ("2분 뒤", "한 번만", "이번 한 번", "내일 아침 한 번"), create a skill with a once trigger.
 For immediate one-time requests, just execute the code directly without creating a skill.
@@ -55,26 +79,48 @@ Example — once skill (one-shot delayed):
 
 CRITICAL: Never use "schedule" trigger for one-time delayed tasks.
 - "schedule" = recurring (runs repeatedly on cron)
-- "once" = one-shot (runs exactly once after the delay, then deleted automatically)
+- "once" = one-shot (runs exactly once after the delay, then deleted automatically)`
 
-## Search language
-When the user communicates in a specific language (e.g. Korean), generate Web.search queries in that SAME language.
-
-## CRITICAL: Real data only — never fabricate
-For ANY request involving external information:
-1. ALWAYS call Web.search(query) or Http.get(url) FIRST to get real data
-2. Use the ACTUAL search results — do not summarize from memory
-3. If search returns empty or fails, return "검색 결과를 가져오지 못했습니다" and STOP
-
-## Telegram.sendMessage vs return
-- ` + "`return value`" + ` → engine sends value as a Telegram message automatically
-- ` + "`Telegram.sendMessage(x)`" + ` → sends x directly, AND return value is also sent
-- To avoid duplicate messages: if you call Telegram.sendMessage(), return null
-
-## Memory & Learning
+// MemoryBlock guides memory usage for user preferences.
+const MemoryBlock = `## Memory & Learning
 When you learn something about the user (preferences, interests, corrections):
-- Use Memory.user(key, value) to save it to their profile
-`
+- Use Memory.user(key, value) to save it to their profile`
+
+// SystemPrompt is the assembled base prompt, stored in agent state for auditing.
+// BuildPrompt assembles blocks directly — this var exists for backward compatibility.
+var SystemPrompt = IdentityBlock + "\n\n" + ExecutionBlock + "\n\n" + QualityBlock + "\n\n" + SkillCreationBlock + "\n\n" + MemoryBlock
+
+// channelHint returns channel-specific output format guidance.
+// Returns empty string for unknown channels.
+func channelHint(channelName string) string {
+	switch channelName {
+	case "telegram":
+		return `## Output format (Telegram)
+- Keep messages short and readable — Telegram renders limited markdown.
+- Minimize markdown: avoid headers, complex formatting.
+- ` + "`return value`" + ` → engine sends value as a Telegram message automatically.
+- ` + "`Telegram.sendMessage(x)`" + ` → sends x directly, AND return value is also sent.
+- To avoid duplicate messages: if you call Telegram.sendMessage(), return null.`
+	case "web", "web_chat":
+		return `## Output format (Web)
+- Markdown is fully supported: headers, code blocks, lists, links.
+- Use formatting to improve readability.`
+	case "cli", "desktop":
+		return `## Output format (CLI)
+- Prefer plain text output.
+- Use simple formatting: dashes for lists, indentation for structure.`
+	case "slack":
+		return `## Output format (Slack)
+- Use Slack mrkdwn format: *bold*, _italic_, ~strike~, ` + "`code`" + `.
+- Links: <url|text>. Avoid standard markdown.`
+	case "discord":
+		return `## Output format (Discord)
+- Use Discord markdown: **bold**, *italic*, ~~strike~~, ` + "`code`" + `.
+- Code blocks with language hints are supported.`
+	default:
+		return ""
+	}
+}
 
 // FormatEvent extracts the user-facing text from an event.
 func FormatEvent(event *core.Event) string {
@@ -94,6 +140,7 @@ func FormatExecResult(result *core.ExecutionResult) string {
 }
 
 // BuildPrompt constructs the LLM message chain from agent state and config.
+// Assembly order: SOUL.md → Identity → Execution → Quality → Channel → Skills → SkillCreation → Memory → MCP → Nick/UserMD → MemoryContext
 func BuildPrompt(
 	state *core.AgentState,
 	eventText string,
@@ -104,35 +151,70 @@ func BuildPrompt(
 	memoryContext string,
 	mcpToolsSection string,
 ) []core.LlmMessage {
-	// Build system prompt with skills section
-	skillsSection := buildSkillsSection(config)
-	sysPrompt := strings.Replace(SystemPrompt, "{{SKILLS_SECTION}}", skillsSection, 1)
+	var sb strings.Builder
 
-	// Add MCP tools section
-	if mcpToolsSection != "" {
-		sysPrompt += "\n\n" + mcpToolsSection
+	// 1. SOUL.md first — identity takes highest priority
+	if profile != nil && profile.Soul != "" {
+		sb.WriteString("## Your Identity (SOUL.md)\n")
+		sb.WriteString(profile.Soul)
+		sb.WriteString("\n\n")
 	}
 
-	// Inject profile identity from SOUL.md / USER.md
+	// 2. Identity block
+	sb.WriteString(IdentityBlock)
+	sb.WriteString("\n\n")
+
+	// 3. Execution rules
+	sb.WriteString(ExecutionBlock)
+	sb.WriteString("\n\n")
+
+	// 4. Quality enforcement
+	sb.WriteString(QualityBlock)
+	sb.WriteString("\n\n")
+
+	// 5. Channel-specific hints (dynamic)
+	if hint := channelHint(channelName); hint != "" {
+		sb.WriteString(hint)
+		sb.WriteString("\n\n")
+	}
+
+	// 6. Available skills (dynamic)
+	sb.WriteString(buildSkillsSection(config))
+	sb.WriteString("\n\n")
+
+	// 7. Skill creation guide
+	sb.WriteString(SkillCreationBlock)
+	sb.WriteString("\n\n")
+
+	// 8. Memory guide
+	sb.WriteString(MemoryBlock)
+
+	// 9. MCP tools (dynamic)
+	if mcpToolsSection != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(mcpToolsSection)
+	}
+
+	// 10. Profile nick + user markdown
 	if profile != nil {
-		if profile.Soul != "" {
-			sysPrompt += "\n\n## Your Identity (SOUL.md)\n" + profile.Soul
-		}
 		if profile.Nick != "" {
-			sysPrompt += "\n\nYour name/nickname is: " + profile.Nick
+			sb.WriteString("\n\nYour name/nickname is: ")
+			sb.WriteString(profile.Nick)
 		}
 		if profile.UserMD != "" {
-			sysPrompt += "\n\n## User Profile (USER.md)\n" + profile.UserMD
+			sb.WriteString("\n\n## User Profile (USER.md)\n")
+			sb.WriteString(profile.UserMD)
 		}
 	}
 
-	// Add memory context
+	// 11. Memory context
 	if memoryContext != "" {
-		sysPrompt += fmt.Sprintf("\n\n## User Memory\n%s", memoryContext)
+		sb.WriteString("\n\n## User Memory\n")
+		sb.WriteString(memoryContext)
 	}
 
 	messages := []core.LlmMessage{
-		{Role: core.RoleSystem, Content: sysPrompt},
+		{Role: core.RoleSystem, Content: sb.String()},
 	}
 
 	// Compact conversation history

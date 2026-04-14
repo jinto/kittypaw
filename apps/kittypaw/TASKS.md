@@ -1,3 +1,14 @@
+## Plan 23: Prompt Quality — Proactive Result Quality ✅
+
+Plan: `.claude/plans/prompt-quality.md`
+Spec: `.ina/specs/20260415-think-prompt-quality.md`
+
+- [x] T1: Extract block constants from SystemPrompt (IdentityBlock, ExecutionBlock, SkillCreationBlock, MemoryBlock)
+- [x] T2: Add QualityBlock — execution forcing + result quality + code-level persistence (~225 tokens)
+- [x] T3: Add channelHint() for ChannelBlock — 5 channels + Telegram dispatch + unknown fallback
+- [x] T4: Rewrite BuildPrompt assembly — SOUL.md first, block ordering, SystemPrompt→var
+- [x] T5: Update tests + token budget regression — block presence, SOUL.md position, channel hints, 1171/1200 tokens
+
 ## Plan 22: Docs Site Go Rewrite Alignment ✅
 
 Plan: `.claude/plans/docs-go-rewrite-alignment.md`
