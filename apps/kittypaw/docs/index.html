@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KittyPaw — 알아서 일하고, 쓸수록 나를 알아가는 AI</title>
-  <meta name="description" content="코드 없이 자동화. 반복 패턴을 감지하고 스킬을 먼저 제안합니다. 순수 Rust · 로컬 LLM 지원 · 오픈소스.">
+  <meta name="description" content="코드 없이 자동화. 반복 패턴을 감지하고 스킬을 먼저 제안합니다. Go · CLI + HTTP · 로컬 LLM 지원 · 오픈소스.">
   <link rel="canonical" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
@@ -23,7 +23,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "코드 없이 자동화하는 AI 데스크톱 앱. 스킬 갤러리에서 설치하고, 설정만 채우면 끝.",
+    "description": "코드 없이 자동화하는 AI 에이전트 프레임워크. 스킬 갤러리에서 설치하고, 설정만 채우면 끝.",
     "url": "https://kittypaw.app/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux",
@@ -73,7 +73,7 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> 로컬 LLM 지원 · 순수 Rust · 오픈소스
+        <span>🏠</span> 로컬 LLM 지원 · 멀티채널 · 오픈소스
       </div>
     </div>
 
@@ -87,11 +87,11 @@
     </p>
 
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw/releases/latest/download/KittyPaw-arm64.dmg" class="btn btn-primary">
-        <span>⬇️</span> Mac 다운로드 (Apple Silicon)
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
+        <span>⭐</span> GitHub Releases
       </a>
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-secondary">
-        <span>📦</span> 모든 릴리즈 보기
+      <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
+        <span>🎨</span> 스킬 갤러리
       </a>
     </div>
 
@@ -103,13 +103,14 @@
         <span class="terminal-label">kittypaw — bash</span>
       </div>
       <div class="terminal-body">
-        <div><span class="t-prompt">$</span> <span class="t-cmd">cargo run -p kittypaw-gui</span></div>
-        <div class="t-out">   Compiling kittypaw v0.1.0</div>
-        <div class="t-out">    Finished release in 3.2s</div>
-        <div><span class="t-highlight">🐾 KittyPaw started!</span> <span class="t-cursor"></span></div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw init</span></div>
+        <div class="t-out">   LLM provider: Claude (Anthropic)</div>
+        <div class="t-out">   Channel: Telegram</div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw serve</span></div>
+        <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">npm 없음 · JS 없음 · cargo run 한 줄이면 끝</p>
+    <p class="hero-note">외부 런타임 없음 · 바이너리 하나로 실행</p>
   </div>
 </section>
 
@@ -145,7 +146,7 @@
     <div class="reveal">
       <span class="section-eyebrow">핵심 기능</span>
       <h2 class="section-title">왜 KittyPaw인가요?</h2>
-      <p class="section-sub">n8n, Zapier 같은 자동화 도구의 데스크톱 네이티브 대안.<br>AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
+      <p class="section-sub">n8n, Zapier 같은 자동화 도구의 로컬 AI 에이전트 대안.<br>AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
@@ -161,7 +162,7 @@
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
         <h3>안전한 실행</h3>
-        <p>모든 스킬은 QuickJS 샌드박스 + OS 커널 격리 (Seatbelt/Landlock) 안에서 실행됩니다.</p>
+        <p>모든 스킬은 goja 샌드박스 안에서 실행되며, 위험한 작업은 Permission 승인 시스템이 보호합니다.</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
@@ -406,28 +407,28 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">기술 스택</span>
-      <h2 class="section-title">외부 런타임 없이 Rust만으로</h2>
+      <h2 class="section-title">외부 런타임 없이 Go만으로</h2>
       <p class="section-sub">단일 바이너리로 배포. npm도 Node도 Python도 필요 없습니다.</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
-        <div class="tech-badge">🦀</div>
+        <div class="tech-badge">🐹</div>
         <div>
-          <div class="tech-card-name">Rust</div>
-          <div class="tech-card-desc">메모리 안전 · 고성능</div>
+          <div class="tech-card-name">Go</div>
+          <div class="tech-card-desc">단일 바이너리 · 고성능</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
         <div class="tech-badge">🖥</div>
         <div>
-          <div class="tech-card-name">Dioxus GUI</div>
-          <div class="tech-card-desc">네이티브 데스크톱 UI</div>
+          <div class="tech-card-name">Web UI</div>
+          <div class="tech-card-desc">Chi + WebSocket 스트리밍</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-3">
         <div class="tech-badge">🔐</div>
         <div>
-          <div class="tech-card-name">QuickJS Sandbox</div>
+          <div class="tech-card-name">goja Sandbox</div>
           <div class="tech-card-desc">안전한 스킬 실행</div>
         </div>
       </div>
@@ -455,8 +456,8 @@
       <div class="tech-card reveal reveal-delay-1">
         <div class="tech-badge">🛡</div>
         <div>
-          <div class="tech-card-name">Seatbelt / Landlock</div>
-          <div class="tech-card-desc">커널 레벨 격리</div>
+          <div class="tech-card-name">Permission 시스템</div>
+          <div class="tech-card-desc">승인 기반 접근 제어</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
@@ -491,7 +492,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td>GUI 데스크톱 앱</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+          <tr><td>멀티채널 (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>로컬 LLM 지원</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
           <tr><td>스킬 갤러리</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>자동 스킬 생성</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
@@ -514,10 +515,10 @@
     <h2 class="reveal">지금 시작하세요</h2>
     <p class="reveal reveal-delay-1">
       급할수록 필요한 건, 작고 빠른 고양이손.<br>
-      cargo run 한 줄로 오늘부터 자동화를 시작하세요.
+      kittypaw serve 한 줄로 오늘부터 자동화를 시작하세요.
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest/download/KittyPaw-arm64.dmg" class="btn btn-cta-primary">
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
         <span>⭐</span> GitHub에서 받기
       </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">
@@ -540,7 +541,7 @@
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
     <span class="footer-sep">·</span>
-    <span>Made with 🦀 &amp; ❤️</span>
+    <span>Made with 🐹 &amp; ❤️</span>
   </div>
   <div class="biz-info">
     <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>

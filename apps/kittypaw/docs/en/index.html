@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KittyPaw — AI Desktop App That Automates Without Code</title>
-  <meta name="description" content="Install skills from the gallery, fill in settings, done. Daily market reports, RSS summaries, URL monitoring... all automated.">
+  <title>KittyPaw — AI Agent Framework That Automates Without Code</title>
+  <meta name="description" content="Go-powered AI agent framework. Install skills from the gallery, fill in settings, done. Multi-channel · Local LLM · Open source.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 
   <!-- Canonical & hreflang -->
@@ -15,7 +15,7 @@
   <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="KittyPaw — AI Desktop App That Automates Without Code">
+  <meta property="og:title" content="KittyPaw — AI Agent Framework That Automates Without Code">
   <meta property="og:description" content="Install skills from the gallery, fill in settings, done. Daily market reports, RSS summaries, URL monitoring... all automated.">
   <meta property="og:url" content="https://kittypaw.app/en/">
   <meta property="og:type" content="website">
@@ -23,7 +23,7 @@
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KittyPaw — AI Desktop App That Automates Without Code">
+  <meta name="twitter:title" content="KittyPaw — AI Agent Framework That Automates Without Code">
   <meta name="twitter:description" content="Install skills from the gallery, fill in settings, done. Daily market reports, RSS summaries, URL monitoring... all automated.">
 
   <script type="application/ld+json">
@@ -31,7 +31,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "AI desktop app that automates without code. Install skills from the gallery, fill in settings, done.",
+    "description": "AI agent framework that automates without code. Install skills from the gallery, fill in settings, done.",
     "url": "https://kittypaw.app/en/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux",
@@ -79,7 +79,7 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> Local LLM support · Pure Rust · Open source
+        <span>🏠</span> Local LLM support · Multi-channel · Open source
       </div>
     </div>
 
@@ -94,8 +94,8 @@
     </p>
 
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">
-        <span>⭐</span> Get on GitHub
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
+        <span>⭐</span> GitHub Releases
       </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
         <span>🎨</span> Browse Skill Gallery
@@ -110,13 +110,14 @@
         <span class="terminal-label">kittypaw — bash</span>
       </div>
       <div class="terminal-body">
-        <div><span class="t-prompt">$</span> <span class="t-cmd">cargo run -p kittypaw-gui</span></div>
-        <div class="t-out">   Compiling kittypaw v0.1.0</div>
-        <div class="t-out">    Finished release in 3.2s</div>
-        <div><span class="t-highlight">🐾 KittyPaw started!</span> <span class="t-cursor"></span></div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw init</span></div>
+        <div class="t-out">   LLM provider: Claude (Anthropic)</div>
+        <div class="t-out">   Channel: Telegram</div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw serve</span></div>
+        <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">No npm · No JS · One line: cargo run</p>
+    <p class="hero-note">No external runtimes · Single binary</p>
   </div>
 </section>
 
@@ -152,7 +153,7 @@
     <div class="reveal">
       <span class="section-eyebrow">Core Features</span>
       <h2 class="section-title">Why KittyPaw?</h2>
-      <p class="section-sub">A desktop-native alternative to automation tools like n8n and Zapier.<br>AI writes the code, runs it safely in a sandbox.</p>
+      <p class="section-sub">A local AI agent alternative to automation tools like n8n and Zapier.<br>AI writes the code, runs it safely in a sandbox.</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
@@ -168,7 +169,7 @@
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
         <h3>Safe Execution</h3>
-        <p>Every skill runs inside a QuickJS sandbox with OS kernel isolation (Seatbelt/Landlock).</p>
+        <p>Every skill runs inside a goja sandbox, and dangerous operations are protected by the Permission approval system.</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
@@ -324,28 +325,28 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">Tech Stack</span>
-      <h2 class="section-title">Pure Rust. No external runtimes.</h2>
+      <h2 class="section-title">Pure Go. No external runtimes.</h2>
       <p class="section-sub">Ships as a single binary. No npm, no Node, no Python required.</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
-        <div class="tech-badge">🦀</div>
+        <div class="tech-badge">🐹</div>
         <div>
-          <div class="tech-card-name">Rust</div>
-          <div class="tech-card-desc">Memory safe · High performance</div>
+          <div class="tech-card-name">Go</div>
+          <div class="tech-card-desc">Single binary · High performance</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
         <div class="tech-badge">🖥</div>
         <div>
-          <div class="tech-card-name">Dioxus GUI</div>
-          <div class="tech-card-desc">Native desktop UI</div>
+          <div class="tech-card-name">Web UI</div>
+          <div class="tech-card-desc">Chi + WebSocket streaming</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-3">
         <div class="tech-badge">🔐</div>
         <div>
-          <div class="tech-card-name">QuickJS Sandbox</div>
+          <div class="tech-card-name">goja Sandbox</div>
           <div class="tech-card-desc">Safe skill execution</div>
         </div>
       </div>
@@ -373,8 +374,8 @@
       <div class="tech-card reveal reveal-delay-1">
         <div class="tech-badge">🛡</div>
         <div>
-          <div class="tech-card-name">Seatbelt / Landlock</div>
-          <div class="tech-card-desc">Kernel-level isolation</div>
+          <div class="tech-card-name">Permission System</div>
+          <div class="tech-card-desc">Approval-based access control</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
@@ -409,10 +410,12 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td>GUI desktop app</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+          <tr><td>Multi-channel (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>Local LLM support</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
           <tr><td>Skill gallery</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>Auto skill generation</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+          <tr class="compare-highlight"><td>Repeated pattern → Auto skill suggestion</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+          <tr class="compare-highlight"><td>Weekly interest report</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>Open source</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
           <tr><td>Free</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
         </tbody>
@@ -430,7 +433,7 @@
     <h2 class="reveal">Get started today</h2>
     <p class="reveal reveal-delay-1">
       The busier you are, the more you need a small, fast cat by your side.<br>
-      Start automating today with a single cargo run.
+      Start automating today — just run kittypaw serve.
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
       <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
@@ -456,7 +459,7 @@
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
     <span class="footer-sep">·</span>
-    <span>Made with 🦀 &amp; ❤️</span>
+    <span>Made with 🐹 &amp; ❤️</span>
   </div>
 </footer>
 
