@@ -57,6 +57,15 @@ func TestResolveLLMConfig_LocalDefaultURL(t *testing.T) {
 	}
 }
 
+func TestResolveLLMConfig_LocalFullURL(t *testing.T) {
+	// User pastes full URL with /chat/completions — must not double-append.
+	_, _, u := ResolveLLMConfig("local", "http://myhost:1234/v1/chat/completions", "llama3")
+	want := "http://myhost:1234/v1/chat/completions"
+	if u != want {
+		t.Errorf("baseURL = %q, want %q", u, want)
+	}
+}
+
 func TestResolveLLMConfig_Claude(t *testing.T) {
 	p, _, _ := ResolveLLMConfig("claude", "", "")
 	if p != "anthropic" {

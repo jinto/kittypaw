@@ -54,6 +54,7 @@ func ResolveLLMConfig(provider, localURL, localModel string) (internalProvider, 
 		if u == "" {
 			u = OllamaDefaultBaseURL
 		}
+		u = strings.TrimSuffix(u, "/chat/completions")
 		return "openai", localModel, u + "/chat/completions"
 	default:
 		return provider, "", ""
