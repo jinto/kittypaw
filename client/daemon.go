@@ -84,6 +84,16 @@ func (d *DaemonConn) Connect() (*Client, error) {
 	return cl, nil
 }
 
+// IsRunning checks if a daemon is already running (without starting one).
+func (d *DaemonConn) IsRunning() bool {
+	pidPath, err := daemonPidPath()
+	if err != nil {
+		return false
+	}
+	pid, ok := readPid(pidPath)
+	return ok && isKittypawProcess(pid)
+}
+
 // WebSocketURL returns the ws:// or wss:// URL for streaming chat.
 func (d *DaemonConn) WebSocketURL() string {
 	url := d.BaseURL

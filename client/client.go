@@ -34,6 +34,28 @@ func (c *Client) Health() error {
 	return err
 }
 
+// ServerInfo returns version, model, and channels from the health endpoint.
+func (c *Client) ServerInfo() (version, model string, channels []string, err error) {
+	data, err := c.get("/health")
+	if err != nil {
+		return "", "", nil, err
+	}
+	if v, ok := data["version"].(string); ok {
+		version = v
+	}
+	if m, ok := data["model"].(string); ok {
+		model = m
+	}
+	if chs, ok := data["channels"].([]any); ok {
+		for _, ch := range chs {
+			if s, ok := ch.(string); ok {
+				channels = append(channels, s)
+			}
+		}
+	}
+	return
+}
+
 // Status returns today's execution statistics.
 func (c *Client) Status() (map[string]any, error) {
 	return c.get("/api/v1/status")

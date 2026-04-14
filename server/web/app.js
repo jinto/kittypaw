@@ -50,7 +50,7 @@ const App = {
     this.root.innerHTML = `
       <div class="shell">
         <aside class="sidebar">
-          <div class="sidebar-logo">Go<span class="accent">Paw</span></div>
+          <div class="sidebar-logo">Kitty<span class="accent">Paw</span></div>
           <nav class="sidebar-nav">
             <button class="nav-item" data-tab="chat">Chat</button>
             <button class="nav-item" data-tab="dashboard">Dashboard</button>
