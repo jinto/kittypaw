@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jinto/gopaw/engine"
+	"github.com/jinto/kittypaw/engine"
 )
 
 // GET /api/v1/reflection — list suggestion candidates.

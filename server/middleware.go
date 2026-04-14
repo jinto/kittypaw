@@ -37,7 +37,7 @@ func fixedLenEqual(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}
-	key := []byte("gopaw-auth-comparison")
+	key := []byte("kittypaw-auth-comparison")
 	ha := hmac.New(sha256.New, key)
 	ha.Write([]byte(a))
 	hb := hmac.New(sha256.New, key)

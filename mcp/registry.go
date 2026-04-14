@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -75,7 +75,7 @@ func (r *Registry) IsConnected(server string) bool {
 	return ok
 }
 
-var clientImpl = &mcp.Implementation{Name: "gopaw", Version: "1.0.0"}
+var clientImpl = &mcp.Implementation{Name: "kittypaw", Version: "1.0.0"}
 
 // connectWithSession establishes an MCP client session over the given transport,
 // caches the tool list, and stores the entry under the given name.

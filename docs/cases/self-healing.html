@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>고장나면 스스로 고칩니다 — KittyPaw</title>
+  <meta name="description" content="API가 바뀌어 스킬이 멈춰도, AI가 원인을 진단하고 코드를 수정합니다. KittyPaw의 자동 복구 기능.">
+  <link rel="canonical" href="https://kittypaw.app/cases/self-healing.html">
+  <meta property="og:title" content="고장나면 스스로 고칩니다 — KittyPaw">
+  <meta property="og:description" content="API가 바뀌어 스킬이 멈춰도, AI가 원인을 진단하고 코드를 수정합니다.">
+  <meta property="og:url" content="https://kittypaw.app/cases/self-healing.html">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="../" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">
+      <span class="nav-brand-paw">🐾</span> KittyPaw
+    </a>
+  </div>
+  <div class="nav-links">
+    <a href="../#features" class="nav-link">기능</a>
+    <a href="./" class="nav-link" style="color:var(--blue-600)">사례</a>
+    <a href="../#skills" class="nav-link">스킬</a>
+    <a href="../#tech" class="nav-link">기술</a>
+    <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<div class="case-breadcrumb">
+  <a href="../">홈</a><span class="bc-sep">›</span>
+  <a href="./">활용 사례</a><span class="bc-sep">›</span>
+  고장나면 스스로 고칩니다
+</div>
+
+<!-- ============================================================
+     CASE HERO
+============================================================ -->
+<section class="case-hero">
+  <div class="case-hero-inner">
+    <span class="case-hero-icon">🔧</span>
+    <h1>고장나면 스스로 고칩니다</h1>
+    <p class="case-hero-sub">API가 바뀌어 스킬이 멈춰도, AI가 원인을 진단하고 코드를 수정합니다.</p>
+    <span class="case-tag">자동 복구</span>
+  </div>
+</section>
+
+<!-- ============================================================
+     STORY
+============================================================ -->
+<div class="case-story">
+  <div class="case-story-header">
+    <span class="section-eyebrow">시나리오</span>
+    <h2 class="section-title">어느 날 갑자기 API가 바뀌면</h2>
+  </div>
+
+  <!-- Step 1 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">1</div>
+    <div class="case-step-body">
+      <h3>잘 돌아가던 스킬이 실패합니다</h3>
+      <p>외부 API의 응답 포맷이 바뀌거나, 엔드포인트가 변경되면 스킬 실행이 실패합니다.</p>
+      <div class="mock-notif">
+        <div class="mock-notif-icon mock-notif-icon-fail">❌</div>
+        <div class="mock-notif-body">
+          <h4>스킬 실행 실패</h4>
+          <p>macro-economy-report — TypeError: Cannot read property 'regularMarketPrice' of undefined</p>
+        </div>
+        <div class="mock-notif-time">오전 8:01</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">2</div>
+    <div class="case-step-body">
+      <h3>AI가 에러를 분석합니다</h3>
+      <p>엔진이 실패한 코드와 에러 메시지를 LLM에게 전달합니다. LLM이 원인을 진단하고 수정 코드를 생성합니다.</p>
+      <div class="mock-code">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          자동 진단 — AI
+        </div>
+        <div class="mock-code-body">
+          <span class="code-cm">// 원인: Yahoo Finance API 응답 구조 변경</span>
+          <span class="code-cm">// regularMarketPrice → currentPrice 으로 필드명 변경</span>
+          <br>
+          <span class="code-del">- const price = data.regularMarketPrice;</span>
+          <span class="code-add">+ const price = data.currentPrice ?? data.regularMarketPrice;</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">3</div>
+    <div class="case-step-body">
+      <h3>자동으로 수정하고 재실행합니다</h3>
+      <p>Full autonomy 모드에서는 수정을 즉시 적용하고, Supervised 모드에서는 승인을 요청합니다.</p>
+      <div class="mock-notif" style="margin-bottom:10px">
+        <div class="mock-notif-icon mock-notif-icon-warn">🔧</div>
+        <div class="mock-notif-body">
+          <h4>자동 수정 적용됨</h4>
+          <p>macro-economy-report: 필드명 변경 (regularMarketPrice → currentPrice)</p>
+        </div>
+        <div class="mock-notif-time">오전 8:02</div>
+      </div>
+      <div class="mock-notif">
+        <div class="mock-notif-icon mock-notif-icon-ok">✅</div>
+        <div class="mock-notif-body">
+          <h4>재실행 성공</h4>
+          <p>macro-economy-report — 정상 동작. 텔레그램 전송 완료.</p>
+        </div>
+        <div class="mock-notif-time">오전 8:02</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">4</div>
+    <div class="case-step-body">
+      <h3>아무 일 없었다는 듯, 브리핑이 도착합니다</h3>
+      <p>사용자는 실패와 복구 과정을 알 필요 없습니다. 결과만 도착하면 됩니다.</p>
+      <div class="mock-tg">
+        <div class="mock-tg-header">
+          <div class="mock-tg-avatar">📈</div>
+          시장 리포트
+        </div>
+        <div class="mock-tg-body">
+          <div class="mock-tg-msg">
+            📊 어제 시장 요약<br>
+            • S&amp;P 500: 5,432 (+0.8%)<br>
+            • 나스닥: 17,891 (+1.2%)<br>
+            <br>
+            AI 반도체 섹터 강세 지속.<br>
+            <br>
+            🔧 자동 수정 1건 적용됨 (상세 보기)
+            <div class="mock-tg-time">오전 8:02</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top:0;padding-bottom:0">
+    <div class="reveal">
+      <span class="section-eyebrow">작동 원리</span>
+      <h2 class="section-title">Auto-Fix 파이프라인</h2>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">🔍</div>
+        <div class="step-num">1</div>
+        <h3>실패 감지</h3>
+        <p>스킬 실행 중 에러 발생 시 즉시 포착</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">🧠</div>
+        <div class="step-num">2</div>
+        <h3>LLM 진단</h3>
+        <p>에러 메시지 + 코드를 분석해 수정안 생성</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">✅</div>
+        <div class="step-num">3</div>
+        <h3>적용 &amp; 재실행</h3>
+        <p>수정 적용 후 재실행, 이력은 SQLite에 기록</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     ROLLBACK SAFETY
+============================================================ -->
+<section>
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">안전장치</span>
+      <h2 class="section-title">언제든 되돌릴 수 있습니다</h2>
+      <p class="section-sub">모든 자동 수정은 이전 버전을 보존합니다. CLI에서 한 줄로 롤백할 수 있습니다.</p>
+    </div>
+    <div class="mock-code reveal reveal-delay-1" style="max-width:520px;margin:0 auto">
+      <div class="mock-code-header">
+        <span class="mock-code-dot mock-code-dot-r"></span>
+        <span class="mock-code-dot mock-code-dot-y"></span>
+        <span class="mock-code-dot mock-code-dot-g"></span>
+        terminal
+      </div>
+      <div class="mock-code-body">
+        <span style="color:#4ade80">$</span> <span style="color:#e2e8f0">kittypaw rollback macro-economy-report</span><br>
+        <span style="color:#4ade80">✓</span> <span style="color:var(--slate-400)">이전 버전으로 복원되었습니다 (v3 → v2)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     OTHER CASES
+============================================================ -->
+<div class="case-others">
+  <div class="case-others-inner">
+    <div style="text-align:center;margin-bottom:8px">
+      <span class="section-eyebrow">다른 사례</span>
+    </div>
+    <div class="case-others-grid">
+      <a href="morning-briefing.html" class="case-others-card reveal">
+        <div class="case-others-icon">☀️</div>
+        <h4>아침 자동 브리핑</h4>
+        <p>날씨+시장+뉴스</p>
+      </a>
+      <a href="pattern-automation.html" class="case-others-card reveal reveal-delay-1">
+        <div class="case-others-icon">🔄</div>
+        <h4>반복 → 자동화</h4>
+        <p>패턴 감지 &amp; 제안</p>
+      </a>
+      <a href="teach-skill.html" class="case-others-card reveal reveal-delay-2">
+        <div class="case-others-icon">💬</div>
+        <h4>자연어 스킬 생성</h4>
+        <p>말로 만드는 자동화</p>
+      </a>
+      <a href="site-monitoring.html" class="case-others-card reveal reveal-delay-3">
+        <div class="case-others-icon">🚨</div>
+        <h4>서비스 모니터링</h4>
+        <p>다운 즉시 알림</p>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     CTA
+============================================================ -->
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw">🐾</span>
+    <h2 class="reveal">지금 시작하세요</h2>
+    <p class="reveal reveal-delay-1">급할수록 필요한 건, 작고 빠른 고양이손.<br>cargo run 한 줄로 오늘부터 자동화를 시작하세요.</p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/jinto/kittypaw/releases/latest/download/KittyPaw-arm64.dmg" class="btn btn-cta-primary"><span>⭐</span> GitHub에서 받기</a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">🎨 스킬 갤러리</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/jinto/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-skills">스킬 갤러리</a>
+    <span class="footer-sep">·</span>
+    <span>MIT License</span>
+  </div>
+</footer>
+
+<script src="../main.js"></script>
+</body>
+</html>

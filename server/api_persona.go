@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/engine"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 )
 
 // GET /api/v1/persona/evolution — list pending evolutions.

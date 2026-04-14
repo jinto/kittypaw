@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // stubChannel is a minimal Channel implementation for testing.

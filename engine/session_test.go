@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/store"
 )
 
 func openTestStore(t *testing.T) *store.Store {

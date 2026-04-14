@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 type contextKey string
@@ -220,7 +220,7 @@ func webSearch(ctx context.Context, query string) (string, error) {
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
-	req.Header.Set("User-Agent", "GoPaw/1.0")
+	req.Header.Set("User-Agent", "KittyPaw/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -239,7 +239,7 @@ func webFetch(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
-	req.Header.Set("User-Agent", "GoPaw/1.0")
+	req.Header.Set("User-Agent", "KittyPaw/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

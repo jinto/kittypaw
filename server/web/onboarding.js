@@ -1,4 +1,4 @@
-// GoPaw Onboarding — 7-step flow
+// KittyPaw Onboarding — 7-step flow
 
 const Onboarding = {
   root: null,
@@ -489,7 +489,7 @@ const Onboarding = {
       <div class="text-center mb-32">
         <div style="font-size:40px;margin-bottom:12px">\u{1F4C1}</div>
         <h2>\uC791\uC5C5 \uD3F4\uB354\uB97C \uC120\uD0DD\uD574\uC8FC\uC138\uC694</h2>
-        <p class="note">GoPaw\uAC00 \uC811\uADFC\uD560 \uC218 \uC788\uB294 \uD3F4\uB354\uB97C \uC9C0\uC815\uD569\uB2C8\uB2E4</p>
+        <p class="note">KittyPaw\uAC00 \uC811\uADFC\uD560 \uC218 \uC788\uB294 \uD3F4\uB354\uB97C \uC9C0\uC815\uD569\uB2C8\uB2E4</p>
       </div>
       <div class="flex flex-col gap-12">
         <div>

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // tryHandleCommand checks if the event text is a slash command.
@@ -42,7 +42,7 @@ func tryHandleCommand(ctx context.Context, text string, s *Session) (string, boo
 }
 
 func handleHelp() string {
-	return `GoPaw 명령어:
+	return `KittyPaw 명령어:
 /help — 도움말 표시
 /status — 실행 통계 확인
 /skills — 스킬 목록

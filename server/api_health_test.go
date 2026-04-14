@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -28,8 +28,8 @@ func TestHandleHealth(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Errorf("status = %q, want %q", body["status"], "ok")
 	}
-	if body["version"] != "gopaw" {
-		t.Errorf("version = %q, want %q", body["version"], "gopaw")
+	if body["version"] != "kittypaw" {
+		t.Errorf("version = %q, want %q", body["version"], "kittypaw")
 	}
 }
 

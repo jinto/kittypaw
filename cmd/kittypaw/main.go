@@ -1,4 +1,4 @@
-// Command gopaw is the CLI for the GoPaw AI agent platform.
+// Command kittypaw is the CLI for the KittyPaw AI agent platform.
 package main
 
 import (
@@ -18,14 +18,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jinto/gopaw/client"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/engine"
-	"github.com/jinto/gopaw/llm"
-	mcpreg "github.com/jinto/gopaw/mcp"
-	"github.com/jinto/gopaw/sandbox"
-	"github.com/jinto/gopaw/server"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/client"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
+	"github.com/jinto/kittypaw/llm"
+	mcpreg "github.com/jinto/kittypaw/mcp"
+	"github.com/jinto/kittypaw/sandbox"
+	"github.com/jinto/kittypaw/server"
+	"github.com/jinto/kittypaw/store"
 )
 
 // flags
@@ -50,8 +50,8 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "gopaw",
-		Short:        "GoPaw — AI agent platform",
+		Use:          "kittypaw",
+		Short:        "KittyPaw — AI agent platform",
 		SilenceUsage: true,
 	}
 
@@ -133,7 +133,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	srv.StartChannels(ctx, cfg.Channels)
 
 	// Start HTTP server (blocks until shutdown signal).
-	slog.Info("gopaw serving", "bind", flagBind)
+	slog.Info("kittypaw serving", "bind", flagBind)
 	return srv.ListenAndServe(flagBind)
 }
 
@@ -146,7 +146,7 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize config with interactive wizard",
-		Long:  "Set up GoPaw interactively (LLM, Telegram, workspace) or via flags for CI.",
+		Long:  "Set up KittyPaw interactively (LLM, Telegram, workspace) or via flags for CI.",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runInit(flags)
 		},
@@ -169,15 +169,15 @@ func runInit(flags *initFlags) error {
 		return err
 	}
 
-	gopawDir := filepath.Join(home, ".gopaw")
-	for _, dir := range []string{gopawDir, filepath.Join(gopawDir, "data"), filepath.Join(gopawDir, "skills")} {
+	kittypawDir := filepath.Join(home, ".kittypaw")
+	for _, dir := range []string{kittypawDir, filepath.Join(kittypawDir, "data"), filepath.Join(kittypawDir, "skills")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
 
 	// Check existing config.
-	cfgPath := filepath.Join(gopawDir, "config.toml")
+	cfgPath := filepath.Join(kittypawDir, "config.toml")
 	var existing *core.Config
 	if cfg, err := core.LoadConfig(cfgPath); err == nil {
 		existing = cfg
@@ -223,12 +223,12 @@ func runInit(flags *initFlags) error {
 	}
 
 	// Ensure default profile.
-	if err := core.EnsureDefaultProfile(gopawDir); err != nil {
+	if err := core.EnsureDefaultProfile(kittypawDir); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
 	fmt.Printf("\n  config saved: %s\n", cfgPath)
-	fmt.Println("  next: gopaw serve or gopaw chat")
+	fmt.Println("  next: kittypaw serve or kittypaw chat")
 	return nil
 }
 
@@ -263,7 +263,7 @@ func runChat(_ *cobra.Command, _ []string) error {
 
 	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Println("GoPaw interactive chat (Ctrl-D to exit)")
+	fmt.Println("KittyPaw interactive chat (Ctrl-D to exit)")
 	fmt.Println()
 
 	for {
@@ -1000,7 +1000,7 @@ func runPersonaList(_ *cobra.Command, _ []string) error {
 
 	profiles := jsonSlice(res, "profiles")
 	if len(profiles) == 0 {
-		fmt.Println("No profiles found. Run 'gopaw init' to create a default profile.")
+		fmt.Println("No profiles found. Run 'kittypaw init' to create a default profile.")
 		return nil
 	}
 
@@ -1334,7 +1334,7 @@ func newPkgConfigCmd() *cobra.Command {
 				// Set config.
 				return pm.SetConfig(id, args[1], args[2])
 			}
-			return fmt.Errorf("usage: gopaw packages config <id> [key value]")
+			return fmt.Errorf("usage: kittypaw packages config <id> [key value]")
 		},
 	}
 	return cmd
@@ -1949,7 +1949,7 @@ func openStore() (*store.Store, error) {
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
 		return nil, err
 	}
-	dbPath := filepath.Join(dbDir, "gopaw.db")
+	dbPath := filepath.Join(dbDir, "kittypaw.db")
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open store %s: %w", dbPath, err)

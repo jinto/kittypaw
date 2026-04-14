@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/store"
 )
 
 // ---------------------------------------------------------------------------

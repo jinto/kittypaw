@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
-	"github.com/jinto/gopaw/sandbox"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
+	"github.com/jinto/kittypaw/sandbox"
+	"github.com/jinto/kittypaw/store"
 )
 
 // --- test helpers ---

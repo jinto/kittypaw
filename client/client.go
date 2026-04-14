@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Client communicates with a GoPaw server instance via REST API.
+// Client communicates with a KittyPaw server instance via REST API.
 type Client struct {
 	baseURL string
 	apiKey  string

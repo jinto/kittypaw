@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 func openTestStore(t *testing.T) *Store {

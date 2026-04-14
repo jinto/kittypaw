@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // TokenUsage tracks token consumption for a single LLM call.

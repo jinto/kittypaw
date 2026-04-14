@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/store"
 )
 
 // ---------------------------------------------------------------------------

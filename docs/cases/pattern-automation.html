@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>반복하면 자동화됩니다 — KittyPaw</title>
+  <meta name="description" content="같은 종류의 요청을 반복하면 KittyPaw가 패턴을 감지하고 자동화를 먼저 제안합니다. Reflection Loop이 대화를 분석해 스킬을 생성합니다.">
+  <link rel="canonical" href="https://kittypaw.app/cases/pattern-automation.html">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <meta property="og:title" content="반복하면 자동화됩니다 — KittyPaw">
+  <meta property="og:description" content="같은 종류의 요청을 반복하면 AI가 패턴을 감지하고 자동화를 먼저 제안합니다.">
+  <meta property="og:url" content="https://kittypaw.app/cases/pattern-automation.html">
+  <meta property="og:type" content="article">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="../" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">
+      <span class="nav-brand-paw">🐾</span> KittyPaw
+    </a>
+  </div>
+  <div class="nav-links">
+    <a href="../#features" class="nav-link">기능</a>
+    <a href="./" class="nav-link" style="color:var(--blue-600)">사례</a>
+    <a href="../#skills" class="nav-link">스킬</a>
+    <a href="../#tech" class="nav-link">기술</a>
+    <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<div class="case-breadcrumb">
+  <a href="../">홈</a><span class="bc-sep">›</span>
+  <a href="./">활용 사례</a><span class="bc-sep">›</span>
+  반복하면 자동화됩니다
+</div>
+
+<section class="case-hero">
+  <div class="case-hero-inner">
+    <span class="case-hero-icon">🔄</span>
+    <h1>반복하면 자동화됩니다</h1>
+    <p class="case-hero-sub">같은 종류의 요청을 3번 하면, AI가 패턴을 감지하고 자동화를 먼저 제안합니다.</p>
+    <span class="case-tag case-tag-wow">WOW 시나리오</span>
+  </div>
+</section>
+
+<section class="case-story">
+  <div class="case-story-header">
+    <span class="section-eyebrow">시나리오</span>
+    <h2 class="section-title">환율, 매번 물어보지 마세요</h2>
+  </div>
+
+  <!-- Step 1 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">1</div>
+    <div class="case-step-body">
+      <h3>평소처럼 질문합니다</h3>
+      <p>일주일 동안, 비슷한 질문을 여러 번 합니다. 의식하지 않아도 됩니다.</p>
+      <div class="mock-chat">
+        <div class="mock-chat-user">오늘 달러 환율 어때?</div>
+        <div class="mock-chat-ai">현재 원/달러 환율은 1,342원입니다. 어제 대비 0.3% 하락했습니다.</div>
+        <div style="height:6px"></div>
+        <div class="mock-chat-user">환율 알려줘</div>
+        <div class="mock-chat-ai">원/달러 1,339원. 최근 3일 연속 하락세입니다.</div>
+        <div class="mock-chat-user">달러 가격?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">2</div>
+    <div class="case-step-body">
+      <h3>AI가 패턴을 감지합니다</h3>
+      <p>엔진의 Reflection Loop이 대화 이력을 분석합니다. 비슷한 의도의 요청이 반복되면 자동으로 감지.</p>
+      <div class="mock-notif">
+        <div class="mock-notif-icon mock-notif-icon-warn">💡</div>
+        <div class="mock-notif-body">
+          <h4>패턴 감지됨</h4>
+          <p>환율 조회를 3회 반복하셨습니다. 자동화 스킬을 만들어드릴까요?</p>
+        </div>
+        <div class="mock-notif-time">방금</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">3</div>
+    <div class="case-step-body">
+      <h3>한 번의 승인으로 자동화 완성</h3>
+      <p>"승인"을 누르면 AI가 스킬 코드를 생성하고, 스케줄을 등록합니다. 다음 날부터 알아서 도착.</p>
+      <div class="mock-chat">
+        <div class="mock-chat-ai">💡 환율을 자주 확인하시네요. 매일 아침 8시에 자동으로 알려드릴까요?<br><br>• 원/달러 환율<br>• 전일 대비 변동<br>• 주간 추이 요약<br><br>승인하시면 바로 만들어 드립니다.</div>
+        <div class="mock-chat-user">좋아, 만들어줘</div>
+        <div class="mock-chat-ai">✅ '환율 자동 브리핑' 스킬을 등록했습니다.<br>매일 오전 8시에 텔레그램으로 보내드릴게요.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">4</div>
+    <div class="case-step-body">
+      <h3>다음 날 아침, 이미 와있습니다</h3>
+      <p>설정할 것도, 코드를 볼 필요도 없습니다. AI가 만든 스킬이 알아서 동작합니다.</p>
+      <div class="mock-tg">
+        <div class="mock-tg-header">
+          <div class="mock-tg-avatar">💱</div>
+          환율 브리핑
+        </div>
+        <div class="mock-tg-body">
+          <div class="mock-tg-msg">
+            💱 오전 환율 리포트<br><br>
+            원/달러: 1,338원 (▼4원)<br>
+            원/엔: 892원 (▲2원)<br>
+            원/유로: 1,456원 (—)<br><br>
+            📉 달러 약세 3일째. 수출 기업 실적 기대감.
+          </div>
+          <div class="mock-tg-time">오전 8:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="how-section section-full section-center">
+  <span class="section-eyebrow reveal">작동 원리</span>
+  <h2 class="section-title reveal">Reflection Loop</h2>
+  <div class="steps-row">
+    <div class="step reveal">
+      <div class="step-emoji">📝</div>
+      <div class="step-num">1</div>
+      <h3>대화 수집</h3>
+      <p>모든 대화가 로컬 SQLite에 저장됩니다</p>
+    </div>
+    <div class="step reveal reveal-delay-1">
+      <div class="step-emoji">🧠</div>
+      <div class="step-num">2</div>
+      <h3>패턴 분석</h3>
+      <p>LLM이 의도 유사성을 분석하고 그룹화합니다</p>
+    </div>
+    <div class="step reveal reveal-delay-2">
+      <div class="step-emoji">✨</div>
+      <div class="step-num">3</div>
+      <h3>스킬 제안</h3>
+      <p>반복 패턴을 발견하면 자동화를 제안합니다</p>
+    </div>
+  </div>
+</section>
+
+<section class="case-others">
+  <div class="case-others-inner">
+    <h3 style="text-align:center;font-size:15px;font-weight:700;color:var(--slate-800)">다른 사례 보기</h3>
+    <div class="case-others-grid">
+      <a href="morning-briefing.html" class="case-others-card">
+        <div class="case-others-icon">☀️</div>
+        <h4>아침 자동 브리핑</h4>
+        <p>날씨+시장+뉴스</p>
+      </a>
+      <a href="teach-skill.html" class="case-others-card">
+        <div class="case-others-icon">💬</div>
+        <h4>자연어 스킬 생성</h4>
+        <p>말로 만드는 자동화</p>
+      </a>
+      <a href="self-healing.html" class="case-others-card">
+        <div class="case-others-icon">🔧</div>
+        <h4>자동 복구</h4>
+        <p>고장나면 AI가 고칩니다</p>
+      </a>
+      <a href="site-monitoring.html" class="case-others-card">
+        <div class="case-others-icon">🚨</div>
+        <h4>서비스 모니터링</h4>
+        <p>다운 즉시 알림</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw">🐾</span>
+    <h2 class="reveal">지금 시작하세요</h2>
+    <p class="reveal reveal-delay-1">급할수록 필요한 건, 작고 빠른 고양이손.<br>cargo run 한 줄로 오늘부터 자동화를 시작하세요.</p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/jinto/kittypaw/releases/latest/download/KittyPaw-arm64.dmg" class="btn btn-cta-primary"><span>⭐</span> GitHub에서 받기</a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">🎨 스킬 갤러리</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span><span class="footer-sep">·</span>
+    <a href="https://github.com/jinto/kittypaw">GitHub</a><span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-skills">스킬 갤러리</a><span class="footer-sep">·</span>
+    <span>MIT License</span>
+  </div>
+</footer>
+
+<script src="../main.js"></script>
+</body>
+</html>
