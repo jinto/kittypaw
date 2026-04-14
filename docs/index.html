@@ -51,7 +51,7 @@
     <a href="cases/" class="nav-link">사례</a>
     <a href="#skills" class="nav-link">스킬</a>
     <a href="#tech" class="nav-link">기술</a>
-    <a href="#compare" class="nav-link">비교</a>
+    <a href="#strengths" class="nav-link">강점</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/" class="nav-link-active">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/">JA</a></span>
   </div>
@@ -86,12 +86,17 @@
       반복 패턴을 감지하고, 매주 내 관심사를 정리합니다.
     </p>
 
+    <div class="install-box">
+      <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent)" aria-label="복사">📋</button>
+    </div>
+    <p class="install-hint">macOS · Linux — 터미널에 붙여넣기</p>
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
-        <span>⭐</span> GitHub Releases
-      </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
         <span>🎨</span> 스킬 갤러리
+      </a>
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
+        기타 다운로드
       </a>
     </div>
 
@@ -474,36 +479,30 @@
 </section>
 
 <!-- ============================================================
-     COMPARE
+     STRENGTHS
 ============================================================ -->
-<section class="section" id="compare">
+<section class="section" id="strengths">
   <div class="section section-center">
     <div class="reveal">
-      <h2 class="section-title">왜 KittyPaw인가요?</h2>
-      <p class="section-sub">다른 AI 에이전트와 비교해보세요</p>
+      <h2 class="section-title">KittyPaw만의 강점</h2>
+      <p class="section-sub">오픈소스 · 무료 · 셀프호스팅</p>
     </div>
-    <div class="compare-table-wrapper reveal reveal-delay-1">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>KittyPaw</th>
-            <th>Hermes Agent</th>
-            <th>OpenClaw</th>
-            <th>Crew</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>멀티채널 (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>로컬 LLM 지원</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr><td>스킬 갤러리</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>자동 스킬 생성</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>반복 패턴 → 스킬 자동 제안</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>주간 관심사 리포트</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>오픈소스</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-          <tr><td>무료</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-        </tbody>
-      </table>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">📡</div>
+        <h3>진정한 멀티채널</h3>
+        <p>텔레그램, 슬랙, 디스코드, 카카오를 <strong>동시에</strong> 연결. 하나의 에이전트가 모든 채널에서 동작합니다.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>대화에서 스킬로</h3>
+        <p>반복되는 요청 패턴을 감지하고, 자동으로 스킬을 제안합니다. 시간이 갈수록 더 똑똑해집니다.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">📊</div>
+        <h3>주간 관심사 리포트</h3>
+        <p>대화 속 관심 토픽을 추적하고, 매주 리포트를 생성합니다. 나만의 AI 비서가 나를 이해합니다.</p>
+      </div>
     </div>
   </div>
 </section>

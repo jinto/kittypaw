@@ -33,6 +33,19 @@ changelog:
       - "^test:"
       - "^ci:"
 
+brews:
+  - repository:
+      owner: jinto
+      name: homebrew-tap
+    name: kittypaw
+    homepage: "https://jinto.github.io/kittypaw"
+    description: "AI agent platform with multi-channel messaging and skill learning"
+    license: "MIT"
+    install: |
+      bin.install "kittypaw"
+    test: |
+      system "#{bin}/kittypaw", "--version"
+
 release:
   github:
     owner: jinto

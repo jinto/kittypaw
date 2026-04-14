@@ -57,7 +57,7 @@
     <a href="../cases/" class="nav-link">Cases</a>
     <a href="#skills" class="nav-link">Skills</a>
     <a href="#tech" class="nav-link">Tech</a>
-    <a href="#compare" class="nav-link">Compare</a>
+    <a href="#strengths" class="nav-link">Strengths</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/" class="nav-link-active">EN</a> · <a href="https://kittypaw.app/ja/">JA</a></span>
   </div>
@@ -93,12 +93,17 @@
       Daily market reports, RSS summaries, URL monitoring&hellip; all on autopilot.
     </p>
 
+    <div class="install-box">
+      <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent)" aria-label="Copy">📋</button>
+    </div>
+    <p class="install-hint">macOS · Linux — paste in your terminal</p>
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
-        <span>⭐</span> GitHub Releases
-      </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
         <span>🎨</span> Browse Skill Gallery
+      </a>
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
+        Other downloads
       </a>
     </div>
 
@@ -392,36 +397,30 @@
 </section>
 
 <!-- ============================================================
-     COMPARE
+     STRENGTHS
 ============================================================ -->
-<section class="section" id="compare">
+<section class="section" id="strengths">
   <div class="section section-center">
     <div class="reveal">
-      <h2 class="section-title">Why KittyPaw?</h2>
-      <p class="section-sub">See how it stacks up against other AI agents</p>
+      <h2 class="section-title">What Makes KittyPaw Different</h2>
+      <p class="section-sub">Open source · Free · Self-hosted</p>
     </div>
-    <div class="compare-table-wrapper reveal reveal-delay-1">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>KittyPaw</th>
-            <th>Hermes Agent</th>
-            <th>OpenClaw</th>
-            <th>Crew</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>Multi-channel (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>Local LLM support</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr><td>Skill gallery</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>Auto skill generation</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>Repeated pattern → Auto skill suggestion</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>Weekly interest report</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>Open source</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-          <tr><td>Free</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-        </tbody>
-      </table>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">📡</div>
+        <h3>True Multi-Channel</h3>
+        <p>Connect Telegram, Slack, Discord, and Kakao <strong>simultaneously</strong>. One agent serves all your channels.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>Conversations Become Skills</h3>
+        <p>Detects repeated request patterns and suggests skills automatically. Gets smarter over time.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">📊</div>
+        <h3>Weekly Interest Report</h3>
+        <p>Tracks topics from your conversations and generates weekly reports. Your AI assistant that truly understands you.</p>
+      </div>
     </div>
   </div>
 </section>

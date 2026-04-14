@@ -50,7 +50,7 @@
     <a href="../cases/" class="nav-link">事例</a>
     <a href="#skills" class="nav-link">スキル</a>
     <a href="#tech" class="nav-link">技術</a>
-    <a href="#compare" class="nav-link">比較</a>
+    <a href="#strengths" class="nav-link">強み</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/" class="nav-link-active">JA</a></span>
   </div>
@@ -86,12 +86,17 @@
       毎朝のマーケットレポート、RSS要約、URL監視&hellip; すべて自動で。
     </p>
 
+    <div class="install-box">
+      <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent)" aria-label="コピー">📋</button>
+    </div>
+    <p class="install-hint">macOS · Linux — ターミナルに貼り付け</p>
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
-        <span>⭐</span> GitHub Releases
-      </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
         <span>🎨</span> スキルギャラリーを見る
+      </a>
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
+        その他のダウンロード
       </a>
     </div>
 
@@ -385,36 +390,30 @@
 </section>
 
 <!-- ============================================================
-     COMPARE
+     STRENGTHS
 ============================================================ -->
-<section class="section" id="compare">
+<section class="section" id="strengths">
   <div class="section section-center">
     <div class="reveal">
-      <h2 class="section-title">なぜKittyPawなのか？</h2>
-      <p class="section-sub">他のAIエージェントと比較してみてください</p>
+      <h2 class="section-title">KittyPawの強み</h2>
+      <p class="section-sub">オープンソース · 無料 · セルフホスティング</p>
     </div>
-    <div class="compare-table-wrapper reveal reveal-delay-1">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>KittyPaw</th>
-            <th>Hermes Agent</th>
-            <th>OpenClaw</th>
-            <th>Crew</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>マルチチャネル (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>ローカルLLM対応</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr><td>スキルギャラリー</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>スキル自動生成</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>繰り返しパターン → スキル自動提案</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr class="compare-highlight"><td>週間関心事レポート</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
-          <tr><td>オープンソース</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-          <tr><td>無料</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
-        </tbody>
-      </table>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">📡</div>
+        <h3>真のマルチチャネル</h3>
+        <p>Telegram、Slack、Discord、Kakaoを<strong>同時に</strong>接続。一つのエージェントが全チャネルで動作します。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>会話からスキルへ</h3>
+        <p>繰り返しのリクエストパターンを検知し、自動でスキルを提案。時間とともにもっと賢くなります。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">📊</div>
+        <h3>週間関心事レポート</h3>
+        <p>会話の中の関心トピックを追跡し、毎週レポートを生成。あなたを理解するAIアシスタント。</p>
+      </div>
     </div>
   </div>
 </section>

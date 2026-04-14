@@ -23,30 +23,6 @@
   });
 })();
 
-/* Auto-detect OS and update hero download button */
-(function() {
-  var btn = document.querySelector('.hero .btn-primary');
-  if (!btn) return;
-
-  var ua = navigator.userAgent || '';
-  var os, arch, ext, label;
-
-  if (/Mac/i.test(ua)) {
-    os = 'darwin'; arch = 'arm64'; ext = 'tar.gz';
-    label = 'macOS';
-  } else if (/Win/i.test(ua)) {
-    os = 'windows'; arch = 'amd64'; ext = 'zip';
-    label = 'Windows';
-  } else {
-    os = 'linux'; arch = 'amd64'; ext = 'tar.gz';
-    label = 'Linux';
-  }
-
-  var url = 'https://github.com/jinto/kittypaw/releases/latest/download/kittypaw_' + os + '_' + arch + '.' + ext;
-  btn.href = url;
-  btn.querySelector('span').textContent = '⬇';
-  btn.childNodes[btn.childNodes.length - 1].textContent = ' Download for ' + label;
-})();
 
 /* Obfuscate — assemble split data attributes for bot protection */
 document.querySelectorAll('.obf-p,.obf-a,.obf-b').forEach(function (el) {
