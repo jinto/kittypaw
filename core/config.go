@@ -122,8 +122,17 @@ type OrchestrationConfig struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
+	Bind           string   `toml:"bind"`
 	APIKey         string   `toml:"api_key"`
 	AllowedOrigins []string `toml:"allowed_origins"`
+}
+
+// BindOrDefault returns the configured bind address, defaulting to ":3000".
+func (s ServerConfig) BindOrDefault() string {
+	if s.Bind != "" {
+		return s.Bind
+	}
+	return ":3000"
 }
 
 // MCPServerConfig defines an external MCP tool server.

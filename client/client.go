@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -27,14 +28,24 @@ func New(baseURL, apiKey string) *Client {
 	}
 }
 
+// Health checks daemon liveness. Returns nil if healthy.
+func (c *Client) Health() error {
+	_, err := c.get("/health")
+	return err
+}
+
 // Status returns today's execution statistics.
 func (c *Client) Status() (map[string]any, error) {
 	return c.get("/api/v1/status")
 }
 
-// Executions returns recent execution records.
-func (c *Client) Executions(limit int) (map[string]any, error) {
-	return c.get(fmt.Sprintf("/api/v1/executions?limit=%d", limit))
+// Executions returns recent execution records, optionally filtered by skill name.
+func (c *Client) Executions(skill string, limit int) (map[string]any, error) {
+	path := fmt.Sprintf("/api/v1/executions?limit=%d", limit)
+	if skill != "" {
+		path += "&skill=" + url.QueryEscape(skill)
+	}
+	return c.get(path)
 }
 
 // Agents returns configured agents.
@@ -68,12 +79,12 @@ func (c *Client) Chat(text, sessionID string) (map[string]any, error) {
 
 // DeleteSkill removes a skill by name.
 func (c *Client) DeleteSkill(name string) (map[string]any, error) {
-	return c.delete("/api/v1/skills/" + name)
+	return c.delete("/api/v1/skills/" + url.PathEscape(name))
 }
 
 // DisableSkill disables a skill by name.
 func (c *Client) DisableSkill(name string) (map[string]any, error) {
-	return c.post("/api/v1/skills/"+name+"/disable", nil)
+	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/disable", nil)
 }
 
 // ConfigCheck returns configuration summary.
@@ -83,7 +94,7 @@ func (c *Client) ConfigCheck() (map[string]any, error) {
 
 // MemorySearch performs full-text search over execution history.
 func (c *Client) MemorySearch(query string, limit int) (map[string]any, error) {
-	return c.get(fmt.Sprintf("/api/v1/memory/search?q=%s&limit=%d", query, limit))
+	return c.get(fmt.Sprintf("/api/v1/memory/search?q=%s&limit=%d", url.QueryEscape(query), limit))
 }
 
 // LinkIdentity links a channel user to a global identity.
@@ -98,6 +109,31 @@ func (c *Client) LinkIdentity(globalUserID, channel, channelUserID string) (map[
 // Reload triggers a config reload on the server.
 func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
+}
+
+// ProfileList returns all profiles with preset status.
+func (c *Client) ProfileList() (map[string]any, error) {
+	return c.get("/api/v1/profiles")
+}
+
+// ProfileActivate activates a profile by ID, optionally applying a preset first.
+func (c *Client) ProfileActivate(id, presetID string) (map[string]any, error) {
+	var body any
+	if presetID != "" {
+		body = map[string]string{"preset_id": presetID}
+	}
+	return c.post("/api/v1/profiles/"+url.PathEscape(id)+"/activate", body)
+}
+
+// TeachApprove saves a generated skill after user approval.
+func (c *Client) TeachApprove(name, description, code, trigger, schedule string) (map[string]any, error) {
+	return c.post("/api/v1/skills/teach/approve", map[string]string{
+		"name":        name,
+		"description": description,
+		"code":        code,
+		"trigger":     trigger,
+		"schedule":    schedule,
+	})
 }
 
 func (c *Client) get(path string) (map[string]any, error) {

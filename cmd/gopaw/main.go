@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jinto/gopaw/client"
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/engine"
 	"github.com/jinto/gopaw/llm"
@@ -210,20 +211,22 @@ func newChatCmd() *cobra.Command {
 }
 
 func runChat(_ *cobra.Command, _ []string) error {
-	cfg, st, provider, sbox, err := bootstrap()
+	conn, err := client.NewDaemonConn(flagRemote)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-
-	session := &engine.Session{
-		Provider: provider,
-		Sandbox:  sbox,
-		Store:    st,
-		Config:   cfg,
+	// Ensure daemon is running (auto-starts if needed).
+	if _, err := conn.Connect(); err != nil {
+		return err
 	}
 
 	ctx := context.Background()
+	cs, err := client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
+	if err != nil {
+		return err
+	}
+	defer cs.Close()
+
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println("GoPaw interactive chat (Ctrl-D to exit)")
@@ -239,13 +242,15 @@ func runChat(_ *cobra.Command, _ []string) error {
 			continue
 		}
 
-		event := desktopEvent(text)
-		resp, err := session.Run(ctx, event, nil)
+		fmt.Print("paw> ")
+		err := cs.Send(text, client.ChatOptions{
+			OnToken: func(t string) { fmt.Print(t) },
+			OnDone:  func(_ string, _ *int64) { fmt.Print("\n\n") },
+			OnError: func(msg string) { fmt.Fprintf(os.Stderr, "\nerror: %s\n", msg) },
+		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			continue
 		}
-		fmt.Printf("paw> %s\n\n", resp)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -268,24 +273,23 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-	defer st.Close()
 
-	stats, err := st.TodayStats()
+	res, err := cl.Status()
 	if err != nil {
 		return fmt.Errorf("query stats: %w", err)
 	}
 
 	fmt.Println("Today's execution stats")
 	fmt.Println("-----------------------")
-	fmt.Printf("  Total runs:   %d\n", stats.TotalRuns)
-	fmt.Printf("  Successful:   %d\n", stats.Successful)
-	fmt.Printf("  Failed:       %d\n", stats.Failed)
-	fmt.Printf("  Auto-retries: %d\n", stats.AutoRetries)
-	fmt.Printf("  Total tokens: %d\n", stats.TotalTokens)
+	fmt.Printf("  Total runs:   %d\n", jsonInt(res, "total_runs"))
+	fmt.Printf("  Successful:   %d\n", jsonInt(res, "successful"))
+	fmt.Printf("  Failed:       %d\n", jsonInt(res, "failed"))
+	fmt.Printf("  Auto-retries: %d\n", jsonInt(res, "auto_retries"))
+	fmt.Printf("  Total tokens: %d\n", jsonInt(res, "total_tokens"))
 	return nil
 }
 
@@ -315,10 +319,17 @@ func newSkillsListCmd() *cobra.Command {
 }
 
 func runSkillsList(_ *cobra.Command, _ []string) error {
-	skills, err := core.LoadAllSkills()
+	cl, err := connectDaemon()
+	if err != nil {
+		return err
+	}
+
+	res, err := cl.Skills()
 	if err != nil {
 		return fmt.Errorf("load skills: %w", err)
 	}
+
+	skills := jsonSlice(res, "skills")
 	if len(skills) == 0 {
 		fmt.Println("No skills found.")
 		return nil
@@ -328,14 +339,14 @@ func runSkillsList(_ *cobra.Command, _ []string) error {
 	fmt.Println(strings.Repeat("-", 80))
 	for _, s := range skills {
 		enabled := "yes"
-		if !s.Skill.Enabled {
+		if !jsonBool(s, "enabled") {
 			enabled = "no"
 		}
-		desc := s.Skill.Description
+		desc := jsonStr(s, "description")
 		if len(desc) > 38 {
 			desc = desc[:38] + ".."
 		}
-		fmt.Printf("%-20s %-40s %-8s %s\n", s.Skill.Name, desc, enabled, s.Skill.Trigger.Type)
+		fmt.Printf("%-20s %-40s %-8s %s\n", jsonStr(s, "name"), desc, enabled, jsonStr(s, "trigger"))
 	}
 	return nil
 }
@@ -346,7 +357,11 @@ func newSkillsDisableCmd() *cobra.Command {
 		Short: "Disable a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if err := core.DisableSkill(args[0]); err != nil {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.DisableSkill(args[0]); err != nil {
 				return err
 			}
 			fmt.Printf("Skill %q disabled.\n", args[0])
@@ -361,7 +376,11 @@ func newSkillsDeleteCmd() *cobra.Command {
 		Short: "Delete a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if err := core.DeleteSkill(args[0]); err != nil {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.DeleteSkill(args[0]); err != nil {
 				return err
 			}
 			fmt.Printf("Skill %q deleted.\n", args[0])
@@ -388,15 +407,15 @@ func newRunCmd() *cobra.Command {
 func runSkill(_ *cobra.Command, args []string) error {
 	name := args[0]
 
-	skill, code, err := core.LoadSkill(name)
-	if err != nil {
-		return fmt.Errorf("load skill: %w", err)
-	}
-	if skill == nil {
-		return fmt.Errorf("skill %q not found", name)
-	}
-
 	if flagDryRun {
+		// Dry run stays local — no daemon needed.
+		skill, code, err := core.LoadSkill(name)
+		if err != nil {
+			return fmt.Errorf("load skill: %w", err)
+		}
+		if skill == nil {
+			return fmt.Errorf("skill %q not found", name)
+		}
 		fmt.Printf("Skill:       %s\n", skill.Name)
 		fmt.Printf("Description: %s\n", skill.Description)
 		fmt.Printf("Trigger:     %s\n", skill.Trigger.Type)
@@ -405,27 +424,18 @@ func runSkill(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cfg, st, provider, sbox, err := bootstrap()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-	defer st.Close()
 
-	session := &engine.Session{
-		Provider: provider,
-		Sandbox:  sbox,
-		Store:    st,
-		Config:   cfg,
-	}
-
-	event := desktopEvent(fmt.Sprintf("/run %s", name))
-	ctx := context.Background()
-
-	resp, err := session.Run(ctx, event, nil)
+	res, err := cl.RunSkill(name)
 	if err != nil {
 		return fmt.Errorf("run skill: %w", err)
 	}
-	fmt.Println(resp)
+	if output := jsonStr(res, "output"); output != "" {
+		fmt.Println(output)
+	}
 	return nil
 }
 
@@ -445,40 +455,49 @@ func newTeachCmd() *cobra.Command {
 func runTeach(_ *cobra.Command, args []string) error {
 	description := strings.Join(args, " ")
 
-	cfg, st, provider, sbox, err := bootstrap()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-	defer st.Close()
 
-	session := &engine.Session{
-		Provider: provider,
-		Sandbox:  sbox,
-		Store:    st,
-		Config:   cfg,
-	}
-
-	ctx := context.Background()
-
-	result, err := engine.HandleTeach(ctx, description, "cli", session)
+	res, err := cl.Teach(description)
 	if err != nil {
 		return fmt.Errorf("teach skill: %w", err)
 	}
 
-	// Print preview
-	fmt.Printf("스킬명: %s\n", result.SkillName)
-	fmt.Printf("설명:  %s\n", result.Description)
-	fmt.Printf("트리거: %s\n", result.Trigger.Type)
-	if len(result.Permissions) > 0 {
-		fmt.Printf("권한:  %s\n", strings.Join(result.Permissions, ", "))
-	}
-	fmt.Printf("\n--- 생성된 코드 ---\n%s\n--- 코드 끝 ---\n\n", result.Code)
+	name := jsonStr(res, "skill_name")
+	desc := jsonStr(res, "description")
+	code := jsonStr(res, "code")
+	syntaxOK := jsonBool(res, "syntax_ok")
+	syntaxErr := jsonStr(res, "syntax_error")
 
-	if !result.SyntaxOK {
-		return fmt.Errorf("구문 오류: %s", result.SyntaxError)
+	triggerType := ""
+	if trig, ok := res["trigger"].(map[string]any); ok {
+		triggerType = jsonStr(trig, "type")
 	}
 
-	// Interactive approval
+	// Print preview.
+	fmt.Printf("스킬명: %s\n", name)
+	fmt.Printf("설명:  %s\n", desc)
+	fmt.Printf("트리거: %s\n", triggerType)
+
+	if perms, ok := res["permissions"].([]any); ok && len(perms) > 0 {
+		var permStrs []string
+		for _, p := range perms {
+			if s, ok := p.(string); ok {
+				permStrs = append(permStrs, s)
+			}
+		}
+		fmt.Printf("권한:  %s\n", strings.Join(permStrs, ", "))
+	}
+
+	fmt.Printf("\n--- 생성된 코드 ---\n%s\n--- 코드 끝 ---\n\n", code)
+
+	if !syntaxOK {
+		return fmt.Errorf("구문 오류: %s", syntaxErr)
+	}
+
+	// Interactive approval.
 	fmt.Print("이 스킬을 저장하시겠습니까? (y/n): ")
 	var answer string
 	fmt.Scanln(&answer)
@@ -487,10 +506,10 @@ func runTeach(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if err := engine.ApproveSkill(result); err != nil {
+	if _, err := cl.TeachApprove(name, desc, code, triggerType, ""); err != nil {
 		return fmt.Errorf("스킬 저장 실패: %w", err)
 	}
-	fmt.Printf("스킬 '%s' 저장 완료!\n", result.SkillName)
+	fmt.Printf("스킬 '%s' 저장 완료!\n", name)
 	return nil
 }
 
@@ -566,16 +585,17 @@ func newAgentListCmd() *cobra.Command {
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-	defer st.Close()
 
-	agents, err := st.ListAgents()
+	res, err := cl.Agents()
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}
+
+	agents := jsonSlice(res, "agents")
 	if len(agents) == 0 {
 		fmt.Println("No agents found.")
 		return nil
@@ -584,7 +604,7 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 	fmt.Printf("%-30s %-6s %s\n", "AGENT ID", "TURNS", "UPDATED")
 	fmt.Println(strings.Repeat("-", 60))
 	for _, a := range agents {
-		fmt.Printf("%-30s %-6d %s\n", a.AgentID, a.TurnCount, a.UpdatedAt)
+		fmt.Printf("%-30s %-6d %s\n", jsonStr(a, "agent_id"), jsonInt(a, "turn_count"), jsonStr(a, "updated_at"))
 	}
 	return nil
 }
@@ -605,21 +625,17 @@ func newLogCmd() *cobra.Command {
 }
 
 func runLog(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-	defer st.Close()
 
-	var records []store.ExecutionRecord
-	if flagSkill != "" {
-		records, err = st.SearchExecutions(flagSkill, flagLimit)
-	} else {
-		records, err = st.RecentExecutions(flagLimit)
-	}
+	res, err := cl.Executions(flagSkill, flagLimit)
 	if err != nil {
 		return fmt.Errorf("query executions: %w", err)
 	}
+
+	records := jsonSlice(res, "executions")
 	if len(records) == 0 {
 		fmt.Println("No execution records found.")
 		return nil
@@ -629,11 +645,11 @@ func runLog(_ *cobra.Command, _ []string) error {
 	fmt.Println(strings.Repeat("-", 80))
 	for _, r := range records {
 		status := "OK"
-		if !r.Success {
+		if !jsonBool(r, "success") {
 			status = "FAIL"
 		}
-		duration := strconv.FormatInt(r.DurationMs, 10) + "ms"
-		fmt.Printf("%-5d %-20s %-20s %-7s %s\n", r.ID, r.SkillName, r.StartedAt, status, duration)
+		duration := strconv.FormatInt(jsonInt(r, "duration_ms"), 10) + "ms"
+		fmt.Printf("%-5d %-20s %-20s %-7s %s\n", jsonInt(r, "id"), jsonStr(r, "skill_name"), jsonStr(r, "started_at"), status, duration)
 	}
 	return nil
 }
@@ -785,22 +801,17 @@ func newPersonaListCmd() *cobra.Command {
 }
 
 func runPersonaList(_ *cobra.Command, _ []string) error {
-	st, err := openStore()
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-
-	base, err := core.ConfigDir()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
 
-	profiles, err := st.ListActiveProfiles()
+	res, err := cl.ProfileList()
 	if err != nil {
 		return fmt.Errorf("list profiles: %w", err)
 	}
 
+	profiles := jsonSlice(res, "profiles")
 	if len(profiles) == 0 {
 		fmt.Println("No profiles found. Run 'gopaw init' to create a default profile.")
 		return nil
@@ -809,23 +820,23 @@ func runPersonaList(_ *cobra.Command, _ []string) error {
 	fmt.Printf("%-20s %-30s %-12s %s\n", "ID", "DESCRIPTION", "STATUS", "PRESET")
 	fmt.Println(strings.Repeat("-", 75))
 
-	for _, pm := range profiles {
-		status := core.PresetStatus(base, pm.ID)
-		statusStr := "unknown"
-		presetStr := "-"
-		switch status.Kind {
-		case core.StatusPreset:
-			statusStr = "preset"
-			presetStr = status.PresetID
-		case core.StatusCustom:
-			statusStr = "custom"
-			presetStr = status.PresetID + " (modified)"
+	for _, p := range profiles {
+		statusStr := jsonStr(p, "preset_status")
+		if statusStr == "" {
+			statusStr = "unknown"
 		}
-		desc := pm.Description
+		presetStr := jsonStr(p, "preset_id")
+		if presetStr == "" {
+			presetStr = "-"
+		}
+		if statusStr == "custom" && presetStr != "-" {
+			presetStr += " (modified)"
+		}
+		desc := jsonStr(p, "description")
 		if len(desc) > 28 {
 			desc = desc[:28] + ".."
 		}
-		fmt.Printf("%-20s %-30s %-12s %s\n", pm.ID, desc, statusStr, presetStr)
+		fmt.Printf("%-20s %-30s %-12s %s\n", jsonStr(p, "id"), desc, statusStr, presetStr)
 	}
 	return nil
 }
@@ -846,26 +857,16 @@ func runPersonaApply(_ *cobra.Command, args []string) error {
 		profileID = args[1]
 	}
 
-	// Validate preset exists.
-	preset, ok := core.Presets[presetID]
-	if !ok {
-		fmt.Printf("Unknown preset %q. Available presets:\n", presetID)
-		for id, p := range core.Presets {
-			fmt.Printf("  %-25s %s\n", id, p.Description)
-		}
-		return fmt.Errorf("preset %q not found", presetID)
-	}
-
-	base, err := core.ConfigDir()
+	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
 
-	if err := core.ApplyPreset(base, profileID, presetID); err != nil {
+	if _, err := cl.ProfileActivate(profileID, presetID); err != nil {
 		return fmt.Errorf("apply preset: %w", err)
 	}
 
-	fmt.Printf("Applied preset %q (%s) to profile %q.\n", presetID, preset.Description, profileID)
+	fmt.Printf("Applied preset %q to profile %q.\n", presetID, profileID)
 	return nil
 }
 
@@ -1054,6 +1055,59 @@ func newPkgRunCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
+// Thin Client helpers
+// ---------------------------------------------------------------------------
+
+// connectDaemon returns a Client connected to the daemon via DaemonConn.
+// Uses --remote flag if set, otherwise auto-discovers/starts local daemon.
+func connectDaemon() (*client.Client, error) {
+	conn, err := client.NewDaemonConn(flagRemote)
+	if err != nil {
+		return nil, err
+	}
+	return conn.Connect()
+}
+
+// jsonInt extracts an integer from a map[string]any (JSON numbers are float64).
+func jsonInt(m map[string]any, key string) int64 {
+	if v, ok := m[key].(float64); ok {
+		return int64(v)
+	}
+	return 0
+}
+
+// jsonStr extracts a string from a map[string]any.
+func jsonStr(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// jsonBool extracts a bool from a map[string]any.
+func jsonBool(m map[string]any, key string) bool {
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
+	return false
+}
+
+// jsonSlice extracts a slice of map items from a map[string]any.
+func jsonSlice(m map[string]any, key string) []map[string]any {
+	arr, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(arr))
+	for _, item := range arr {
+		if obj, ok := item.(map[string]any); ok {
+			result = append(result, obj)
+		}
+	}
+	return result
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1101,18 +1155,6 @@ func openStore() (*store.Store, error) {
 		return nil, fmt.Errorf("open store %s: %w", dbPath, err)
 	}
 	return st, nil
-}
-
-// desktopEvent constructs a core.Event as if typed in the terminal.
-func desktopEvent(text string) core.Event {
-	payload, _ := json.Marshal(core.ChatPayload{
-		ChatID: "cli",
-		Text:   text,
-	})
-	return core.Event{
-		Type:    core.EventDesktop,
-		Payload: payload,
-	}
 }
 
 // daemonPidPath returns the path to the daemon pid file.

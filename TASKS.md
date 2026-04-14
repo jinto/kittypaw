@@ -170,6 +170,17 @@ Spec: `.ina/specs/20260414-2200-think-workspace-indexer.md`
 - [x] T4: Skill metadata + Executor — `core/skillmeta.go` search/stats/reindex entries + `executor.go` early dispatch + AllowedPaths post-filter + tests
 - [x] T5: Session + Server wiring — Session.Indexer field + server.New indexer creation + async startup indexing + API triggers (create→Index, delete→Remove) + tests
 
+## Plan 17: Thin Client Architecture (CLI → Daemon HTTP/WS)
+
+Plan: `.claude/plans/thin-client.md`
+Spec: `.ina/specs/20260414-2330-think-thin-client.md`
+
+- [x] T1: GET /health + Config.Server.Bind + Executions skill 필터 — server /health 라우트 + handleHealth + ServerConfig.Bind 필드 + handleExecutions skill param + Client.Health() + Client.Executions(skill, limit) + tests
+- [x] T2: DaemonConn — `client/daemon.go` DaemonConn struct + Connect (PID flock + 소유자 검증 + health 폴링 200ms×50 + auto-start) + NewDaemonConn(remoteURL) + WebSocketURL() + tests
+- [x] T3: WebSocket 스트리밍 + 누락 Client 메서드 — `client/ws.go` StreamChat (nhooyr.io/websocket, OnToken/OnDone/OnError) + ProfileList/ProfileActivate/TeachApprove + tests
+- [x] T4: CLI 단순 커맨드 마이그레이션 — connectDaemon() 헬퍼 + status/agent list/log/persona list·apply/skills list·disable·delete → DaemonConn + Client
+- [x] T5: CLI 복잡 커맨드 + 최종 정리 — chat (WS 스트리밍) + run (RunSkill, dry-run 로컬) + teach (2단계) + bootstrap/openStore CLI 제거 + go build/vet 검증
+
 ### v2 후보 (향후 검토)
 
 - [ ] bleve 백엔드 전환 — camelCase 토크나이징, 한국어 형태소, BM25 랭킹 필요 시
@@ -177,6 +188,24 @@ Spec: `.ina/specs/20260414-2200-think-workspace-indexer.md`
 - [ ] 실시간 파일 감시 — fsnotify 또는 File.write 훅으로 인덱스 자동 갱신
 - [ ] File.summary(path) — LLM 기반 파일 요약 + 캐시
 - [ ] Permission Checker — 에이전트 파일 접근 규칙 엔진 — 스코프 미확정
+
+## Backlog: CLI 온보딩 + 채팅 모드 🔴 높음 / 작업량 중
+
+온보딩은 브라우저(Web UI)와 CLI 양쪽 모두 가능해야 한다.
+CLI 온보딩 완료 후 곧바로 대화형 채팅 상태(REPL)로 진입해야 한다.
+
+- [ ] CLI 온보딩 플로우 — `gopaw init` 또는 `gopaw setup`에서 LLM/채널/워크스페이스 설정
+- [ ] 온보딩 완료 후 채팅 REPL 자동 진입 — `gopaw chat` 상태로 전환
+- [ ] 브라우저 온보딩과 동일한 설정 결과 보장 (config.toml + DB 상태 일치)
+
+## Backlog: 사용자 프로필 시스템 (kittypaw.yml) 🔴 높음 / 작업량 중
+
+설치 시 기본 사용자 프로필은 `kittypaw.default.yml`.
+사용자를 추가할 때 `kittypaw.{username}.yml` 형태로 프로필 파일을 생성한다.
+
+- [ ] `kittypaw.default.yml` 기본 프로필 — 설치 시 자동 생성, 스키마 정의
+- [ ] `kittypaw.{username}.yml` 사용자 추가 — CLI/API로 프로필 CRUD
+- [ ] 프로필 전환 — 활성 사용자 선택 + 세션별 프로필 바인딩
 
 ## Backlog: MoA (Mixture of Agents) 🟡 중간 / 작업량 중
 

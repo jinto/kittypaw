@@ -110,6 +110,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/v1/profiles/{id}/activate — activate or switch to a profile.
+// Optional JSON body: {"preset_id": "..."} applies a preset before activating.
 func (s *Server) handleProfileActivate(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := core.ValidateProfileID(id); err != nil {
@@ -124,6 +125,28 @@ func (s *Server) handleProfileActivate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "profile not found: "+id)
 		return
 	}
+
+	// Optional: apply preset if specified in body.
+	var body struct {
+		PresetID string `json:"preset_id"`
+	}
+	if r.ContentLength > 0 {
+		if !decodeBody(w, r, &body) {
+			return
+		}
+	}
+	if body.PresetID != "" {
+		base, err := core.ConfigDir()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := core.ApplyPreset(base, id, body.PresetID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	if err := s.store.SetProfileActive(id, true); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

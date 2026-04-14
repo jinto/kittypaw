@@ -96,6 +96,9 @@ func (s *Server) setupRoutes() chi.Router {
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(s.corsMiddleware)
 
+	// Health check (unauthenticated — daemon liveness probe).
+	r.Get("/health", s.handleHealth)
+
 	// Bootstrap (unauthenticated — returns api_key + ws_url to the GUI).
 	r.Get("/api/bootstrap", s.handleBootstrap)
 
