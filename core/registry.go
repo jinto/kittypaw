@@ -56,7 +56,7 @@ func NewRegistryClient(baseURL string) (*RegistryClient, error) {
 		baseURL:         strings.TrimSuffix(baseURL, "/"),
 		allowedHost:     parsed.Host,
 		allowedScheme:   parsed.Scheme,
-		allowedBasePath: parsed.Path,
+		allowedBasePath: strings.TrimSuffix(parsed.Path, "/") + "/",
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
