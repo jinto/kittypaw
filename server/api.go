@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -822,5 +824,120 @@ func (s *Server) handleChannels(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.spawner.List())
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/install
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string `json:"source"`
+		MdMode string `json:"md_mode"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Source == "" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+
+	cfg := s.getConfig()
+	mdMode := req.MdMode
+	if mdMode == "" {
+		mdMode = cfg.SkillInstall.MdExecutionMode
+	}
+	if mdMode == "" {
+		mdMode = "prompt" // final fallback
+	}
+
+	// Determine if source is GitHub URL or local path.
+	var result *core.InstallResult
+	var err error
+
+	if owner, repo, parseErr := core.ParseGitHubURL(req.Source); parseErr == nil {
+		// GitHub URL — resolve source.
+		source, resolveErr := core.ResolveGitHubSource("https://raw.githubusercontent.com", owner, repo)
+		if resolveErr != nil {
+			writeError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+		// For native packages, install from temp dir.
+		if source.Format == core.SourceFormatNative {
+			defer os.RemoveAll(source.TempDir)
+			result, err = core.InstallSkillSource(s.session.BaseDir, source.TempDir, core.InstallOptions{
+				SourceURL: source.SourceURL,
+			})
+		} else {
+			// For SKILL.md, write to temp dir and install.
+			tmpDir, tmpErr := os.MkdirTemp("", "gopaw-install-")
+			if tmpErr != nil {
+				writeError(w, http.StatusInternalServerError, tmpErr.Error())
+				return
+			}
+			defer os.RemoveAll(tmpDir)
+			if wErr := os.WriteFile(filepath.Join(tmpDir, "SKILL.md"), []byte(source.SkillMdContent), 0o644); wErr != nil {
+				writeError(w, http.StatusInternalServerError, wErr.Error())
+				return
+			}
+			result, err = core.InstallSkillSource(s.session.BaseDir, tmpDir, core.InstallOptions{
+				MdExecutionMode: mdMode,
+				SourceURL:       source.SourceURL,
+			})
+		}
+	} else {
+		// Local path — validate before passing to installer.
+		cleanPath := filepath.Clean(req.Source)
+		if !filepath.IsAbs(cleanPath) {
+			writeError(w, http.StatusBadRequest, "local install path must be absolute")
+			return
+		}
+		fi, statErr := os.Lstat(cleanPath)
+		if statErr != nil {
+			writeError(w, http.StatusBadRequest, "source path not found")
+			return
+		}
+		if !fi.IsDir() {
+			writeError(w, http.StatusBadRequest, "source path must be a directory")
+			return
+		}
+		result, err = core.InstallSkillSource(s.session.BaseDir, cleanPath, core.InstallOptions{
+			MdExecutionMode: mdMode,
+		})
+	}
+
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/search?q=...
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	keyword := r.URL.Query().Get("q")
+
+	cfg := s.getConfig()
+	registryURL := "https://raw.githubusercontent.com/kittypaw-skills/registry/main"
+	_ = cfg // registry URL could come from config in the future
+
+	rc, err := core.NewRegistryClient(registryURL)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "registry unavailable: " + err.Error()})
+		return
+	}
+
+	entries, err := rc.FetchIndex()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "fetch registry: " + err.Error()})
+		return
+	}
+
+	results := core.SearchEntries(entries, keyword)
+	writeJSON(w, 200, map[string]any{"results": results})
 }
 

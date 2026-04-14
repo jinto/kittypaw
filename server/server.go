@@ -176,6 +176,12 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Get("/config/check", s.handleConfigCheck)
 		r.Post("/reload", s.handleReload)
 
+		// Install
+		r.Post("/install", s.handleInstall)
+
+		// Search
+		r.Get("/search", s.handleSearch)
+
 		// Channels
 		r.Get("/channels", s.handleChannels)
 

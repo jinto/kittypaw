@@ -77,6 +77,8 @@ func newRootCmd() *cobra.Command {
 		newMemoryCmd(),
 		newChannelsCmd(),
 		newReloadCmd(),
+		newInstallCmd(),
+		newSearchCmd(),
 	)
 
 	return cmd
@@ -584,6 +586,35 @@ func runTeach(_ *cobra.Command, args []string) error {
 	}
 	fmt.Printf("스킬 '%s' 저장 완료!\n", name)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// install
+// ---------------------------------------------------------------------------
+
+func newInstallCmd() *cobra.Command {
+	var mdMode string
+	cmd := &cobra.Command{
+		Use:   "install <github-url|local-path>",
+		Short: "Install a skill from GitHub or a local directory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			result, err := cl.Install(args[0], mdMode)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed: %s (format: %s)\n",
+				jsonStr(result, "SkillName"),
+				jsonStr(result, "Format"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&mdMode, "mode", "", "SKILL.md execution mode (default: prompt, from config or fallback)")
+	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -1787,6 +1818,37 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(jsonStr(res, "report"))
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// search
+// ---------------------------------------------------------------------------
+
+func newSearchCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "search <keyword>",
+		Short: "Search the skill registry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			result, err := cl.Search(args[0])
+			if err != nil {
+				return err
+			}
+			results := jsonSlice(result, "results")
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return nil
+			}
+			for _, r := range results {
+				fmt.Printf("  %-20s  %s\n", jsonStr(r, "id"), jsonStr(r, "description"))
+			}
 			return nil
 		},
 	}

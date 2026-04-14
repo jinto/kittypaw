@@ -61,7 +61,12 @@ func PackagesDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pkgDir := filepath.Join(dir, "packages")
+	return PackagesDirFrom(dir)
+}
+
+// PackagesDirFrom returns the packages directory under baseDir, creating it if needed.
+func PackagesDirFrom(baseDir string) (string, error) {
+	pkgDir := filepath.Join(baseDir, "packages")
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 		return "", err
 	}
