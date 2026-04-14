@@ -1,3 +1,14 @@
+## Plan 18: CLI Command Completion ✅
+
+Plan: `.claude/plans/cli-completion.md`
+Spec: `.ina/specs/20260414-2350-think-cli-completion.md`
+
+- [x] T1: Client methods — 17 new methods in `client/client.go` (Enable/Explain Skill, Suggestions CRUD, Fixes, Reflection, Evolution, Channels) + array response wrapping
+- [x] T2: `skills enable` + `skills explain` subcommands
+- [x] T3: `suggestions` (list/accept/dismiss) + `fixes` (list/approve) + `reflection` (list/approve/reject/clear/run/weekly-report) groups
+- [x] T4: `persona evolution` (list/approve/reject) + `memory search` + `channels list` + `reload` commands + root registration
+- [x] T5: Build verification — `go build` + `go vet` + `go test ./...` all pass
+
 ## Plan 1: Skill Scheduler Wiring ✅
 
 Plan: `.claude/plans/skill-scheduler-wiring.md`

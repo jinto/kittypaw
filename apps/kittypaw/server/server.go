@@ -145,6 +145,7 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/skills/teach", s.handleSkillsTeach)
 		r.Post("/skills/teach/approve", s.handleTeachApprove)
 		r.Delete("/skills/{name}", s.handleSkillsDelete)
+		r.Post("/skills/{name}/enable", s.handleSkillEnable)
 		r.Post("/skills/{name}/disable", s.handleSkillDisable)
 		r.Post("/skills/{name}/explain", s.handleSkillExplain)
 		r.Get("/skills/{id}/fixes", s.handleSkillFixes)

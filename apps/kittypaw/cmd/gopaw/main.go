@@ -71,6 +71,12 @@ func newRootCmd() *cobra.Command {
 		newDaemonCmd(),
 		newPackagesCmd(),
 		newPersonaCmd(),
+		newSuggestionsCmd(),
+		newFixesCmd(),
+		newReflectionCmd(),
+		newMemoryCmd(),
+		newChannelsCmd(),
+		newReloadCmd(),
 	)
 
 	return cmd
@@ -304,8 +310,10 @@ func newSkillsCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newSkillsListCmd(),
+		newSkillsEnableCmd(),
 		newSkillsDisableCmd(),
 		newSkillsDeleteCmd(),
+		newSkillsExplainCmd(),
 	)
 	return cmd
 }
@@ -349,6 +357,45 @@ func runSkillsList(_ *cobra.Command, _ []string) error {
 		fmt.Printf("%-20s %-40s %-8s %s\n", jsonStr(s, "name"), desc, enabled, jsonStr(s, "trigger"))
 	}
 	return nil
+}
+
+func newSkillsEnableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "enable <name>",
+		Short: "Enable a skill",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.EnableSkill(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Skill %q enabled.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newSkillsExplainCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "explain <name>",
+		Short: "Explain what a skill does",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.ExplainSkill(args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Println(jsonStr(res, "explanation"))
+			return nil
+		},
+	}
 }
 
 func newSkillsDisableCmd() *cobra.Command {
@@ -788,8 +835,91 @@ func newPersonaCmd() *cobra.Command {
 		Use:   "persona",
 		Short: "Manage persona presets",
 	}
-	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd())
+	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd(), newPersonaEvolutionCmd())
 	return cmd
+}
+
+func newPersonaEvolutionCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "evolution",
+		Short: "Manage persona evolution proposals",
+	}
+	cmd.AddCommand(
+		newEvolutionListCmd(),
+		newEvolutionApproveCmd(),
+		newEvolutionRejectCmd(),
+	)
+	return cmd
+}
+
+func newEvolutionListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List pending evolutions",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.EvolutionList()
+			if err != nil {
+				return err
+			}
+			evos := jsonSlice(res, "evolutions")
+			if len(evos) == 0 {
+				fmt.Println("No pending evolutions.")
+				return nil
+			}
+			fmt.Printf("%-30s %s\n", "ID", "REASON")
+			fmt.Println(strings.Repeat("-", 60))
+			for _, e := range evos {
+				reason := jsonStr(e, "Value")
+				if len(reason) > 40 {
+					reason = reason[:40] + ".."
+				}
+				fmt.Printf("%-30s %s\n", jsonStr(e, "Key"), reason)
+			}
+			return nil
+		},
+	}
+}
+
+func newEvolutionApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <id>",
+		Short: "Approve an evolution",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.EvolutionApprove(args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Evolution approved.")
+			return nil
+		},
+	}
+}
+
+func newEvolutionRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reject <id>",
+		Short: "Reject an evolution",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.EvolutionReject(args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Evolution rejected.")
+			return nil
+		},
+	}
 }
 
 func newPersonaListCmd() *cobra.Command {
@@ -1049,6 +1179,440 @@ func newPkgRunCmd() *cobra.Command {
 				return fmt.Errorf("run package %q: %w", args[0], err)
 			}
 			fmt.Println(resp)
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// memory
+// ---------------------------------------------------------------------------
+
+func newMemoryCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "memory",
+		Short: "Memory operations",
+	}
+	cmd.AddCommand(newMemorySearchCmd())
+	return cmd
+}
+
+func newMemorySearchCmd() *cobra.Command {
+	var memLimit int
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search execution memory",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			query := strings.Join(args, " ")
+			res, err := cl.MemorySearch(query, memLimit)
+			if err != nil {
+				return err
+			}
+			results := jsonSlice(res, "results")
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return nil
+			}
+			fmt.Printf("%-6s %-20s %-20s %s\n", "ID", "SKILL", "DATE", "INPUT")
+			fmt.Println(strings.Repeat("-", 80))
+			for _, r := range results {
+				input := jsonStr(r, "input")
+				if input == "" {
+					input = jsonStr(r, "skill_name")
+				}
+				if len(input) > 30 {
+					input = input[:30] + ".."
+				}
+				fmt.Printf("%-6d %-20s %-20s %s\n",
+					jsonInt(r, "id"),
+					jsonStr(r, "skill_name"),
+					jsonStr(r, "started_at"),
+					input,
+				)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&memLimit, "limit", 20, "number of results")
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// channels
+// ---------------------------------------------------------------------------
+
+func newChannelsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "channels",
+		Short: "Manage messaging channels",
+	}
+	cmd.AddCommand(newChannelsListCmd())
+	return cmd
+}
+
+func newChannelsListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List active channels",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.ChannelsList()
+			if err != nil {
+				return err
+			}
+			// The server returns a JSON array; client wraps it under "items".
+			channels := jsonSlice(res, "items")
+			if len(channels) == 0 {
+				fmt.Println("No channels found.")
+				return nil
+			}
+			fmt.Printf("%-20s %-12s %s\n", "NAME", "TYPE", "STATUS")
+			fmt.Println(strings.Repeat("-", 50))
+			for _, ch := range channels {
+				status := "stopped"
+				if jsonBool(ch, "running") {
+					status = "running"
+				}
+				fmt.Printf("%-20s %-12s %s\n",
+					jsonStr(ch, "name"),
+					jsonStr(ch, "type"),
+					status,
+				)
+			}
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// reload
+// ---------------------------------------------------------------------------
+
+func newReloadCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reload",
+		Short: "Reload server configuration",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.Reload(); err != nil {
+				return err
+			}
+			fmt.Println("Config reloaded.")
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// suggestions
+// ---------------------------------------------------------------------------
+
+func newSuggestionsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "suggestions",
+		Short: "Manage skill suggestions",
+	}
+	cmd.AddCommand(
+		newSuggestionsListCmd(),
+		newSuggestionsAcceptCmd(),
+		newSuggestionsDismissCmd(),
+	)
+	return cmd
+}
+
+func newSuggestionsListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List pending suggestions",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.SuggestionsList()
+			if err != nil {
+				return err
+			}
+			items := jsonSlice(res, "suggestions")
+			if len(items) == 0 {
+				fmt.Println("No suggestions found.")
+				return nil
+			}
+			fmt.Printf("%-20s %s\n", "SKILL_ID", "DESCRIPTION")
+			fmt.Println(strings.Repeat("-", 60))
+			for _, s := range items {
+				desc := jsonStr(s, "description")
+				if len(desc) > 50 {
+					desc = desc[:50] + ".."
+				}
+				fmt.Printf("%-20s %s\n", jsonStr(s, "skill_id"), desc)
+			}
+			return nil
+		},
+	}
+}
+
+func newSuggestionsAcceptCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "accept <skill-id>",
+		Short: "Accept a suggestion",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.SuggestionsAccept(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Suggestion %q accepted.\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newSuggestionsDismissCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dismiss <skill-id>",
+		Short: "Dismiss a suggestion",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.SuggestionsDismiss(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Suggestion %q dismissed.\n", args[0])
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fixes
+// ---------------------------------------------------------------------------
+
+func newFixesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fixes",
+		Short: "Manage skill fixes",
+	}
+	cmd.AddCommand(
+		newFixesListCmd(),
+		newFixesApproveCmd(),
+	)
+	return cmd
+}
+
+func newFixesListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list <skill>",
+		Short: "List fixes for a skill",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.FixesList(args[0])
+			if err != nil {
+				return err
+			}
+			fixes := jsonSlice(res, "fixes")
+			if len(fixes) == 0 {
+				fmt.Println("No fixes found.")
+				return nil
+			}
+			fmt.Printf("%-6s %-8s %-20s %s\n", "ID", "APPLIED", "DATE", "ERROR")
+			fmt.Println(strings.Repeat("-", 60))
+			for _, f := range fixes {
+				applied := "no"
+				if jsonBool(f, "applied") {
+					applied = "yes"
+				}
+				errMsg := jsonStr(f, "error_message")
+				if len(errMsg) > 30 {
+					errMsg = errMsg[:30] + ".."
+				}
+				fmt.Printf("%-6d %-8s %-20s %s\n", jsonInt(f, "id"), applied, jsonStr(f, "created_at"), errMsg)
+			}
+			return nil
+		},
+	}
+}
+
+func newFixesApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <id>",
+		Short: "Approve a fix",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.FixesApprove(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Fix %s approved.\n", args[0])
+			return nil
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// reflection
+// ---------------------------------------------------------------------------
+
+func newReflectionCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reflection",
+		Short: "Manage reflection system",
+	}
+	cmd.AddCommand(
+		newReflectionListCmd(),
+		newReflectionApproveCmd(),
+		newReflectionRejectCmd(),
+		newReflectionClearCmd(),
+		newReflectionRunCmd(),
+		newReflectionWeeklyReportCmd(),
+	)
+	return cmd
+}
+
+func newReflectionListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List reflection candidates",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.ReflectionList()
+			if err != nil {
+				return err
+			}
+			candidates := jsonSlice(res, "candidates")
+			if len(candidates) == 0 {
+				fmt.Println("No reflection candidates found.")
+				return nil
+			}
+			fmt.Printf("%-30s %s\n", "KEY", "VALUE")
+			fmt.Println(strings.Repeat("-", 60))
+			for _, c := range candidates {
+				val := jsonStr(c, "Value")
+				if len(val) > 40 {
+					val = val[:40] + ".."
+				}
+				fmt.Printf("%-30s %s\n", jsonStr(c, "Key"), val)
+			}
+			return nil
+		},
+	}
+}
+
+func newReflectionApproveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <key>",
+		Short: "Approve a reflection candidate",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.ReflectionApprove(args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Pattern approved.")
+			return nil
+		},
+	}
+}
+
+func newReflectionRejectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reject <key>",
+		Short: "Reject a reflection candidate",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.ReflectionReject(args[0]); err != nil {
+				return err
+			}
+			fmt.Println("Pattern rejected.")
+			return nil
+		},
+	}
+}
+
+func newReflectionClearCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clear",
+		Short: "Clear all reflection candidates",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.ReflectionClear(); err != nil {
+				return err
+			}
+			fmt.Println("Reflection data cleared.")
+			return nil
+		},
+	}
+}
+
+func newReflectionRunCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "run",
+		Short: "Trigger reflection cycle",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.ReflectionRun(); err != nil {
+				return err
+			}
+			fmt.Println("Reflection cycle triggered.")
+			return nil
+		},
+	}
+}
+
+func newReflectionWeeklyReportCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "weekly-report",
+		Short: "Show weekly reflection report",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.WeeklyReport()
+			if err != nil {
+				return err
+			}
+			fmt.Println(jsonStr(res, "report"))
 			return nil
 		},
 	}
