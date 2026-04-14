@@ -809,7 +809,7 @@ func runDaemonStart(_ *cobra.Command, _ []string) error {
 	proc := exec.Command(exe, "serve")
 	proc.Stdout = nil
 	proc.Stderr = nil
-	proc.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(proc)
 
 	if err := proc.Start(); err != nil {
 		return fmt.Errorf("start daemon: %w", err)

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jinto/kittypaw/core"
@@ -126,7 +125,7 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 	proc := exec.Command(exe, args...)
 	proc.Stdout = nil
 	proc.Stderr = nil
-	proc.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(proc)
 
 	if err := proc.Start(); err != nil {
 		return fmt.Errorf("daemon 시작 실패: %w", err)
@@ -153,26 +152,7 @@ func (d *DaemonConn) pollHealth(cl *Client) error {
 	return fmt.Errorf("daemon 시작 타임아웃 (10초). `kittypaw daemon start`로 직접 시작하세요")
 }
 
-// lockPidFile acquires an exclusive advisory lock on the given path.
-// Returns an error if another process holds the lock.
-// Note: flock is automatically released on process death (including SIGKILL)
-// on both Darwin and Linux — no manual cleanup needed for crash scenarios.
-func lockPidFile(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
-
-func unlockPidFile(f *os.File) {
-	syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	f.Close()
-}
+// lockPidFile and unlockPidFile are in proc_{unix,windows}.go
 
 func daemonPidPath() (string, error) {
 	dir, err := core.ConfigDir()
@@ -195,24 +175,7 @@ func readPid(path string) (int, bool) {
 }
 
 // isKittypawProcess checks if a PID belongs to a running kittypaw process.
-// Uses signal(0) for liveness + process name verification to prevent
-// PID reuse false positives.
-func isKittypawProcess(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	if proc.Signal(syscall.Signal(0)) != nil {
-		return false
-	}
-	// Verify process name to guard against PID reuse.
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
-	}
-	name := strings.TrimSpace(string(out))
-	return strings.Contains(name, "kittypaw")
-}
+// isKittypawProcess is in proc_{unix,windows}.go
 
 func parseBindAddr(bind string) (host, port string) {
 	if idx := strings.LastIndex(bind, ":"); idx >= 0 {
