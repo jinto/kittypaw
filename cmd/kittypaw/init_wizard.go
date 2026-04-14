@@ -149,6 +149,8 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		if apiKey == "" && existing != nil && existing.LLM.Provider == "anthropic" {
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
+		} else if apiKey != "" {
+			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
 		}
 	case 2:
 		provider = "openrouter"
@@ -160,6 +162,8 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		if apiKey == "" && existing != nil && existing.LLM.BaseURL == core.OpenRouterBaseURL {
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
+		} else if apiKey != "" {
+			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
 		}
 	case 3:
 		provider = "local"
@@ -242,7 +246,13 @@ func wizardTelegram(scanner *bufio.Scanner, _ *core.Config, w *core.WizardResult
 		return
 	}
 
+	fmt.Printf("  ✓ %s\n", maskKey(token))
 	w.TelegramBotToken = token
+
+	// Guide user to send /start before auto-detect.
+	printTelegramGuide()
+	fmt.Printf("  > ")
+	scanner.Scan() // wait for Enter
 
 	// Auto-detect chat ID.
 	fmt.Print("  Chat ID auto-detect... ")
@@ -252,14 +262,59 @@ func wizardTelegram(scanner *bufio.Scanner, _ *core.Config, w *core.WizardResult
 	chatID, err := core.FetchTelegramChatID(ctx, token)
 	if err != nil {
 		fmt.Println("failed.")
-		manual := promptLine(scanner, "  Chat ID (manual)", "")
+		printTelegramChatIDHelp()
+		manual := promptLine(scanner, "  Chat ID", "")
 		if manual != "" {
 			w.TelegramChatID = manual
 		}
 	} else {
-		fmt.Println(chatID)
+		fmt.Printf("%s ✓\n", chatID)
 		w.TelegramChatID = chatID
 	}
+}
+
+func printTelegramGuide() {
+	lang := detectLang()
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		fmt.Println()
+		fmt.Println("  📱 텔레그램에서 봇에게 /start 를 보내세요.")
+		fmt.Println("     보낸 뒤 Enter를 누르면 Chat ID를 자동으로 찾습니다.")
+		fmt.Println()
+	case strings.HasPrefix(lang, "ja"):
+		fmt.Println()
+		fmt.Println("  📱 Telegramでボットに /start を送信してください。")
+		fmt.Println("     送信後、Enterを押すとChat IDを自動検出します。")
+		fmt.Println()
+	default:
+		fmt.Println()
+		fmt.Println("  📱 Send /start to your bot in Telegram.")
+		fmt.Println("     Then press Enter to auto-detect your Chat ID.")
+		fmt.Println()
+	}
+}
+
+func printTelegramChatIDHelp() {
+	lang := detectLang()
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		fmt.Println("  봇에게 메시지를 보냈는지 확인하세요.")
+		fmt.Println("  @userinfobot 에게 메시지를 보내면 Chat ID를 알 수 있습니다.")
+	case strings.HasPrefix(lang, "ja"):
+		fmt.Println("  ボットにメッセージを送信したか確認してください。")
+		fmt.Println("  @userinfobot にメッセージを送るとChat IDを確認できます。")
+	default:
+		fmt.Println("  Make sure you sent a message to the bot.")
+		fmt.Println("  You can also message @userinfobot to find your Chat ID.")
+	}
+}
+
+func detectLang() string {
+	lang := os.Getenv("LANG")
+	if lang == "" {
+		lang = os.Getenv("LC_ALL")
+	}
+	return strings.ToLower(lang)
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +393,14 @@ func promptPassword(prompt string) (string, error) {
 		return "", nil
 	}
 	return strings.TrimSpace(scanner.Text()), nil
+}
+
+// maskKey returns a masked version of an API key, e.g. "sk-ant-...x2f4".
+func maskKey(key string) string {
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:6] + "..." + key[len(key)-4:]
 }
 
 // promptYesNo asks a yes/no question. defaultYes controls Enter behavior.
