@@ -211,8 +211,8 @@ func (s *Scheduler) runPackage(ctx context.Context, pkg *core.SkillPackage) {
 		return
 	}
 
-	// Execute main.js.
-	output, err := s.executePackageCode(ctx, pkg, code, "")
+	// Execute main.js (package-level model override applies).
+	output, err := s.executePackageCode(ctx, pkg, code, "", pkg.Meta.Model)
 	if err != nil {
 		slog.Error("scheduler: package execution failed", "id", pkg.Meta.ID, "error", err)
 		_ = s.session.Store.IncrementFailureCount(schedName)
@@ -239,7 +239,12 @@ func (s *Scheduler) executeChainSteps(ctx context.Context, pkg *core.SkillPackag
 
 	prevOutput := initialOutput
 	for _, step := range chain {
-		output, err := s.executePackageCode(ctx, &step.Package, step.Code, prevOutput)
+		// Model priority: chain step > chain package meta > session default.
+		model := step.Model
+		if model == "" {
+			model = step.Package.Meta.Model
+		}
+		output, err := s.executePackageCode(ctx, &step.Package, step.Code, prevOutput, model)
 		if err != nil {
 			return fmt.Errorf("chain step %q failed: %w", step.Package.Meta.ID, err)
 		}
@@ -250,7 +255,8 @@ func (s *Scheduler) executeChainSteps(ctx context.Context, pkg *core.SkillPackag
 
 // executePackageCode runs a package's JavaScript code through the engine.
 // prevOutput is injected as context for chain step execution.
-func (s *Scheduler) executePackageCode(ctx context.Context, pkg *core.SkillPackage, code, prevOutput string) (string, error) {
+// model overrides the session's default LLM model when non-empty.
+func (s *Scheduler) executePackageCode(ctx context.Context, pkg *core.SkillPackage, code, prevOutput, model string) (string, error) {
 	text := "skill:pkg:" + pkg.Meta.ID
 	if prevOutput != "" {
 		text += "\nprev_output:" + prevOutput
@@ -265,7 +271,11 @@ func (s *Scheduler) executePackageCode(ctx context.Context, pkg *core.SkillPacka
 		Payload: payload,
 	}
 
-	return s.session.Run(ctx, event, nil)
+	var opts *RunOptions
+	if model != "" {
+		opts = &RunOptions{ModelOverride: model}
+	}
+	return s.session.Run(ctx, event, opts)
 }
 
 func (s *Scheduler) isDue(skill *core.Skill) bool {

@@ -105,6 +105,57 @@ func TestProfileSwitch_SetsContext(t *testing.T) {
 	}
 }
 
+// --- resolveProvider ---
+
+func TestResolveProvider_EmptyReturnsDefault(t *testing.T) {
+	mock := &mockProvider{}
+	sess := &Session{
+		Provider: mock,
+		Config:   &core.Config{LLM: core.LLMConfig{Provider: "anthropic", Model: "default"}},
+	}
+	if got := sess.resolveProvider(""); got != mock {
+		t.Error("empty model should return session default provider")
+	}
+}
+
+func TestResolveProvider_NamedModel(t *testing.T) {
+	mock := &mockProvider{}
+	cfg := core.DefaultConfig()
+	cfg.LLM = core.LLMConfig{Provider: "anthropic", APIKey: "test-key", Model: "default-model", MaxTokens: 1024}
+	cfg.Models = []core.ModelConfig{
+		{Name: "fast", Provider: "anthropic", APIKey: "test-key", Model: "claude-3-haiku", MaxTokens: 2048},
+	}
+	sess := &Session{Provider: mock, Config: &cfg}
+	got := sess.resolveProvider("fast")
+	if got == mock {
+		t.Error("named model should create a new provider")
+	}
+	if got.MaxTokens() != 2048 {
+		t.Errorf("MaxTokens = %d, want 2048 (from named model config)", got.MaxTokens())
+	}
+}
+
+func TestResolveProvider_UnknownModelFallsBack(t *testing.T) {
+	mock := &mockProvider{}
+	cfg := core.DefaultConfig()
+	cfg.LLM = core.LLMConfig{Provider: "anthropic", APIKey: "test-key", Model: "default-model", MaxTokens: 1024}
+	sess := &Session{Provider: mock, Config: &cfg}
+	// Raw model IDs not in config should fall back to default (security: no API key leakage).
+	if got := sess.resolveProvider("claude-3-opus-20240229"); got != mock {
+		t.Error("unknown model should fall back to session default provider")
+	}
+}
+
+func TestResolveProvider_InvalidProviderFallsBack(t *testing.T) {
+	mock := &mockProvider{}
+	cfg := core.DefaultConfig()
+	cfg.LLM = core.LLMConfig{Provider: "nonexistent", Model: "x"}
+	sess := &Session{Provider: mock, Config: &cfg}
+	if got := sess.resolveProvider("any-model"); got != mock {
+		t.Error("invalid provider should fall back to session default")
+	}
+}
+
 func TestProfileSwitch_OverriddenByMention(t *testing.T) {
 	st := openTestStore(t)
 	agentID := "user-42"
