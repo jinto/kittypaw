@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -12,17 +11,105 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+      - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sign-macos:
+    needs: release
+    runs-on: macos-15
+    if: success()
+    steps:
+      - name: Setup signing keychain
+        env:
+          CERT_BASE64: ${{ secrets.DEVELOPER_ID_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          security create-keychain -p "" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "" $KEYCHAIN_PATH
+          echo "$CERT_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -k $KEYCHAIN_PATH -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" $KEYCHAIN_PATH
+          security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
+
+      - name: Sign and notarize darwin binaries
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${GITHUB_REPOSITORY}"
+          IDENTITY="Developer ID Application: JAE KWON PARK (${APPLE_TEAM_ID})"
+
+          for ARCH in amd64 arm64; do
+            ASSET="kittypaw_darwin_${ARCH}.tar.gz"
+            WORKDIR="$(mktemp -d)"
+
+            echo "=== Signing ${ASSET} ==="
+
+            # Download from release
+            gh release download "$TAG" --pattern "$ASSET" --dir "$WORKDIR" --repo "$REPO"
+            tar xzf "${WORKDIR}/${ASSET}" -C "$WORKDIR"
+
+            # Codesign with hardened runtime + timestamp
+            codesign --sign "$IDENTITY" --options runtime --timestamp --force "${WORKDIR}/kittypaw"
+            codesign --verify --verbose "${WORKDIR}/kittypaw"
+
+            # Notarize (bare binary must be zipped first)
+            ditto -c -k "${WORKDIR}/kittypaw" "${WORKDIR}/kittypaw-notarize.zip"
+            SUBMIT_OUT=$(xcrun notarytool submit "${WORKDIR}/kittypaw-notarize.zip" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait 2>&1) || true
+            echo "$SUBMIT_OUT"
+
+            if echo "$SUBMIT_OUT" | grep -q "Invalid"; then
+              SUBMISSION_ID=$(echo "$SUBMIT_OUT" | grep "id:" | head -1 | awk '{print $2}')
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+              exit 1
+            fi
+
+            # Re-archive signed binary and overwrite
+            tar czf "${WORKDIR}/${ASSET}" -C "$WORKDIR" kittypaw
+            gh release upload "$TAG" "${WORKDIR}/${ASSET}" --clobber --repo "$REPO"
+
+            echo "=== ${ASSET} done ==="
+            rm -rf "$WORKDIR"
+          done
+
+      - name: Update checksums
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          REPO="${GITHUB_REPOSITORY}"
+          WORKDIR="$(mktemp -d)"
+
+          gh release download "$TAG" --dir "$WORKDIR" --repo "$REPO" \
+            --pattern "kittypaw_*" --pattern "install.sh"
+
+          cd "$WORKDIR"
+          shasum -a 256 kittypaw_* install.sh > checksums.txt
+          gh release upload "$TAG" checksums.txt --clobber --repo "$REPO"
+          rm -rf "$WORKDIR"
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/signing.keychain-db 2>/dev/null || true
