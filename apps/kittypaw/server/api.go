@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/engine"
 )
+
+var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
 
 // ---------------------------------------------------------------------------
 // JSON helpers
@@ -39,6 +42,14 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// GET /health
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "gopaw"})
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +83,21 @@ func (s *Server) handleExecutions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	execs, err := s.store.RecentExecutions(limit)
+	skill := r.URL.Query().Get("skill")
+	if skill != "" && !safeSkillName.MatchString(skill) {
+		writeError(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+
+	var (
+		execs any
+		err   error
+	)
+	if skill != "" {
+		execs, err = s.store.SearchExecutions(skill, limit)
+	} else {
+		execs, err = s.store.RecentExecutions(limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

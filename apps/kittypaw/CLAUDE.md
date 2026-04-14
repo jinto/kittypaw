@@ -14,7 +14,7 @@ store/         SQLite persistence with 17 migrations (WAL mode)
 engine/        Agent loop state machine, skill executor, compaction, scheduling
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
 server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload)
-client/        REST API client library
+client/        REST/WS client + DaemonConn (thin client: auto daemon discovery/start)
 ```
 
 ## Build & Run
