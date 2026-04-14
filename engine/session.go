@@ -25,8 +25,9 @@ type PermissionCallback func(ctx context.Context, description, resource string) 
 // RunOptions holds per-call options for Session.Run. Callbacks are scoped to
 // a single Run invocation, avoiding shared mutable state across concurrent calls.
 type RunOptions struct {
-	OnToken      llm.TokenCallback
-	OnPermission PermissionCallback
+	OnToken       llm.TokenCallback
+	OnPermission  PermissionCallback
+	ModelOverride string // use a different LLM model for this run (named model or raw model ID)
 }
 
 // Session holds the injected dependencies for processing events.
@@ -209,7 +210,11 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 
 	// Main retry loop
 	var lastError string
+	modelOverridden := opts != nil && opts.ModelOverride != ""
 	activeProvider := s.Provider
+	if modelOverridden {
+		activeProvider = s.resolveProvider(opts.ModelOverride)
+	}
 	fallbackUsed := false
 
 	for attempt := range maxRetries {
@@ -271,8 +276,8 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 				time.Sleep(2 * time.Second)
 				continue
 			}
-			// Try fallback on last attempt
-			if !fallbackUsed && s.FallbackProvider != nil {
+			// Try fallback on last attempt (skip when model was explicitly overridden).
+			if !fallbackUsed && !modelOverridden && s.FallbackProvider != nil {
 				slog.Warn("switching to fallback provider", "error", err)
 				activeProvider = s.FallbackProvider
 				fallbackUsed = true
@@ -419,6 +424,27 @@ func (s *Session) compactionForAttempt(attempt int) CompactionConfig {
 		return DefaultCompaction()
 	}
 	return CompactionForAttempt(attempt)
+}
+
+// resolveProvider returns a Provider for the given model name.
+// Only named models from config ([[models]]) are accepted; arbitrary model IDs
+// are rejected to prevent unintended API key leakage to unknown models.
+// Falls back to the session's default provider when the model is unknown or invalid.
+func (s *Session) resolveProvider(model string) llm.Provider {
+	if model == "" {
+		return s.Provider
+	}
+	mc := s.Config.FindModel(model)
+	if mc == nil {
+		slog.Warn("resolveProvider: model not found in config, using default", "model", model)
+		return s.Provider
+	}
+	p, err := llm.NewProviderFromModelConfig(*mc)
+	if err != nil {
+		slog.Warn("resolveProvider: failed to create provider for named model", "model", model, "error", err)
+		return s.Provider
+	}
+	return p
 }
 
 // ResolveProfileName determines which profile to use for this request.
