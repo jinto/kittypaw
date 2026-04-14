@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,35 @@ const (
 	maxBackoff        = 60 * time.Second
 	initialBackoff    = 1 * time.Second
 )
+
+// isDuplicateBotError checks if the Telegram error indicates another bot instance is running.
+func isDuplicateBotError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "terminated by other getUpdates request")
+}
+
+// duplicateBotMessage returns a user-friendly message based on system locale.
+func duplicateBotMessage() string {
+	lang := os.Getenv("LANG")
+	if lang == "" {
+		lang = os.Getenv("LC_ALL")
+	}
+	lang = strings.ToLower(lang)
+
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		return "\n  ⚠ 같은 봇 토큰으로 다른 인스턴스가 실행 중입니다.\n" +
+			"    기존 프로세스를 종료한 뒤 다시 실행하세요.\n\n" +
+			"    pkill -f kittypaw\n    kittypaw serve\n"
+	case strings.HasPrefix(lang, "ja"):
+		return "\n  ⚠ 同じボットトークンで別のインスタンスが実行中です。\n" +
+			"    既存のプロセスを終了してから再実行してください。\n\n" +
+			"    pkill -f kittypaw\n    kittypaw serve\n"
+	default:
+		return "\n  ⚠ Another instance is already running with the same bot token.\n" +
+			"    Stop the existing process and try again.\n\n" +
+			"    pkill -f kittypaw\n    kittypaw serve\n"
+	}
+}
 
 // --- Telegram API DTOs ---
 
@@ -153,6 +183,10 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if isDuplicateBotError(err) {
+				fmt.Fprint(os.Stderr, duplicateBotMessage())
+				return fmt.Errorf("telegram: duplicate bot instance")
 			}
 			slog.Warn("telegram: getUpdates failed, backing off",
 				"error", err, "backoff", backoff)
