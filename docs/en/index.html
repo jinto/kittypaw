@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KittyPaw — AI Agent Framework That Automates Without Code</title>
-  <meta name="description" content="Go-powered AI agent framework. Install skills from the gallery, fill in settings, done. Multi-channel · Local LLM · Open source.">
+  <meta name="description" content="Go-powered AI agent framework. Install skills from the gallery, fill in settings, done. Multi-channel · Local LLM · Source available.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 
   <!-- Canonical & hreflang -->
@@ -79,7 +79,7 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> Local LLM support · Multi-channel · Open source
+        <span>🏠</span> Local LLM support · Multi-channel · Source available
       </div>
     </div>
 
@@ -94,8 +94,9 @@
     </p>
 
     <div class="install-box">
+      <span class="install-prompt">$</span>
       <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
-      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent)" aria-label="Copy">📋</button>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="Copy">📋</button>
     </div>
     <p class="install-hint">macOS · Linux — paste in your terminal</p>
     <div class="hero-buttons">
@@ -135,7 +136,7 @@
   <div class="proof-inner">
     <div class="proof-item reveal">
       <span class="proof-dot"></span>
-      Open source project
+      Source available
     </div>
     <div class="proof-item reveal reveal-delay-1">
       <span class="proof-dot"></span>
@@ -403,7 +404,7 @@
   <div class="section section-center">
     <div class="reveal">
       <h2 class="section-title">What Makes KittyPaw Different</h2>
-      <p class="section-sub">Open source · Free · Self-hosted</p>
+      <p class="section-sub">Source available · Free · Self-hosted</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">

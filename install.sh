@@ -52,10 +52,10 @@ curl -fsSL --proto '=https' --tlsv1.2 "${BASE_URL}/checksums.txt" -o "${TMPDIR}/
 
 # verify checksum
 cd "$TMPDIR"
-if command -v sha256sum >/dev/null 2>&1; then
-  grep -F "$TARBALL" checksums.txt | sha256sum -c --quiet
-elif command -v shasum >/dev/null 2>&1; then
+if command -v shasum >/dev/null 2>&1; then
   grep -F "$TARBALL" checksums.txt | shasum -a 256 -c --quiet
+elif command -v sha256sum >/dev/null 2>&1; then
+  grep -F "$TARBALL" checksums.txt | sha256sum -c --quiet
 else
   echo "Error: sha256 verification requires sha256sum or shasum." >&2
   exit 1
