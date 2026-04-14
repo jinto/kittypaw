@@ -48,7 +48,7 @@ func (s *Server) handleReflectionApprove(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := engine.ApproveSkill(result); err != nil {
+	if err := engine.ApproveSkill(s.session.BaseDir, result); err != nil {
 		slog.Error("reflection approve: save failed", "key", key, "error", err)
 		writeError(w, http.StatusInternalServerError, "skill save failed")
 		return

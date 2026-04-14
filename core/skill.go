@@ -61,7 +61,12 @@ func SkillsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	skillsDir := filepath.Join(dir, "skills")
+	return SkillsDirFrom(dir)
+}
+
+// SkillsDirFrom returns the skills directory under baseDir, creating it if needed.
+func SkillsDirFrom(baseDir string) (string, error) {
+	skillsDir := filepath.Join(baseDir, "skills")
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		return "", err
 	}
@@ -70,11 +75,20 @@ func SkillsDir() (string, error) {
 
 // SaveSkill writes a skill definition and its JavaScript code to disk.
 func SaveSkill(skill *Skill, jsCode string) error {
+	dir, err := ConfigDir()
+	if err != nil {
+		return err
+	}
+	return SaveSkillTo(dir, skill, jsCode)
+}
+
+// SaveSkillTo writes a skill to the skills directory under baseDir.
+func SaveSkillTo(baseDir string, skill *Skill, jsCode string) error {
 	if err := ValidateSkillName(skill.Name); err != nil {
 		return err
 	}
 
-	dir, err := SkillsDir()
+	dir, err := SkillsDirFrom(baseDir)
 	if err != nil {
 		return err
 	}
@@ -119,10 +133,19 @@ func SaveSkill(skill *Skill, jsCode string) error {
 
 // LoadSkill loads a single skill by name. Returns nil, nil if not found.
 func LoadSkill(name string) (*Skill, string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return nil, "", err
+	}
+	return LoadSkillFrom(dir, name)
+}
+
+// LoadSkillFrom loads a skill from the skills directory under baseDir.
+func LoadSkillFrom(baseDir, name string) (*Skill, string, error) {
 	if err := ValidateSkillName(name); err != nil {
 		return nil, "", err
 	}
-	dir, err := SkillsDir()
+	dir, err := SkillsDirFrom(baseDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -131,7 +154,16 @@ func LoadSkill(name string) (*Skill, string, error) {
 
 // LoadAllSkills loads all skills from the skills directory.
 func LoadAllSkills() ([]SkillWithCode, error) {
-	dir, err := SkillsDir()
+	dir, err := ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	return LoadAllSkillsFrom(dir)
+}
+
+// LoadAllSkillsFrom loads all skills from the skills directory under baseDir.
+func LoadAllSkillsFrom(baseDir string) ([]SkillWithCode, error) {
+	dir, err := SkillsDirFrom(baseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +198,16 @@ type SkillWithCode struct {
 
 // EnableSkill sets enabled=true for a skill on disk.
 func EnableSkill(name string) error {
-	if err := ValidateSkillName(name); err != nil {
+	dir, err := ConfigDir()
+	if err != nil {
 		return err
 	}
-	skill, code, err := LoadSkill(name)
+	return EnableSkillFrom(dir, name)
+}
+
+// EnableSkillFrom sets enabled=true for a skill under baseDir.
+func EnableSkillFrom(baseDir, name string) error {
+	skill, code, err := LoadSkillFrom(baseDir, name)
 	if err != nil {
 		return err
 	}
@@ -177,15 +215,21 @@ func EnableSkill(name string) error {
 		return fmt.Errorf("skill %q not found", name)
 	}
 	skill.Enabled = true
-	return SaveSkill(skill, code)
+	return SaveSkillTo(baseDir, skill, code)
 }
 
 // DisableSkill sets enabled=false for a skill on disk.
 func DisableSkill(name string) error {
-	if err := ValidateSkillName(name); err != nil {
+	dir, err := ConfigDir()
+	if err != nil {
 		return err
 	}
-	skill, code, err := LoadSkill(name)
+	return DisableSkillFrom(dir, name)
+}
+
+// DisableSkillFrom sets enabled=false for a skill under baseDir.
+func DisableSkillFrom(baseDir, name string) error {
+	skill, code, err := LoadSkillFrom(baseDir, name)
 	if err != nil {
 		return err
 	}
@@ -193,15 +237,24 @@ func DisableSkill(name string) error {
 		return fmt.Errorf("skill %q not found", name)
 	}
 	skill.Enabled = false
-	return SaveSkill(skill, code)
+	return SaveSkillTo(baseDir, skill, code)
 }
 
 // DeleteSkill removes a skill directory entirely.
 func DeleteSkill(name string) error {
+	dir, err := ConfigDir()
+	if err != nil {
+		return err
+	}
+	return DeleteSkillFrom(dir, name)
+}
+
+// DeleteSkillFrom removes a skill directory under baseDir.
+func DeleteSkillFrom(baseDir, name string) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
 	}
-	dir, err := SkillsDir()
+	dir, err := SkillsDirFrom(baseDir)
 	if err != nil {
 		return err
 	}
@@ -210,10 +263,19 @@ func DeleteSkill(name string) error {
 
 // RollbackSkill restores the most recent archived version of a skill.
 func RollbackSkill(name string) error {
+	dir, err := ConfigDir()
+	if err != nil {
+		return err
+	}
+	return RollbackSkillFrom(dir, name)
+}
+
+// RollbackSkillFrom restores the most recent archived version under baseDir.
+func RollbackSkillFrom(baseDir, name string) error {
 	if err := ValidateSkillName(name); err != nil {
 		return err
 	}
-	dir, err := SkillsDir()
+	dir, err := SkillsDirFrom(baseDir)
 	if err != nil {
 		return err
 	}

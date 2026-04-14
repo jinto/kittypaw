@@ -24,7 +24,7 @@ func AttemptAutoFix(
 	budget *SharedTokenBudget,
 ) (*TeachResult, error) {
 	// Load current skill metadata and code from disk.
-	skill, currentCode, err := core.LoadSkill(skillName)
+	skill, currentCode, err := core.LoadSkillFrom(s.BaseDir, skillName)
 	if err != nil {
 		return nil, fmt.Errorf("load skill %q: %w", skillName, err)
 	}
@@ -83,7 +83,7 @@ func ApplyAutoFix(
 	switch s.Config.AutonomyLevel {
 	case core.AutonomyFull:
 		// Apply immediately: save to disk.
-		if err := ApproveSkill(result); err != nil {
+		if err := ApproveSkill(s.BaseDir, result); err != nil {
 			return fmt.Errorf("approve fix: %w", err)
 		}
 		// Record as already applied.

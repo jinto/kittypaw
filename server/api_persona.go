@@ -29,7 +29,7 @@ func (s *Server) handleEvolutionApprove(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid profile id")
 		return
 	}
-	if err := engine.ApproveEvolution(s.store, profileID); err != nil {
+	if err := engine.ApproveEvolution(s.session.BaseDir, s.store, profileID); err != nil {
 		writeError(w, http.StatusBadRequest, "evolution approval failed")
 		return
 	}

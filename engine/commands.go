@@ -25,7 +25,7 @@ func tryHandleCommand(ctx context.Context, text string, s *Session) (string, boo
 	case "/status":
 		return handleStatus(s), true
 	case "/skills":
-		return handleSkills(), true
+		return handleSkills(s), true
 	case "/run":
 		if len(parts) > 1 {
 			return handleRun(parts[1]), true
@@ -61,8 +61,8 @@ func handleStatus(s *Session) string {
 	)
 }
 
-func handleSkills() string {
-	skills, err := core.LoadAllSkills()
+func handleSkills(s *Session) string {
+	skills, err := core.LoadAllSkillsFrom(s.BaseDir)
 	if err != nil {
 		return fmt.Sprintf("스킬 목록 조회 실패: %s", err)
 	}
@@ -103,7 +103,7 @@ func handleTeach(ctx context.Context, description string, s *Session) string {
 	}
 
 	// Auto-approve for chat entry point (no interactive mechanism for safe skills)
-	if err := ApproveSkill(result); err != nil {
+	if err := ApproveSkill(s.BaseDir, result); err != nil {
 		return fmt.Sprintf("스킬 저장 실패: %s", err)
 	}
 

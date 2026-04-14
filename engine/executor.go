@@ -803,10 +803,10 @@ func executeDiscord(ctx context.Context, call core.SkillCall, s *Session) (strin
 
 // --- Skill Management ---
 
-func executeSkillMgmt(_ context.Context, call core.SkillCall, _ *Session) (string, error) {
+func executeSkillMgmt(_ context.Context, call core.SkillCall, s *Session) (string, error) {
 	switch call.Method {
 	case "list":
-		skills, err := core.LoadAllSkills()
+		skills, err := core.LoadAllSkillsFrom(s.BaseDir)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -853,7 +853,7 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, _ *Session) (strin
 			skill.Trigger.Cron = schedule
 		}
 
-		if err := core.SaveSkill(skill, code); err != nil {
+		if err := core.SaveSkillTo(s.BaseDir, skill, code); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		return jsonResult(map[string]any{"success": true, "name": name})
@@ -864,7 +864,7 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, _ *Session) (strin
 		}
 		var name string
 		json.Unmarshal(call.Args[0], &name)
-		if err := core.DisableSkill(name); err != nil {
+		if err := core.DisableSkillFrom(s.BaseDir, name); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		return jsonResult(map[string]any{"success": true})
@@ -875,7 +875,7 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, _ *Session) (strin
 		}
 		var name string
 		json.Unmarshal(call.Args[0], &name)
-		if err := core.RollbackSkill(name); err != nil {
+		if err := core.RollbackSkillFrom(s.BaseDir, name); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		return jsonResult(map[string]any{"success": true})
@@ -908,7 +908,7 @@ func executeProfile(ctx context.Context, call core.SkillCall, s *Session) (strin
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		// Verify profile exists on disk.
-		base, err := core.ConfigDir()
+		base, err := core.ResolveBaseDir(s.BaseDir)
 		if err != nil {
 			return jsonResult(map[string]any{"error": "config dir: " + err.Error()})
 		}
@@ -1031,7 +1031,7 @@ func executeDelegate(ctx context.Context, call core.SkillCall, s *Session) (stri
 			maxDepth = int(s.Config.Orchestration.MaxDepth)
 		}
 
-		result := executeDelegateTask(ctx, spec, s.Provider, s.Store, nil, 1, maxDepth)
+		result := executeDelegateTask(ctx, spec, s.Provider, s.Store, nil, 1, maxDepth, s.BaseDir)
 		return jsonResult(map[string]any{
 			"result":      result.Result,
 			"success":     result.Success,

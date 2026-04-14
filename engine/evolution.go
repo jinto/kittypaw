@@ -57,7 +57,7 @@ func TriggerEvolution(
 	}
 
 	// Load current SOUL.md.
-	currentSOUL := loadSOUL(profileID)
+	currentSOUL := loadSOUL(s.BaseDir, profileID)
 	if currentSOUL == "" {
 		currentSOUL = "(no SOUL.md found)"
 	}
@@ -117,7 +117,7 @@ JSON으로 응답하세요 (마크다운 펜스 없이):
 }
 
 // ApproveEvolution applies a pending persona evolution by overwriting SOUL.md.
-func ApproveEvolution(st *store.Store, profileID string) error {
+func ApproveEvolution(baseDir string, st *store.Store, profileID string) error {
 	if err := core.ValidateProfileID(profileID); err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func ApproveEvolution(st *store.Store, profileID string) error {
 	}
 
 	// Write new SOUL.md.
-	dir, err := core.ConfigDir()
+	dir, err := core.ResolveBaseDir(baseDir)
 	if err != nil {
 		return err
 	}

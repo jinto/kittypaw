@@ -131,7 +131,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, _ *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSkills(w http.ResponseWriter, _ *http.Request) {
-	skills, err := core.LoadAllSkills()
+	skills, err := core.LoadAllSkillsFrom(s.session.BaseDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -261,7 +261,7 @@ func (s *Server) handleTeachApprove(w http.ResponseWriter, r *http.Request) {
 		Trigger:     core.SkillTrigger{Type: trigger, Cron: body.Schedule},
 		Permissions: engine.DetectPermissions(body.Code),
 	}
-	if err := engine.ApproveSkill(result); err != nil {
+	if err := engine.ApproveSkill(s.session.BaseDir, result); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -278,7 +278,7 @@ func (s *Server) handleSkillsDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := core.DeleteSkill(name); err != nil {
+	if err := core.DeleteSkillFrom(s.session.BaseDir, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -295,7 +295,7 @@ func (s *Server) handleSkillEnable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := core.EnableSkill(name); err != nil {
+	if err := core.EnableSkillFrom(s.session.BaseDir, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -312,7 +312,7 @@ func (s *Server) handleSkillDisable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if err := core.DisableSkill(name); err != nil {
+	if err := core.DisableSkillFrom(s.session.BaseDir, name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -329,7 +329,7 @@ func (s *Server) handleSkillExplain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	skill, code, err := core.LoadSkill(name)
+	skill, code, err := core.LoadSkillFrom(s.session.BaseDir, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -460,7 +460,7 @@ func (s *Server) handleFixApprove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load current disk code and skill metadata for stale check.
-	skill, currentCode, loadErr := core.LoadSkill(fix.SkillID)
+	skill, currentCode, loadErr := core.LoadSkillFrom(s.session.BaseDir, fix.SkillID)
 	if loadErr != nil || skill == nil {
 		writeError(w, http.StatusNotFound, "skill not found on disk")
 		return
@@ -482,7 +482,7 @@ func (s *Server) handleFixApprove(w http.ResponseWriter, r *http.Request) {
 
 	// Apply the new code to disk using the already-loaded skill.
 	skill.Version++
-	if saveErr := core.SaveSkill(skill, fix.NewCode); saveErr != nil {
+	if saveErr := core.SaveSkillTo(s.session.BaseDir, skill, fix.NewCode); saveErr != nil {
 		// Revert DB state since disk write failed.
 		_ = s.store.RevertFix(fixID)
 		writeError(w, http.StatusInternalServerError, "failed to save fix to disk")
@@ -568,7 +568,7 @@ func (s *Server) handleSuggestionsAccept(w http.ResponseWriter, r *http.Request)
 			Format:      core.SkillFormatNative,
 			Trigger:     core.SkillTrigger{Type: trigger},
 		}
-		if err := core.SaveSkill(skill, sg.Code); err != nil {
+		if err := core.SaveSkillTo(s.session.BaseDir, skill, sg.Code); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

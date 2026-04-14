@@ -72,6 +72,7 @@ func OrchestrateRequest(
 	st *store.Store,
 	config *core.OrchestrationConfig,
 	budget *SharedTokenBudget,
+	baseDir string,
 ) (string, bool, error) {
 	if !config.Enabled {
 		return "", false, nil
@@ -103,7 +104,7 @@ func OrchestrateRequest(
 	}
 
 	// Execute delegations in parallel.
-	results, err := fanOutDelegations(ctx, decision.Tasks, provider, st, budget, maxDepth, config)
+	results, err := fanOutDelegations(ctx, decision.Tasks, provider, st, budget, maxDepth, config, baseDir)
 	if err != nil {
 		return "", false, fmt.Errorf("delegation fan-out: %w", err)
 	}
@@ -179,6 +180,7 @@ func fanOutDelegations(
 	budget *SharedTokenBudget,
 	maxDepth int,
 	config *core.OrchestrationConfig,
+	baseDir string,
 ) ([]DelegateResult, error) {
 	maxDelegates := int(config.MaxDelegates)
 	if maxDelegates == 0 {
@@ -202,7 +204,7 @@ func fanOutDelegations(
 			childCtx, cancel := context.WithTimeout(gCtx, 60*time.Second)
 			defer cancel()
 
-			result := executeDelegateTask(childCtx, task, provider, st, budget, 1, maxDepth)
+			result := executeDelegateTask(childCtx, task, provider, st, budget, 1, maxDepth, baseDir)
 			results[i] = result
 
 			// If budget exhausted, cancel all remaining siblings.
@@ -227,6 +229,7 @@ func executeDelegateTask(
 	st *store.Store,
 	budget *SharedTokenBudget,
 	depth, maxDepth int,
+	baseDir string,
 ) DelegateResult {
 	result := DelegateResult{
 		ProfileID: task.ProfileID,
@@ -255,7 +258,7 @@ func executeDelegateTask(
 	}
 
 	// Build system prompt: try SOUL.md, fallback to description.
-	systemPrompt := loadSOUL(task.ProfileID)
+	systemPrompt := loadSOUL(baseDir, task.ProfileID)
 	if systemPrompt == "" {
 		systemPrompt = fmt.Sprintf("You are the %q profile. %s", meta.ID, meta.Description)
 	}
@@ -299,8 +302,8 @@ func executeDelegateTask(
 
 // loadSOUL reads ~/.gopaw/profiles/{id}/SOUL.md via core.LoadProfile.
 // Returns "" on any failure.
-func loadSOUL(profileID string) string {
-	base, err := core.ConfigDir()
+func loadSOUL(baseDir, profileID string) string {
+	base, err := core.ResolveBaseDir(baseDir)
 	if err != nil {
 		return ""
 	}

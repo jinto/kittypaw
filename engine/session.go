@@ -38,6 +38,7 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
+	BaseDir          string             // tenant base directory (e.g. ~/.gopaw/tenants/alice/)
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
 	Indexer          Indexer            // nil when workspace indexer is not initialized
@@ -177,7 +178,7 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 
 	// Orchestration gate: PM agent may delegate to profiles.
 	if response, handled, orchErr := OrchestrateRequest(
-		ctx, eventText, s.Provider, s.Store, &s.Config.Orchestration, s.Budget,
+		ctx, eventText, s.Provider, s.Store, &s.Config.Orchestration, s.Budget, s.BaseDir,
 	); orchErr != nil {
 		slog.Warn("orchestration error, falling through", "error", orchErr)
 	} else if handled {
@@ -221,7 +222,7 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 
 		// Resolve and load profile.
 		profileName := ResolveProfileName(s.Config, channelName, agentID, mentionOverride, s.Store)
-		profile := loadProfileForPrompt(profileName, s.Config)
+		profile := loadProfileForPrompt(profileName, s.Config, s.BaseDir)
 
 		// Build prompt
 		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection)
@@ -459,8 +460,9 @@ func ResolveProfileName(
 }
 
 // loadProfileForPrompt loads a profile from disk and enriches it with config nick.
-func loadProfileForPrompt(profileName string, config *core.Config) *core.Profile {
-	base, err := core.ConfigDir()
+// baseDir is the tenant's base directory; falls back to ConfigDir() if empty.
+func loadProfileForPrompt(profileName string, config *core.Config, baseDir string) *core.Profile {
+	base, err := core.ResolveBaseDir(baseDir)
 	if err != nil {
 		slog.Warn("failed to get config dir for profile", "error", err)
 		return &core.Profile{ID: profileName, Soul: core.Presets["default-assistant"].Soul}

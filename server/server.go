@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -45,6 +46,12 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		}
 	}
 
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		// ConfigDir only fails if $HOME is unset — catastrophic for the server.
+		panic(fmt.Sprintf("fatal: config dir unavailable: %v", err))
+	}
+
 	session := &engine.Session{
 		Provider:         provider,
 		FallbackProvider: fallback,
@@ -52,6 +59,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		Store:            st,
 		Config:           cfg,
 		McpRegistry:      mcpReg,
+		BaseDir:          cfgDir,
 	}
 	if err := session.RefreshAllowedPaths(); err != nil {
 		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
