@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -63,6 +64,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newServeCmd(),
+		newStopCmd(),
 		newInitCmd(),
 		newChatCmd(),
 		newStatusCmd(),
@@ -108,6 +110,15 @@ func runServe(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	defer st.Close()
+
+	// Check port availability before starting channels.
+	if err := checkPort(flagBind); err != nil {
+		return err
+	}
+
+	// Write PID file so `kittypaw stop` can find us.
+	writePidFile()
+	defer removePidFile()
 
 	// Resolve fallback provider if a secondary model is configured.
 	var fallback llm.Provider
@@ -807,6 +818,7 @@ func runDaemonStart(_ *cobra.Command, _ []string) error {
 	}
 
 	proc := exec.Command(exe, "serve")
+	proc.Env = append(os.Environ(), "KITTYPAW_DAEMON=1")
 	proc.Stdout = nil
 	proc.Stderr = nil
 	setSysProcAttr(proc)
@@ -885,6 +897,127 @@ func runDaemonStatus(_ *cobra.Command, _ []string) error {
 		os.Remove(pidPath)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// stop
+// ---------------------------------------------------------------------------
+
+func newStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the running server",
+		RunE:  runStop,
+	}
+}
+
+func runStop(_ *cobra.Command, _ []string) error {
+	pidPath, err := daemonPidPath()
+	if err != nil {
+		return err
+	}
+
+	pid, ok := readPid(pidPath)
+	if !ok || !processRunning(pid) {
+		lang := detectLang()
+		switch {
+		case strings.HasPrefix(lang, "ko"):
+			fmt.Println("실행 중인 KittyPaw가 없습니다.")
+		case strings.HasPrefix(lang, "ja"):
+			fmt.Println("実行中のKittyPawはありません。")
+		default:
+			fmt.Println("No running KittyPaw found.")
+		}
+		if ok {
+			os.Remove(pidPath)
+		}
+		return nil
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("find process: %w", err)
+	}
+
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("stop process %d: %w", pid, err)
+	}
+
+	os.Remove(pidPath)
+	fmt.Printf("Stopped (pid %d).\n", pid)
+	return nil
+}
+
+// checkPort verifies that the bind address is available before starting
+// channels. This avoids wasting time on Telegram/Slack connections only
+// to fail on port conflict.
+func checkPort(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		if isAddrInUse(err) {
+			printPortInUseMessage(addr)
+		}
+		return err
+	}
+	ln.Close()
+	return nil
+}
+
+func isAddrInUse(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "address already in use")
+}
+
+func printPortInUseMessage(addr string) {
+	lang := detectLang()
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		fmt.Printf("\n  ⚠ %s 포트가 이미 사용 중입니다.\n", addr)
+		fmt.Println("    이미 실행 중인 KittyPaw가 있을 수 있습니다.")
+		fmt.Println()
+		fmt.Println("    kittypaw stop     # 기존 서버 종료")
+		fmt.Println("    kittypaw serve    # 다시 시작")
+		fmt.Println()
+	case strings.HasPrefix(lang, "ja"):
+		fmt.Printf("\n  ⚠ ポート %s は既に使用中です。\n", addr)
+		fmt.Println("    KittyPawが既に実行中の可能性があります。")
+		fmt.Println()
+		fmt.Println("    kittypaw stop     # サーバーを停止")
+		fmt.Println("    kittypaw serve    # 再起動")
+		fmt.Println()
+	default:
+		fmt.Printf("\n  ⚠ Port %s is already in use.\n", addr)
+		fmt.Println("    Another KittyPaw instance may be running.")
+		fmt.Println()
+		fmt.Println("    kittypaw stop     # stop the existing server")
+		fmt.Println("    kittypaw serve    # restart")
+		fmt.Println()
+	}
+}
+
+func writePidFile() {
+	// When launched via `daemon start`, the parent manages the PID file.
+	if os.Getenv("KITTYPAW_DAEMON") != "" {
+		return
+	}
+	pidPath, err := daemonPidPath()
+	if err != nil {
+		return
+	}
+	os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+func removePidFile() {
+	if os.Getenv("KITTYPAW_DAEMON") != "" {
+		return
+	}
+	pidPath, err := daemonPidPath()
+	if err != nil {
+		return
+	}
+	// Only remove if it's our PID (another instance may have overwritten it).
+	if pid, ok := readPid(pidPath); ok && pid == os.Getpid() {
+		os.Remove(pidPath)
+	}
 }
 
 // ---------------------------------------------------------------------------
