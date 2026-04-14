@@ -140,69 +140,95 @@ func runServe(_ *cobra.Command, _ []string) error {
 // ---------------------------------------------------------------------------
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	flags := &initFlags{}
+	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize config and data directories",
-		RunE:  runInit,
+		Short: "Initialize config with interactive wizard",
+		Long:  "Set up GoPaw interactively (LLM, Telegram, workspace) or via flags for CI.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runInit(flags)
+		},
 	}
+	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openrouter|local)")
+	cmd.Flags().StringVar(&flags.apiKey, "api-key", "", "LLM API key")
+	cmd.Flags().StringVar(&flags.localURL, "local-url", "", "Local LLM URL (default: http://localhost:11434/v1)")
+	cmd.Flags().StringVar(&flags.localModel, "local-model", "", "Local LLM model name")
+	cmd.Flags().StringVar(&flags.telegramToken, "telegram-token", "", "Telegram bot token")
+	cmd.Flags().StringVar(&flags.telegramChatID, "telegram-chat-id", "", "Telegram chat ID")
+	cmd.Flags().StringVar(&flags.workspace, "workspace", "", "Workspace directory path")
+	cmd.Flags().BoolVar(&flags.httpAccess, "http-access", false, "Grant HTTP access capability")
+	cmd.Flags().BoolVar(&flags.force, "force", false, "Overwrite existing config without confirmation")
+	return cmd
 }
 
-func runInit(_ *cobra.Command, _ []string) error {
+func runInit(flags *initFlags) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 
 	gopawDir := filepath.Join(home, ".gopaw")
-	dataDir := filepath.Join(gopawDir, "data")
-	skillsDir := filepath.Join(gopawDir, "skills")
-
-	for _, dir := range []string{gopawDir, dataDir, skillsDir} {
+	for _, dir := range []string{gopawDir, filepath.Join(gopawDir, "data"), filepath.Join(gopawDir, "skills")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
-		fmt.Printf("  directory: %s\n", dir)
 	}
 
-	configPath := filepath.Join(gopawDir, "config.toml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		if err := os.WriteFile(configPath, []byte(defaultConfigTOML), 0o600); err != nil {
-			return fmt.Errorf("write config: %w", err)
+	// Check existing config.
+	cfgPath := filepath.Join(gopawDir, "config.toml")
+	var existing *core.Config
+	if cfg, err := core.LoadConfig(cfgPath); err == nil {
+		existing = cfg
+		if !flags.force && flags.provider == "" {
+			fmt.Println()
+			fmt.Println("  Existing configuration found.")
+			fmt.Printf("  LLM: %s (%s)\n", cfg.LLM.Provider, cfg.LLM.Model)
+			for _, ch := range cfg.Channels {
+				fmt.Printf("  Channel: %s\n", ch.ChannelType)
+			}
+			fmt.Println()
+
+			scanner := bufio.NewScanner(os.Stdin)
+			if !promptYesNo(scanner, "  Reconfigure?", false) {
+				fmt.Println("  Keeping existing config.")
+				return nil
+			}
 		}
-		fmt.Printf("  created:   %s\n", configPath)
-	} else {
-		fmt.Printf("  exists:    %s\n", configPath)
 	}
 
-	// Create default profile with SOUL.md.
+	// Run wizard.
+	result, err := runWizard(*flags, existing)
+	if err != nil {
+		return err
+	}
+
+	// Merge and write config.
+	base := core.DefaultConfig()
+	if existing != nil {
+		base = *existing
+	}
+	merged := core.MergeWizardSettings(&base, result)
+	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	// HTTP access grant (requires store).
+	if result.HTTPAccess {
+		if st, err := openStore(); err == nil {
+			_ = st.GrantCapability("http")
+			st.Close()
+		}
+	}
+
+	// Ensure default profile.
 	if err := core.EnsureDefaultProfile(gopawDir); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
-	fmt.Printf("  profile:   %s\n", filepath.Join(gopawDir, "profiles", "default", "SOUL.md"))
 
-	fmt.Println("\ngopaw initialized. Edit config.toml to set your LLM API key.")
+	fmt.Printf("\n  config saved: %s\n", cfgPath)
+	fmt.Println("  next: gopaw serve or gopaw chat")
 	return nil
 }
-
-const defaultConfigTOML = `# GoPaw configuration
-# See https://github.com/jinto/gopaw for documentation.
-
-[llm]
-provider = "anthropic"
-api_key  = ""
-model    = "claude-sonnet-4-20250514"
-max_tokens = 4096
-
-[sandbox]
-timeout_secs   = 30
-memory_limit_mb = 64
-
-autonomy_level = "full"
-
-[features]
-progressive_retry  = true
-context_compaction = true
-`
 
 // ---------------------------------------------------------------------------
 // chat
