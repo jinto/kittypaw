@@ -67,7 +67,7 @@ const Onboarding = {
   stepWelcome() {
     const card = el('div', { className: 'card card--center' });
     card.innerHTML = `
-      <h1>Go<span class="accent">Paw</span></h1>
+      <h1>Kitty<span class="accent">Paw</span></h1>
       <p class="sub mt-12 mb-40">AI \uC790\uB3D9\uD654\uB97C 3\uBD84 \uC548\uC5D0 \uC2DC\uC791\uD558\uC138\uC694</p>`;
     const btn = el('button', {
       className: 'btn btn--primary',

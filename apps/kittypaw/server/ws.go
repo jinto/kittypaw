@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -73,7 +72,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	permCh := make(chan bool, 1)
 
 	// Multi-turn loop
-	var mu sync.Mutex
 	for {
 		readCtx, readCancel := context.WithTimeout(ctx, wsIdleTimeout)
 		_, msgBytes, err := conn.Read(readCtx)
@@ -108,15 +106,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				Payload: payload,
 			}
 
-			// Accumulate full text from streaming tokens.
-			var fullText strings.Builder
-
 			// Build per-call options with streaming and permission callbacks.
 			runOpts := &engine.RunOptions{
 				OnToken: func(token string) {
-					mu.Lock()
-					fullText.WriteString(token)
-					mu.Unlock()
 					sendWsMsg(ctx, conn, core.NewTokenMsg(token))
 				},
 				OnPermission: func(pCtx context.Context, description, resource string) (bool, error) {
@@ -139,14 +131,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Prefer streamed text; fall back to engine output.
-			mu.Lock()
-			ft := fullText.String()
-			mu.Unlock()
-			if ft == "" {
-				ft = result
-			}
-			sendWsMsg(ctx, conn, core.NewDoneMsg(ft, nil))
+			// Send execution result as final message, replacing streamed tokens.
+			sendWsMsg(ctx, conn, core.NewDoneMsg(result, nil))
 
 		case core.WsMsgPermit:
 			ok := clientMsg.OK != nil && *clientMsg.OK

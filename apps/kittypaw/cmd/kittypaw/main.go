@@ -144,7 +144,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.New(cfg, st, provider, fallback, sbox, mcpReg)
+	srv := server.New(cfg, st, provider, fallback, sbox, mcpReg, version)
 	srv.StartChannels(ctx, cfg.Channels)
 
 	// Start HTTP server (blocks until shutdown signal).
@@ -264,12 +264,31 @@ func runChat(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Check if daemon was already running before we connect.
+	wasRunning := conn.IsRunning()
+
 	// Ensure daemon is running (auto-starts if needed).
 	if _, err := conn.Connect(); err != nil {
 		return err
 	}
 
 	ctx := context.Background()
+
+	// Show server info.
+	cl := client.New(conn.BaseURL, conn.APIKey)
+	srvVer, model, channels, _ := cl.ServerInfo()
+	fmt.Printf("KittyPaw chat (cli %s · server %s · %s", version, srvVer, model)
+	if len(channels) > 0 {
+		fmt.Printf(" · %s", strings.Join(channels, ","))
+	}
+	fmt.Println(")")
+
+	if version != srvVer {
+		fmt.Println("  ⚠ CLI and server versions differ. Consider restarting: kittypaw stop && kittypaw serve")
+	}
+	fmt.Println()
+
 	cs, err := client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
 	if err != nil {
 		return err
@@ -277,9 +296,6 @@ func runChat(_ *cobra.Command, _ []string) error {
 	defer cs.Close()
 
 	scanner := bufio.NewScanner(os.Stdin)
-
-	fmt.Println("KittyPaw interactive chat (Ctrl-D to exit)")
-	fmt.Println()
 
 	for {
 		fmt.Print("you> ")
@@ -292,9 +308,18 @@ func runChat(_ *cobra.Command, _ []string) error {
 		}
 
 		fmt.Print("paw> ")
+		dots := 0
 		err := cs.Send(text, client.ChatOptions{
-			OnToken: func(t string) { fmt.Print(t) },
-			OnDone:  func(_ string, _ *int64) { fmt.Print("\n\n") },
+			OnToken: func(_ string) {
+				if dots < 3 {
+					fmt.Print(".")
+					dots++
+				}
+			},
+			OnDone: func(result string, _ *int64) {
+				fmt.Print("\r\033[K") // clear the "paw> ..." line
+				fmt.Printf("paw> %s\n\n", result)
+			},
 			OnError: func(msg string) { fmt.Fprintf(os.Stderr, "\nerror: %s\n", msg) },
 		})
 		if err != nil {
@@ -306,7 +331,38 @@ func runChat(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Println()
+
+	// If we auto-started the daemon, offer to stop it.
+	if !wasRunning && flagRemote == "" {
+		if isTTY() {
+			chatScanner := bufio.NewScanner(os.Stdin)
+			if promptYesNo(chatScanner, "Stop the daemon?", true) {
+				stopDaemon()
+			}
+		} else {
+			stopDaemon()
+		}
+	}
+
 	return nil
+}
+
+func stopDaemon() {
+	pidPath, err := daemonPidPath()
+	if err != nil {
+		return
+	}
+	pid, ok := readPid(pidPath)
+	if !ok || !processRunning(pid) {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	proc.Signal(syscall.SIGTERM)
+	os.Remove(pidPath)
+	fmt.Println("Daemon stopped.")
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
 ```bash
 kittypaw init          # interactive setup (LLM, Telegram, workspace)
 kittypaw serve         # start the server
+kittypaw chat          # interactive chat (auto-starts daemon)
 ```
 
 ## Skills

@@ -345,7 +345,15 @@ func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) isOnboardingCompleted() bool {
 	v, ok, _ := s.store.GetUserContext("onboarding_completed")
-	return ok && v == "true"
+	if ok && v == "true" {
+		return true
+	}
+	// CLI `kittypaw init` writes config.toml but doesn't set the DB flag.
+	// Treat a configured LLM as onboarding complete.
+	s.configMu.RLock()
+	configured := s.config.LLM.APIKey != "" || s.config.LLM.BaseURL != ""
+	s.configMu.RUnlock()
+	return configured
 }
 
 // requireOnboardingIncomplete blocks mutating setup endpoints after
