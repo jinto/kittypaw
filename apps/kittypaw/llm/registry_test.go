@@ -3,7 +3,7 @@ package llm
 import (
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestNewProviderClaude(t *testing.T) {

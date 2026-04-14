@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // run executes JS code in an in-process goja VM.

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // Vision/Image skill constants.

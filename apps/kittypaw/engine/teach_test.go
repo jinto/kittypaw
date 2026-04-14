@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 )
 
 func TestStripFences(t *testing.T) {

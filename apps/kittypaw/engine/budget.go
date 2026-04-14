@@ -3,7 +3,7 @@ package engine
 import (
 	"sync/atomic"
 
-	"github.com/jinto/gopaw/llm"
+	"github.com/jinto/kittypaw/llm"
 )
 
 // SharedTokenBudget tracks shared token consumption across auto-fix,

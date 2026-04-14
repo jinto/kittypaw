@@ -1,11 +1,11 @@
-# GoPaw
+# KittyPaw
 
-Go port of KittyPaw — an AI agent framework with JavaScript sandbox execution, multi-channel messaging, and skill learning.
+AI agent framework with JavaScript sandbox execution, multi-channel messaging, and skill learning.
 
 ## Architecture
 
 ```
-cmd/gopaw/     CLI binary (Cobra)
+cmd/kittypaw/  CLI binary (Cobra)
 core/          Types, config, skill management, persona profiles/presets, tenant isolation, WebSocket protocol, setup wizard shared logic
 llm/           LLM provider abstraction (Claude, OpenAI, Ollama)
 mcp/           MCP client registry (external tool server connections)
@@ -20,14 +20,14 @@ client/        REST/WS client + DaemonConn (thin client: auto daemon discovery/s
 ## Build & Run
 
 ```bash
-go build ./cmd/gopaw
-./gopaw init                # interactive 4-step wizard (LLM, Telegram, workspace, HTTP)
-./gopaw serve --bind :3000
+go build ./cmd/kittypaw
+./kittypaw init                # interactive 4-step wizard (LLM, Telegram, workspace, HTTP)
+./kittypaw serve --bind :3000
 ```
 
 Non-interactive setup for CI:
 ```bash
-./gopaw init --provider anthropic --api-key $ANTHROPIC_API_KEY
+./kittypaw init --provider anthropic --api-key $ANTHROPIC_API_KEY
 ```
 
 ## Key Design Decisions (vs Rust original)
@@ -43,9 +43,9 @@ Non-interactive setup for CI:
 ## Skill Install
 
 ```bash
-gopaw install https://github.com/owner/repo   # install from GitHub
-gopaw install /path/to/local/skill             # install from local directory
-gopaw search <keyword>                          # search skill registry
+kittypaw install https://github.com/owner/repo   # install from GitHub
+kittypaw install /path/to/local/skill             # install from local directory
+kittypaw search <keyword>                          # search skill registry
 ```
 
 Supports two source formats:
@@ -63,8 +63,8 @@ Callback responses route through channel-internal `sync.Map` (not `eventCh`) to 
 
 ## Config
 
-TOML config at `~/.gopaw/config.toml`. See `core/config.go` for all options.
-Server-wide settings (bind, master API key, tenants) go in `~/.gopaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
+TOML config at `~/.kittypaw/config.toml`. See `core/config.go` for all options.
+Server-wide settings (bind, master API key, tenants) go in `~/.kittypaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
 
 Registry URL (default: GitHub `kittypaw/skills`):
 ```toml

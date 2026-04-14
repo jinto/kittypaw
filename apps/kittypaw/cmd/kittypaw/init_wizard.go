@@ -13,11 +13,11 @@ import (
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 )
 
-// initFlags holds the cobra flag values for `gopaw init`.
+// initFlags holds the cobra flag values for `kittypaw init`.
 type initFlags struct {
 	provider       string
 	apiKey         string
@@ -43,14 +43,14 @@ func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error
 	// TTY check: if not a terminal and no --provider flag, bail.
 	if !isTTY() {
 		return w, fmt.Errorf("not a terminal — use flags for non-interactive setup\n" +
-			"  example: gopaw init --provider anthropic --api-key $ANTHROPIC_API_KEY\n" +
-			"  run gopaw init --help for all options")
+			"  example: kittypaw init --provider anthropic --api-key $ANTHROPIC_API_KEY\n" +
+			"  run kittypaw init --help for all options")
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 
 	fmt.Println()
-	fmt.Println("  GoPaw — AI Automation Framework")
+	fmt.Println("  KittyPaw — AI Automation Framework")
 	fmt.Println()
 
 	// [1/4] LLM
@@ -65,7 +65,7 @@ func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error
 	fmt.Println()
 	fmt.Println("  [3/4] KakaoTalk")
 	fmt.Println("  > KakaoTalk requires the relay server. Skipping.")
-	fmt.Println("    Configure via web onboarding after `gopaw serve`.")
+	fmt.Println("    Configure via web onboarding after `kittypaw serve`.")
 
 	// [4/4] Workspace & HTTP
 	wizardWorkspaceHTTP(scanner, existing, &w)

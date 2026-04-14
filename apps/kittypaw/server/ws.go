@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/engine"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 	"nhooyr.io/websocket"
 )
 

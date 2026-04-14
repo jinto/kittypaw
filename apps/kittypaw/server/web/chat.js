@@ -1,4 +1,4 @@
-// GoPaw Chat Panel — WS streaming + permission modal + reconnect
+// KittyPaw Chat Panel — WS streaming + permission modal + reconnect
 
 const Chat = {
   ws: null,

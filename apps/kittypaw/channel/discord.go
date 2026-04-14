@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
 )
 
@@ -145,8 +145,8 @@ func (d *DiscordChannel) runGateway(ctx context.Context, eventCh chan<- core.Eve
 		Intents: 1 << 9 | 1 << 15, // GUILD_MESSAGES | MESSAGE_CONTENT
 		Properties: discordIdentifyProperties{
 			OS:      "linux",
-			Browser: "gopaw",
-			Device:  "gopaw",
+			Browser: "kittypaw",
+			Device:  "kittypaw",
 		},
 	}
 	if err := d.sendPayload(ctx, conn, 2, identify); err != nil {

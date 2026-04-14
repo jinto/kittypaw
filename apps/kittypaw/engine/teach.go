@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 )
 
 // maxCodeSize caps generated code at 64KB to catch truncated LLM output.
@@ -100,7 +100,7 @@ func buildTeachPrompt() string {
 		}
 	}
 
-	return fmt.Sprintf(`You are a JavaScript code generator for GoPaw skills.
+	return fmt.Sprintf(`You are a JavaScript code generator for KittyPaw skills.
 
 Your task: generate a single JavaScript function body that implements the user's request.
 

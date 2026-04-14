@@ -1,4 +1,4 @@
-// GoPaw Web App — Router + Auth Bootstrap + Tab Navigation
+// KittyPaw Web App — Router + Auth Bootstrap + Tab Navigation
 
 const App = {
   root: null,
@@ -134,7 +134,7 @@ const App = {
   _showDashboard(container) {
     container.innerHTML = `
       <div class="dashboard">
-        <h1>\u{1F43E} GoPaw Dashboard</h1>
+        <h1>\u{1F43E} KittyPaw Dashboard</h1>
         <p class="hint">Auto-refreshes every 30s</p>
         <div class="stats-grid" id="stats"></div>
         <h2>Agents</h2>

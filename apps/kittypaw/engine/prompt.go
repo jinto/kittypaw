@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jinto/gopaw/core"
-	mcpreg "github.com/jinto/gopaw/mcp"
+	"github.com/jinto/kittypaw/core"
+	mcpreg "github.com/jinto/kittypaw/mcp"
 )
 
 // SystemPrompt is the base prompt that instructs the LLM to generate JavaScript code.
-const SystemPrompt = `You are GoPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
+const SystemPrompt = `You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
 
 ## How you work
 1. You receive an event (message, command, etc.)

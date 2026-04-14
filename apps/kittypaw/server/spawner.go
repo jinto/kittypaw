@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/gopaw/channel"
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/channel"
+	"github.com/jinto/kittypaw/core"
 )
 
 // stopTimeout is the maximum time to wait for a channel goroutine to exit

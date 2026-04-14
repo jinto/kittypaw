@@ -94,7 +94,7 @@ func ResolveGitHubSource(baseURL, owner, repo string) (*SourceResult, error) {
 		}
 
 		// Write to temp dir
-		tmpDir, err := os.MkdirTemp("", "gopaw-github-"+repo+"-")
+		tmpDir, err := os.MkdirTemp("", "kittypaw-github-"+repo+"-")
 		if err != nil {
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}

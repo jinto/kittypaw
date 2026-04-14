@@ -1,4 +1,4 @@
-// Package channel provides messaging channel backends for gopaw.
+// Package channel provides messaging channel backends for kittypaw.
 //
 // Each channel is an event producer: it listens for inbound messages
 // from a specific platform (Telegram, Slack, Discord, etc.) and emits
@@ -9,7 +9,7 @@ package channel
 import (
 	"context"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // Channel is the interface for all messaging channel backends.

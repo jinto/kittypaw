@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/store"
 )
 
 // ReflectionResult holds the parsed output of the LLM intent analysis.

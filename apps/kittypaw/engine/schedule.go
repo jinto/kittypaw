@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 	"github.com/robfig/cron/v3"
 )
 

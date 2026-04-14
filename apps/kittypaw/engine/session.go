@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
-	mcpreg "github.com/jinto/gopaw/mcp"
-	"github.com/jinto/gopaw/sandbox"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
+	mcpreg "github.com/jinto/kittypaw/mcp"
+	"github.com/jinto/kittypaw/sandbox"
+	"github.com/jinto/kittypaw/store"
 )
 
 const maxRetries = 3
@@ -39,7 +39,7 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
-	BaseDir          string             // tenant base directory (e.g. ~/.gopaw/tenants/alice/)
+	BaseDir          string             // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
 	Indexer          Indexer            // nil when workspace indexer is not initialized

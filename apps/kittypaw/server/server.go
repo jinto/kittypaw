@@ -13,13 +13,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jinto/gopaw/channel"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/engine"
-	"github.com/jinto/gopaw/llm"
-	mcpreg "github.com/jinto/gopaw/mcp"
-	"github.com/jinto/gopaw/sandbox"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/channel"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
+	"github.com/jinto/kittypaw/llm"
+	mcpreg "github.com/jinto/kittypaw/mcp"
+	"github.com/jinto/kittypaw/sandbox"
+	"github.com/jinto/kittypaw/store"
 )
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
