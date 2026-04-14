@@ -41,7 +41,7 @@ echo "Installing ${BINARY} v${VERSION} (${OS}/${ARCH})..."
 
 # ----- download & verify -----
 
-TARBALL="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
+TARBALL="${BINARY}_${OS}_${ARCH}.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
 TMPDIR="$(mktemp -d)"
