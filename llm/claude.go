@@ -141,7 +141,11 @@ func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage,
 		"messages":   apiMsgs,
 	}
 	if system != "" {
-		body["system"] = system
+		body["system"] = []map[string]any{{
+			"type":          "text",
+			"text":          system,
+			"cache_control": map[string]string{"type": "ephemeral"},
+		}}
 	}
 	if stream {
 		body["stream"] = true
@@ -211,8 +215,10 @@ type claudeResponse struct {
 		Text string `json:"text"`
 	} `json:"content"`
 	Usage struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
+		InputTokens              int64 `json:"input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 	Model string `json:"model"`
 }
@@ -231,9 +237,11 @@ func (c *ClaudeProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 	return &Response{
 		Content: content.String(),
 		Usage: &TokenUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-			Model:        resp.Model,
+			InputTokens:              resp.Usage.InputTokens,
+			OutputTokens:             resp.Usage.OutputTokens,
+			CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
+			Model:                    resp.Model,
 		},
 	}, nil
 }
@@ -262,7 +270,9 @@ type sseMessageStart struct {
 	Message struct {
 		Model string `json:"model"`
 		Usage struct {
-			InputTokens int64 `json:"input_tokens"`
+			InputTokens              int64 `json:"input_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 }
@@ -278,11 +288,13 @@ func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
 	var (
-		content      strings.Builder
-		eventType    string
-		model        string
-		inputTokens  int64
-		outputTokens int64
+		content                  strings.Builder
+		eventType                string
+		model                    string
+		inputTokens              int64
+		outputTokens             int64
+		cacheCreationInputTokens int64
+		cacheReadInputTokens     int64
 	)
 
 	for scanner.Scan() {
@@ -305,6 +317,8 @@ func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 			if err := json.Unmarshal([]byte(data), &msg); err == nil {
 				model = msg.Message.Model
 				inputTokens = msg.Message.Usage.InputTokens
+				cacheCreationInputTokens = msg.Message.Usage.CacheCreationInputTokens
+				cacheReadInputTokens = msg.Message.Usage.CacheReadInputTokens
 			}
 
 		case "content_block_delta":
@@ -341,9 +355,11 @@ func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Re
 	return &Response{
 		Content: content.String(),
 		Usage: &TokenUsage{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			Model:        model,
+			InputTokens:              inputTokens,
+			OutputTokens:             outputTokens,
+			CacheCreationInputTokens: cacheCreationInputTokens,
+			CacheReadInputTokens:     cacheReadInputTokens,
+			Model:                    model,
 		},
 	}, nil
 }

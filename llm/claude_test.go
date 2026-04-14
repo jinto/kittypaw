@@ -2,7 +2,9 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,6 +126,41 @@ func TestClaudeSSEStream(t *testing.T) {
 	}
 }
 
+func TestClaudeSSEStreamWithCacheMetrics(t *testing.T) {
+	sseBody := sseLines(
+		"event: message_start",
+		`data: {"type":"message_start","message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":30,"cache_creation_input_tokens":0,"cache_read_input_tokens":2500}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"cached"}}`,
+		"",
+		"event: message_delta",
+		`data: {"type":"message_delta","usage":{"output_tokens":3}}`,
+		"",
+		"event: message_stop",
+		`data: {"type":"message_stop"}`,
+	)
+
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, sseBody)
+	})
+	defer srv.Close()
+
+	resp, err := p.GenerateStream(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	}, func(_ string) {})
+	if err != nil {
+		t.Fatalf("GenerateStream() error: %v", err)
+	}
+	if resp.Usage.CacheCreationInputTokens != 0 {
+		t.Errorf("CacheCreationInputTokens = %d, want 0", resp.Usage.CacheCreationInputTokens)
+	}
+	if resp.Usage.CacheReadInputTokens != 2500 {
+		t.Errorf("CacheReadInputTokens = %d, want 2500", resp.Usage.CacheReadInputTokens)
+	}
+}
+
 func TestClaudeSSEStreamNilCallback(t *testing.T) {
 	// Calling parseSSEStream with nil onToken must not panic.
 	sseBody := sseLines(
@@ -222,12 +259,71 @@ func TestClaudeSSEErrorAfterPartialContent(t *testing.T) {
 	}
 }
 
+func TestClaudeJSONResponseWithCacheMetrics(t *testing.T) {
+	body := `{
+		"content": [{"type":"text","text":"cached reply"}],
+		"usage": {
+			"input_tokens": 15,
+			"output_tokens": 7,
+			"cache_creation_input_tokens": 2500,
+			"cache_read_input_tokens": 0
+		},
+		"model": "claude-sonnet-4-20250514"
+	}`
+
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if resp.Usage.CacheCreationInputTokens != 2500 {
+		t.Errorf("CacheCreationInputTokens = %d, want 2500", resp.Usage.CacheCreationInputTokens)
+	}
+	if resp.Usage.CacheReadInputTokens != 0 {
+		t.Errorf("CacheReadInputTokens = %d, want 0", resp.Usage.CacheReadInputTokens)
+	}
+}
+
+func TestClaudeJSONResponseBackwardCompat(t *testing.T) {
+	// Responses without cache fields must still parse cleanly with zero values.
+	body := `{
+		"content": [{"type":"text","text":"ok"}],
+		"usage": {"input_tokens": 10, "output_tokens": 5},
+		"model": "claude-3-opus-20240229"
+	}`
+
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if resp.Usage.CacheCreationInputTokens != 0 {
+		t.Errorf("CacheCreationInputTokens = %d, want 0", resp.Usage.CacheCreationInputTokens)
+	}
+	if resp.Usage.CacheReadInputTokens != 0 {
+		t.Errorf("CacheReadInputTokens = %d, want 0", resp.Usage.CacheReadInputTokens)
+	}
+}
+
 func TestClaudeSystemMessageSplit(t *testing.T) {
 	var receivedBody string
 	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
-		b := make([]byte, 4096)
-		n, _ := r.Body.Read(b)
-		receivedBody = string(b[:n])
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"content":[{"text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1},"model":"claude-3-opus-20240229"}`)
 	})
@@ -246,6 +342,22 @@ func TestClaudeSystemMessageSplit(t *testing.T) {
 	// System messages should NOT appear in the messages array
 	if strings.Contains(receivedBody, `"role":"system"`) {
 		t.Error("system role should not be in messages array for Claude API")
+	}
+	// System must be content blocks with cache_control, not a plain string.
+	if !strings.Contains(receivedBody, `"cache_control"`) {
+		t.Error("system blocks missing 'cache_control'")
+	}
+	if !strings.Contains(receivedBody, `"ephemeral"`) {
+		t.Error("cache_control should be ephemeral type")
+	}
+	// Verify it's an array (content blocks format), not a string.
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(receivedBody), &parsed); err != nil {
+		t.Fatalf("parse request body: %v", err)
+	}
+	sysRaw := parsed["system"]
+	if len(sysRaw) == 0 || sysRaw[0] != '[' {
+		t.Errorf("system should be a JSON array (content blocks), got: %s", string(sysRaw))
 	}
 }
 

@@ -8,9 +8,11 @@ import (
 
 // TokenUsage tracks token consumption for a single LLM call.
 type TokenUsage struct {
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	Model        string `json:"model"`
+	InputTokens              int64  `json:"input_tokens"`
+	OutputTokens             int64  `json:"output_tokens"`
+	CacheCreationInputTokens int64  `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64  `json:"cache_read_input_tokens,omitempty"`
+	Model                    string `json:"model"`
 }
 
 // Response is the result of an LLM generation call.
