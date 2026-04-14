@@ -28,6 +28,9 @@ import (
 	"github.com/jinto/kittypaw/store"
 )
 
+// version is set via ldflags at build time.
+var version = "dev"
+
 // flags
 var (
 	flagRemote string // --remote: connect to daemon instead of running locally
@@ -52,6 +55,7 @@ func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "kittypaw",
 		Short:        "KittyPaw — AI agent platform",
+		Version:      version,
 		SilenceUsage: true,
 	}
 

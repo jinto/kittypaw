@@ -72,6 +72,23 @@ Registry URL (default: GitHub `kittypaw/skills`):
 url = "https://raw.githubusercontent.com/kittypaw/skills/main"
 ```
 
+## Release
+
+Tag-triggered CI via GoReleaser + GitHub Actions. Produces static binaries for linux/darwin/windows × amd64/arm64.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+# → .github/workflows/release.yml builds and uploads to GitHub Releases
+```
+
+User install:
+```bash
+curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
+```
+
+Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints it.
+
 ## Testing
 
 ```bash
