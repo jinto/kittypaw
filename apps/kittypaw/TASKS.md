@@ -1,3 +1,13 @@
+## Plan 19: Claude API Prompt Caching ✅
+
+Plan: `.claude/plans/prompt-caching.md`
+
+- [x] T1: `TokenUsage` cache 필드 추가 + 실패 테스트 작성 (JSON parse + backward compat)
+- [x] T2: system prompt → content blocks + `cache_control` 포맷 변경 + 테스트
+- [x] T3: JSON 응답에서 cache metrics 파싱 → T1 테스트 통과
+- [x] T4: SSE 스트림에서 cache metrics 파싱 + 테스트
+- [x] T5: `go test ./...` 전체 통과 + `TokenUsage{}` literal 누락 검증
+
 ## Plan 18: CLI Command Completion ✅
 
 Plan: `.claude/plans/cli-completion.md`
