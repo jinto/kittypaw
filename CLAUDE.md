@@ -40,6 +40,12 @@ go build ./cmd/gopaw
 TOML config at `~/.gopaw/config.toml`. See `core/config.go` for all options.
 Server-wide settings (bind, master API key, tenants) go in `~/.gopaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
 
+Registry URL (default: GitHub `kittypaw/skills`):
+```toml
+[registry]
+url = "https://raw.githubusercontent.com/kittypaw/skills/main"
+```
+
 ## Testing
 
 ```bash

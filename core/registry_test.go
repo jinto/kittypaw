@@ -28,11 +28,20 @@ func TestNewRegistryClient_RequiresHTTPS(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// DownloadPackage — SSRF
+// ---------------------------------------------------------------------------
+
 func TestRegistryClient_DownloadSSRFDefense(t *testing.T) {
-	// Start an HTTPS test server (test infra uses HTTP, but we test the logic).
-	// We bypass the HTTPS check by constructing the client directly.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`Agent.respond("hello")`))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/pkg/package.toml":
+			w.Write([]byte("[meta]\nid = \"test-pkg\"\nname = \"Test\"\nversion = \"1.0.0\"\n"))
+		case "/pkg/main.js":
+			w.Write([]byte(`Agent.respond("hello")`))
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer ts.Close()
 
@@ -41,12 +50,13 @@ func TestRegistryClient_DownloadSSRFDefense(t *testing.T) {
 	// Download from allowed URL should work.
 	entry := RegistryEntry{
 		ID:  "test-pkg",
-		URL: ts.URL + "/packages/test-pkg/main.js",
+		URL: ts.URL + "/pkg",
 	}
 	dir, err := client.DownloadPackage(entry)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer os.RemoveAll(dir)
 	if dir == "" {
 		t.Error("expected non-empty temp dir")
 	}
@@ -58,6 +68,119 @@ func TestRegistryClient_DownloadSSRFDefense(t *testing.T) {
 		t.Error("expected SSRF rejection for external URL")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DownloadPackage — multi-file
+// ---------------------------------------------------------------------------
+
+func TestRegistryClient_DownloadMultiFile(t *testing.T) {
+	tomlContent := "[meta]\nid = \"multi\"\nname = \"Multi\"\nversion = \"2.0.0\"\n"
+	jsContent := `Agent.respond("multi")`
+	readmeContent := "# Multi Package\n"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/multi/package.toml":
+			w.Write([]byte(tomlContent))
+		case "/multi/main.js":
+			w.Write([]byte(jsContent))
+		case "/multi/README.md":
+			w.Write([]byte(readmeContent))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := testRegistryClient(t, ts)
+	dir, err := client.DownloadPackage(RegistryEntry{ID: "multi", URL: ts.URL + "/multi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"package.toml", tomlContent},
+		{"main.js", jsContent},
+		{"README.md", readmeContent},
+	} {
+		got, err := os.ReadFile(filepath.Join(dir, tc.name))
+		if err != nil {
+			t.Errorf("expected %s to exist: %v", tc.name, err)
+			continue
+		}
+		if string(got) != tc.content {
+			t.Errorf("%s content = %q, want %q", tc.name, got, tc.content)
+		}
+	}
+}
+
+func TestRegistryClient_DownloadRequiredFile404(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/broken/package.toml":
+			w.Write([]byte("[meta]\nid = \"broken\"\nname = \"Broken\"\nversion = \"1.0.0\"\n"))
+		default:
+			// main.js returns 404
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := testRegistryClient(t, ts)
+	dir, err := client.DownloadPackage(RegistryEntry{ID: "broken", URL: ts.URL + "/broken"})
+	if err == nil {
+		os.RemoveAll(dir)
+		t.Fatal("expected error when required main.js is 404")
+	}
+
+	// Verify tmpDir was cleaned up — the returned dir should be empty string.
+	if dir != "" {
+		if _, statErr := os.Stat(dir); statErr == nil {
+			t.Error("expected tmpDir to be cleaned up on failure")
+		}
+	}
+}
+
+func TestRegistryClient_DownloadOptionalReadme404(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/noreadme/package.toml":
+			w.Write([]byte("[meta]\nid = \"noreadme\"\nname = \"No Readme\"\nversion = \"1.0.0\"\n"))
+		case "/noreadme/main.js":
+			w.Write([]byte(`Agent.respond("ok")`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	client := testRegistryClient(t, ts)
+	dir, err := client.DownloadPackage(RegistryEntry{ID: "noreadme", URL: ts.URL + "/noreadme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// package.toml and main.js should exist.
+	for _, name := range []string{"package.toml", "main.js"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("expected %s to exist", name)
+		}
+	}
+
+	// README.md should NOT exist.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err == nil {
+		t.Error("expected README.md to be absent when server returns 404")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DownloadPackage — path traversal + invalid ID
+// ---------------------------------------------------------------------------
 
 func TestRegistryClient_DownloadPathTraversal(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -87,7 +210,7 @@ func TestRegistryClient_DownloadInvalidID(t *testing.T) {
 
 	entry := RegistryEntry{
 		ID:  "../escape",
-		URL: "https://example.com/pkg.js",
+		URL: "https://example.com/pkg",
 	}
 	_, err := client.DownloadPackage(entry)
 	if err == nil {
@@ -95,10 +218,14 @@ func TestRegistryClient_DownloadInvalidID(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// FetchIndex + cache fallback
+// ---------------------------------------------------------------------------
+
 func TestRegistryClient_FetchIndex(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/index.json" {
-			w.Write([]byte(`[{"id":"hello","name":"Hello","version":"1.0.0","url":"https://example.com/hello.js"}]`))
+			w.Write([]byte(`[{"id":"hello","name":"Hello","version":"1.0.0","url":"https://example.com/hello"}]`))
 		}
 	}))
 	defer ts.Close()
@@ -118,15 +245,12 @@ func TestRegistryClient_FetchIndex(t *testing.T) {
 }
 
 func TestRegistryClient_FetchIndexCacheFallback(t *testing.T) {
-	// Server that returns 500.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
 	}))
 	defer ts.Close()
 
 	cacheDir := t.TempDir()
-
-	// Pre-seed cache.
 	cacheContent := `[{"id":"cached","name":"Cached Pkg","version":"0.1.0"}]`
 	writeFile(t, cacheDir, "index.json", cacheContent)
 
@@ -147,6 +271,10 @@ func TestRegistryClient_FetchIndexCacheFallback(t *testing.T) {
 		t.Error("should fall back to cached index")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// No redirect
+// ---------------------------------------------------------------------------
 
 func TestRegistryClient_NoRedirect(t *testing.T) {
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -177,13 +305,96 @@ func TestRegistryClient_NoRedirect(t *testing.T) {
 		URL: ts.URL + "/redirect",
 	}
 	_, err := client.DownloadPackage(entry)
-	// Should fail because redirect response has non-200 status.
 	if err == nil {
 		t.Error("expected failure — redirects should not be followed")
 	}
 }
 
-// writeFile is a test helper that writes a file in a directory.
+// ---------------------------------------------------------------------------
+// FilterEntries — table driven
+// ---------------------------------------------------------------------------
+
+func TestFilterEntries(t *testing.T) {
+	entries := []RegistryEntry{
+		{ID: "rss-digest", Name: "RSS Digest", Description: "RSS feed summary"},
+		{ID: "weather", Name: "Weather", Description: "Weather briefing"},
+		{ID: "reminder", Name: "Reminder", Description: "Set reminders"},
+	}
+
+	tests := []struct {
+		query string
+		want  int
+		ids   []string
+	}{
+		{"", 3, []string{"rss-digest", "weather", "reminder"}},
+		{"rss", 1, []string{"rss-digest"}},
+		{"RSS", 1, []string{"rss-digest"}},       // case insensitive
+		{"brief", 1, []string{"weather"}},         // matches description
+		{"nonexistent", 0, nil},
+		{"re", 1, []string{"reminder"}}, // only "reminder" contains "re"
+	}
+
+	for _, tc := range tests {
+		t.Run("query="+tc.query, func(t *testing.T) {
+			got := FilterEntries(entries, tc.query)
+			if len(got) != tc.want {
+				var gotIDs []string
+				for _, e := range got {
+					gotIDs = append(gotIDs, e.ID)
+				}
+				t.Errorf("FilterEntries(%q) returned %d entries %v, want %d", tc.query, len(got), gotIDs, tc.want)
+				return
+			}
+			if tc.ids != nil {
+				for i, e := range got {
+					if e.ID != tc.ids[i] {
+						t.Errorf("got[%d].ID = %q, want %q", i, e.ID, tc.ids[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SearchEntries
+// ---------------------------------------------------------------------------
+
+func TestRegistryClient_SearchEntries(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.json" {
+			w.Write([]byte(`[
+				{"id":"rss-digest","name":"RSS Digest","version":"1.0.0","description":"RSS feed summary"},
+				{"id":"weather","name":"Weather","version":"1.0.0","description":"Weather briefing"}
+			]`))
+		}
+	}))
+	defer ts.Close()
+
+	client := testRegistryClient(t, ts)
+
+	results, err := client.SearchEntries("rss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].ID != "rss-digest" {
+		t.Errorf("SearchEntries(\"rss\") = %v, want [rss-digest]", results)
+	}
+
+	// Empty query returns all.
+	all, err := client.SearchEntries("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("SearchEntries(\"\") returned %d, want 2", len(all))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {

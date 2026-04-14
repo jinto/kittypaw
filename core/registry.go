@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"time"
 )
+
+// DefaultRegistryURL is the canonical GitHub-hosted skill registry.
+const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw/skills/main"
 
 // RegistryEntry describes a package listing in the remote registry.
 type RegistryEntry struct {
@@ -79,18 +83,21 @@ func (rc *RegistryClient) FetchIndex() ([]RegistryEntry, error) {
 		return rc.loadCachedIndex()
 	}
 
-	// Cache the response for offline use.
-	cachePath := filepath.Join(rc.cacheDir, "index.json")
-	_ = os.WriteFile(cachePath, body, 0o644)
-
 	var entries []RegistryEntry
 	if err := json.Unmarshal(body, &entries); err != nil {
 		return nil, fmt.Errorf("parse registry index: %w", err)
 	}
+
+	// Cache only after successful parse to prevent cache poisoning.
+	cachePath := filepath.Join(rc.cacheDir, "index.json")
+	_ = os.WriteFile(cachePath, body, 0o600)
+
 	return entries, nil
 }
 
-// DownloadPackage downloads and extracts a package to a temporary directory.
+// DownloadPackage downloads a package's files to a temporary directory.
+// entry.URL is treated as a directory URL — individual files are fetched by
+// appending hardcoded filenames (package.toml, main.js, README.md).
 // Returns the path to the temp directory containing the package files.
 // The caller is responsible for removing the directory.
 func (rc *RegistryClient) DownloadPackage(entry RegistryEntry) (string, error) {
@@ -98,55 +105,118 @@ func (rc *RegistryClient) DownloadPackage(entry RegistryEntry) (string, error) {
 		return "", fmt.Errorf("download: %w", err)
 	}
 
-	// SSRF defense: parse URL and compare host exactly (not prefix).
-	parsed, err := url.Parse(entry.URL)
-	if err != nil {
-		return "", fmt.Errorf("download: invalid URL: %w", err)
-	}
-	if parsed.Host != rc.allowedHost {
-		return "", fmt.Errorf("download URL host %q not allowed (must be %s)", parsed.Host, rc.allowedHost)
-	}
-	if parsed.Scheme != rc.allowedScheme {
-		return "", fmt.Errorf("download URL scheme %q not allowed (must be %s)", parsed.Scheme, rc.allowedScheme)
-	}
-	if parsed.User != nil {
-		return "", fmt.Errorf("download URL must not contain userinfo: %s", entry.URL)
-	}
-	if strings.Contains(parsed.Path, "..") {
-		return "", fmt.Errorf("download: URL contains path traversal: %s", entry.URL)
+	// SSRF defense: validate the base URL once. File names are hardcoded constants,
+	// so no additional validation is needed for the individual file URLs.
+	if err := rc.validateURL(entry.URL); err != nil {
+		return "", err
 	}
 
-	resp, err := rc.client.Get(entry.URL)
-	if err != nil {
-		return "", fmt.Errorf("download %q: %w", entry.ID, err)
-	}
-	defer resp.Body.Close()
+	baseURL := strings.TrimSuffix(entry.URL, "/")
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download %q: HTTP %d", entry.ID, resp.StatusCode)
-	}
-
-	// Read the package tarball/content to a temp directory.
 	tmpDir, err := os.MkdirTemp("", "gopaw-pkg-"+entry.ID+"-")
 	if err != nil {
 		return "", fmt.Errorf("download: create temp dir: %w", err)
 	}
 
-	// For now, assume the download URL points to a single main.js + package.toml.
-	// A real implementation would handle tar.gz archives.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB max
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("download %q: read body: %w", entry.ID, err)
+	// Required files — failure removes tmpDir.
+	for _, name := range []string{"package.toml", "main.js"} {
+		if err := rc.fetchToFile(baseURL+"/"+name, filepath.Join(tmpDir, name)); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("download %q: %s: %w", entry.ID, name, err)
+		}
 	}
 
-	// Write as main.js (simplified — real impl would extract archive).
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.js"), body, 0o644); err != nil {
+	// Optional files — only 404 is ignored; other errors propagate.
+	if err := rc.fetchToFile(baseURL+"/README.md", filepath.Join(tmpDir, "README.md")); err != nil && !isHTTPNotFound(err) {
 		os.RemoveAll(tmpDir)
-		return "", err
+		return "", fmt.Errorf("download %q: README.md: %w", entry.ID, err)
 	}
 
 	return tmpDir, nil
+}
+
+// validateURL performs SSRF checks on a download URL.
+func (rc *RegistryClient) validateURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("download: invalid URL: %w", err)
+	}
+	if parsed.Host != rc.allowedHost {
+		return fmt.Errorf("download URL host %q not allowed (must be %s)", parsed.Host, rc.allowedHost)
+	}
+	if parsed.Scheme != rc.allowedScheme {
+		return fmt.Errorf("download URL scheme %q not allowed (must be %s)", parsed.Scheme, rc.allowedScheme)
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("download URL must not contain userinfo: %s", rawURL)
+	}
+	if strings.Contains(parsed.Path, "..") {
+		return fmt.Errorf("download: URL contains path traversal: %s", rawURL)
+	}
+	return nil
+}
+
+// errHTTPNotFound indicates a 404 response.
+var errHTTPNotFound = fmt.Errorf("HTTP 404")
+
+// isHTTPNotFound reports whether err wraps errHTTPNotFound.
+func isHTTPNotFound(err error) bool {
+	return errors.Is(err, errHTTPNotFound)
+}
+
+// fetchToFile downloads a single URL to a local file path.
+// Enforces a 10MB size limit. Returns errHTTPNotFound on 404, other errors on failure.
+func (rc *RegistryClient) fetchToFile(fileURL, dest string) error {
+	resp, err := rc.client.Get(fileURL)
+	if err != nil {
+		return fmt.Errorf("GET %s: %w", fileURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%s: %w", fileURL, errHTTPNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, fileURL)
+	}
+
+	const maxSize = 10 << 20 // 10MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	if len(body) > maxSize {
+		return fmt.Errorf("response body exceeds %d bytes", maxSize)
+	}
+
+	return os.WriteFile(dest, body, 0o600)
+}
+
+// FilterEntries returns entries whose ID, Name, or Description contain the
+// query as a case-insensitive substring. An empty query returns all entries.
+func FilterEntries(entries []RegistryEntry, query string) []RegistryEntry {
+	if query == "" {
+		return entries
+	}
+	q := strings.ToLower(query)
+	var out []RegistryEntry
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.ID), q) ||
+			strings.Contains(strings.ToLower(e.Name), q) ||
+			strings.Contains(strings.ToLower(e.Description), q) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// SearchEntries fetches the registry index and filters by query.
+func (rc *RegistryClient) SearchEntries(query string) ([]RegistryEntry, error) {
+	entries, err := rc.FetchIndex()
+	if err != nil {
+		return nil, err
+	}
+	return FilterEntries(entries, query), nil
 }
 
 // loadCachedIndex reads the locally cached index.
