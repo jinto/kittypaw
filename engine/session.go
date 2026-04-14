@@ -27,7 +27,7 @@ type PermissionCallback func(ctx context.Context, description, resource string) 
 type RunOptions struct {
 	OnToken       llm.TokenCallback
 	OnPermission  PermissionCallback
-	ModelOverride string // use a different LLM model for this run (named model or raw model ID)
+	ModelOverride string // use a named model from config [[models]] for this run
 }
 
 // Session holds the injected dependencies for processing events.
