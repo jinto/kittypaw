@@ -27,7 +27,7 @@
     "description": "コード不要のAIエージェントフレームワーク。スキルギャラリーからインストールして、設定を入力するだけ。",
     "url": "https://kittypaw.app/ja/",
     "applicationCategory": "UtilitiesApplication",
-    "operatingSystem": "macOS, Linux",
+    "operatingSystem": "macOS, Linux, Windows",
     "license": "https://opensource.org/licenses/MIT",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
     "author": { "@type": "Person", "name": "jinto", "url": "https://github.com/jinto" }
@@ -103,6 +103,8 @@
         <span class="terminal-label">kittypaw — bash</span>
       </div>
       <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</span></div>
+        <div class="t-out">   <span class="t-highlight">✓</span> kittypaw installed to /usr/local/bin</div>
         <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw init</span></div>
         <div class="t-out">   LLM provider: Claude (Anthropic)</div>
         <div class="t-out">   Channel: Telegram</div>
@@ -110,7 +112,7 @@
         <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">外部ランタイム不要 · シングルバイナリ</p>
+    <p class="hero-note">外部ランタイム不要 · シングルバイナリ · macOS · Linux · Windows</p>
   </div>
 </section>
 
@@ -133,7 +135,7 @@
     </div>
     <div class="proof-item reveal reveal-delay-3">
       <span class="proof-dot"></span>
-      macOS · Linux 対応
+      macOS · Linux · Windows 対応
     </div>
   </div>
 </div>
@@ -429,7 +431,7 @@
       kittypaw serve 一行で、今日から自動化を始めましょう。
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
         <span>⭐</span> GitHubで入手
       </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">
