@@ -26,3 +26,14 @@ type Channel interface {
 	// Name returns the channel identifier (e.g., "telegram", "slack").
 	Name() string
 }
+
+// Confirmer is an optional capability for channels that support interactive
+// permission dialogs. Channels implement this to enable approval prompts
+// for destructive operations (e.g., shell commands, git push).
+//
+// Use a type assertion to check at runtime:
+//
+//	if confirmer, ok := ch.(channel.Confirmer); ok { ... }
+type Confirmer interface {
+	AskConfirmation(ctx context.Context, chatID, description, resource string) (bool, error)
+}

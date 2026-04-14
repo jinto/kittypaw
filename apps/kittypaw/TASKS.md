@@ -1,3 +1,15 @@
+## Plan 21: Permission Dialog for Chat Channels ✅
+
+Plan: `.claude/plans/permission-dialog.md`
+Spec: `.ina/specs/20260414-1200-think-permission-dialog.md`
+
+- [x] T1: Confirmer interface + PermissionPolicy config
+- [x] T2: Central permission gate in resolveSkillCall
+- [x] T3: Permission audit logging
+- [x] T4: Telegram Confirmer implementation
+- [x] T5: dispatchLoop Confirmer injection
+- [x] T6: Integration test + edge cases
+
 ## Plan 20: GitHub Registry Packages ✅
 
 Plan: `.claude/plans/github-registry-packages.md`

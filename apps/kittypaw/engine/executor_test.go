@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jinto/gopaw/core"
@@ -415,5 +416,226 @@ func TestExecuteFileRead_StillWorks(t *testing.T) {
 	}
 	if result == "" {
 		t.Fatal("expected content from File.read")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// needsPermission tests
+// ---------------------------------------------------------------------------
+
+func TestNeedsPermission(t *testing.T) {
+	tests := []struct {
+		name      string
+		skill     string
+		method    string
+		autonomy  core.AutonomyLevel
+		custom    []string // nil = use defaults
+		want      bool
+	}{
+		// AutonomyFull never needs permission
+		{"full_shell", "Shell", "exec", core.AutonomyFull, nil, false},
+		{"full_git_push", "Git", "push", core.AutonomyFull, nil, false},
+
+		// AutonomyReadonly never needs permission (blocked elsewhere)
+		{"readonly_shell", "Shell", "exec", core.AutonomyReadonly, nil, false},
+
+		// Supervised with default list
+		{"supervised_shell_exec", "Shell", "exec", core.AutonomySupervised, nil, true},
+		{"supervised_git_commit", "Git", "commit", core.AutonomySupervised, nil, true},
+		{"supervised_git_push", "Git", "push", core.AutonomySupervised, nil, true},
+		{"supervised_git_pull", "Git", "pull", core.AutonomySupervised, nil, true},
+		{"supervised_file_delete", "File", "delete", core.AutonomySupervised, nil, true},
+
+		// Non-destructive ops not in default list
+		{"supervised_git_status", "Git", "status", core.AutonomySupervised, nil, false},
+		{"supervised_git_log", "Git", "log", core.AutonomySupervised, nil, false},
+		{"supervised_git_diff", "Git", "diff", core.AutonomySupervised, nil, false},
+		{"supervised_file_read", "File", "read", core.AutonomySupervised, nil, false},
+		{"supervised_http_get", "Http", "get", core.AutonomySupervised, nil, false},
+
+		// Custom list overrides defaults
+		{"custom_file_write", "File", "write", core.AutonomySupervised, []string{"File.write"}, true},
+		{"custom_shell_not_listed", "Shell", "exec", core.AutonomySupervised, []string{"File.write"}, false},
+
+		// Empty custom list = nothing needs permission
+		{"empty_list", "Shell", "exec", core.AutonomySupervised, []string{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &core.Config{
+				AutonomyLevel: tt.autonomy,
+				Permissions:   core.PermissionPolicy{RequireApproval: tt.custom},
+			}
+			got := needsPermission(tt.skill, tt.method, cfg)
+			if got != tt.want {
+				t.Errorf("needsPermission(%q, %q) = %v, want %v", tt.skill, tt.method, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveSkillCallPermissionGate(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomySupervised,
+		},
+	}
+
+	call := core.SkillCall{
+		SkillName: "Shell",
+		Method:    "exec",
+		Args:      []json.RawMessage{json.RawMessage(`"echo hello"`)},
+	}
+
+	// No permFn → should be denied
+	result, err := resolveSkillCall(context.Background(), call, s, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "requires permission approval") {
+		t.Errorf("expected permission denied, got: %s", result)
+	}
+}
+
+func TestResolveSkillCallPermissionApproved(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomySupervised,
+		},
+	}
+
+	call := core.SkillCall{
+		SkillName: "Shell",
+		Method:    "exec",
+		Args:      []json.RawMessage{json.RawMessage(`"echo hello"`)},
+	}
+
+	// Approving permFn → should execute
+	approveFn := func(ctx context.Context, desc, res string) (bool, error) {
+		return true, nil
+	}
+
+	result, err := resolveSkillCall(context.Background(), call, s, approveFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "permission denied") {
+		t.Errorf("expected success, got: %s", result)
+	}
+	// Should contain actual output
+	if !strings.Contains(result, "hello") {
+		t.Errorf("expected 'hello' in output, got: %s", result)
+	}
+}
+
+func TestResolveSkillCallPermissionDenied(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomySupervised,
+		},
+	}
+
+	call := core.SkillCall{
+		SkillName: "Shell",
+		Method:    "exec",
+		Args:      []json.RawMessage{json.RawMessage(`"echo hello"`)},
+	}
+
+	// Denying permFn → should be denied
+	denyFn := func(ctx context.Context, desc, res string) (bool, error) {
+		return false, nil
+	}
+
+	result, err := resolveSkillCall(context.Background(), call, s, denyFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "permission denied") {
+		t.Errorf("expected permission denied, got: %s", result)
+	}
+}
+
+func TestResolveSkillCallFullAutonomy(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomyFull,
+		},
+	}
+
+	call := core.SkillCall{
+		SkillName: "Shell",
+		Method:    "exec",
+		Args:      []json.RawMessage{json.RawMessage(`"echo full"`)},
+	}
+
+	// AutonomyFull: should execute without any permFn
+	result, err := resolveSkillCall(context.Background(), call, s, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "full") {
+		t.Errorf("expected 'full' in output, got: %s", result)
+	}
+}
+
+func TestResolveSkillCallCustomPermissionList(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomySupervised,
+			Permissions: core.PermissionPolicy{
+				RequireApproval: []string{"File.write"}, // Shell.exec NOT listed
+			},
+		},
+	}
+
+	// Shell.exec NOT in custom list → should execute without permFn
+	shellCall := core.SkillCall{
+		SkillName: "Shell",
+		Method:    "exec",
+		Args:      []json.RawMessage{json.RawMessage(`"echo custom"`)},
+	}
+	result, err := resolveSkillCall(context.Background(), shellCall, s, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "custom") {
+		t.Errorf("expected 'custom' in output, got: %s", result)
+	}
+}
+
+func TestResolveSkillCallGitNonDestructive(t *testing.T) {
+	st := openTestStore(t)
+	s := &Session{
+		Store: st,
+		Config: &core.Config{
+			AutonomyLevel: core.AutonomySupervised,
+		},
+	}
+
+	// Git.status is not in the default require_approval list
+	call := core.SkillCall{
+		SkillName: "Git",
+		Method:    "status",
+	}
+
+	// Should work without permFn since Git.status is not protected
+	result, err := resolveSkillCall(context.Background(), call, s, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should not be blocked by permission gate
+	if strings.Contains(result, "permission denied") || strings.Contains(result, "requires permission approval") {
+		t.Errorf("Git.status should not require permission, got: %s", result)
 	}
 }

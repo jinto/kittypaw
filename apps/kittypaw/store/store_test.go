@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -1445,5 +1446,72 @@ func TestWorkspaceFTS_Pagination(t *testing.T) {
 	results, _, _ = st.SearchWorkspaceFTS("common_token", "", "", 2, 4)
 	if len(results) != 1 {
 		t.Errorf("page 3 results: got %d, want 1", len(results))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Permission Audit
+// ---------------------------------------------------------------------------
+
+func TestLogPermissionEvent(t *testing.T) {
+	st := openTestStore(t)
+
+	if err := st.LogPermissionEvent("approved", "telegram", "12345", "Shell.exec", "Shell"); err != nil {
+		t.Fatalf("LogPermissionEvent: %v", err)
+	}
+	if err := st.LogPermissionEvent("denied", "telegram", "12345", "Git.push", "Git"); err != nil {
+		t.Fatalf("LogPermissionEvent: %v", err)
+	}
+	if err := st.LogPermissionEvent("timeout", "slack", "C001", "Shell.exec", "Shell"); err != nil {
+		t.Fatalf("LogPermissionEvent: %v", err)
+	}
+
+	// Query permission log
+	logs, err := st.QueryPermissionLog(10)
+	if err != nil {
+		t.Fatalf("QueryPermissionLog: %v", err)
+	}
+	if len(logs) != 3 {
+		t.Fatalf("expected 3 logs, got %d", len(logs))
+	}
+
+	// Should be ordered newest first
+	if logs[0].EventType != "permission.timeout" {
+		t.Errorf("expected permission.timeout, got %s", logs[0].EventType)
+	}
+	if logs[1].EventType != "permission.denied" {
+		t.Errorf("expected permission.denied, got %s", logs[1].EventType)
+	}
+
+	// Verify JSON detail roundtrip
+	var detail map[string]string
+	if err := json.Unmarshal([]byte(logs[0].Detail), &detail); err != nil {
+		t.Fatalf("unmarshal detail: %v", err)
+	}
+	if detail["channel"] != "slack" {
+		t.Errorf("expected channel=slack, got %s", detail["channel"])
+	}
+	if detail["description"] != "Shell.exec" {
+		t.Errorf("expected description=Shell.exec, got %s", detail["description"])
+	}
+}
+
+func TestQueryPermissionLogFiltersNonPermission(t *testing.T) {
+	st := openTestStore(t)
+
+	// Insert a regular audit entry
+	st.RecordAudit("config.reload", "reloaded config", "info")
+	// Insert a permission entry
+	st.LogPermissionEvent("approved", "telegram", "123", "Shell.exec", "Shell")
+
+	logs, err := st.QueryPermissionLog(10)
+	if err != nil {
+		t.Fatalf("QueryPermissionLog: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 permission log, got %d (filter not working)", len(logs))
+	}
+	if logs[0].EventType != "permission.approved" {
+		t.Errorf("expected permission.approved, got %s", logs[0].EventType)
 	}
 }
