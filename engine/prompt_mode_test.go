@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestFilterSkillsByPermissions(t *testing.T) {

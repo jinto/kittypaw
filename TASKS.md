@@ -168,7 +168,7 @@ Note: CEO 권장 — Plans 8-10 배치 후 별도 PR로 진행
 - [x] `core/package_manager.go` — Install, Uninstall, List, Load, GetConfig, SetConfig, LoadChain
 - [x] `core/registry.go` — `RegistryClient` (FetchIndex, DownloadPackage, SSRF defense)
 - [x] Wire packages into scheduler + chain execution (prev_output, model priority, can_disable=false)
-- [x] Cron upgrade (`robfig/cron/v3`) + CLI commands (`gopaw packages {install,uninstall,list,search,config,run}`)
+- [x] Cron upgrade (`robfig/cron/v3`) + CLI commands (`kittypaw packages {install,uninstall,list,search,config,run}`)
 - [x] Tests — TOML parse, ID validation, secrets masking, chain loading, registry SSRF, schedule integration
 
 ## Plan 13: Vision / Image Skills ✅
@@ -202,7 +202,7 @@ Spec: `.ina/specs/20260413-2330-think-persona-preset-system.md`
 - [x] T3: engine/prompt.go — BuildPrompt takes *core.Profile + tests
 - [x] T4: engine/session.go — ResolveProfileName + orchestration.go loadSOUL refactor + tests
 - [x] T5: engine/executor.go — Profile.switch via user_context DB + tests
-- [x] T6: server/api_profile.go + cmd/gopaw persona + init integration
+- [x] T6: server/api_profile.go + cmd/kittypaw persona + init integration
 
 ## Plan 16: Workspace Indexer v1 (FTS5 Full-text Search) ✅
 
@@ -239,8 +239,8 @@ Spec: `.ina/specs/20260414-2330-think-thin-client.md`
 온보딩은 브라우저(Web UI)와 CLI 양쪽 모두 가능해야 한다.
 CLI 온보딩 완료 후 곧바로 대화형 채팅 상태(REPL)로 진입해야 한다.
 
-- [ ] CLI 온보딩 플로우 — `gopaw init` 또는 `gopaw setup`에서 LLM/채널/워크스페이스 설정
-- [ ] 온보딩 완료 후 채팅 REPL 자동 진입 — `gopaw chat` 상태로 전환
+- [ ] CLI 온보딩 플로우 — `kittypaw init` 또는 `kittypaw setup`에서 LLM/채널/워크스페이스 설정
+- [ ] 온보딩 완료 후 채팅 REPL 자동 진입 — `kittypaw chat` 상태로 전환
 - [ ] 브라우저 온보딩과 동일한 설정 결과 보장 (config.toml + DB 상태 일치)
 
 ## Backlog: 사용자 프로필 시스템 (kittypaw.yml) 🔴 높음 / 작업량 중
@@ -272,8 +272,8 @@ Spec: `.ina/specs/20260414-think-skill-install.md`
 - [x] T3: GitHub source resolver — `core/github.go` ParseGitHubURL + ResolveGitHubSource (raw URL probing main→master, HTTPS only, redirect block, symlink reject)
 - [x] T4: Install orchestrator — `core/installer.go` Install() + DetectSourceFormat + SHA256 verify + cleanup-on-failure + route to PackageManager or teach/prompt pipeline
 - [x] T5: Prompt mode executor — `engine/executor.go` buildPromptModeCall + FilterToolsByPermissions + single-turn enforcement + Format branch in skill execution
-- [x] T6: CLI `gopaw install` + API — newInstallCmd + handleInstall endpoint + Client.Install + SkillInstallConfig (md_execution_mode) + mode selection prompt
-- [x] T7: CLI `gopaw search` + API — newSearchCmd + handleSearch endpoint + Client.Search + SearchEntries filter
+- [x] T6: CLI `kittypaw install` + API — newInstallCmd + handleInstall endpoint + Client.Install + SkillInstallConfig (md_execution_mode) + mode selection prompt
+- [x] T7: CLI `kittypaw search` + API — newSearchCmd + handleSearch endpoint + Client.Search + SearchEntries filter
 
 ## Backlog: Desktop GUI 🟢 낮음 / 작업량 대
 

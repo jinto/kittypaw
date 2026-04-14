@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 const ollamaDefaultBaseURL = "http://localhost:11434/v1/chat/completions"

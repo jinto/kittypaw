@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KittyPaw — コード不要のAIデスクトップ自動化アプリ</title>
+  <meta name="description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="canonical" href="https://kittypaw.app/ja/">
+  <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
+  <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
+  <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
+  <meta property="og:title" content="KittyPaw — コード不要のAIデスクトップ自動化アプリ">
+  <meta property="og:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <meta property="og:url" content="https://kittypaw.app/ja/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="KittyPaw — コード不要のAIデスクトップ自動化アプリ">
+  <meta name="twitter:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "KittyPaw",
+    "description": "コード不要のAIデスクトップ自動化アプリ。スキルギャラリーからインストールして、設定を入力するだけ。",
+    "url": "https://kittypaw.app/ja/",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS, Linux",
+    "license": "https://www.elastic.co/licensing/elastic-license",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "jinto", "url": "https://github.com/jinto" }
+  }
+  </script>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     NAV
+============================================================ -->
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="nav-brand-paw">🐾</span>
+    KittyPaw
+  </div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link">機能</a>
+    <a href="../cases/" class="nav-link">事例</a>
+    <a href="#skills" class="nav-link">スキル</a>
+    <a href="#tech" class="nav-link">技術</a>
+    <a href="#compare" class="nav-link">比較</a>
+    <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
+    <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/" class="nav-link-active">JA</a></span>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-paw-badge">
+      <div class="hero-paw" role="img" aria-label="猫の肉球アイコン">
+        <div class="paw-toes">
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+        </div>
+        <div class="paw-pad"></div>
+      </div>
+      <div class="hero-badge">
+        <span>🏠</span> ローカルLLM対応 · 純粋Rust · オープンソース
+      </div>
+    </div>
+
+    <h1>
+      コード不要で<br>
+      <span class="accent-warm">AIがすべて</span><br>
+      自動化します
+    </h1>
+    <p class="hero-sub">
+      スキルギャラリーからインストールして、設定を入力するだけ。<br>
+      毎朝のマーケットレポート、RSS要約、URL監視&hellip; すべて自動で。
+    </p>
+
+    <div class="hero-buttons">
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">
+        <span>⭐</span> GitHubで入手
+      </a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
+        <span>🎨</span> スキルギャラリーを見る
+      </a>
+    </div>
+
+    <div class="hero-terminal" role="region" aria-label="ターミナル例">
+      <div class="terminal-bar">
+        <span class="terminal-dot terminal-dot-r"></span>
+        <span class="terminal-dot terminal-dot-y"></span>
+        <span class="terminal-dot terminal-dot-g"></span>
+        <span class="terminal-label">kittypaw — bash</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">cargo run -p kittypaw-gui</span></div>
+        <div class="t-out">   Compiling kittypaw v0.1.0</div>
+        <div class="t-out">    Finished release in 3.2s</div>
+        <div><span class="t-highlight">🐾 KittyPaw started!</span> <span class="t-cursor"></span></div>
+      </div>
+    </div>
+    <p class="hero-note">npmなし · JSなし · cargo run 一行で完了</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     SOCIAL PROOF STRIP
+============================================================ -->
+<div class="proof-strip">
+  <div class="proof-inner">
+    <div class="proof-item reveal">
+      <span class="proof-dot"></span>
+      オープンソースプロジェクト
+    </div>
+    <div class="proof-item reveal reveal-delay-1">
+      <span class="proof-dot"></span>
+      Elastic License 2.0ライセンス
+    </div>
+    <div class="proof-item reveal reveal-delay-2">
+      <span class="proof-dot"></span>
+      GitHubで確認する
+    </div>
+    <div class="proof-item reveal reveal-delay-3">
+      <span class="proof-dot"></span>
+      macOS · Linux 対応
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">主な機能</span>
+      <h2 class="section-title">なぜKittyPawなのか？</h2>
+      <p class="section-sub">n8n、Zapierのようなデスクトップネイティブな自動化の代替。<br>AIがコードを書き、サンドボックスで安全に実行します。</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">🎯</div>
+        <h3>コード不要の自動化</h3>
+        <p>スキルギャラリーから目的の自動化をインストールし、Telegramトークンを入力するだけですぐに動作します。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">💬</div>
+        <h3>対話型AIアシスタント</h3>
+        <p>「ドラマの新エピソードを通知してほしい」と話しかけるだけ。合うスキルを推薦するか、新しく作成します。使うほどあなたを理解するパーソナルアシスタント。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">🔒</div>
+        <h3>安全な実行</h3>
+        <p>すべてのスキルはQuickJSサンドボックス + OSカーネル分離（Seatbelt/Landlock）の中で実行されます。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="feature-icon-wrap">🔗</div>
+        <h3>スキルチェーン</h3>
+        <p>複数のスキルを順次パイプラインで連結。データ収集 → 要約 → 送信を一度に。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-5">
+        <div class="feature-icon-wrap">🌐</div>
+        <h3>ウェブ検索</h3>
+        <p>スキルがウェブを検索し、ページを読み込み、AIで要約します。ファクトチェックも自動で。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-6">
+        <div class="feature-icon-wrap">🏠</div>
+        <h3>ローカルLLM対応</h3>
+        <p>Ollama、LM Studioなど自分のPCのローカルモデルを接続。API費用ゼロ。データが自分のPCから出ません。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">使い方</span>
+      <h2 class="section-title">3ステップで完了</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">インストールして設定すれば、猫が勝手に働きます</p>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">📦</div>
+        <div class="step-num">1</div>
+        <h3>スキルをインストール</h3>
+        <p>ギャラリーから目的のスキルを選んで、ワンクリックでインストールします。</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">⚙️</div>
+        <div class="step-num">2</div>
+        <h3>設定を入力</h3>
+        <p>Telegramトークン、スケジュール、APIキーを入力するだけ。コードに触れる必要はありません。</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">✨</div>
+        <div class="step-num">3</div>
+        <h3>自動実行</h3>
+        <p>設定したスケジュールに従って自動的に実行され、結果を通知で受け取ります。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     USE CASES
+============================================================ -->
+<section>
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">活用例</span>
+      <h2 class="section-title">こんな使い方ができます</h2>
+      <p class="section-sub">インストールして設定するだけですぐに動く自動化</p>
+    </div>
+    <div class="usecases-grid">
+      <div class="usecase-card reveal reveal-delay-1">
+        <div class="usecase-num-badge">1</div>
+        <div>
+          <h3>毎朝のマーケットレポート</h3>
+          <p>ETFデータを収集しAIが要約してTelegramに送信。平日午前8時に自動配信。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-2">
+        <div class="usecase-num-badge">2</div>
+        <div>
+          <h3>RSSニュース要約</h3>
+          <p>Hacker News、TechCrunchなどRSSフィードの新着記事をAIが要約。既読記事は自動フィルタリング。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-3">
+        <div class="usecase-num-badge">3</div>
+        <div>
+          <h3>サービスダウン通知</h3>
+          <p>自分のウェブサイト/APIを5分ごとにチェック。ダウン時はすぐにTelegram通知。復旧時も通知。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-4">
+        <div class="usecase-num-badge">4</div>
+        <div>
+          <h3>天気ブリーフィング</h3>
+          <p>毎朝7日間の予報を自然言語でお知らせ。APIキー不要（Open-Meteo無料API使用）。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-5">
+        <div class="usecase-num-badge">5</div>
+        <div>
+          <h3>自分だけの自動化を作る</h3>
+          <p><code>kittypaw teach "毎日宝くじ当選番号を確認して教えて"</code> — AIがコードを書き、テストして登録します。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SKILLS GALLERY
+============================================================ -->
+<section id="skills" class="skills-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">内蔵スキル</span>
+      <h2 class="section-title">ギャラリーからすぐに使えます</h2>
+      <p class="section-sub">アプリを開くと5つのスキルがすでにインストールされています</p>
+    </div>
+    <div class="skills-grid">
+      <div class="skill-card reveal reveal-delay-1">
+        <span class="skill-icon">📈</span>
+        <h4>マクロ経済レポート</h4>
+        <p>ETF + AI要約</p>
+        <span class="skill-tag">毎日自動</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-2">
+        <span class="skill-icon">🌤</span>
+        <h4>天気ブリーフィング</h4>
+        <p>7日間予報</p>
+        <span class="skill-tag">APIキー不要</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-3">
+        <span class="skill-icon">📰</span>
+        <h4>RSSニュース要約</h4>
+        <p>フィード + LLM要約</p>
+        <span class="skill-tag">重複フィルター</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-4">
+        <span class="skill-icon">✅</span>
+        <h4>リマインダー</h4>
+        <p>チャットでToDo管理</p>
+        <span class="skill-tag">AIチャット</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-5">
+        <span class="skill-icon">🔍</span>
+        <h4>URLモニター</h4>
+        <p>状態変更通知</p>
+        <span class="skill-tag">5分周期</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     TECH STACK
+============================================================ -->
+<section id="tech" class="tech-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">技術スタック</span>
+      <h2 class="section-title">外部ランタイム不要、Rustのみで</h2>
+      <p class="section-sub">単一バイナリで配布。npmもNodeもPythonも不要です。</p>
+    </div>
+    <div class="tech-grid">
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🦀</div>
+        <div>
+          <div class="tech-card-name">Rust</div>
+          <div class="tech-card-desc">メモリ安全 · 高パフォーマンス</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">🖥</div>
+        <div>
+          <div class="tech-card-name">Dioxus GUI</div>
+          <div class="tech-card-desc">ネイティブデスクトップUI</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-3">
+        <div class="tech-badge">🔐</div>
+        <div>
+          <div class="tech-card-name">QuickJS Sandbox</div>
+          <div class="tech-card-desc">安全なスキル実行</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-4">
+        <div class="tech-badge">🤖</div>
+        <div>
+          <div class="tech-card-name">Claude + OpenAI</div>
+          <div class="tech-card-desc">マルチLLM対応</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-5">
+        <div class="tech-badge">🗄</div>
+        <div>
+          <div class="tech-card-name">SQLite</div>
+          <div class="tech-card-desc">ローカルデータ保存</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-6">
+        <div class="tech-badge">🔑</div>
+        <div>
+          <div class="tech-card-name">Local Secret Store</div>
+          <div class="tech-card-desc">ローカルファイルベースのキー管理</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🛡</div>
+        <div>
+          <div class="tech-card-name">Seatbelt / Landlock</div>
+          <div class="tech-card-desc">カーネルレベル分離</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">📦</div>
+        <div>
+          <div class="tech-card-name">TOMLパッケージ</div>
+          <div class="tech-card-desc">スキル配布フォーマット</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     COMPARE
+============================================================ -->
+<section class="section" id="compare">
+  <div class="section section-center">
+    <div class="reveal">
+      <h2 class="section-title">なぜKittyPawなのか？</h2>
+      <p class="section-sub">他のAIエージェントと比較してみてください</p>
+    </div>
+    <div class="compare-table-wrapper reveal reveal-delay-1">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>KittyPaw</th>
+            <th>Hermes Agent</th>
+            <th>OpenClaw</th>
+            <th>Crew</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>GUIデスクトップアプリ</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+          <tr><td>ローカルLLM対応</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+          <tr><td>スキルギャラリー</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+          <tr><td>スキル自動生成</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+          <tr><td>オープンソース</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
+          <tr><td>無料</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     CTA
+============================================================ -->
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw" role="img" aria-label="猫の肉球">🐾</span>
+    <h2 class="reveal">今すぐ始めましょう</h2>
+    <p class="reveal reveal-delay-1">
+      急ぐときこそ必要なのは、小さくて速い猫の手。<br>
+      cargo run 一行で、今日から自動化を始めましょう。
+    </p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHubで入手
+      </a>
+      <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">
+        🎨 スキルギャラリー
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/jinto/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-skills">スキルギャラリー</a>
+    <span class="footer-sep">·</span>
+    <span>Elastic License 2.0</span>
+    <span class="footer-sep">·</span>
+    <span>Made with 🦀 &amp; ❤️</span>
+  </div>
+</footer>
+
+<!-- Scroll animation (progressive enhancement) -->
+<script src="../main.js"></script>
+
+</body>
+</html>

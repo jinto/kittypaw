@@ -120,7 +120,7 @@ func (rc *RegistryClient) DownloadPackage(entry RegistryEntry) (string, error) {
 
 	baseURL := strings.TrimSuffix(entry.URL, "/")
 
-	tmpDir, err := os.MkdirTemp("", "gopaw-pkg-"+entry.ID+"-")
+	tmpDir, err := os.MkdirTemp("", "kittypaw-pkg-"+entry.ID+"-")
 	if err != nil {
 		return "", fmt.Errorf("download: create temp dir: %w", err)
 	}

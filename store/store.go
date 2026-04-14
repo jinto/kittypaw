@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 	_ "modernc.org/sqlite"
 )
 
@@ -170,7 +170,7 @@ type PendingResponse struct {
 // Store
 // ---------------------------------------------------------------------------
 
-// Store wraps a SQLite database providing all persistence for gopaw.
+// Store wraps a SQLite database providing all persistence for kittypaw.
 type Store struct {
 	db *sql.DB
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
-	mcpreg "github.com/jinto/gopaw/mcp"
+	"github.com/jinto/kittypaw/core"
+	mcpreg "github.com/jinto/kittypaw/mcp"
 )
 
 func TestBuildSkillsSection(t *testing.T) {

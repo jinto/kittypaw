@@ -1,4 +1,4 @@
-// GoPaw Skills Gallery — placeholder
+// KittyPaw Skills Gallery — placeholder
 
 const Skills = {
   mount(container) {

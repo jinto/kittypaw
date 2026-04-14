@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/jinto/gopaw/channel"
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/channel"
+	"github.com/jinto/kittypaw/core"
 )
 
 // ---------------------------------------------------------------------------

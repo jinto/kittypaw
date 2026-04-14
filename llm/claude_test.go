@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // sseLines joins lines with \n to build an SSE response body.

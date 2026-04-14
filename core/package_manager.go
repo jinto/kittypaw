@@ -34,7 +34,7 @@ func (pm *PackageManager) packagesDir() (string, error) {
 	return PackagesDir()
 }
 
-// Install validates and copies a package from sourcePath to ~/.gopaw/packages/<id>/.
+// Install validates and copies a package from sourcePath to ~/.kittypaw/packages/<id>/.
 // sourcePath must contain a valid package.toml and main.js.
 // Rejects symlinks in source files to prevent arbitrary file reads.
 func (pm *PackageManager) Install(sourcePath string) (*SkillPackage, error) {

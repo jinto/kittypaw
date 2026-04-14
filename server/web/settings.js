@@ -1,4 +1,4 @@
-// GoPaw Settings Panel — Channel & LLM status
+// KittyPaw Settings Panel — Channel & LLM status
 
 const Settings = {
   mount(container) {

@@ -87,18 +87,18 @@ func TestReadPid(t *testing.T) {
 	}
 }
 
-func TestIsGopawProcess_CurrentProcess(t *testing.T) {
-	// Current process is "go" (test runner), not "gopaw".
+func TestIsKittypawProcess_CurrentProcess(t *testing.T) {
+	// Current process is "go" (test runner), not "kittypaw".
 	pid := os.Getpid()
-	if isGopawProcess(pid) {
-		t.Skip("test runner name contains 'gopaw'")
+	if isKittypawProcess(pid) {
+		t.Skip("test runner name contains 'kittypaw'")
 	}
 }
 
-func TestIsGopawProcess_DeadPid(t *testing.T) {
-	// PID 1 is init/launchd, not gopaw.
-	if isGopawProcess(99999999) {
-		t.Error("isGopawProcess(99999999) = true, want false")
+func TestIsKittypawProcess_DeadPid(t *testing.T) {
+	// PID 1 is init/launchd, not kittypaw.
+	if isKittypawProcess(99999999) {
+		t.Error("isKittypawProcess(99999999) = true, want false")
 	}
 }
 

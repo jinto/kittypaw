@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/engine"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 )
 
 var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
@@ -51,7 +51,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "gopaw"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "kittypaw"})
 }
 
 // ---------------------------------------------------------------------------
@@ -871,7 +871,7 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			})
 		} else {
 			// For SKILL.md, write to temp dir and install.
-			tmpDir, tmpErr := os.MkdirTemp("", "gopaw-install-")
+			tmpDir, tmpErr := os.MkdirTemp("", "kittypaw-install-")
 			if tmpErr != nil {
 				writeError(w, http.StatusInternalServerError, tmpErr.Error())
 				return

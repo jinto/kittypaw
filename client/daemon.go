@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // DaemonConn manages daemon discovery and auto-start.
@@ -59,7 +59,7 @@ func (d *DaemonConn) Connect() (*Client, error) {
 
 	// Try existing daemon first.
 	if pid, ok := readPid(pidPath); ok {
-		if isGopawProcess(pid) {
+		if isKittypawProcess(pid) {
 			if cl.Health() == nil {
 				return cl, nil
 			}
@@ -107,7 +107,7 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 	defer unlockPidFile(lockFile)
 
 	// Double-check after acquiring lock — daemon may have appeared.
-	if pid, ok := readPid(pidPath); ok && isGopawProcess(pid) {
+	if pid, ok := readPid(pidPath); ok && isKittypawProcess(pid) {
 		return nil
 	}
 
@@ -150,7 +150,7 @@ func (d *DaemonConn) pollHealth(cl *Client) error {
 		}
 		time.Sleep(healthPollInterval)
 	}
-	return fmt.Errorf("daemon 시작 타임아웃 (10초). `gopaw daemon start`로 직접 시작하세요")
+	return fmt.Errorf("daemon 시작 타임아웃 (10초). `kittypaw daemon start`로 직접 시작하세요")
 }
 
 // lockPidFile acquires an exclusive advisory lock on the given path.
@@ -194,10 +194,10 @@ func readPid(path string) (int, bool) {
 	return pid, true
 }
 
-// isGopawProcess checks if a PID belongs to a running gopaw process.
+// isKittypawProcess checks if a PID belongs to a running kittypaw process.
 // Uses signal(0) for liveness + process name verification to prevent
 // PID reuse false positives.
-func isGopawProcess(pid int) bool {
+func isKittypawProcess(pid int) bool {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
@@ -211,7 +211,7 @@ func isGopawProcess(pid int) bool {
 		return false
 	}
 	name := strings.TrimSpace(string(out))
-	return strings.Contains(name, "gopaw")
+	return strings.Contains(name, "kittypaw")
 }
 
 func parseBindAddr(bind string) (host, port string) {

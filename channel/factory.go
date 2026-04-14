@@ -3,7 +3,7 @@ package channel
 import (
 	"fmt"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // FromConfig creates a Channel from a ChannelConfig.

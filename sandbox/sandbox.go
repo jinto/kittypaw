@@ -12,7 +12,7 @@ package sandbox
 import (
 	"context"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // SkillResolver is called for each skill invocation during sandbox execution.

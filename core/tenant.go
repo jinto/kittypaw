@@ -10,7 +10,7 @@ import (
 // Tenant represents a single user/workspace with isolated data.
 type Tenant struct {
 	ID      string
-	BaseDir string // e.g. ~/.gopaw/tenants/<id>/
+	BaseDir string // e.g. ~/.kittypaw/tenants/<id>/
 	Config  *Config
 }
 
@@ -35,8 +35,20 @@ func (t *Tenant) SecretsPath() string {
 }
 
 // DBPath returns the path to the tenant's SQLite database.
+// Migrates legacy gopaw.db → kittypaw.db on first access.
 func (t *Tenant) DBPath() string {
-	return filepath.Join(t.BaseDir, "data", "gopaw.db")
+	dbDir := filepath.Join(t.BaseDir, "data")
+	newPath := filepath.Join(dbDir, "kittypaw.db")
+	if _, err := os.Stat(newPath); os.IsNotExist(err) {
+		oldPath := filepath.Join(dbDir, "gopaw.db")
+		if _, err := os.Stat(oldPath); err == nil {
+			_ = os.Rename(oldPath, newPath)
+			// Also migrate WAL and SHM files if they exist.
+			_ = os.Rename(oldPath+"-wal", newPath+"-wal")
+			_ = os.Rename(oldPath+"-shm", newPath+"-shm")
+		}
+	}
+	return newPath
 }
 
 // PackagesDir returns the tenant's npm packages directory.
@@ -65,7 +77,7 @@ func (t *Tenant) EnsureDirs() error {
 type TenantRegistry struct {
 	mu        sync.RWMutex
 	tenants   map[string]*Tenant
-	baseDir   string // e.g. ~/.gopaw/tenants/
+	baseDir   string // e.g. ~/.kittypaw/tenants/
 	defaultID string
 }
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -56,7 +57,7 @@ func LoadServerConfig(path string) (*TopLevelServerConfig, error) {
 	return sc, nil
 }
 
-// ServerConfigPath returns the path to server.toml in the gopaw dir.
+// ServerConfigPath returns the path to server.toml in the kittypaw dir.
 func ServerConfigPath() (string, error) {
 	dir, err := ConfigDir()
 	if err != nil {
@@ -293,13 +294,29 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// ConfigDir returns the user's .gopaw config directory, creating it if needed.
+// ConfigDir returns the user's .kittypaw config directory, creating it if needed.
+// On first run after rename, migrates ~/.gopaw → ~/.kittypaw automatically.
 func ConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".gopaw")
+	dir := filepath.Join(home, ".kittypaw")
+
+	// Migrate legacy ~/.gopaw if .kittypaw doesn't exist yet.
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		oldDir := filepath.Join(home, ".gopaw")
+		if _, err := os.Stat(oldDir); err == nil {
+			if renameErr := os.Rename(oldDir, dir); renameErr != nil {
+				slog.Warn("failed to migrate config dir, using legacy path",
+					"from", oldDir, "to", dir, "error", renameErr)
+				dir = oldDir
+			} else {
+				slog.Info("migrated config directory", "from", oldDir, "to", dir)
+			}
+		}
+	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

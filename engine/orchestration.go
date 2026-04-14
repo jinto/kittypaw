@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinto/gopaw/core"
-	"github.com/jinto/gopaw/llm"
-	"github.com/jinto/gopaw/store"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
+	"github.com/jinto/kittypaw/store"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -300,7 +300,7 @@ func executeDelegateTask(
 	return result
 }
 
-// loadSOUL reads ~/.gopaw/profiles/{id}/SOUL.md via core.LoadProfile.
+// loadSOUL reads ~/.kittypaw/profiles/{id}/SOUL.md via core.LoadProfile.
 // Returns "" on any failure.
 func loadSOUL(baseDir, profileID string) string {
 	base, err := core.ResolveBaseDir(baseDir)

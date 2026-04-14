@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 )
 
 // --- Provider Resolution Tests ---

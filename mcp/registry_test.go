@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/gopaw/core"
+	"github.com/jinto/kittypaw/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
