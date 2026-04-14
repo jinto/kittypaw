@@ -85,6 +85,7 @@ type Config struct {
 	Reflection      ReflectionConfig    `toml:"reflection"`
 	Evolution       EvolutionConfig     `toml:"evolution"`
 	Orchestration   OrchestrationConfig `toml:"orchestration"`
+	Registry        RegistryConfig      `toml:"registry"`
 }
 
 // LLMConfig holds the primary LLM provider settings.
@@ -154,6 +155,11 @@ type OrchestrationConfig struct {
 	Enabled      bool   `toml:"enabled"`
 	MaxDepth     uint32 `toml:"max_depth"`
 	MaxDelegates uint32 `toml:"max_delegates"`
+}
+
+// RegistryConfig controls the remote package registry.
+type RegistryConfig struct {
+	URL string `toml:"url"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -249,6 +255,9 @@ func DefaultConfig() Config {
 		Orchestration: OrchestrationConfig{
 			MaxDepth:     3,
 			MaxDelegates: 5,
+		},
+		Registry: RegistryConfig{
+			URL: DefaultRegistryURL,
 		},
 	}
 }

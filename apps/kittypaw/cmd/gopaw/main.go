@@ -1014,6 +1014,8 @@ func newPackagesCmd() *cobra.Command {
 		newPkgInstallCmd(),
 		newPkgUninstallCmd(),
 		newPkgListCmd(),
+		newPkgSearchCmd(),
+		newPkgInfoCmd(),
 		newPkgConfigCmd(),
 		newPkgRunCmd(),
 	)
@@ -1022,8 +1024,8 @@ func newPackagesCmd() *cobra.Command {
 
 func newPkgInstallCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "install <path>",
-		Short: "Install a package from a local directory",
+		Use:   "install <path-or-id>",
+		Short: "Install a package from a local directory or the registry",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			secrets, err := core.LoadSecrets()
@@ -1031,14 +1033,171 @@ func newPkgInstallCmd() *cobra.Command {
 				return err
 			}
 			pm := core.NewPackageManager(secrets)
-			pkg, err := pm.Install(args[0])
+
+			arg := args[0]
+
+			// If arg is an existing directory, install locally.
+			fi, statErr := os.Stat(arg)
+			if statErr != nil && !os.IsNotExist(statErr) {
+				return statErr // permission denied, etc.
+			}
+			if statErr == nil && fi.IsDir() {
+				pkg, err := pm.Install(arg)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Installed package %q (%s) v%s\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
+				return nil
+			}
+
+			// Otherwise treat as a registry package ID.
+			rc, err := registryClient()
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Installed package %q (%s) v%s\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
+			entries, err := rc.FetchIndex()
+			if err != nil {
+				return err
+			}
+
+			var entry *core.RegistryEntry
+			for i := range entries {
+				if entries[i].ID == arg {
+					entry = &entries[i]
+					break
+				}
+			}
+			if entry == nil {
+				return fmt.Errorf("package %q not found in registry", arg)
+			}
+
+			pkg, err := pm.InstallFromRegistry(rc, *entry)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed package %q (%s) v%s from registry\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
 			return nil
 		},
 	}
+}
+
+func newPkgSearchCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "search [query]",
+		Short: "Search the package registry",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			rc, err := registryClient()
+			if err != nil {
+				return err
+			}
+
+			var query string
+			if len(args) > 0 {
+				query = args[0]
+			}
+
+			results, err := rc.SearchEntries(query)
+			if err != nil {
+				return err
+			}
+
+			if len(results) == 0 {
+				fmt.Println("No packages found.")
+				return nil
+			}
+
+			fmt.Printf("%-20s %-25s %-10s %s\n", "ID", "NAME", "VERSION", "DESCRIPTION")
+			fmt.Println(strings.Repeat("-", 80))
+			for _, e := range results {
+				desc := e.Description
+				if len(desc) > 30 {
+					desc = desc[:28] + ".."
+				}
+				name := e.Name
+				if len(name) > 23 {
+					name = name[:21] + ".."
+				}
+				fmt.Printf("%-20s %-25s %-10s %s\n", e.ID, name, e.Version, desc)
+			}
+			return nil
+		},
+	}
+}
+
+func newPkgInfoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info <id>",
+		Short: "Show details of an installed package",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+
+			pkg, _, err := pm.LoadPackage(args[0])
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("ID:          %s\n", pkg.Meta.ID)
+			fmt.Printf("Name:        %s\n", pkg.Meta.Name)
+			fmt.Printf("Version:     %s\n", pkg.Meta.Version)
+			if pkg.Meta.Description != "" {
+				fmt.Printf("Description: %s\n", pkg.Meta.Description)
+			}
+			if pkg.Meta.Author != "" {
+				fmt.Printf("Author:      %s\n", pkg.Meta.Author)
+			}
+			if pkg.Meta.Cron != "" {
+				fmt.Printf("Cron:        %s\n", pkg.Meta.Cron)
+			}
+			if pkg.Meta.Model != "" {
+				fmt.Printf("Model:       %s\n", pkg.Meta.Model)
+			}
+
+			if len(pkg.Config) > 0 {
+				fmt.Println("\nConfig Fields:")
+				cfg, _ := pm.GetConfig(args[0])
+				for _, f := range pkg.Config {
+					val := cfg[f.Key]
+					if f.Secret && val != "" {
+						val = "****"
+					}
+					req := ""
+					if f.Required {
+						req = " (required)"
+					}
+					fmt.Printf("  %-20s %s%s\n", f.Key, val, req)
+				}
+			}
+
+			if len(pkg.Permissions.Primitives) > 0 {
+				fmt.Printf("\nPermissions: %s\n", strings.Join(pkg.Permissions.Primitives, ", "))
+			}
+			if len(pkg.Permissions.AllowedHosts) > 0 {
+				fmt.Printf("Hosts:       %s\n", strings.Join(pkg.Permissions.AllowedHosts, ", "))
+			}
+
+			return nil
+		},
+	}
+}
+
+// registryClient creates a RegistryClient from config, falling back to DefaultRegistryURL.
+func registryClient() (*core.RegistryClient, error) {
+	registryURL := core.DefaultRegistryURL
+
+	cfgPath, err := core.ConfigPath()
+	if err == nil {
+		if cfg, loadErr := core.LoadConfig(cfgPath); loadErr == nil && cfg.Registry.URL != "" {
+			registryURL = cfg.Registry.URL
+		}
+	}
+
+	return core.NewRegistryClient(registryURL)
 }
 
 func newPkgUninstallCmd() *cobra.Command {

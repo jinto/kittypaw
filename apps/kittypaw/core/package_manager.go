@@ -71,13 +71,27 @@ func (pm *PackageManager) Install(sourcePath string) (*SkillPackage, error) {
 }
 
 // InstallFromRegistry downloads a package from a registry and installs it.
+// Verifies that the package.toml ID matches the registry entry ID to prevent
+// a malicious registry from overwriting unrelated packages.
 func (pm *PackageManager) InstallFromRegistry(client *RegistryClient, entry RegistryEntry) (*SkillPackage, error) {
 	tmpDir, err := client.DownloadPackage(entry)
 	if err != nil {
 		return nil, fmt.Errorf("install from registry: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	return pm.Install(tmpDir)
+
+	pkg, err := pm.Install(tmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("install from registry: %w", err)
+	}
+
+	if pkg.Meta.ID != entry.ID {
+		// Undo the install — the downloaded package.toml declared a different ID.
+		_ = pm.Uninstall(pkg.Meta.ID)
+		return nil, fmt.Errorf("install from registry: package ID mismatch (registry %q, toml %q)", entry.ID, pkg.Meta.ID)
+	}
+
+	return pkg, nil
 }
 
 // Uninstall removes a package directory and its secrets.

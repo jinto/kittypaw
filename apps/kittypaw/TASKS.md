@@ -1,3 +1,15 @@
+## Plan 20: GitHub Registry Packages ✅
+
+Plan: `.claude/plans/github-registry-packages.md`
+Spec: `.ina/specs/20260414-github-registry-packages.md`
+
+- [x] T1: `RegistryConfig` + `DefaultRegistryURL` — Config 구조체에 Registry 섹션 추가, DefaultConfig 기본값 설정, `DefaultRegistryURL` 상수 추가
+- [x] T2: `fetchToFile` + `DownloadPackage` 멀티파일 — 헬퍼 추출, 3파일 개별 다운로드 (package.toml/main.js 필수, README.md 선택), 실패 시 tmpDir 정리
+- [x] T3: `FilterEntries` + `SearchEntries` — 순수 필터 함수 + FetchIndex 조합 메서드
+- [x] T4: 테스트 — 기존 DownloadSSRFDefense 수정, DownloadMultiFile, RequiredFile404, OptionalReadme404, FilterEntries 테이블 드리븐, SearchEntries, NotFoundID
+- [x] T5: CLI `search` + `info` + `install` 분기 — newPkgSearchCmd, newPkgInfoCmd, newPkgInstallCmd 로컬/레지스트리 분기, registryClient 헬퍼
+- [x] T6: 빌드 검증 — `go build` + `go vet` + `go test ./...` 통과
+
 ## Plan 19: Claude API Prompt Caching ✅
 
 Plan: `.claude/plans/prompt-caching.md`
