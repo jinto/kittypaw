@@ -72,5 +72,9 @@ else
   sudo mv "$BINARY" "$INSTALL_DIR/"
 fi
 
-echo "Installed ${BINARY} v${VERSION} to ${INSTALL_DIR}/${BINARY}"
-echo "Run '${BINARY} init' to get started."
+echo ""
+echo "  ✓ ${BINARY} v${VERSION} installed"
+echo ""
+echo "  Get started:"
+echo "    kittypaw init"
+echo ""
