@@ -3,28 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KittyPaw — コード不要のAIデスクトップ自動化アプリ</title>
-  <meta name="description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <title>KittyPaw — コード不要のAIエージェントフレームワーク</title>
+  <meta name="description" content="Go · CLI + HTTP · ローカルLLM対応。スキルギャラリーからインストールして、設定を入力するだけ。すべて自動化。">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
   <link rel="canonical" href="https://kittypaw.app/ja/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
   <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
   <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
-  <meta property="og:title" content="KittyPaw — コード不要のAIデスクトップ自動化アプリ">
+  <meta property="og:title" content="KittyPaw — コード不要のAIエージェントフレームワーク">
   <meta property="og:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
   <meta property="og:url" content="https://kittypaw.app/ja/">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="ja_JP">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KittyPaw — コード不要のAIデスクトップ自動化アプリ">
+  <meta name="twitter:title" content="KittyPaw — コード不要のAIエージェントフレームワーク">
   <meta name="twitter:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "コード不要のAIデスクトップ自動化アプリ。スキルギャラリーからインストールして、設定を入力するだけ。",
+    "description": "コード不要のAIエージェントフレームワーク。スキルギャラリーからインストールして、設定を入力するだけ。",
     "url": "https://kittypaw.app/ja/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux",
@@ -72,7 +72,7 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> ローカルLLM対応 · 純粋Rust · オープンソース
+        <span>🏠</span> ローカルLLM対応 · マルチチャネル · オープンソース
       </div>
     </div>
 
@@ -87,8 +87,8 @@
     </p>
 
     <div class="hero-buttons">
-      <a href="https://github.com/jinto/kittypaw" class="btn btn-primary">
-        <span>⭐</span> GitHubで入手
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-primary">
+        <span>⭐</span> GitHub Releases
       </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-secondary">
         <span>🎨</span> スキルギャラリーを見る
@@ -103,13 +103,14 @@
         <span class="terminal-label">kittypaw — bash</span>
       </div>
       <div class="terminal-body">
-        <div><span class="t-prompt">$</span> <span class="t-cmd">cargo run -p kittypaw-gui</span></div>
-        <div class="t-out">   Compiling kittypaw v0.1.0</div>
-        <div class="t-out">    Finished release in 3.2s</div>
-        <div><span class="t-highlight">🐾 KittyPaw started!</span> <span class="t-cursor"></span></div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw init</span></div>
+        <div class="t-out">   LLM provider: Claude (Anthropic)</div>
+        <div class="t-out">   Channel: Telegram</div>
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw serve</span></div>
+        <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">npmなし · JSなし · cargo run 一行で完了</p>
+    <p class="hero-note">外部ランタイム不要 · シングルバイナリ</p>
   </div>
 </section>
 
@@ -145,7 +146,7 @@
     <div class="reveal">
       <span class="section-eyebrow">主な機能</span>
       <h2 class="section-title">なぜKittyPawなのか？</h2>
-      <p class="section-sub">n8n、Zapierのようなデスクトップネイティブな自動化の代替。<br>AIがコードを書き、サンドボックスで安全に実行します。</p>
+      <p class="section-sub">n8n、ZapierのようなローカルAIエージェントの代替。<br>AIがコードを書き、サンドボックスで安全に実行します。</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
@@ -161,7 +162,7 @@
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
         <h3>安全な実行</h3>
-        <p>すべてのスキルはQuickJSサンドボックス + OSカーネル分離（Seatbelt/Landlock）の中で実行されます。</p>
+        <p>すべてのスキルはgojaサンドボックスで実行され、危険な操作はPermission承認システムが保護します。</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
@@ -317,28 +318,28 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">技術スタック</span>
-      <h2 class="section-title">外部ランタイム不要、Rustのみで</h2>
+      <h2 class="section-title">外部ランタイム不要、Goのみで</h2>
       <p class="section-sub">単一バイナリで配布。npmもNodeもPythonも不要です。</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
-        <div class="tech-badge">🦀</div>
+        <div class="tech-badge">🐹</div>
         <div>
-          <div class="tech-card-name">Rust</div>
-          <div class="tech-card-desc">メモリ安全 · 高パフォーマンス</div>
+          <div class="tech-card-name">Go</div>
+          <div class="tech-card-desc">シングルバイナリ · 高パフォーマンス</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
         <div class="tech-badge">🖥</div>
         <div>
-          <div class="tech-card-name">Dioxus GUI</div>
-          <div class="tech-card-desc">ネイティブデスクトップUI</div>
+          <div class="tech-card-name">Web UI</div>
+          <div class="tech-card-desc">Chi + WebSocketストリーミング</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-3">
         <div class="tech-badge">🔐</div>
         <div>
-          <div class="tech-card-name">QuickJS Sandbox</div>
+          <div class="tech-card-name">goja Sandbox</div>
           <div class="tech-card-desc">安全なスキル実行</div>
         </div>
       </div>
@@ -366,8 +367,8 @@
       <div class="tech-card reveal reveal-delay-1">
         <div class="tech-badge">🛡</div>
         <div>
-          <div class="tech-card-name">Seatbelt / Landlock</div>
-          <div class="tech-card-desc">カーネルレベル分離</div>
+          <div class="tech-card-name">Permissionシステム</div>
+          <div class="tech-card-desc">承認ベースのアクセス制御</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-2">
@@ -402,10 +403,12 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td>GUIデスクトップアプリ</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td></tr>
+          <tr><td>マルチチャネル (TG/Slack/Discord/Kakao)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>ローカルLLM対応</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
           <tr><td>スキルギャラリー</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>スキル自動生成</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td></tr>
+          <tr class="compare-highlight"><td>繰り返しパターン → スキル自動提案</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+          <tr class="compare-highlight"><td>週間関心事レポート</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
           <tr><td>オープンソース</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
           <tr><td>無料</td><td>✅</td><td>✅</td><td>✅</td><td>❌</td></tr>
         </tbody>
@@ -423,7 +426,7 @@
     <h2 class="reveal">今すぐ始めましょう</h2>
     <p class="reveal reveal-delay-1">
       急ぐときこそ必要なのは、小さくて速い猫の手。<br>
-      cargo run 一行で、今日から自動化を始めましょう。
+      kittypaw serve 一行で、今日から自動化を始めましょう。
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
       <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
@@ -449,7 +452,7 @@
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
     <span class="footer-sep">·</span>
-    <span>Made with 🦀 &amp; ❤️</span>
+    <span>Made with 🐹 &amp; ❤️</span>
   </div>
 </footer>
 

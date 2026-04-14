@@ -7,7 +7,7 @@
   <meta name="description" content="원하는 자동화를 말로 설명하세요. AI가 코드를 짜고, 테스트하고, 등록합니다. 코드 한 줄 없이 나만의 스킬 생성.">
   <link rel="canonical" href="https://kittypaw.app/cases/teach-skill.html">
   <meta property="og:title" content="자연어로 스킬 만들기 — KittyPaw">
-  <meta property="og:description" content="원하는 자동화를 말로 설명하면 AI가 코드를 짜고, 샌드박스에서 테스트하고, 스킬로 등록합니다.">
+  <meta property="og:description" content="원하는 자동화를 말로 설명하면 AI가 코드를 짜고, goja 샌드박스에서 검증한 뒤, 스킬로 등록합니다.">
   <meta property="og:url" content="https://kittypaw.app/cases/teach-skill.html">
   <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
@@ -78,7 +78,7 @@
     <div class="case-step-num">2</div>
     <div class="case-step-body">
       <h3>AI가 코드를 생성합니다</h3>
-      <p>LLM이 요청을 분석하고, KittyPaw 프리미티브를 사용하는 JavaScript 코드를 생성합니다.</p>
+      <p>LLM이 요청을 분석하고, KittyPaw 프리미티브를 사용하는 JavaScript 코드를 생성합니다. 생성된 코드는 goja 샌드박스에서 검증됩니다.</p>
       <div class="mock-code">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -99,15 +99,7 @@
           <div><span class="code-kw">await</span> <span class="code-fn">Telegram.sendMessage</span>(summary.text);</div>
         </div>
       </div>
-    </div>
-  </div>
-
-  <div class="case-step">
-    <div class="case-step-num">3</div>
-    <div class="case-step-body">
-      <h3>샌드박스에서 테스트합니다</h3>
-      <p>생성된 코드를 QuickJS 샌드박스에서 즉시 실행하여 동작을 확인합니다.</p>
-      <div class="mock-code">
+      <div class="mock-code" style="margin-top:12px">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
           <span class="mock-code-dot mock-code-dot-y"></span>
@@ -115,23 +107,19 @@
           kittypaw — bash
         </div>
         <div class="mock-code-body">
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw test lotto-check</span></div>
-          <div class="t-out">⏳ 샌드박스에서 실행 중...</div>
-          <div class="t-out"><span class="t-highlight">✓</span> Http.get → 200 OK</div>
-          <div class="t-out"><span class="t-highlight">✓</span> Llm.generate → 응답 수신 (128 tokens)</div>
-          <div class="t-out"><span class="t-highlight">✓</span> Telegram.sendMessage → 전송 완료</div>
-          <div>&nbsp;</div>
-          <div class="t-out">✅ 테스트 통과! 등록할까요? (y/n)</div>
+          <div class="t-out">⏳ goja 샌드박스에서 검증 중...</div>
+          <div class="t-out"><span class="t-highlight">✓</span> 검증 통과!</div>
+          <div class="t-out">✅ 등록할까요? (y/n)</div>
         </div>
       </div>
     </div>
   </div>
 
   <div class="case-step">
-    <div class="case-step-num">4</div>
+    <div class="case-step-num">3</div>
     <div class="case-step-body">
       <h3>등록 완료, 매주 자동 실행</h3>
-      <p>y를 누르면 스킬이 등록되고 스케줄러에 cron이 설정됩니다. 다음 토요일부터 자동 실행.</p>
+      <p>승인하면 스킬이 등록되고 스케줄러에 cron이 설정됩니다. 다음 토요일부터 자동 실행.</p>
       <div class="mock-code" style="margin-bottom:16px">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -194,7 +182,7 @@
         <div class="step-emoji">🔒</div>
         <div class="step-num">3</div>
         <h3>샌드박스 검증</h3>
-        <p>QuickJS + OS 격리 환경에서 안전하게 테스트</p>
+        <p>goja 샌드박스에서 안전하게 테스트</p>
       </div>
     </div>
   </div>
@@ -234,10 +222,10 @@
     <h2 class="reveal">지금 시작하세요</h2>
     <p class="reveal reveal-delay-1">
       급할수록 필요한 건, 작고 빠른 고양이손.<br>
-      cargo run 한 줄로 오늘부터 자동화를 시작하세요.
+      kittypaw serve 한 줄로 오늘부터 자동화를 시작하세요.
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest/download/KittyPaw-arm64.dmg" class="btn btn-cta-primary">
+      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
         <span>⭐</span> GitHub에서 받기
       </a>
       <a href="https://github.com/kittypaw-skills" class="btn btn-cta-secondary">
@@ -257,7 +245,7 @@
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
     <span class="footer-sep">·</span>
-    <span>Made with 🦀 &amp; ❤️</span>
+    <span>Made with 🐹 &amp; ❤️</span>
   </div>
   <div class="biz-info">
     <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>
