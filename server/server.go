@@ -34,12 +34,13 @@ type Server struct {
 	router    chi.Router
 	spawner   *ChannelSpawner // manages channel lifecycle for hot-reload
 	eventCh   chan core.Event  // shared event channel between channels and dispatch loop
+	version   string
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
 // mcpReg may be nil when no MCP servers are configured.
 // Call StartChannels before ListenAndServe to activate messaging channels.
-func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry) *Server {
+func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry, version string) *Server {
 	// Seed TOML-configured workspace paths into DB (idempotent).
 	if len(cfg.Sandbox.AllowedPaths) > 0 {
 		if err := st.SeedWorkspacesFromConfig(cfg.Sandbox.AllowedPaths); err != nil {
@@ -89,6 +90,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		session:   session,
 		scheduler: engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
 		eventCh:   make(chan core.Event, 64),
+		version:   version,
 	}
 	s.router = s.setupRoutes()
 	return s

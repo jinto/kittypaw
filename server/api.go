@@ -51,7 +51,21 @@ func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": "kittypaw"})
+	s.configMu.RLock()
+	cfg := s.config
+	s.configMu.RUnlock()
+
+	channels := make([]string, 0, len(cfg.Channels))
+	for _, ch := range cfg.Channels {
+		channels = append(channels, string(ch.ChannelType))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"version":  s.version,
+		"model":    cfg.LLM.Model,
+		"channels": channels,
+	})
 }
 
 // ---------------------------------------------------------------------------
