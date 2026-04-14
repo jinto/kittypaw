@@ -432,7 +432,7 @@ func TestApproveSkill(t *testing.T) {
 			Permissions: []string{"Http"},
 		}
 
-		if err := ApproveSkill(result); err != nil {
+		if err := ApproveSkill("", result); err != nil {
 			t.Fatalf("ApproveSkill failed: %v", err)
 		}
 
@@ -467,7 +467,7 @@ func TestApproveSkill(t *testing.T) {
 			Permissions: []string{"Http"},
 		}
 
-		if err := ApproveSkill(result); err != nil {
+		if err := ApproveSkill("", result); err != nil {
 			t.Fatalf("ApproveSkill failed: %v", err)
 		}
 
@@ -488,7 +488,7 @@ func TestApproveSkill(t *testing.T) {
 			Trigger:   core.SkillTrigger{Type: "schedule", Cron: "invalid"},
 		}
 
-		err := ApproveSkill(result)
+		err := ApproveSkill("", result)
 		if err == nil {
 			t.Fatal("expected error for invalid cron")
 		}
@@ -505,7 +505,7 @@ func TestApproveSkill(t *testing.T) {
 			SyntaxError: "SyntaxError: unexpected token",
 		}
 
-		err := ApproveSkill(result)
+		err := ApproveSkill("", result)
 		if err == nil {
 			t.Fatal("expected error for failed syntax check")
 		}

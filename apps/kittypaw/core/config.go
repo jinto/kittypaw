@@ -29,6 +29,42 @@ const (
 	ChannelKakaoTalk ChannelType = "kakao_talk"
 )
 
+// TopLevelServerConfig holds server-wide settings loaded from server.toml.
+// This is separate from per-tenant Config — it controls the daemon itself.
+type TopLevelServerConfig struct {
+	Bind          string `toml:"bind"`
+	MasterAPIKey  string `toml:"master_api_key"`
+	TenantsDir    string `toml:"tenants_dir"`
+	DefaultTenant string `toml:"default_tenant"`
+}
+
+// LoadServerConfig reads server.toml from the given path.
+func LoadServerConfig(path string) (*TopLevelServerConfig, error) {
+	sc := &TopLevelServerConfig{
+		DefaultTenant: "default",
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return sc, nil // defaults
+		}
+		return nil, fmt.Errorf("read server config: %w", err)
+	}
+	if err := toml.Unmarshal(data, sc); err != nil {
+		return nil, fmt.Errorf("parse server config: %w", err)
+	}
+	return sc, nil
+}
+
+// ServerConfigPath returns the path to server.toml in the gopaw dir.
+func ServerConfigPath() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "server.toml"), nil
+}
+
 // Config is the top-level application configuration, loaded from TOML.
 type Config struct {
 	LLM             LLMConfig           `toml:"llm"`
@@ -241,6 +277,14 @@ func ConfigDir() (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// ResolveBaseDir returns baseDir if non-empty, otherwise falls back to ConfigDir.
+func ResolveBaseDir(baseDir string) (string, error) {
+	if baseDir != "" {
+		return baseDir, nil
+	}
+	return ConfigDir()
 }
 
 // ConfigPath returns the default config file path.

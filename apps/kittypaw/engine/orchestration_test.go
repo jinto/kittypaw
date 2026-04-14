@@ -60,7 +60,7 @@ func TestDelegateTask_TaskTooLong(t *testing.T) {
 		longTask[i] = 'a'
 	}
 	spec := PMTaskSpec{ProfileID: "test", Task: string(longTask)}
-	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 0, 3)
+	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 0, 3, "")
 	if result.Success {
 		t.Fatal("expected failure for oversized task")
 	}
@@ -68,7 +68,7 @@ func TestDelegateTask_TaskTooLong(t *testing.T) {
 
 func TestDelegateTask_DepthExceeded(t *testing.T) {
 	spec := PMTaskSpec{ProfileID: "test", Task: "do something"}
-	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 3, 3)
+	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 3, 3, "")
 	if result.Success {
 		t.Fatal("expected failure when depth >= maxDepth")
 	}
@@ -77,7 +77,7 @@ func TestDelegateTask_DepthExceeded(t *testing.T) {
 func TestDelegateTask_DepthZeroMaxZero(t *testing.T) {
 	// Delegation structurally disabled when maxDepth=0.
 	spec := PMTaskSpec{ProfileID: "test", Task: "do something"}
-	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 0, 0)
+	result := executeDelegateTask(context.Background(), spec, nil, nil, nil, 0, 0, "")
 	if result.Success {
 		t.Fatal("expected failure when maxDepth=0")
 	}
@@ -86,7 +86,7 @@ func TestDelegateTask_DepthZeroMaxZero(t *testing.T) {
 func TestDelegateTask_ProfileNotFound(t *testing.T) {
 	st := newDelegateTestStore(t)
 	spec := PMTaskSpec{ProfileID: "nonexistent", Task: "do something"}
-	result := executeDelegateTask(context.Background(), spec, nil, st, nil, 0, 3)
+	result := executeDelegateTask(context.Background(), spec, nil, st, nil, 0, 3, "")
 	if result.Success {
 		t.Fatal("expected failure for missing profile")
 	}
@@ -99,7 +99,7 @@ func TestDelegateTask_ProfileNotFound(t *testing.T) {
 func TestLoadSOUL_MissingFile(t *testing.T) {
 	// When SOUL.md is missing, loadSOUL returns the default preset fallback.
 	// This matches the persona preset system behavior (AC5: fallback + warn log).
-	content := loadSOUL("definitely-nonexistent-profile")
+	content := loadSOUL("", "definitely-nonexistent-profile")
 	if content == "" {
 		t.Fatal("expected default preset fallback, got empty string")
 	}
@@ -157,7 +157,7 @@ func TestDelegateTask_BudgetExhausted(t *testing.T) {
 	// Since we can't call the real LLM, the test just verifies budget is checked.
 	// With a nil provider, it will fail at LLM call, but the budget would still
 	// be checked after. We verify the flow doesn't panic.
-	result := executeDelegateTask(context.Background(), spec, nil, st, b, 0, 3)
+	result := executeDelegateTask(context.Background(), spec, nil, st, b, 0, 3, "")
 	// Should fail because provider is nil, not because of budget.
 	if result.Success {
 		t.Fatal("expected failure with nil provider")
@@ -170,7 +170,7 @@ func TestDelegateTask_BudgetExhausted(t *testing.T) {
 
 func TestOrchestrateRequest_Disabled(t *testing.T) {
 	config := &core.OrchestrationConfig{Enabled: false}
-	_, handled, err := OrchestrateRequest(context.Background(), "hello", nil, nil, config, nil)
+	_, handled, err := OrchestrateRequest(context.Background(), "hello", nil, nil, config, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

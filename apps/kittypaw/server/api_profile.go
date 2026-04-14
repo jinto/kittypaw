@@ -17,11 +17,7 @@ func (s *Server) handleProfileList(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	base, err := core.ConfigDir()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "config dir: "+err.Error())
-		return
-	}
+	base := s.session.BaseDir
 
 	type profileEntry struct {
 		ID           string `json:"id"`
@@ -95,12 +91,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Apply preset if specified (already validated above).
 	if req.PresetID != "" {
-		base, err := core.ConfigDir()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "config dir: "+err.Error())
-			return
-		}
-		if err := core.ApplyPreset(base, req.ID, req.PresetID); err != nil {
+		if err := core.ApplyPreset(s.session.BaseDir, req.ID, req.PresetID); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -136,12 +127,7 @@ func (s *Server) handleProfileActivate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.PresetID != "" {
-		base, err := core.ConfigDir()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err := core.ApplyPreset(base, id, body.PresetID); err != nil {
+		if err := core.ApplyPreset(s.session.BaseDir, id, body.PresetID); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

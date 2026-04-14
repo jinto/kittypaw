@@ -126,7 +126,7 @@ func (s *Scheduler) Wait() {
 }
 
 func (s *Scheduler) checkAndRun(ctx context.Context) {
-	skills, err := core.LoadAllSkills()
+	skills, err := core.LoadAllSkillsFrom(s.session.BaseDir)
 	if err != nil {
 		slog.Error("scheduler: load skills failed", "error", err)
 		return
@@ -326,7 +326,7 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 
 		// Auto-delete one-shot skills even on failure.
 		if sk.Skill.Trigger.Type == "once" {
-			if delErr := core.DeleteSkill(sk.Skill.Name); delErr != nil {
+			if delErr := core.DeleteSkillFrom(s.session.BaseDir, sk.Skill.Name); delErr != nil {
 				slog.Error("scheduler: failed to delete one-shot skill after failure", "name", sk.Skill.Name, "error", delErr)
 			}
 			return
@@ -342,7 +342,7 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 
 	// Delete one-shot skills after successful execution
 	if sk.Skill.Trigger.Type == "once" {
-		if delErr := core.DeleteSkill(sk.Skill.Name); delErr != nil {
+		if delErr := core.DeleteSkillFrom(s.session.BaseDir, sk.Skill.Name); delErr != nil {
 			slog.Error("scheduler: failed to delete one-shot skill after success", "name", sk.Skill.Name, "error", delErr)
 		} else {
 			slog.Info("scheduler: one-shot skill completed and deleted", "name", sk.Skill.Name)
@@ -373,7 +373,7 @@ func (s *Scheduler) tryAutoFix(ctx context.Context, sk *core.SkillWithCode, errM
 		fixAttempts, _ := s.session.Store.GetFixAttempts(sk.Skill.Name)
 		if fixAttempts >= maxFixAttempts {
 			slog.Warn("auto-fix: max attempts reached, disabling skill", "skill", sk.Skill.Name)
-			if disableErr := core.DisableSkill(sk.Skill.Name); disableErr != nil {
+			if disableErr := core.DisableSkillFrom(s.session.BaseDir, sk.Skill.Name); disableErr != nil {
 				slog.Error("auto-fix: disable failed", "skill", sk.Skill.Name, "error", disableErr)
 			}
 			_ = s.session.Store.RecordAudit("auto_fix_exhausted",
@@ -391,7 +391,7 @@ func (s *Scheduler) tryAutoFix(ctx context.Context, sk *core.SkillWithCode, errM
 		// Check if this was the last attempt and disable if so.
 		fixAttempts, _ := s.session.Store.GetFixAttempts(sk.Skill.Name)
 		if fixAttempts >= maxFixAttempts {
-			_ = core.DisableSkill(sk.Skill.Name)
+			_ = core.DisableSkillFrom(s.session.BaseDir, sk.Skill.Name)
 			_ = s.session.Store.RecordAudit("auto_fix_exhausted",
 				fmt.Sprintf("skill %q disabled after %d fix attempts (generation failed: %v)", sk.Skill.Name, maxFixAttempts, genErr), "warning")
 		}

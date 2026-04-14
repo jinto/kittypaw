@@ -58,7 +58,7 @@ func HandleTeach(ctx context.Context, desc, chatID string, s *Session) (*TeachRe
 // ApproveSkill validates the teach result and persists the skill to disk.
 // For schedule triggers, validates the cron expression. Refuses to save
 // skills that failed syntax check.
-func ApproveSkill(result *TeachResult) error {
+func ApproveSkill(baseDir string, result *TeachResult) error {
 	if !result.SyntaxOK {
 		return fmt.Errorf("cannot approve skill with syntax error: %s", result.SyntaxError)
 	}
@@ -80,7 +80,11 @@ func ApproveSkill(result *TeachResult) error {
 			Primitives: result.Permissions,
 		},
 	}
-	return core.SaveSkill(skill, result.Code)
+	dir, err := core.ResolveBaseDir(baseDir)
+	if err != nil {
+		return err
+	}
+	return core.SaveSkillTo(dir, skill, result.Code)
 }
 
 // buildTeachPrompt generates the system prompt for skill code generation.
