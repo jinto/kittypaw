@@ -111,6 +111,91 @@ func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
 }
 
+// EnableSkill sets a skill's enabled state to true.
+func (c *Client) EnableSkill(name string) (map[string]any, error) {
+	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/enable", nil)
+}
+
+// ExplainSkill asks the LLM to explain a skill.
+func (c *Client) ExplainSkill(name string) (map[string]any, error) {
+	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/explain", nil)
+}
+
+// SuggestionsList returns all pending suggestions.
+func (c *Client) SuggestionsList() (map[string]any, error) {
+	return c.get("/api/v1/suggestions")
+}
+
+// SuggestionsAccept accepts a suggestion by skill ID.
+func (c *Client) SuggestionsAccept(skillID string) (map[string]any, error) {
+	return c.post("/api/v1/suggestions/"+url.PathEscape(skillID)+"/accept", nil)
+}
+
+// SuggestionsDismiss dismisses a suggestion by skill ID.
+func (c *Client) SuggestionsDismiss(skillID string) (map[string]any, error) {
+	return c.post("/api/v1/suggestions/"+url.PathEscape(skillID)+"/dismiss", nil)
+}
+
+// FixesList returns fixes for a skill.
+func (c *Client) FixesList(skillID string) (map[string]any, error) {
+	return c.get("/api/v1/skills/" + url.PathEscape(skillID) + "/fixes")
+}
+
+// FixesApprove approves a fix by ID.
+func (c *Client) FixesApprove(id string) (map[string]any, error) {
+	return c.post("/api/v1/fixes/"+url.PathEscape(id)+"/approve", nil)
+}
+
+// ReflectionList returns reflection candidates.
+func (c *Client) ReflectionList() (map[string]any, error) {
+	return c.get("/api/v1/reflection")
+}
+
+// ReflectionApprove approves a reflection candidate.
+func (c *Client) ReflectionApprove(key string) (map[string]any, error) {
+	return c.post("/api/v1/reflection/"+url.PathEscape(key)+"/approve", nil)
+}
+
+// ReflectionReject rejects a reflection candidate.
+func (c *Client) ReflectionReject(key string) (map[string]any, error) {
+	return c.post("/api/v1/reflection/"+url.PathEscape(key)+"/reject", nil)
+}
+
+// ReflectionClear clears all reflection candidates.
+func (c *Client) ReflectionClear() (map[string]any, error) {
+	return c.post("/api/v1/reflection/clear", nil)
+}
+
+// ReflectionRun triggers a reflection cycle.
+func (c *Client) ReflectionRun() (map[string]any, error) {
+	return c.post("/api/v1/reflection/run", nil)
+}
+
+// WeeklyReport returns the weekly reflection report.
+func (c *Client) WeeklyReport() (map[string]any, error) {
+	return c.get("/api/v1/reflection/weekly-report")
+}
+
+// EvolutionList returns pending persona evolutions.
+func (c *Client) EvolutionList() (map[string]any, error) {
+	return c.get("/api/v1/persona/evolution")
+}
+
+// EvolutionApprove approves a persona evolution.
+func (c *Client) EvolutionApprove(id string) (map[string]any, error) {
+	return c.post("/api/v1/persona/evolution/"+url.PathEscape(id)+"/approve", nil)
+}
+
+// EvolutionReject rejects a persona evolution.
+func (c *Client) EvolutionReject(id string) (map[string]any, error) {
+	return c.post("/api/v1/persona/evolution/"+url.PathEscape(id)+"/reject", nil)
+}
+
+// ChannelsList returns active channels.
+func (c *Client) ChannelsList() (map[string]any, error) {
+	return c.get("/api/v1/channels")
+}
+
 // ProfileList returns all profiles with preset status.
 func (c *Client) ProfileList() (map[string]any, error) {
 	return c.get("/api/v1/profiles")
@@ -193,6 +278,11 @@ func (c *Client) do(req *http.Request) (map[string]any, error) {
 
 	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
+		// Some endpoints (e.g., /channels) return arrays. Wrap for consistency.
+		var arr []any
+		if json.Unmarshal(data, &arr) == nil {
+			return map[string]any{"items": arr}, nil
+		}
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 	return result, nil

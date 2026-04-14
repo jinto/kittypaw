@@ -164,6 +164,22 @@ type SkillWithCode struct {
 	Code  string
 }
 
+// EnableSkill sets enabled=true for a skill on disk.
+func EnableSkill(name string) error {
+	if err := ValidateSkillName(name); err != nil {
+		return err
+	}
+	skill, code, err := LoadSkill(name)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	skill.Enabled = true
+	return SaveSkill(skill, code)
+}
+
 // DisableSkill sets enabled=false for a skill on disk.
 func DisableSkill(name string) error {
 	if err := ValidateSkillName(name); err != nil {

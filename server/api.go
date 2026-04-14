@@ -286,6 +286,23 @@ func (s *Server) handleSkillsDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/v1/skills/{name}/enable
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillEnable(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := core.EnableSkill(name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/v1/skills/{name}/disable
 // ---------------------------------------------------------------------------
 
