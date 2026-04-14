@@ -1,19 +1,13 @@
 package server
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
-	"regexp"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/jinto/gopaw/channel"
@@ -120,42 +114,38 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate provider-specific requirements.
 	switch body.Provider {
 	case "claude", "anthropic":
 		if body.APIKey == "" {
 			writeError(w, http.StatusBadRequest, "api_key is required for Claude")
 			return
 		}
-		s.store.SetUserContext("setup:llm_provider", "anthropic", "setup")
-		s.store.SetUserContext("setup:llm_api_key", body.APIKey, "setup")
-		s.store.SetUserContext("setup:llm_model", "claude-sonnet-4-20250514", "setup")
-		s.store.SetUserContext("setup:llm_base_url", "", "setup")
-
 	case "openrouter":
 		if body.APIKey == "" {
 			writeError(w, http.StatusBadRequest, "api_key is required for OpenRouter")
 			return
 		}
-		s.store.SetUserContext("setup:llm_provider", "openai", "setup")
-		s.store.SetUserContext("setup:llm_api_key", body.APIKey, "setup")
-		s.store.SetUserContext("setup:llm_base_url", "https://openrouter.ai/api/v1/chat/completions", "setup")
-		s.store.SetUserContext("setup:llm_model", "qwen/qwen3-235b-a22b:free", "setup")
-
 	case "local":
 		if body.LocalURL == "" || body.LocalModel == "" {
 			writeError(w, http.StatusBadRequest, "local_url and local_model are required")
 			return
 		}
-		baseURL := strings.TrimRight(body.LocalURL, "/") + "/chat/completions"
-		s.store.SetUserContext("setup:llm_provider", "openai", "setup")
-		s.store.SetUserContext("setup:llm_api_key", "", "setup")
-		s.store.SetUserContext("setup:llm_base_url", baseURL, "setup")
-		s.store.SetUserContext("setup:llm_model", body.LocalModel, "setup")
-
 	default:
 		writeError(w, http.StatusBadRequest, "invalid provider")
 		return
 	}
+
+	provider, model, baseURL := core.ResolveLLMConfig(body.Provider, body.LocalURL, body.LocalModel)
+	apiKey := body.APIKey
+	if body.Provider == "local" {
+		apiKey = ""
+	}
+
+	s.store.SetUserContext("setup:llm_provider", provider, "setup")
+	s.store.SetUserContext("setup:llm_api_key", apiKey, "setup")
+	s.store.SetUserContext("setup:llm_model", model, "setup")
+	s.store.SetUserContext("setup:llm_base_url", baseURL, "setup")
 
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "provider": body.Provider})
 }
@@ -174,6 +164,10 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.BotToken == "" || body.ChatID == "" {
 		writeError(w, http.StatusBadRequest, "bot_token and chat_id are required")
+		return
+	}
+	if !core.ValidateTelegramToken(body.BotToken) {
+		writeError(w, http.StatusBadRequest, "invalid bot token format")
 		return
 	}
 
@@ -211,7 +205,7 @@ func (s *Server) handleSetupTelegramChatID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	chatID, err := fetchTelegramChatID(r.Context(), body.Token)
+	chatID, err := core.FetchTelegramChatID(r.Context(), body.Token)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to fetch chat ID: "+err.Error())
 		return
@@ -400,6 +394,39 @@ func maskValue(v string) string {
 	return "***" + v[len(v)-4:]
 }
 
+// wizardResultFromStore reads setup:* keys from the store into a WizardResult.
+func (s *Server) wizardResultFromStore() core.WizardResult {
+	var w core.WizardResult
+	if v, ok, _ := s.store.GetUserContext("setup:llm_provider"); ok {
+		w.LLMProvider = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:llm_api_key"); ok {
+		w.LLMAPIKey = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:llm_model"); ok {
+		w.LLMModel = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:llm_base_url"); ok {
+		w.LLMBaseURL = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:telegram_bot_token"); ok {
+		w.TelegramBotToken = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:telegram_chat_id"); ok {
+		w.TelegramChatID = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:kakao_relay_url"); ok {
+		w.KakaoRelayURL = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:kakao_user_token"); ok {
+		w.KakaoUserToken = v
+	}
+	if v, ok, _ := s.store.GetUserContext("setup:workspace_path"); ok {
+		w.WorkspacePath = v
+	}
+	return w
+}
+
 // generateConfig merges wizard settings into the existing config.toml.
 func (s *Server) generateConfig() error {
 	cfgPath, err := core.ConfigPath()
@@ -407,7 +434,6 @@ func (s *Server) generateConfig() error {
 		return err
 	}
 
-	// Load existing config or start from defaults.
 	cfg := core.DefaultConfig()
 	if data, readErr := os.ReadFile(cfgPath); readErr == nil {
 		if err := toml.Unmarshal(data, &cfg); err != nil {
@@ -415,151 +441,7 @@ func (s *Server) generateConfig() error {
 		}
 	}
 
-	cfg.FreeformFallback = true
-
-	// LLM
-	if v, ok, _ := s.store.GetUserContext("setup:llm_provider"); ok && v != "" {
-		cfg.LLM.Provider = v
-	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_api_key"); ok {
-		cfg.LLM.APIKey = v
-	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_model"); ok && v != "" {
-		cfg.LLM.Model = v
-	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_base_url"); ok {
-		cfg.LLM.BaseURL = v
-	}
-	if cfg.LLM.MaxTokens == 0 {
-		cfg.LLM.MaxTokens = 4096
-	}
-
-	// Channels — only replace wizard-managed types when setup values exist.
-	hasTelegramSetup := false
-	if v, ok, _ := s.store.GetUserContext("setup:telegram_bot_token"); ok && v != "" {
-		hasTelegramSetup = true
-	}
-	hasKakaoSetup := false
-	if v, ok, _ := s.store.GetUserContext("setup:kakao_relay_url"); ok && v != "" {
-		hasKakaoSetup = true
-	}
-
-	var kept []core.ChannelConfig
-	for _, ch := range cfg.Channels {
-		if ch.ChannelType == core.ChannelTelegram && hasTelegramSetup {
-			continue // will be replaced below
-		}
-		if ch.ChannelType == core.ChannelKakaoTalk && hasKakaoSetup {
-			continue // will be replaced below
-		}
-		kept = append(kept, ch)
-	}
-
-	// Telegram — add from wizard only if user configured it.
-	if hasTelegramSetup {
-		tok, _, _ := s.store.GetUserContext("setup:telegram_bot_token")
-		kept = append(kept, core.ChannelConfig{
-			ChannelType: core.ChannelTelegram,
-			Token:       tok,
-		})
-		if cid, ok2, _ := s.store.GetUserContext("setup:telegram_chat_id"); ok2 && cid != "" {
-			cfg.AdminChatIDs = []string{cid}
-		}
-	}
-
-	// KakaoTalk — add from wizard only if user configured it.
-	if hasKakaoSetup {
-		relay, _, _ := s.store.GetUserContext("setup:kakao_relay_url")
-		userToken, _, _ := s.store.GetUserContext("setup:kakao_user_token")
-		kept = append(kept, core.ChannelConfig{
-			ChannelType: core.ChannelKakaoTalk,
-			Kakao: &core.KakaoChannelConfig{
-				RelayURL:  relay,
-				UserToken: userToken,
-			},
-		})
-	}
-
-	cfg.Channels = kept
-
-	// Sandbox defaults
-	if cfg.Sandbox.AllowedHosts == nil {
-		cfg.Sandbox.AllowedHosts = []string{}
-	}
-
-	// Workspace → sandbox allowed paths
-	if ws, ok, _ := s.store.GetUserContext("setup:workspace_path"); ok && ws != "" {
-		cfg.Sandbox.AllowedPaths = []string{ws}
-	}
-
-	// Write config atomically: tmp file + rename.
-	var buf bytes.Buffer
-	enc := toml.NewEncoder(&buf)
-	if err := enc.Encode(cfg); err != nil {
-		return fmt.Errorf("encode config: %w", err)
-	}
-
-	tmpPath := cfgPath + ".tmp"
-	if err := os.WriteFile(tmpPath, buf.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write tmp config: %w", err)
-	}
-	if err := os.Rename(tmpPath, cfgPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("rename config: %w", err)
-	}
-
-	return nil
-}
-
-var telegramTokenRe = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{30,50}$`)
-
-// fetchTelegramChatID calls the Telegram Bot API getUpdates to discover the
-// chat ID from the most recent message.
-func fetchTelegramChatID(ctx context.Context, token string) (string, error) {
-	if !telegramTokenRe.MatchString(token) {
-		return "", fmt.Errorf("invalid token format")
-	}
-	url := "https://api.telegram.org/bot" + token + "/getUpdates?limit=1&timeout=0"
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-
-	var result struct {
-		OK     bool `json:"ok"`
-		Result []struct {
-			Message struct {
-				Chat struct {
-					ID int64 `json:"id"`
-				} `json:"chat"`
-			} `json:"message"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-	if !result.OK {
-		return "", fmt.Errorf("telegram API returned an error")
-	}
-	if len(result.Result) == 0 {
-		return "", fmt.Errorf("no messages found — send a message to the bot first")
-	}
-
-	chatID := result.Result[0].Message.Chat.ID
-	return fmt.Sprintf("%d", chatID), nil
+	w := s.wizardResultFromStore()
+	merged := core.MergeWizardSettings(&cfg, w)
+	return core.WriteConfigAtomic(merged, cfgPath)
 }
