@@ -1548,6 +1548,46 @@ func (s *Store) RecentAuditEvents(limit int) ([]AuditRecord, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Permission Audit
+// ---------------------------------------------------------------------------
+
+// LogPermissionEvent records a permission decision to the audit log.
+func (s *Store) LogPermissionEvent(decision, channel, chatID, description, resource string) error {
+	detail, _ := json.Marshal(map[string]string{
+		"channel":     channel,
+		"chat_id":     chatID,
+		"description": description,
+		"resource":    resource,
+		"decision":    decision,
+	})
+	return s.RecordAudit("permission."+decision, string(detail), "info")
+}
+
+// QueryPermissionLog returns recent permission audit entries.
+func (s *Store) QueryPermissionLog(limit int) ([]AuditRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, event_type, detail, severity, created_at
+		FROM audit_log
+		WHERE event_type LIKE 'permission.%'
+		ORDER BY id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AuditRecord
+	for rows.Next() {
+		var a AuditRecord
+		if err := rows.Scan(&a.ID, &a.EventType, &a.Detail, &a.Severity, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
 // Pending Responses
 // ---------------------------------------------------------------------------
 

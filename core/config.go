@@ -87,11 +87,23 @@ type Config struct {
 	Orchestration   OrchestrationConfig `toml:"orchestration"`
 	Registry        RegistryConfig      `toml:"registry"`
 	SkillInstall    SkillInstallConfig  `toml:"skill_install"`
+	Permissions     PermissionPolicy    `toml:"permissions"`
 }
 
 // SkillInstallConfig controls skill installation behavior.
 type SkillInstallConfig struct {
 	MdExecutionMode string `toml:"md_execution_mode"` // "prompt" or "native", empty = ask user
+}
+
+// PermissionPolicy configures which operations require explicit user approval.
+type PermissionPolicy struct {
+	RequireApproval []string `toml:"require_approval"`
+	TimeoutSeconds  int      `toml:"timeout_seconds"`
+}
+
+// DefaultRequireApproval is used when RequireApproval is nil (not configured).
+var DefaultRequireApproval = []string{
+	"Shell.exec", "Git.add", "Git.commit", "Git.push", "Git.pull", "File.delete",
 }
 
 // LLMConfig holds the primary LLM provider settings.

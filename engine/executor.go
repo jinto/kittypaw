@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,9 +35,59 @@ func AgentIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// needsPermission checks whether a skill call requires explicit user approval
+// based on the config's permission policy. Returns false for AutonomyFull
+// (auto-approve) and AutonomyReadonly (execution blocked elsewhere).
+func needsPermission(skillName, method string, cfg *core.Config) bool {
+	if cfg.AutonomyLevel == core.AutonomyFull {
+		return false
+	}
+	if cfg.AutonomyLevel == core.AutonomyReadonly {
+		return false
+	}
+	key := skillName + "." + method
+	list := cfg.Permissions.RequireApproval
+	if list == nil {
+		list = core.DefaultRequireApproval
+	}
+	return slices.Contains(list, key)
+}
+
 // resolveSkillCall dispatches a single skill call to the appropriate handler.
 func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, permFn PermissionCallback) (string, error) {
 	slog.Debug("resolving skill call", "skill", call.SkillName, "method", call.Method)
+
+	// Central permission gate — applies to ALL skills uniformly.
+	if needsPermission(call.SkillName, call.Method, s.Config) {
+		desc := fmt.Sprintf("%s.%s", call.SkillName, call.Method)
+		// Include the first argument for context (e.g., the shell command or file path).
+		if len(call.Args) > 0 {
+			var arg string
+			if json.Unmarshal(call.Args[0], &arg) == nil && arg != "" {
+				const maxArgLen = 200
+				if len(arg) > maxArgLen {
+					// Avoid splitting a multi-byte UTF-8 character.
+					arg = arg[:maxArgLen]
+					for len(arg) > 0 && arg[len(arg)-1]&0xC0 == 0x80 {
+						arg = arg[:len(arg)-1]
+					}
+					if len(arg) > 0 && arg[len(arg)-1]&0xC0 == 0xC0 {
+						arg = arg[:len(arg)-1]
+					}
+					arg += "..."
+				}
+				desc += ": " + arg
+			}
+		}
+		if permFn != nil {
+			ok, err := permFn(ctx, desc, call.SkillName)
+			if err != nil || !ok {
+				return jsonResult(map[string]any{"error": call.SkillName + "." + call.Method + " permission denied"})
+			}
+		} else {
+			return jsonResult(map[string]any{"error": call.SkillName + "." + call.Method + " requires permission approval"})
+		}
+	}
 
 	switch call.SkillName {
 	case "Http", "Web":
@@ -46,9 +97,9 @@ func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, perm
 	case "Storage":
 		return executeStorage(ctx, call, s)
 	case "Shell":
-		return executeShell(ctx, call, s, permFn)
+		return executeShell(ctx, call, s)
 	case "Git":
-		return executeGit(ctx, call, s, permFn)
+		return executeGit(ctx, call, s)
 	case "Llm":
 		return executeLLM(ctx, call, s)
 	case "Memory":
@@ -481,7 +532,7 @@ func executeStorage(_ context.Context, call core.SkillCall, s *Session) (string,
 
 // --- Shell ---
 
-func executeShell(ctx context.Context, call core.SkillCall, s *Session, permFn PermissionCallback) (string, error) {
+func executeShell(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	if call.Method != "exec" {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Shell method: %s", call.Method)})
 	}
@@ -490,15 +541,6 @@ func executeShell(ctx context.Context, call core.SkillCall, s *Session, permFn P
 	}
 	var command string
 	json.Unmarshal(call.Args[0], &command)
-
-	if permFn != nil {
-		ok, err := permFn(ctx, "Shell.exec: "+command, command)
-		if err != nil || !ok {
-			return jsonResult(map[string]any{"error": "Shell.exec permission denied"})
-		}
-	} else if s.Config.AutonomyLevel != core.AutonomyFull {
-		return jsonResult(map[string]any{"error": "Shell.exec requires permission approval"})
-	}
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	output, err := cmd.CombinedOutput()
@@ -518,11 +560,8 @@ func executeShell(ctx context.Context, call core.SkillCall, s *Session, permFn P
 
 // --- Git ---
 
-func executeGit(ctx context.Context, call core.SkillCall, s *Session, permFn PermissionCallback) (string, error) {
+func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	var args []string
-
-	// Destructive git operations require explicit permission.
-	destructive := false
 
 	switch call.Method {
 	case "status":
@@ -536,7 +575,6 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session, permFn Per
 	case "diff":
 		args = []string{"diff"}
 	case "add":
-		destructive = true
 		if len(call.Args) == 0 {
 			args = []string{"add", "."}
 		} else {
@@ -545,7 +583,6 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session, permFn Per
 			args = []string{"add", path}
 		}
 	case "commit":
-		destructive = true
 		if len(call.Args) == 0 {
 			return jsonResult(map[string]any{"error": "commit message required"})
 		}
@@ -553,25 +590,11 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session, permFn Per
 		json.Unmarshal(call.Args[0], &msg)
 		args = []string{"commit", "-m", msg}
 	case "push":
-		destructive = true
 		args = []string{"push"}
 	case "pull":
-		destructive = true
 		args = []string{"pull"}
 	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Git method: %s", call.Method)})
-	}
-
-	if destructive {
-		desc := fmt.Sprintf("Git.%s: git %s", call.Method, strings.Join(args, " "))
-		if permFn != nil {
-			ok, err := permFn(ctx, desc, "git")
-			if err != nil || !ok {
-				return jsonResult(map[string]any{"error": "Git permission denied for " + call.Method})
-			}
-		} else if s.Config.AutonomyLevel != core.AutonomyFull {
-			return jsonResult(map[string]any{"error": "Git." + call.Method + " requires permission approval"})
-		}
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)

@@ -1,8 +1,10 @@
 package channel
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jinto/gopaw/core"
 )
@@ -269,6 +271,173 @@ func TestDiscordSessionIDFromAuthor(t *testing.T) {
 
 	if payload.SessionID != "discord-user-99" {
 		t.Errorf("expected SessionID %q, got %q", "discord-user-99", payload.SessionID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Telegram Confirmer tests
+// ---------------------------------------------------------------------------
+
+func TestTelegramConfirmerInterface(t *testing.T) {
+	ch := NewTelegram("fake-token")
+	var _ Confirmer = ch // compile-time check
+	if _, ok := interface{}(ch).(Confirmer); !ok {
+		t.Fatal("TelegramChannel does not implement Confirmer")
+	}
+}
+
+func TestResolveCallbackApprove(t *testing.T) {
+	tc := NewTelegram("fake-token")
+	reqID := "test-req-123"
+	ch := make(chan bool, 1)
+	tc.pending.Store(reqID, ch)
+
+	query := &telegramCallbackQuery{
+		ID:   "cb-1",
+		Data: "a:" + reqID,
+	}
+
+	// Use a canceled context to prevent actual HTTP calls (answerCallbackQuery)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tc.resolveCallback(ctx, query)
+
+	select {
+	case ok := <-ch:
+		if !ok {
+			t.Error("expected approve (true), got deny")
+		}
+	default:
+		t.Error("expected value on channel, got nothing")
+	}
+
+	// Verify the pending entry was cleaned up
+	if _, ok := tc.pending.Load(reqID); ok {
+		t.Error("expected pending entry to be deleted after resolve")
+	}
+}
+
+func TestResolveCallbackDeny(t *testing.T) {
+	tc := NewTelegram("fake-token")
+	reqID := "test-req-456"
+	ch := make(chan bool, 1)
+	tc.pending.Store(reqID, ch)
+
+	query := &telegramCallbackQuery{
+		ID:   "cb-2",
+		Data: "d:" + reqID,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tc.resolveCallback(ctx, query)
+
+	select {
+	case ok := <-ch:
+		if ok {
+			t.Error("expected deny (false), got approve")
+		}
+	default:
+		t.Error("expected value on channel, got nothing")
+	}
+}
+
+func TestResolveCallbackStale(t *testing.T) {
+	tc := NewTelegram("fake-token")
+
+	// No pending entry for this ID — should not panic
+	query := &telegramCallbackQuery{
+		ID:   "cb-stale",
+		Data: "a:nonexistent-req",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tc.resolveCallback(ctx, query) // should not panic
+}
+
+func TestResolveCallbackDuplicate(t *testing.T) {
+	tc := NewTelegram("fake-token")
+	reqID := "test-req-dup"
+	ch := make(chan bool, 1)
+	tc.pending.Store(reqID, ch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// First click — should resolve
+	tc.resolveCallback(ctx, &telegramCallbackQuery{ID: "cb-1", Data: "a:" + reqID})
+	// Second click — should be a no-op (entry already deleted by LoadAndDelete)
+	tc.resolveCallback(ctx, &telegramCallbackQuery{ID: "cb-2", Data: "a:" + reqID})
+
+	select {
+	case ok := <-ch:
+		if !ok {
+			t.Error("expected approve from first click")
+		}
+	default:
+		t.Error("expected value from first click")
+	}
+}
+
+func TestAskConfirmationTimeout(t *testing.T) {
+	tc := NewTelegram("fake-token")
+
+	// Use an already-canceled context to simulate timeout.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ok, err := tc.AskConfirmation(ctx, "12345", "Shell.exec: rm -rf /", "Shell")
+	if ok {
+		t.Error("expected false on timeout")
+	}
+	if err == nil {
+		t.Error("expected error on timeout")
+	}
+}
+
+func TestResolveCallbackBadFormat(t *testing.T) {
+	tc := NewTelegram("fake-token")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Short data, missing colon — should not panic
+	tc.resolveCallback(ctx, &telegramCallbackQuery{ID: "cb", Data: "x"})
+	tc.resolveCallback(ctx, &telegramCallbackQuery{ID: "cb", Data: ""})
+	tc.resolveCallback(ctx, &telegramCallbackQuery{ID: "cb", Data: "ab"})
+}
+
+func TestAskConfirmationApproveViaResolve(t *testing.T) {
+	tc := NewTelegram("fake-token")
+
+	// We can't make real HTTP calls, but we can test the pending map flow.
+	// Simulate: store a pending entry, then resolve it from another goroutine.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reqID := "manual-test-req"
+	ch := make(chan bool, 1)
+	tc.pending.Store(reqID, ch)
+
+	// Simulate callback arriving
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancelCtx, cancelFn := context.WithCancel(context.Background())
+		cancelFn()
+		tc.resolveCallback(cancelCtx, &telegramCallbackQuery{
+			ID:   "cb-async",
+			Data: "a:" + reqID,
+		})
+	}()
+
+	select {
+	case ok := <-ch:
+		if !ok {
+			t.Error("expected approve")
+		}
+	case <-ctx.Done():
+		t.Error("timed out waiting for callback resolution")
 	}
 }
 

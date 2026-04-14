@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jinto/gopaw/channel"
 	"github.com/jinto/gopaw/core"
 	"github.com/jinto/gopaw/engine"
 	"github.com/jinto/gopaw/llm"
@@ -275,7 +276,39 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				"from", payload.FromName,
 			)
 
-			response, err := s.ProcessEvent(ctx, event)
+			// Build RunOptions with Confirmer-based permission callback if available.
+			var runOpts *engine.RunOptions
+			ch, chOK := s.spawner.GetChannel(event.Type)
+			if chOK {
+				if confirmer, ok := ch.(channel.Confirmer); ok {
+					evType := string(event.Type)
+					chatID := payload.ChatID
+					runOpts = &engine.RunOptions{
+						OnPermission: func(pCtx context.Context, desc, res string) (bool, error) {
+							s.logPermissionEvent("requested", evType, chatID, desc, res)
+
+							timeout := s.permissionTimeout()
+							permCtx, cancel := context.WithTimeout(pCtx, timeout)
+							defer cancel()
+
+							ok, err := confirmer.AskConfirmation(permCtx, chatID, desc, res)
+							var decision string
+							switch {
+							case err != nil:
+								decision = "timeout"
+							case ok:
+								decision = "approved"
+							default:
+								decision = "denied"
+							}
+							s.logPermissionEvent(decision, evType, chatID, desc, res)
+							return ok, err
+						},
+					}
+				}
+			}
+
+			response, err := s.session.Run(ctx, event, runOpts)
 			if err != nil {
 				slog.Error("channel event: engine error",
 					"type", event.Type,
@@ -285,8 +318,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
-			ch, ok := s.spawner.GetChannel(event.Type)
-			if !ok {
+			if !chOK {
 				slog.Warn("channel event: no channel for response routing, enqueuing for retry", "type", event.Type)
 				if event.Type != core.EventKakaoTalk {
 					_ = s.store.EnqueueResponse(string(event.Type), payload.ChatID, response)
@@ -308,6 +340,24 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				}
 			}
 		}
+	}
+}
+
+// permissionTimeout returns the configured permission timeout duration.
+func (s *Server) permissionTimeout() time.Duration {
+	s.configMu.RLock()
+	secs := s.config.Permissions.TimeoutSeconds
+	s.configMu.RUnlock()
+	if secs <= 0 {
+		secs = 120
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// logPermissionEvent records a permission decision to the audit log.
+func (s *Server) logPermissionEvent(decision, channelType, chatID, desc, resource string) {
+	if err := s.store.LogPermissionEvent(decision, channelType, chatID, desc, resource); err != nil {
+		slog.Warn("permission audit log failed", "error", err)
 	}
 }
 

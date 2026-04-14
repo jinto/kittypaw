@@ -54,6 +54,13 @@ Supports two source formats:
 
 Provenance tracked via `SourceURL`, `SourceHash`, `SourceText` fields on Skill. SHA256 verification for registry packages.
 
+## Permission System
+
+Destructive operations (Shell.exec, Git.push, etc.) require user approval in `supervised` autonomy mode.
+Chat channels that implement `channel.Confirmer` (currently Telegram) show an inline keyboard for approve/deny.
+Config: `[permissions]` section in `config.toml` — `require_approval` (operation list) + `timeout_seconds`.
+Callback responses route through channel-internal `sync.Map` (not `eventCh`) to prevent dispatchLoop deadlock.
+
 ## Config
 
 TOML config at `~/.gopaw/config.toml`. See `core/config.go` for all options.
