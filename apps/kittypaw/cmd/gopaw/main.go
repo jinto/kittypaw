@@ -1055,20 +1055,9 @@ func newPkgInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			entries, err := rc.FetchIndex()
+			entry, err := rc.FindEntry(arg)
 			if err != nil {
 				return err
-			}
-
-			var entry *core.RegistryEntry
-			for i := range entries {
-				if entries[i].ID == arg {
-					entry = &entries[i]
-					break
-				}
-			}
-			if entry == nil {
-				return fmt.Errorf("package %q not found in registry", arg)
 			}
 
 			pkg, err := pm.InstallFromRegistry(rc, *entry)
