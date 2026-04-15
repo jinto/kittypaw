@@ -652,6 +652,45 @@ th {
   color: var(--text-muted);
 }
 
+/* Code preview during streaming */
+.code-preview {
+  opacity: 0.7;
+}
+
+.code-preview-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.code-preview pre {
+  max-height: 120px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+/* Collapsible code after execution */
+.code-details {
+  margin-top: 8px;
+}
+
+.code-details summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.code-details summary:hover {
+  color: var(--text);
+}
+
+.code-details pre {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* Chat input */
 .chat-input-area {
   display: flex;

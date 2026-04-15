@@ -226,6 +226,35 @@ func TestMergeWizardSettings_AllowedHostsNonNil(t *testing.T) {
 	}
 }
 
+func TestMergeWizardSettings_Firecrawl(t *testing.T) {
+	base := DefaultConfig()
+	w := WizardResult{FirecrawlKey: "fc-test-key"}
+	cfg := MergeWizardSettings(&base, w)
+
+	if cfg.Web.FirecrawlKey != "fc-test-key" {
+		t.Errorf("expected firecrawl key 'fc-test-key', got %q", cfg.Web.FirecrawlKey)
+	}
+	if cfg.Web.SearchBackend != "firecrawl" {
+		t.Errorf("expected search_backend 'firecrawl', got %q", cfg.Web.SearchBackend)
+	}
+}
+
+func TestMergeWizardSettings_FirecrawlPreservesExplicitBackend(t *testing.T) {
+	base := DefaultConfig()
+	base.Web.SearchBackend = "tavily"
+	base.Web.TavilyAPIKey = "tv-key"
+	w := WizardResult{FirecrawlKey: "fc-key"}
+	cfg := MergeWizardSettings(&base, w)
+
+	if cfg.Web.FirecrawlKey != "fc-key" {
+		t.Errorf("expected firecrawl key set, got %q", cfg.Web.FirecrawlKey)
+	}
+	// Tavily was explicitly set — should NOT be overwritten to firecrawl.
+	if cfg.Web.SearchBackend != "tavily" {
+		t.Errorf("expected search_backend preserved as 'tavily', got %q", cfg.Web.SearchBackend)
+	}
+}
+
 func TestWriteConfigAtomic(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

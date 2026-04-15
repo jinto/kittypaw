@@ -14,9 +14,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 
 	"github.com/jinto/kittypaw/client"
@@ -172,6 +174,9 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.localModel, "local-model", "", "Local LLM model name")
 	cmd.Flags().StringVar(&flags.telegramToken, "telegram-token", "", "Telegram bot token")
 	cmd.Flags().StringVar(&flags.telegramChatID, "telegram-chat-id", "", "Telegram chat ID")
+	cmd.Flags().StringVar(&flags.firecrawlKey, "firecrawl-api-key", "", "Firecrawl API key for web search")
+	cmd.Flags().StringVar(&flags.kakaoRelayURL, "kakao-relay-url", "", "KakaoTalk relay WebSocket URL")
+	cmd.Flags().StringVar(&flags.kakaoUserToken, "kakao-user-token", "", "KakaoTalk relay user token")
 	cmd.Flags().StringVar(&flags.workspace, "workspace", "", "Workspace directory path")
 	cmd.Flags().BoolVar(&flags.httpAccess, "http-access", false, "Grant HTTP access capability")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Overwrite existing config without confirmation")
@@ -293,50 +298,96 @@ func runChat(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer cs.Close()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	// Readline with history.
+	historyFile := ""
+	if cfgDir, err := core.ConfigDir(); err == nil {
+		historyFile = filepath.Join(cfgDir, "chat_history")
+	}
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:      "you> ",
+		HistoryFile: historyFile,
+	})
+	if err != nil {
+		cs.Close()
+		return fmt.Errorf("readline init: %w", err)
+	}
+
+	// Resource cleanup with sync.Once — safe from both normal exit and SIGINT.
+	var cleanupOnce sync.Once
+	closeResources := func() {
+		cleanupOnce.Do(func() {
+			rl.Close()
+			cs.Close()
+			fmt.Print("\033[?25h") // ensure cursor visible
+		})
+	}
+	defer closeResources()
+
+	// Catch Ctrl-C to cleanup before exit.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		signal.Stop(sigCh)
+		fmt.Println()
+		closeResources()
+		if !wasRunning && flagRemote == "" {
+			stopDaemon()
+		}
+		os.Exit(0)
+	}()
 
 	for {
-		fmt.Print("you> ")
-		if !scanner.Scan() {
+		text, err := rl.Readline()
+		if err != nil { // Ctrl-D or error
 			break
 		}
-		text := strings.TrimSpace(scanner.Text())
+		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
 		}
 
-		fmt.Print("paw> ")
-		dots := 0
-		err := cs.Send(text, client.ChatOptions{
-			OnToken: func(_ string) {
-				if dots < 3 {
-					fmt.Print(".")
-					dots++
-				}
-			},
+		spin := newSpinner("paw> ")
+		spin.Start()
+		var gotResult bool
+		sendErr := cs.Send(text, client.ChatOptions{
+			OnToken: func(_ string) {},
 			OnDone: func(result string, _ *int64) {
-				fmt.Print("\r\033[K") // clear the "paw> ..." line
+				spin.Stop()
+				gotResult = true
 				fmt.Printf("paw> %s\n\n", result)
 			},
-			OnError: func(msg string) { fmt.Fprintf(os.Stderr, "\nerror: %s\n", msg) },
+			OnError: func(msg string) {
+				spin.Stop()
+				fmt.Fprintf(os.Stderr, "error: %s\n\n", msg)
+			},
 		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		spin.Stop()
+		if sendErr != nil && !gotResult {
+			if strings.Contains(sendErr.Error(), "EOF") {
+				fmt.Fprintf(os.Stderr, "서버 연결이 끊어졌습니다. 재연결 중...\n")
+				cs.Close()
+				cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
+				if err != nil {
+					return fmt.Errorf("재연결 실패: %w", err)
+				}
+				fmt.Fprintf(os.Stderr, "재연결 완료. 메시지가 전송되지 않았을 수 있습니다. 다시 입력해주세요.\n\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
+			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return err
-	}
 	fmt.Println()
 
-	// If we auto-started the daemon, offer to stop it.
+	// Normal exit (Ctrl-D) — ask if auto-started.
+	// Default to keeping daemon alive: stdin may be EOF after readline,
+	// so Scanner.Scan() returns false immediately → default applies.
 	if !wasRunning && flagRemote == "" {
 		if isTTY() {
 			chatScanner := bufio.NewScanner(os.Stdin)
-			if promptYesNo(chatScanner, "Stop the daemon?", true) {
+			if promptYesNo(chatScanner, "Stop the daemon?", false) {
 				stopDaemon()
 			}
 		} else {
@@ -2181,4 +2232,53 @@ func processRunning(pid int) bool {
 	}
 	// Signal 0 tests existence without sending a signal.
 	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// ---------------------------------------------------------------------------
+// spinner
+// ---------------------------------------------------------------------------
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+type spinner struct {
+	prefix string
+	stop   chan struct{}
+	done   chan struct{}
+}
+
+func newSpinner(prefix string) *spinner {
+	return &spinner{
+		prefix: prefix,
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+}
+
+func (s *spinner) Start() {
+	go func() {
+		defer close(s.done)
+		fmt.Print("\033[?25l") // hide cursor
+		i := 0
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			fmt.Printf("\r%s%s", s.prefix, spinnerFrames[i%len(spinnerFrames)])
+			i++
+			select {
+			case <-s.stop:
+				fmt.Print("\r\033[K\033[?25h") // clear line + show cursor
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func (s *spinner) Stop() {
+	select {
+	case <-s.stop:
+	default:
+		close(s.stop)
+	}
+	<-s.done
 }

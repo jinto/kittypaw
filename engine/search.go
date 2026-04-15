@@ -10,9 +10,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jinto/kittypaw/core"
 )
+
+// searchHTTPClient is a shared client for all search backends with a sensible timeout.
+var searchHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 // WebSearchResult holds a single search result.
 type WebSearchResult struct {
@@ -27,18 +31,48 @@ type SearchBackend interface {
 }
 
 // NewSearchBackend creates a SearchBackend from config.
-// Returns DuckDuckGoBackend when unconfigured or set to "duckduckgo".
+// When search_backend is empty, auto-detects by key availability: firecrawl > tavily > duckduckgo.
 func NewSearchBackend(cfg *core.WebConfig) (SearchBackend, error) {
-	switch strings.ToLower(cfg.SearchBackend) {
+	backend := strings.ToLower(cfg.SearchBackend)
+
+	// Auto-detect: pick the best available backend.
+	if backend == "" {
+		switch {
+		case cfg.FirecrawlKey != "":
+			backend = "firecrawl"
+		case cfg.TavilyAPIKey != "":
+			backend = "tavily"
+		default:
+			backend = "duckduckgo"
+		}
+	}
+
+	switch backend {
+	case "firecrawl":
+		if cfg.FirecrawlKey == "" {
+			return nil, fmt.Errorf("firecrawl search backend requires firecrawl_api_key in [web] config")
+		}
+		apiURL := cfg.FirecrawlURL
+		if apiURL == "" {
+			apiURL = "https://api.firecrawl.dev"
+		}
+		parsed, err := url.Parse(apiURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid firecrawl_api_url: %w", err)
+		}
+		if parsed.Scheme != "https" && parsed.Hostname() != "localhost" && parsed.Hostname() != "127.0.0.1" {
+			return nil, fmt.Errorf("firecrawl_api_url must use HTTPS (got %s)", parsed.Scheme)
+		}
+		return &FirecrawlBackend{APIKey: cfg.FirecrawlKey, BaseURL: strings.TrimRight(apiURL, "/")}, nil
 	case "tavily":
 		if cfg.TavilyAPIKey == "" {
 			return nil, fmt.Errorf("tavily search backend requires tavily_api_key in [web] config")
 		}
 		return &TavilyBackend{APIKey: cfg.TavilyAPIKey}, nil
-	case "duckduckgo", "":
+	case "duckduckgo":
 		return &DuckDuckGoBackend{}, nil
 	default:
-		return nil, fmt.Errorf("unknown search backend: %q (supported: duckduckgo, tavily)", cfg.SearchBackend)
+		return nil, fmt.Errorf("unknown search backend: %q (supported: firecrawl, tavily, duckduckgo)", backend)
 	}
 }
 
@@ -55,7 +89,7 @@ func (d *DuckDuckGoBackend) Search(ctx context.Context, query string, limit int)
 	}
 	req.Header.Set("User-Agent", "KittyPaw/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := searchHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +199,7 @@ func (t *TavilyBackend) Search(ctx context.Context, query string, limit int) ([]
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+t.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := searchHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +232,75 @@ func (t *TavilyBackend) Search(ctx context.Context, query string, limit int) ([]
 			Title:   r.Title,
 			URL:     r.URL,
 			Snippet: r.Content,
+		})
+	}
+	return results, nil
+}
+
+// --- Firecrawl ---
+
+// FirecrawlBackend searches via the Firecrawl REST API.
+type FirecrawlBackend struct {
+	APIKey  string
+	BaseURL string // e.g. "https://api.firecrawl.dev"
+}
+
+func (f *FirecrawlBackend) Search(ctx context.Context, query string, limit int) ([]WebSearchResult, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"query": query,
+		"limit": limit,
+	})
+
+	req, err := http.NewRequestWithContext(ctx, "POST", f.BaseURL+"/v1/search", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+f.APIKey)
+
+	resp, err := searchHTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1000))
+		return nil, fmt.Errorf("firecrawl API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 500_000))
+	if err != nil {
+		return nil, err
+	}
+
+	var fcResp struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			URL         string `json:"url"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Markdown    string `json:"markdown"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &fcResp); err != nil {
+		return nil, fmt.Errorf("firecrawl response parse: %w", err)
+	}
+
+	results := make([]WebSearchResult, 0, len(fcResp.Data))
+	for _, d := range fcResp.Data {
+		snippet := d.Description
+		if snippet == "" {
+			snippet = truncate(d.Markdown, 300)
+		}
+		results = append(results, WebSearchResult{
+			Title:   d.Title,
+			URL:     d.URL,
+			Snippet: snippet,
 		})
 	}
 	return results, nil
