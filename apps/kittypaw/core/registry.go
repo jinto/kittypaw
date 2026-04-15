@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultRegistryURL is the canonical GitHub-hosted skill registry.
-const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw/skills/main"
+const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw-skills/registry/main"
 
 // RegistryEntry describes a package listing in the remote registry.
 type RegistryEntry struct {
@@ -23,8 +23,23 @@ type RegistryEntry struct {
 	Version     string `json:"version"`
 	Description string `json:"description"`
 	Author      string `json:"author"`
-	URL         string `json:"url"`
+	URL         string `json:"url,omitempty"`
+	DownloadURL string `json:"download_url,omitempty"`
 	Hash        string `json:"hash,omitempty"` // SHA256 content hash for verification
+}
+
+// EffectiveURL returns the package download URL, preferring download_url over url.
+func (e RegistryEntry) EffectiveURL() string {
+	if e.DownloadURL != "" {
+		return e.DownloadURL
+	}
+	return e.URL
+}
+
+// registryIndex is the envelope format for index.json.
+type registryIndex struct {
+	Version  int             `json:"version"`
+	Packages []RegistryEntry `json:"packages"`
 }
 
 // RegistryClient fetches package listings and downloads from a remote registry.
@@ -68,38 +83,87 @@ func NewRegistryClient(baseURL string) (*RegistryClient, error) {
 	}, nil
 }
 
+// IndexResult wraps the registry entries with cache metadata.
+type IndexResult struct {
+	Entries   []RegistryEntry
+	FromCache bool
+	CachedAt  time.Time // zero if live or cache time unknown
+}
+
 // FetchIndex retrieves the package listing from the registry.
 // Falls back to a cached copy on network failure.
 func (rc *RegistryClient) FetchIndex() ([]RegistryEntry, error) {
+	result, err := rc.FetchIndexWithMeta()
+	if err != nil {
+		return nil, err
+	}
+	return result.Entries, nil
+}
+
+// cachedResult returns the cached index wrapped as an IndexResult.
+func (rc *RegistryClient) cachedResult() (*IndexResult, error) {
+	entries, err := rc.loadCachedIndex()
+	if err != nil {
+		return nil, err
+	}
+	return &IndexResult{Entries: entries, FromCache: true, CachedAt: rc.cacheModTime()}, nil
+}
+
+// FetchIndexWithMeta retrieves the package listing with cache metadata.
+func (rc *RegistryClient) FetchIndexWithMeta() (*IndexResult, error) {
 	resp, err := rc.client.Get(rc.baseURL + "/index.json")
 	if err != nil {
-		return rc.loadCachedIndex()
+		return rc.cachedResult()
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return rc.loadCachedIndex()
+		return rc.cachedResult()
 	}
 
 	const maxIndexSize = 2 << 20 // 2MB
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexSize+1))
 	if err != nil {
-		return rc.loadCachedIndex()
+		return rc.cachedResult()
 	}
 	if len(body) > maxIndexSize {
 		return nil, fmt.Errorf("registry index too large (>%d bytes)", maxIndexSize)
 	}
 
-	var entries []RegistryEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("parse registry index: %w", err)
+	entries, err := parseIndexJSON(body)
+	if err != nil {
+		return nil, err
 	}
 
 	// Cache only after successful parse to prevent cache poisoning.
 	cachePath := filepath.Join(rc.cacheDir, "index.json")
 	_ = os.WriteFile(cachePath, body, 0o600)
 
+	return &IndexResult{Entries: entries, FromCache: false}, nil
+}
+
+// parseIndexJSON handles both formats: bare array and {"version":N,"packages":[...]} wrapper.
+func parseIndexJSON(data []byte) ([]RegistryEntry, error) {
+	// Try wrapped format first.
+	var idx registryIndex
+	if err := json.Unmarshal(data, &idx); err == nil && len(idx.Packages) > 0 {
+		return idx.Packages, nil
+	}
+	// Fall back to bare array.
+	var entries []RegistryEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse registry index: %w", err)
+	}
 	return entries, nil
+}
+
+// cacheModTime returns the modification time of the cached index file.
+func (rc *RegistryClient) cacheModTime() time.Time {
+	fi, err := os.Stat(filepath.Join(rc.cacheDir, "index.json"))
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
 }
 
 // DownloadPackage downloads a package's files to a temporary directory.
@@ -114,11 +178,12 @@ func (rc *RegistryClient) DownloadPackage(entry RegistryEntry) (string, error) {
 
 	// SSRF defense: validate the base URL once. File names are hardcoded constants,
 	// so no additional validation is needed for the individual file URLs.
-	if err := rc.validateURL(entry.URL); err != nil {
+	dlURL := entry.EffectiveURL()
+	if err := rc.validateURL(dlURL); err != nil {
 		return "", err
 	}
 
-	baseURL := strings.TrimSuffix(entry.URL, "/")
+	baseURL := strings.TrimSuffix(dlURL, "/")
 
 	tmpDir, err := os.MkdirTemp("", "kittypaw-pkg-"+entry.ID+"-")
 	if err != nil {

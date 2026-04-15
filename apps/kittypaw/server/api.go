@@ -936,8 +936,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	keyword := r.URL.Query().Get("q")
 
 	cfg := s.getConfig()
-	registryURL := "https://raw.githubusercontent.com/kittypaw-skills/registry/main"
-	_ = cfg // registry URL could come from config in the future
+	registryURL := core.DefaultRegistryURL
+	if cfg.Registry.URL != "" {
+		registryURL = cfg.Registry.URL
+	}
 
 	rc, err := core.NewRegistryClient(registryURL)
 	if err != nil {
@@ -953,5 +955,244 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	results := core.SearchEntries(entries, keyword)
 	writeJSON(w, 200, map[string]any{"results": results})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/packages — list installed packages with config schema
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackagesList(w http.ResponseWriter, _ *http.Request) {
+	packages, err := s.pkgManager.ListInstalled()
+	if err != nil {
+		writeError(w, 500, "list packages: "+err.Error())
+		return
+	}
+
+	type pkgResp struct {
+		Meta         core.PackageMeta `json:"meta"`
+		ConfigSchema []configFieldDTO `json:"config_schema"`
+		ConfigValues map[string]string `json:"config_values"`
+	}
+
+	var result []pkgResp
+	for _, pkg := range packages {
+		vals, _ := s.pkgManager.GetConfig(pkg.Meta.ID)
+		schema := configFieldsToDTO(pkg.Config)
+		masked := maskSecrets(pkg.Config, vals)
+		result = append(result, pkgResp{
+			Meta:         pkg.Meta,
+			ConfigSchema: schema,
+			ConfigValues: masked,
+		})
+	}
+	if result == nil {
+		result = []pkgResp{}
+	}
+	writeJSON(w, 200, map[string]any{"packages": result})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/packages/{id} — package detail with README
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageDetail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+
+	pkg, _, err := s.pkgManager.LoadPackage(id)
+	if err != nil {
+		writeError(w, 404, "package not found: "+err.Error())
+		return
+	}
+
+	vals, _ := s.pkgManager.GetConfig(id)
+	schema := configFieldsToDTO(pkg.Config)
+	masked := maskSecrets(pkg.Config, vals)
+
+	// Read README if available.
+	var readme string
+	pkgDir, dirErr := core.PackagesDirFrom(s.session.BaseDir)
+	if dirErr == nil {
+		if data, readErr := os.ReadFile(filepath.Join(pkgDir, id, "README.md")); readErr == nil {
+			readme = string(data)
+		}
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"meta":          pkg.Meta,
+		"config_schema": schema,
+		"config_values": masked,
+		"permissions":   pkg.Permissions,
+		"readme":        readme,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/packages/{id}/config — batch set config values
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageConfigSet(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+
+	var req struct {
+		Values map[string]string `json:"values"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if len(req.Values) == 0 {
+		writeError(w, 400, "values is required")
+		return
+	}
+
+	// Validate all keys exist before writing any.
+	pkg, _, err := s.pkgManager.LoadPackage(id)
+	if err != nil {
+		writeError(w, 404, "package not found: "+err.Error())
+		return
+	}
+
+	knownKeys := make(map[string]bool)
+	for _, f := range pkg.Config {
+		knownKeys[f.Key] = true
+	}
+	for k := range req.Values {
+		if !knownKeys[k] {
+			writeError(w, 400, "unknown config key: "+k)
+			return
+		}
+	}
+
+	for k, v := range req.Values {
+		if err := s.pkgManager.SetConfig(id, k, v); err != nil {
+			writeError(w, 500, "set config "+k+": "+err.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/packages/{id} — uninstall a package
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageUninstall(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+	if err := s.pkgManager.Uninstall(id); err != nil {
+		writeError(w, 500, "uninstall: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/packages/install-from-registry — install by registry ID
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageInstallFromRegistry(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string            `json:"id"`
+		Config map[string]string `json:"config"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.ID == "" {
+		writeError(w, 400, "id is required")
+		return
+	}
+
+	cfg := s.getConfig()
+	registryURL := core.DefaultRegistryURL
+	if cfg.Registry.URL != "" {
+		registryURL = cfg.Registry.URL
+	}
+
+	rc, err := core.NewRegistryClient(registryURL)
+	if err != nil {
+		writeError(w, 500, "registry unavailable: "+err.Error())
+		return
+	}
+
+	entry, err := rc.FindEntry(req.ID)
+	if err != nil {
+		writeError(w, 404, "package not found in registry: "+err.Error())
+		return
+	}
+
+	pkg, err := s.pkgManager.InstallFromRegistry(rc, *entry)
+	if err != nil {
+		writeError(w, 500, "install failed: "+err.Error())
+		return
+	}
+
+	// Set config values if provided.
+	for k, v := range req.Config {
+		if setErr := s.pkgManager.SetConfig(pkg.Meta.ID, k, v); setErr != nil {
+			slog.Warn("post-install config set failed", "package", pkg.Meta.ID, "key", k, "error", setErr)
+		}
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"meta":          pkg.Meta,
+		"config_schema": configFieldsToDTO(pkg.Config),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Package API helpers
+// ---------------------------------------------------------------------------
+
+// configFieldDTO is the JSON representation with resolved type.
+type configFieldDTO struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Type     string   `json:"type"`
+	Default  string   `json:"default,omitempty"`
+	Required bool     `json:"required"`
+	Options  []string `json:"options,omitempty"`
+	Source   string   `json:"source,omitempty"`
+}
+
+func configFieldsToDTO(fields []core.ConfigField) []configFieldDTO {
+	out := make([]configFieldDTO, len(fields))
+	for i, f := range fields {
+		out[i] = configFieldDTO{
+			Key:      f.Key,
+			Label:    f.Label,
+			Type:     f.ResolvedType(),
+			Default:  f.Default,
+			Required: f.Required,
+			Options:  f.Options,
+			Source:   f.Source,
+		}
+	}
+	return out
+}
+
+func maskSecrets(fields []core.ConfigField, vals map[string]string) map[string]string {
+	masked := make(map[string]string, len(vals))
+	for k, v := range vals {
+		masked[k] = v
+	}
+	for _, f := range fields {
+		if f.IsSecret() {
+			if v, ok := masked[f.Key]; ok && v != "" {
+				masked[f.Key] = "****"
+			}
+		}
+	}
+	return masked
 }
 

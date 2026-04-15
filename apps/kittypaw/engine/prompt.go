@@ -42,44 +42,38 @@ const ExecutionBlock = `## Rules
 
 // QualityBlock enforces tool execution, result quality, and code-level persistence.
 const QualityBlock = `## Execution quality
-For ANY request involving external information, you MUST generate code that calls available tools.
-Never answer from memory — always fetch real data first.
+For ANY request involving external information, generate code that calls tools. Never answer from memory.
 
-WRONG: return "AI is advancing rapidly..."  ← fabricated, no tool call
-RIGHT: const r = Web.search("AI news today"); return r.results.map(...)  ← real data
+WRONG: return "AI is advancing rapidly..."  ← no tool call
+RIGHT:
+const r = Web.search("오늘 주요 뉴스 한국 2026");
+if (r.error || !r.results || r.results.length === 0) return "검색 결과가 없습니다.";
+return r.results.slice(0, 5).map(x => "• " + x.title + "\n  " + x.snippet).join("\n\n");
 
-If results are insufficient, your code should try additional steps:
-- Search results too brief → fetch detail from top result URLs
-- First query returns nothing → try alternative keywords
-- Combine multiple tool calls in one code block for thorough answers
+Web.search returns {results: [...], error?: string, warning?: string}. Always guard r.error/r.results before use.
+If r.warning exists, append it at the end of your response so the user knows about backend issues.
 
-If all tool calls fail, return "검색 결과를 가져오지 못했습니다" and stop — never fabricate data.`
+If results are insufficient: fetch detail URLs, try alternative keywords, or combine multiple tool calls.
+If all tool calls fail, return "검색 결과를 가져오지 못했습니다" — never fabricate.`
 
 // SkillCreationBlock guides when and how to create scheduled or one-shot skills.
 const SkillCreationBlock = `## When to create a skill
-If the user asks for something recurring ("매일", "every day", "주기적으로"), create a skill with a schedule trigger.
-For one-time delayed requests ("2분 뒤", "한 번만", "이번 한 번", "내일 아침 한 번"), create a skill with a once trigger.
-For immediate one-time requests, just execute the code directly without creating a skill.
+Recurring ("매일", "every day") → schedule trigger. One-time delayed ("2분 뒤", "한 번만") → once trigger.
+Immediate requests → execute directly, no skill creation.
 
-Example — scheduled skill (recurring):
-  await Skill.create("ai-news", "AI 뉴스 매시간 요약", ` + "`" + `
-    const r = await Web.search("AI news");
-    const summary = r.results.map(x => x.title).join("\\n");
-    await Telegram.sendMessage(summary);
-    return summary;
+Example — scheduled (recurring):
+  Skill.create("ai-news", "AI 뉴스 매시간 요약", ` + "`" + `
+    const r = Web.search("AI news today");
+    if (r.error || !r.results) return "검색 실패";
+    return r.results.map(x => x.title).join("\\n");
   ` + "`" + `, "schedule", "every 1h");
 
-Example — once skill (one-shot delayed):
-  await Skill.create("ai-news-once", "2분 뒤 AI 뉴스 한 번 요약", ` + "`" + `
-    const r = await Web.search("AI 뉴스 오늘");
-    const article = await Web.fetch(r.results[0].url);
-    const summary = article.text.slice(0, 800);
-    await Telegram.sendMessage(summary);
+Example — once (one-shot delayed):
+  Skill.create("remind", "2분 뒤 알림", ` + "`" + `
+    Telegram.sendMessage("리마인더: 회의 시작!");
   ` + "`" + `, "once", "2m");
 
-CRITICAL: Never use "schedule" trigger for one-time delayed tasks.
-- "schedule" = recurring (runs repeatedly on cron)
-- "once" = one-shot (runs exactly once after the delay, then deleted automatically)`
+CRITICAL: "schedule" = recurring (cron), "once" = one-shot (runs once then deleted).`
 
 // MemoryBlock guides memory usage for user preferences.
 const MemoryBlock = `## Memory & Learning

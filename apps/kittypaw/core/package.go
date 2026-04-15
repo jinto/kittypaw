@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,14 +31,45 @@ type PackageMeta struct {
 	Cron        string `toml:"cron"        json:"cron,omitempty"`
 }
 
+// Allowed ConfigField type values. Unknown types fall back to "string" with a warning.
+var validConfigTypes = map[string]bool{
+	"string": true, "number": true, "boolean": true, "secret": true, "select": true,
+}
+
 // ConfigField defines a user-configurable parameter for a package.
-// Fields marked Secret are stored in secrets.json instead of config.toml.
+// Fields marked Secret (or Type=="secret") are stored in secrets.json instead of config.toml.
 type ConfigField struct {
-	Key         string `toml:"key"         json:"key"`
-	Label       string `toml:"label"       json:"label"`
-	Default     string `toml:"default"     json:"default,omitempty"`
-	Required    bool   `toml:"required"    json:"required"`
-	Secret      bool   `toml:"secret"      json:"secret"`
+	Key      string   `toml:"key"      json:"key"`
+	Label    string   `toml:"label"    json:"label"`
+	Default  string   `toml:"default"  json:"default,omitempty"`
+	Required bool     `toml:"required" json:"required"`
+	Secret   bool     `toml:"secret"   json:"secret"`
+	Type     string   `toml:"type"     json:"type,omitempty"`
+	Options  []string `toml:"options"  json:"options,omitempty"`
+	Source   string   `toml:"source"   json:"source,omitempty"` // "namespace/key" ref into shared secrets
+}
+
+// ResolvedType returns the effective field type with backward-compatible defaults.
+// Empty Type is inferred from the Secret bool. Unknown types fall back to "string".
+func (f ConfigField) ResolvedType() string {
+	if f.Type == "" {
+		if f.Secret {
+			return "secret"
+		}
+		return "string"
+	}
+	if !validConfigTypes[f.Type] {
+		return "string"
+	}
+	if f.Type == "select" && len(f.Options) == 0 {
+		return "string"
+	}
+	return f.Type
+}
+
+// IsSecret returns true if the field value should be stored in the secrets store.
+func (f ConfigField) IsSecret() bool {
+	return f.Secret || f.Type == "secret"
 }
 
 // ChainStep defines one step in a multi-package execution chain.
@@ -91,7 +123,32 @@ func ValidatePackageID(id string) error {
 // validPackageID allows lowercase alphanumeric, hyphens, and underscores.
 var validPackageID = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
+// registryPackageFormat matches the registry's package.toml schema
+// ([package] + [[config.fields]]), distinct from the internal format
+// ([meta] + [[config]]).
+type registryPackageFormat struct {
+	Package struct {
+		ID          string `toml:"id"`
+		Name        string `toml:"name"`
+		Version     string `toml:"version"`
+		Description string `toml:"description"`
+		Author      string `toml:"author"`
+		Model       string `toml:"model"`
+		Cron        string `toml:"cron"`
+	} `toml:"package"`
+	Config struct {
+		Fields []ConfigField `toml:"fields"`
+	} `toml:"config"`
+	Trigger struct {
+		Type string `toml:"type"`
+		Cron string `toml:"cron"`
+	} `toml:"trigger"`
+	Permissions PackagePermissions `toml:"permissions"`
+}
+
 // LoadPackageToml reads and parses a package.toml file.
+// Supports both the internal format ([meta] + [[config]]) and the
+// registry format ([package] + [[config.fields]]).
 func LoadPackageToml(path string) (*SkillPackage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -100,7 +157,24 @@ func LoadPackageToml(path string) (*SkillPackage, error) {
 
 	var pkg SkillPackage
 	if err := toml.Unmarshal(data, &pkg); err != nil {
-		return nil, fmt.Errorf("parse package.toml: %w", err)
+		// Fall back to registry format.
+		var reg registryPackageFormat
+		if err2 := toml.Unmarshal(data, &reg); err2 != nil {
+			return nil, fmt.Errorf("parse package.toml: %w", err)
+		}
+		pkg = SkillPackage{
+			Meta: PackageMeta{
+				ID:          reg.Package.ID,
+				Name:        reg.Package.Name,
+				Version:     reg.Package.Version,
+				Description: reg.Package.Description,
+				Author:      reg.Package.Author,
+				Model:       reg.Package.Model,
+				Cron:        reg.Trigger.Cron,
+			},
+			Config:      reg.Config.Fields,
+			Permissions: reg.Permissions,
+		}
 	}
 
 	if err := ValidatePackageID(pkg.Meta.ID); err != nil {
@@ -111,6 +185,31 @@ func LoadPackageToml(path string) (*SkillPackage, error) {
 	}
 	if pkg.Meta.Version == "" {
 		return nil, fmt.Errorf("package meta.version is required")
+	}
+
+	// Validate and warn about config field types.
+	for i := range pkg.Config {
+		f := &pkg.Config[i]
+		if f.Type != "" && !validConfigTypes[f.Type] {
+			slog.Warn("unknown config field type, falling back to string",
+				"package", pkg.Meta.ID, "field", f.Key, "type", f.Type)
+		}
+		if f.Type == "select" && len(f.Options) == 0 {
+			slog.Warn("select config field has no options, falling back to string",
+				"package", pkg.Meta.ID, "field", f.Key)
+		}
+		// Normalize: Type=="secret" implies Secret routing.
+		if f.Type == "secret" {
+			f.Secret = true
+		}
+		// Validate source binding format (must be "namespace/key").
+		if f.Source != "" {
+			if _, _, ok := strings.Cut(f.Source, "/"); !ok {
+				slog.Warn("config field source must be namespace/key format, ignoring",
+					"package", pkg.Meta.ID, "field", f.Key, "source", f.Source)
+				f.Source = ""
+			}
+		}
 	}
 
 	return &pkg, nil

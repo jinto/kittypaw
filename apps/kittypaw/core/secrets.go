@@ -43,8 +43,22 @@ func LoadSecretsFrom(path string) (*SecretsStore, error) {
 		return nil, fmt.Errorf("read secrets: %w", err)
 	}
 
+	// Try canonical nested format first: {"pkg": {"key": "val"}}.
 	if err := json.Unmarshal(raw, &s.data); err != nil {
-		return nil, fmt.Errorf("parse secrets: %w", err)
+		// Fall back to flat format: {"pkg/key": "val"}.
+		var flat map[string]string
+		if err2 := json.Unmarshal(raw, &flat); err2 != nil {
+			return nil, fmt.Errorf("parse secrets: %w", err)
+		}
+		for compound, val := range flat {
+			if pkg, key, ok := strings.Cut(compound, "/"); ok {
+				if s.data[pkg] == nil {
+					s.data[pkg] = make(map[string]string)
+				}
+				s.data[pkg][key] = val
+			}
+			// Keys without "/" are silently ignored — no package scope.
+		}
 	}
 	return s, nil
 }

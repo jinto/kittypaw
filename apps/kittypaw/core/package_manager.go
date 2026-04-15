@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -81,6 +82,12 @@ func (pm *PackageManager) Install(sourcePath string) (*SkillPackage, error) {
 	configSrc := filepath.Join(sourcePath, "config.toml")
 	if _, err := os.Stat(configSrc); err == nil {
 		_ = copyFile(configSrc, filepath.Join(destDir, "config.toml"))
+	}
+
+	// Copy README.md if it exists (for gallery detail view).
+	readmeSrc := filepath.Join(sourcePath, "README.md")
+	if _, err := os.Stat(readmeSrc); err == nil {
+		_ = copyFile(readmeSrc, filepath.Join(destDir, "README.md"))
 	}
 
 	return pkg, nil
@@ -211,7 +218,7 @@ func (pm *PackageManager) GetConfig(id string) (map[string]string, error) {
 	}
 
 	for _, field := range pkg.Config {
-		if field.Secret && pm.secrets != nil {
+		if field.IsSecret() && pm.secrets != nil {
 			if val, ok := pm.secrets.Get(id, field.Key); ok {
 				result[field.Key] = val
 				continue
@@ -220,6 +227,15 @@ func (pm *PackageManager) GetConfig(id string) (map[string]string, error) {
 		if val, ok := localConfig[field.Key]; ok {
 			result[field.Key] = val
 			continue
+		}
+		// Source binding: resolve from shared secrets before falling back to default.
+		if field.Source != "" && pm.secrets != nil {
+			if ns, key, ok := strings.Cut(field.Source, "/"); ok {
+				if val, found := pm.secrets.Get(ns, key); found {
+					result[field.Key] = val
+					continue
+				}
+			}
 		}
 		result[field.Key] = field.Default
 	}
@@ -247,7 +263,7 @@ func (pm *PackageManager) SetConfig(id, key, value string) error {
 		return fmt.Errorf("package %q has no config field %q", id, key)
 	}
 
-	if field.Secret {
+	if field.IsSecret() {
 		if pm.secrets == nil {
 			return fmt.Errorf("secrets store not available")
 		}
