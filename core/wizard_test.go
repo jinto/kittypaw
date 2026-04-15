@@ -255,6 +255,68 @@ func TestMergeWizardSettings_FirecrawlPreservesExplicitBackend(t *testing.T) {
 	}
 }
 
+func TestMergeWizardSettings_EmptyTelegramPreservesExisting(t *testing.T) {
+	base := DefaultConfig()
+	base.Channels = append(base.Channels, ChannelConfig{
+		ChannelType: ChannelTelegram,
+		Token:       "123456:ABCDEF",
+	})
+	base.AdminChatIDs = []string{"99887766"}
+
+	cfg := MergeWizardSettings(&base, WizardResult{})
+
+	found := false
+	for _, ch := range cfg.Channels {
+		if ch.ChannelType == ChannelTelegram && ch.Token == "123456:ABCDEF" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("existing Telegram channel should be preserved when WizardResult is empty")
+	}
+	if len(cfg.AdminChatIDs) == 0 || cfg.AdminChatIDs[0] != "99887766" {
+		t.Errorf("existing AdminChatIDs should be preserved, got %v", cfg.AdminChatIDs)
+	}
+}
+
+func TestMergeWizardSettings_EmptyKakaoPreservesExisting(t *testing.T) {
+	base := DefaultConfig()
+	base.Channels = append(base.Channels, ChannelConfig{
+		ChannelType: ChannelKakaoTalk,
+		Kakao: &KakaoChannelConfig{
+			RelayURL:  "https://relay.example.com",
+			UserToken: "kakao-token-123",
+		},
+	})
+
+	cfg := MergeWizardSettings(&base, WizardResult{})
+
+	found := false
+	for _, ch := range cfg.Channels {
+		if ch.ChannelType == ChannelKakaoTalk && ch.Kakao != nil && ch.Kakao.RelayURL == "https://relay.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("existing Kakao channel should be preserved when WizardResult is empty")
+	}
+}
+
+func TestMergeWizardSettings_EmptyFirecrawlPreservesExisting(t *testing.T) {
+	base := DefaultConfig()
+	base.Web.FirecrawlKey = "fc-existing-key"
+	base.Web.SearchBackend = "firecrawl"
+
+	cfg := MergeWizardSettings(&base, WizardResult{})
+
+	if cfg.Web.FirecrawlKey != "fc-existing-key" {
+		t.Errorf("expected firecrawl key preserved, got %q", cfg.Web.FirecrawlKey)
+	}
+	if cfg.Web.SearchBackend != "firecrawl" {
+		t.Errorf("expected search_backend preserved as 'firecrawl', got %q", cfg.Web.SearchBackend)
+	}
+}
+
 func TestWriteConfigAtomic(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")

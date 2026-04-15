@@ -67,7 +67,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(
 		newServeCmd(),
 		newStopCmd(),
-		newInitCmd(),
+		newSetupCmd(),
 		newChatCmd(),
 		newStatusCmd(),
 		newSkillsCmd(),
@@ -158,14 +158,14 @@ func runServe(_ *cobra.Command, _ []string) error {
 // init
 // ---------------------------------------------------------------------------
 
-func newInitCmd() *cobra.Command {
-	flags := &initFlags{}
+func newSetupCmd() *cobra.Command {
+	flags := &setupFlags{}
 	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Initialize config with interactive wizard",
-		Long:  "Set up KittyPaw interactively (LLM, Telegram, workspace) or via flags for CI.",
+		Use:   "setup",
+		Short: "Set up or reconfigure KittyPaw",
+		Long:  "Set up KittyPaw interactively (LLM, channels, web search, workspace) or via flags for CI.",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runInit(flags)
+			return runSetup(flags)
 		},
 	}
 	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openrouter|local)")
@@ -183,7 +183,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-func runInit(flags *initFlags) error {
+func runSetup(flags *setupFlags) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -1244,7 +1244,7 @@ func runPersonaList(_ *cobra.Command, _ []string) error {
 
 	profiles := jsonSlice(res, "profiles")
 	if len(profiles) == 0 {
-		fmt.Println("No profiles found. Run 'kittypaw init' to create a default profile.")
+		fmt.Println("No profiles found. Run 'kittypaw setup' to create a default profile.")
 		return nil
 	}
 
