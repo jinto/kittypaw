@@ -1,3 +1,21 @@
+## Plan 24: Web Tool Quality + Agent Observe Loop ✅
+
+Plan: `.claude/plans/web-tool-quality-observe-loop.md`
+Spec: `.ina/specs/20260415-0300-think-web-tool-quality.md`
+
+### Layer 1: Web Tool Quality
+
+- [x] T1: htmlToMarkdown 변환기 + 테스트 — golang.org/x/net/html 토크나이저, h1-6/p/a/ul/ol/pre/code/table, script/style 무시
+- [x] T2: SearchBackend 인터페이스 + DDG 어댑터 + 테스트 — engine/search.go, WebConfig
+- [x] T3: TavilyBackend 구현 — POST api.tavily.com/search, Bearer auth
+- [x] T4: Web.fetch markdown/title 확장 — {text, markdown, title, status} 반환, 기존 text 불변
+- [x] T5: Web.search 백엔드 통합 — webSearch(ctx, query, cfg), SearchBackend 인터페이스로 전환
+
+### Layer 2: Agent Observe Loop
+
+- [x] T6: Observation 타입 + Agent.observe sandbox primitive — observeSignal{} 타입 sentinel, 5000자 제한
+- [x] T7: Observe 루프 + 프롬프트 블록 + 회귀 테스트 — labeled observeLoop, BuildPrompt observations, AC #10 회귀
+
 ## Plan 23: Prompt Quality — Proactive Result Quality ✅
 
 Plan: `.claude/plans/prompt-quality.md`

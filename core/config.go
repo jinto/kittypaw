@@ -89,6 +89,13 @@ type Config struct {
 	Registry        RegistryConfig      `toml:"registry"`
 	SkillInstall    SkillInstallConfig  `toml:"skill_install"`
 	Permissions     PermissionPolicy    `toml:"permissions"`
+	Web             WebConfig           `toml:"web"`
+}
+
+// WebConfig controls web tool behavior (search backend, etc.).
+type WebConfig struct {
+	SearchBackend string `toml:"search_backend"` // "duckduckgo" (default) | "tavily"
+	TavilyAPIKey  string `toml:"tavily_api_key"`
 }
 
 // SkillInstallConfig controls skill installation behavior.
@@ -151,6 +158,7 @@ type FeatureFlags struct {
 	ModelRouting       bool   `toml:"model_routing"`
 	BackgroundAgents   bool   `toml:"background_agents"`
 	DailyTokenLimit    uint64 `toml:"daily_token_limit"`
+	MaxObserveRounds   int    `toml:"max_observe_rounds"` // default 5
 }
 
 // ReflectionConfig controls daily pattern analysis.

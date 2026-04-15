@@ -140,7 +140,7 @@ func FormatExecResult(result *core.ExecutionResult) string {
 }
 
 // BuildPrompt constructs the LLM message chain from agent state and config.
-// Assembly order: SOUL.md → Identity → Execution → Quality → Channel → Skills → SkillCreation → Memory → MCP → Nick/UserMD → MemoryContext
+// Assembly order: SOUL.md → Identity → Execution → Quality → Channel → Skills → SkillCreation → Memory → MCP → Nick/UserMD → MemoryContext → Observations
 func BuildPrompt(
 	state *core.AgentState,
 	eventText string,
@@ -150,6 +150,7 @@ func BuildPrompt(
 	profile *core.Profile,
 	memoryContext string,
 	mcpToolsSection string,
+	observations []core.Observation,
 ) []core.LlmMessage {
 	var sb strings.Builder
 
@@ -211,6 +212,22 @@ func BuildPrompt(
 	if memoryContext != "" {
 		sb.WriteString("\n\n## User Memory\n")
 		sb.WriteString(memoryContext)
+	}
+
+	// 12. Observations (volatile — replaced each observe round, not accumulated)
+	if len(observations) > 0 {
+		sb.WriteString("\n\n## Current Observations\n")
+		sb.WriteString("You previously called Agent.observe(). Analyze these results and write code to produce your response.\n")
+		sb.WriteString("Do NOT call Agent.observe() again unless you need additional data.\n\n")
+		for _, obs := range observations {
+			if obs.Label != "" {
+				sb.WriteString("### ")
+				sb.WriteString(obs.Label)
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(obs.Data)
+			sb.WriteString("\n\n")
+		}
 	}
 
 	messages := []core.LlmMessage{

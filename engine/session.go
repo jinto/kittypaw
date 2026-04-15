@@ -208,7 +208,16 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		mcpToolsSection = BuildMCPToolsSection(s.McpRegistry.AllTools())
 	}
 
-	// Main retry loop
+	// Observe + retry loop.
+	// Outer loop: observe rounds (Agent.observe() re-invokes LLM with observations).
+	// Inner loop: retry on execution errors.
+	// When observe is not used, observeRound stays 0 and behavior is unchanged.
+	maxObserveRounds := s.Config.Features.MaxObserveRounds
+	if maxObserveRounds <= 0 {
+		maxObserveRounds = 5
+	}
+
+	var observations []core.Observation
 	var lastError string
 	modelOverridden := opts != nil && opts.ModelOverride != ""
 	activeProvider := s.Provider
@@ -217,151 +226,188 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 	}
 	fallbackUsed := false
 
-	for attempt := range maxRetries {
-		if attempt > 0 {
-			slog.Info("retry attempt", "attempt", attempt, "max", maxRetries)
+observeLoop:
+	for observeRound := 0; observeRound <= maxObserveRounds; observeRound++ {
+		lastError = ""
+
+		if observeRound > 0 {
+			slog.Info("observe round", "round", observeRound, "observations", len(observations))
 		}
 
-		// Build compaction config based on attempt and feature flags
-		compaction := s.compactionForAttempt(attempt)
-
-		// Resolve and load profile.
-		profileName := ResolveProfileName(s.Config, channelName, agentID, mentionOverride, s.Store)
-		profile := loadProfileForPrompt(profileName, s.Config, s.BaseDir)
-
-		// Build prompt
-		messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection)
-
-		slog.Info("prompt built",
-			"phase", core.PhasePrompt,
-			"attempt", attempt,
-			"message_count", len(messages),
-			"recent_window", compaction.RecentWindow,
-		)
-
-		// Proactive token budget check
-		estTokens := 0
-		for _, m := range messages {
-			estTokens += EstimateTokens(m.Content)
-		}
-		tokenBudget := activeProvider.ContextWindow() - activeProvider.MaxTokens()
-		if estTokens > tokenBudget && attempt < maxRetries-1 {
-			slog.Warn("prompt exceeds token budget, tightening compaction",
-				"est_tokens", estTokens, "budget", tokenBudget, "attempt", attempt)
-			lastError = fmt.Sprintf("estimated %d tokens exceeds budget %d", estTokens, tokenBudget)
-			continue
-		}
-
-		// Append error feedback if retrying
-		if lastError != "" {
-			messages = append(messages, core.LlmMessage{
-				Role:    core.RoleUser,
-				Content: fmt.Sprintf("Your previous code had an error:\n%s\n\nPlease fix the code and try again.", lastError),
-			})
-		}
-
-		// Call LLM
-		var resp *llm.Response
-		if onToken != nil {
-			resp, err = activeProvider.GenerateStream(ctx, messages, onToken)
-		} else {
-			resp, err = activeProvider.Generate(ctx, messages)
-		}
-
-		if err != nil {
-			// Handle retryable errors
-			if attempt < maxRetries-1 {
-				slog.Warn("LLM error, retrying", "attempt", attempt, "error", err)
-				lastError = err.Error()
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			// Try fallback on last attempt (skip when model was explicitly overridden).
-			if !fallbackUsed && !modelOverridden && s.FallbackProvider != nil {
-				slog.Warn("switching to fallback provider", "error", err)
-				activeProvider = s.FallbackProvider
-				fallbackUsed = true
-				lastError = err.Error()
-				continue
-			}
-			return "", fmt.Errorf("LLM error after %d retries: %w", maxRetries, err)
-		}
-
-		code := resp.Content
-		slog.Info("code generated",
-			"phase", core.PhaseGenerate,
-			"agent_id", agentID,
-			"attempt", attempt,
-			"code_len", len(code),
-		)
-
-		// Build sandbox context
-		jsContext := map[string]any{
-			"event":      json.RawMessage(event.Payload),
-			"event_type": string(event.Type),
-			"agent_id":   agentID,
-		}
-
-		// Execute in sandbox with skill resolver
-		var resolver sandbox.SkillResolver
-		if s.Config.AutonomyLevel != core.AutonomyReadonly {
-			resolver = func(ctx context.Context, call core.SkillCall) (string, error) {
-				return resolveSkillCall(ctx, call, s, onPermission)
-			}
-		}
-
-		execResult, err := s.Sandbox.ExecuteWithResolver(ctx, code, jsContext, resolver)
-		if err != nil {
-			return "", fmt.Errorf("sandbox execute: %w", err)
-		}
-
-		if execResult.Success {
-			output := execResult.Output
-			if output == "" {
-				output = "(no output)"
+		for attempt := range maxRetries {
+			if attempt > 0 {
+				slog.Info("retry attempt", "attempt", attempt, "max", maxRetries)
 			}
 
-			slog.Info("execution success",
-				"phase", core.PhaseFinish,
-				"agent_id", agentID,
-				"output_len", len(output),
-				"skill_calls", len(execResult.SkillCalls),
+			// Build compaction config based on attempt and feature flags
+			compaction := s.compactionForAttempt(attempt)
+
+			// Resolve and load profile.
+			profileName := ResolveProfileName(s.Config, channelName, agentID, mentionOverride, s.Store)
+			profile := loadProfileForPrompt(profileName, s.Config, s.BaseDir)
+
+			// Build prompt (observations are volatile — replaced each observe round)
+			messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection, observations)
+
+			slog.Info("prompt built",
+				"phase", core.PhasePrompt,
+				"attempt", attempt,
+				"observe_round", observeRound,
+				"message_count", len(messages),
+				"recent_window", compaction.RecentWindow,
 			)
 
-			// Save assistant turn
-			assistantTurn := core.ConversationTurn{
-				Role:      core.RoleAssistant,
-				Content:   output,
-				Code:      code,
-				Result:    FormatExecResult(execResult),
-				Timestamp: core.NowTimestamp(),
+			// Proactive token budget check
+			estTokens := 0
+			for _, m := range messages {
+				estTokens += EstimateTokens(m.Content)
 			}
-			state.Turns = append(state.Turns, assistantTurn)
-			if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
-				slog.Warn("failed to save assistant turn", "agent_id", agentID, "error", err)
-			}
-			if err := s.Store.SaveState(state); err != nil {
-				slog.Warn("failed to save agent state", "agent_id", agentID, "error", err)
+			tokenBudget := activeProvider.ContextWindow() - activeProvider.MaxTokens()
+			if estTokens > tokenBudget && attempt < maxRetries-1 {
+				slog.Warn("prompt exceeds token budget, tightening compaction",
+					"est_tokens", estTokens, "budget", tokenBudget, "attempt", attempt)
+				lastError = fmt.Sprintf("estimated %d tokens exceeds budget %d", estTokens, tokenBudget)
+				continue
 			}
 
-			// Record execution metrics.
-			s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
+			// Append error feedback if retrying
+			if lastError != "" {
+				messages = append(messages, core.LlmMessage{
+					Role:    core.RoleUser,
+					Content: fmt.Sprintf("Your previous code had an error:\n%s\n\nPlease fix the code and try again.", lastError),
+				})
+			}
 
-			return output, nil
+			// Call LLM
+			var resp *llm.Response
+			if onToken != nil {
+				resp, err = activeProvider.GenerateStream(ctx, messages, onToken)
+			} else {
+				resp, err = activeProvider.Generate(ctx, messages)
+			}
+
+			if err != nil {
+				// Handle retryable errors
+				if attempt < maxRetries-1 {
+					slog.Warn("LLM error, retrying", "attempt", attempt, "error", err)
+					lastError = err.Error()
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				// Try fallback on last attempt (skip when model was explicitly overridden).
+				if !fallbackUsed && !modelOverridden && s.FallbackProvider != nil {
+					slog.Warn("switching to fallback provider", "error", err)
+					activeProvider = s.FallbackProvider
+					fallbackUsed = true
+					lastError = err.Error()
+					continue
+				}
+				return "", fmt.Errorf("LLM error after %d retries: %w", maxRetries, err)
+			}
+
+			code := resp.Content
+			slog.Info("code generated",
+				"phase", core.PhaseGenerate,
+				"agent_id", agentID,
+				"attempt", attempt,
+				"code_len", len(code),
+			)
+
+			// Build sandbox context
+			jsContext := map[string]any{
+				"event":      json.RawMessage(event.Payload),
+				"event_type": string(event.Type),
+				"agent_id":   agentID,
+			}
+
+			// Execute in sandbox with skill resolver
+			var resolver sandbox.SkillResolver
+			if s.Config.AutonomyLevel != core.AutonomyReadonly {
+				resolver = func(ctx context.Context, call core.SkillCall) (string, error) {
+					return resolveSkillCall(ctx, call, s, onPermission)
+				}
+			}
+
+			execResult, err := s.Sandbox.ExecuteWithResolver(ctx, code, jsContext, resolver)
+			if err != nil {
+				return "", fmt.Errorf("sandbox execute: %w", err)
+			}
+
+			// Agent.observe() — re-invoke LLM with observations
+			if execResult.Observe {
+				observations = execResult.Observations
+				if observeRound < maxObserveRounds {
+					continue observeLoop // → next observe round
+				}
+				// Max rounds reached — use whatever output we have
+				slog.Warn("max observe rounds reached", "round", observeRound)
+				output := execResult.Output
+				if output == "" {
+					output = "(max observation rounds reached)"
+				}
+				assistantTurn := core.ConversationTurn{
+					Role:      core.RoleAssistant,
+					Content:   output,
+					Code:      code,
+					Timestamp: core.NowTimestamp(),
+				}
+				state.Turns = append(state.Turns, assistantTurn)
+				_ = s.Store.AddTurn(agentID, &assistantTurn)
+				_ = s.Store.SaveState(state)
+				s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
+				return output, nil
+			}
+
+			if execResult.Success {
+				output := execResult.Output
+				if output == "" {
+					output = "(no output)"
+				}
+
+				slog.Info("execution success",
+					"phase", core.PhaseFinish,
+					"agent_id", agentID,
+					"output_len", len(output),
+					"skill_calls", len(execResult.SkillCalls),
+				)
+
+				// Save assistant turn
+				assistantTurn := core.ConversationTurn{
+					Role:      core.RoleAssistant,
+					Content:   output,
+					Code:      code,
+					Result:    FormatExecResult(execResult),
+					Timestamp: core.NowTimestamp(),
+				}
+				state.Turns = append(state.Turns, assistantTurn)
+				if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
+					slog.Warn("failed to save assistant turn", "agent_id", agentID, "error", err)
+				}
+				if err := s.Store.SaveState(state); err != nil {
+					slog.Warn("failed to save agent state", "agent_id", agentID, "error", err)
+				}
+
+				// Record execution metrics.
+				s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
+
+				return output, nil
+			}
+
+			// Execution failed — retry
+			errMsg := execResult.Error
+			if errMsg == "" {
+				errMsg = "unknown error"
+			}
+			slog.Warn("execution failed",
+				"phase", core.PhaseRetry,
+				"agent_id", agentID,
+				"attempt", attempt,
+				"error", errMsg,
+			)
+			lastError = errMsg
 		}
 
-		// Execution failed — retry
-		errMsg := execResult.Error
-		if errMsg == "" {
-			errMsg = "unknown error"
-		}
-		slog.Warn("execution failed",
-			"phase", core.PhaseRetry,
-			"agent_id", agentID,
-			"attempt", attempt,
-			"error", errMsg,
-		)
-		lastError = errMsg
+		break // retry exhausted, exit observe loop
 	}
 
 	// All retries exhausted
