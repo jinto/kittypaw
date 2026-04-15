@@ -378,3 +378,122 @@ primitives = ["http_get"]
 	os.WriteFile(filepath.Join(dir, "package.toml"), []byte(toml), 0o644)
 	os.WriteFile(filepath.Join(dir, "main.js"), []byte(`Agent.respond("hello")`), 0o644)
 }
+
+func writeTestPackageWithSource(t *testing.T, dir, id string) {
+	t.Helper()
+	toml := `[meta]
+id = "` + id + `"
+name = "Source Test"
+version = "1.0.0"
+description = "test"
+
+[[config]]
+key = "bot_token"
+label = "Bot Token"
+secret = true
+required = true
+source = "telegram/bot_token"
+
+[[config]]
+key = "region"
+label = "Region"
+default = "us-east-1"
+
+[permissions]
+primitives = ["http_get"]
+`
+	os.WriteFile(filepath.Join(dir, "package.toml"), []byte(toml), 0o644)
+	os.WriteFile(filepath.Join(dir, "main.js"), []byte(`Agent.respond("hello")`), 0o644)
+}
+
+// ---------------------------------------------------------------------------
+// Source Binding
+// ---------------------------------------------------------------------------
+
+func TestGetConfig_SourceBinding(t *testing.T) {
+	src := t.TempDir()
+	writeTestPackageWithSource(t, src, "src-pkg")
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	secrets, _ := LoadSecretsFrom(filepath.Join(tmpHome, "secrets.json"))
+	// Pre-populate shared secret.
+	secrets.Set("telegram", "bot_token", "tk-shared-123")
+
+	pm := NewPackageManager(secrets)
+	if _, err := pm.Install(src); err != nil {
+		t.Fatal(err)
+	}
+
+	// Source binding should resolve.
+	cfg, err := pm.GetConfig("src-pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg["bot_token"] != "tk-shared-123" {
+		t.Errorf("bot_token = %q, want %q (from source binding)", cfg["bot_token"], "tk-shared-123")
+	}
+
+	// Package-scoped override should win.
+	if err := pm.SetConfig("src-pkg", "bot_token", "tk-override"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = pm.GetConfig("src-pkg")
+	if cfg["bot_token"] != "tk-override" {
+		t.Errorf("bot_token = %q, want %q (package-scoped override)", cfg["bot_token"], "tk-override")
+	}
+}
+
+func TestGetConfig_SourceMissing(t *testing.T) {
+	src := t.TempDir()
+	writeTestPackageWithSource(t, src, "src-miss")
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	secrets, _ := LoadSecretsFrom(filepath.Join(tmpHome, "secrets.json"))
+	// Do NOT set telegram/bot_token — source is missing.
+
+	pm := NewPackageManager(secrets)
+	if _, err := pm.Install(src); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := pm.GetConfig("src-miss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should fall through to default (empty for bot_token).
+	if cfg["bot_token"] != "" {
+		t.Errorf("bot_token = %q, want empty (source missing, no default)", cfg["bot_token"])
+	}
+}
+
+func TestLoadPackageToml_InvalidSource(t *testing.T) {
+	dir := t.TempDir()
+	toml := `[meta]
+id = "bad-source"
+name = "Bad Source"
+version = "1.0.0"
+description = "test"
+
+[[config]]
+key = "token"
+label = "Token"
+source = "no-slash"
+
+[permissions]
+primitives = []
+`
+	os.WriteFile(filepath.Join(dir, "package.toml"), []byte(toml), 0o644)
+
+	pkg, err := LoadPackageToml(filepath.Join(dir, "package.toml"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Invalid source should be cleared.
+	if pkg.Config[0].Source != "" {
+		t.Errorf("source = %q, want empty (invalid format should be cleared)", pkg.Config[0].Source)
+	}
+}

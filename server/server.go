@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -26,15 +27,17 @@ import (
 // to the agent engine. It owns the chi router, the engine session, the
 // scheduler, channel spawner, and all handler state.
 type Server struct {
-	config    *core.Config
-	configMu  sync.RWMutex // protects config during hot-reload
-	store     *store.Store
-	session   *engine.Session
-	scheduler *engine.Scheduler
-	router    chi.Router
-	spawner   *ChannelSpawner // manages channel lifecycle for hot-reload
-	eventCh   chan core.Event  // shared event channel between channels and dispatch loop
-	version   string
+	config     *core.Config
+	configMu   sync.RWMutex // protects config during hot-reload
+	store      *store.Store
+	session    *engine.Session
+	scheduler  *engine.Scheduler
+	router     chi.Router
+	spawner    *ChannelSpawner // manages channel lifecycle for hot-reload
+	eventCh    chan core.Event  // shared event channel between channels and dispatch loop
+	version    string
+	pkgManager *core.PackageManager // shared package manager for API handlers
+	secrets    *core.SecretsStore   // shared secrets store for API handlers
 }
 
 // New wires together all dependencies and returns a ready-to-serve Server.
@@ -84,13 +87,21 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		}
 	}()
 
+	// Initialize shared secrets + package manager for API handlers.
+	secrets, secretsErr := core.LoadSecretsFrom(filepath.Join(cfgDir, "secrets.json"))
+	if secretsErr != nil {
+		slog.Warn("failed to load secrets store, package config will be limited", "error", secretsErr)
+	}
+
 	s := &Server{
-		config:    cfg,
-		store:     st,
-		session:   session,
-		scheduler: engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
-		eventCh:   make(chan core.Event, 64),
-		version:   version,
+		config:     cfg,
+		store:      st,
+		session:    session,
+		scheduler:  engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
+		eventCh:    make(chan core.Event, 64),
+		version:    version,
+		pkgManager: core.NewPackageManagerFrom(cfgDir, secrets),
+		secrets:    secrets,
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -184,6 +195,13 @@ func (s *Server) setupRoutes() chi.Router {
 
 		// Search
 		r.Get("/search", s.handleSearch)
+
+		// Packages (gallery)
+		r.Get("/packages", s.handlePackagesList)
+		r.Post("/packages/install-from-registry", s.handlePackageInstallFromRegistry)
+		r.Get("/packages/{id}", s.handlePackageDetail)
+		r.Delete("/packages/{id}", s.handlePackageUninstall)
+		r.Post("/packages/{id}/config", s.handlePackageConfigSet)
 
 		// Channels
 		r.Get("/channels", s.handleChannels)

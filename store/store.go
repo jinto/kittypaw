@@ -398,6 +398,27 @@ func (s *Store) AddTurn(agentID string, turn *core.ConversationTurn) error {
 	return err
 }
 
+// ResetConversations clears conversation history.
+// If agentID is empty, all agents are reset. Otherwise only the specified agent.
+func (s *Store) ResetConversations(agentID string) (int64, error) {
+	var res sql.Result
+	var err error
+	if agentID == "" {
+		res, err = s.db.Exec("DELETE FROM conversations")
+		if err != nil {
+			return 0, err
+		}
+		_, _ = s.db.Exec("DELETE FROM agent_checkpoints")
+	} else {
+		res, err = s.db.Exec("DELETE FROM conversations WHERE agent_id = ?", agentID)
+		if err != nil {
+			return 0, err
+		}
+		_, _ = s.db.Exec("DELETE FROM agent_checkpoints WHERE agent_id = ?", agentID)
+	}
+	return res.RowsAffected()
+}
+
 // ListAgents returns all agents with their turn counts.
 func (s *Store) ListAgents() ([]AgentSummary, error) {
 	rows, err := s.db.Query(`
