@@ -47,6 +47,19 @@ type KakaoChannel struct {
 	mu        sync.Mutex
 }
 
+// TestKakaoRelay attempts a WebSocket connection to the relay and immediately
+// closes it. Returns nil on success. Useful for validating relay URL + token
+// during setup without starting the full message loop.
+func TestKakaoRelay(ctx context.Context, relayURL, userToken string) error {
+	k := &KakaoChannel{relayURL: relayURL, userToken: userToken}
+	conn, _, err := websocket.Dial(ctx, k.wsURL(), nil)
+	if err != nil {
+		return fmt.Errorf("relay connection failed: %w", err)
+	}
+	conn.Close(websocket.StatusNormalClosure, "connection test")
+	return nil
+}
+
 // NewKakao creates a KakaoChannel that connects via WebSocket to the relay.
 func NewKakao(relayURL, userToken string) *KakaoChannel {
 	return &KakaoChannel{

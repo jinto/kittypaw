@@ -35,6 +35,9 @@ type WizardResult struct {
 	KakaoRelayURL  string
 	KakaoUserToken string
 
+	// Web search
+	FirecrawlKey string
+
 	// Workspace & permissions
 	WorkspacePath string
 	HTTPAccess    bool
@@ -117,6 +120,14 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 	}
 
 	cfg.Channels = kept
+
+	// Web search backend
+	if w.FirecrawlKey != "" {
+		cfg.Web.FirecrawlKey = w.FirecrawlKey
+		if cfg.Web.SearchBackend == "" || cfg.Web.SearchBackend == "duckduckgo" {
+			cfg.Web.SearchBackend = "firecrawl"
+		}
+	}
 
 	// Sandbox defaults
 	if cfg.Sandbox.AllowedHosts == nil {

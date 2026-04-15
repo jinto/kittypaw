@@ -35,5 +35,8 @@ Thumbs.db
 # Temp
 /tmp/
 
+# Competitors (cloned for reference, not part of project)
+/competitors/
+
 # Node (relay)
 node_modules/

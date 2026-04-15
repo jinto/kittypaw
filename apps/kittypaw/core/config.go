@@ -94,8 +94,10 @@ type Config struct {
 
 // WebConfig controls web tool behavior (search backend, etc.).
 type WebConfig struct {
-	SearchBackend string `toml:"search_backend"` // "duckduckgo" (default) | "tavily"
-	TavilyAPIKey  string `toml:"tavily_api_key"`
+	SearchBackend  string `toml:"search_backend"`  // "firecrawl" | "tavily" | "duckduckgo"; empty = auto-detect
+	FirecrawlKey   string `toml:"firecrawl_api_key"`
+	FirecrawlURL   string `toml:"firecrawl_api_url"` // self-hosted; default https://api.firecrawl.dev
+	TavilyAPIKey   string `toml:"tavily_api_key"`
 }
 
 // SkillInstallConfig controls skill installation behavior.

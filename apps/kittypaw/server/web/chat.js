@@ -122,15 +122,33 @@ const Chat = {
       case 'token':
         if (this.currentBubble) {
           this.currentBubble._rawText = (this.currentBubble._rawText || '') + msg.text;
-          this.currentBubble.innerHTML = renderMarkdown(this.currentBubble._rawText);
+          // Show streaming tokens as a code preview.
+          this.currentBubble.innerHTML =
+            '<div class="code-preview">' +
+              '<div class="code-preview-header">⚡ running\u2026</div>' +
+              '<pre><code>' + esc(this.currentBubble._rawText) + '</code></pre>' +
+            '</div>';
           this._scrollToBottom();
         }
         break;
 
       case 'done':
         if (this.currentBubble) {
-          this.currentBubble._rawText = msg.full_text;
-          this.currentBubble.innerHTML = renderMarkdown(msg.full_text);
+          const streamed = (this.currentBubble._rawText || '').trim();
+          const result = (msg.full_text || '').trim();
+
+          // If result differs from streamed tokens, code was executed.
+          // Show result + collapsible code. Otherwise show as plain markdown.
+          if (streamed && result !== streamed) {
+            this.currentBubble.innerHTML =
+              renderMarkdown(result) +
+              '<details class="code-details">' +
+                '<summary>code</summary>' +
+                '<pre><code>' + esc(streamed) + '</code></pre>' +
+              '</details>';
+          } else {
+            this.currentBubble.innerHTML = renderMarkdown(result);
+          }
           this.currentBubble.classList.remove('streaming');
           this.currentBubble = null;
           this._scrollToBottom();
