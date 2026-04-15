@@ -13,6 +13,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 
+	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 )
@@ -25,6 +26,9 @@ type initFlags struct {
 	localModel     string
 	telegramToken  string
 	telegramChatID string
+	firecrawlKey   string
+	kakaoRelayURL  string
+	kakaoUserToken string
 	workspace      string
 	httpAccess     bool
 	force          bool
@@ -53,21 +57,21 @@ func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error
 	fmt.Println("  KittyPaw — AI Automation Framework")
 	fmt.Println()
 
-	// [1/4] LLM
+	// [1/5] LLM
 	if err := wizardLLM(scanner, existing, &w); err != nil {
 		return w, err
 	}
 
-	// [2/4] Telegram
+	// [2/5] Telegram
 	wizardTelegram(scanner, existing, &w)
 
-	// [3/4] KakaoTalk — auto-skip
-	fmt.Println()
-	fmt.Println("  [3/4] KakaoTalk")
-	fmt.Println("  > KakaoTalk requires the relay server. Skipping.")
-	fmt.Println("    Configure via web onboarding after `kittypaw serve`.")
+	// [3/5] KakaoTalk
+	wizardKakao(scanner, existing, &w)
 
-	// [4/4] Workspace & HTTP
+	// [4/5] Web Search
+	wizardWebSearch(scanner, existing, &w)
+
+	// [5/5] Workspace & HTTP
 	wizardWorkspaceHTTP(scanner, existing, &w)
 
 	return w, nil
@@ -104,6 +108,14 @@ func runNonInteractive(flags initFlags) (core.WizardResult, error) {
 		w.TelegramChatID = flags.telegramChatID
 	}
 
+	if flags.kakaoRelayURL != "" {
+		if flags.kakaoUserToken == "" {
+			return w, fmt.Errorf("--kakao-user-token is required when --kakao-relay-url is set")
+		}
+		w.KakaoRelayURL = flags.kakaoRelayURL
+		w.KakaoUserToken = flags.kakaoUserToken
+	}
+
 	if flags.workspace != "" {
 		abs, err := filepath.Abs(flags.workspace)
 		if err != nil {
@@ -112,6 +124,7 @@ func runNonInteractive(flags initFlags) (core.WizardResult, error) {
 		w.WorkspacePath = abs
 	}
 
+	w.FirecrawlKey = flags.firecrawlKey
 	w.HTTPAccess = flags.httpAccess
 	return w, nil
 }
@@ -121,7 +134,7 @@ func runNonInteractive(flags initFlags) (core.WizardResult, error) {
 // ---------------------------------------------------------------------------
 
 func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) error {
-	fmt.Println("  [1/4] LLM Selection")
+	fmt.Println("  [1/5] LLM Selection")
 
 	defaultIdx := 1
 	if existing != nil {
@@ -229,7 +242,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 
 func wizardTelegram(scanner *bufio.Scanner, _ *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [2/4] Telegram (optional)")
+	fmt.Println("  [2/5] Telegram (optional)")
 
 	if !promptYesNo(scanner, "  > Connect?", false) {
 		return
@@ -254,22 +267,31 @@ func wizardTelegram(scanner *bufio.Scanner, _ *core.Config, w *core.WizardResult
 	fmt.Printf("  > ")
 	scanner.Scan() // wait for Enter
 
-	// Auto-detect chat ID.
-	fmt.Print("  Chat ID auto-detect... ")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	chatID, err := core.FetchTelegramChatID(ctx, token)
-	if err != nil {
-		fmt.Println("failed.")
-		printTelegramChatIDHelp()
-		manual := promptLine(scanner, "  Chat ID", "")
-		if manual != "" {
-			w.TelegramChatID = manual
+	// Auto-detect chat ID with retries.
+	const maxRetries = 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		fmt.Print("  Chat ID auto-detect... ")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		chatID, err := core.FetchTelegramChatID(ctx, token)
+		cancel()
+		if err == nil {
+			fmt.Printf("%s ✓\n", chatID)
+			w.TelegramChatID = chatID
+			return
 		}
-	} else {
-		fmt.Printf("%s ✓\n", chatID)
-		w.TelegramChatID = chatID
+
+		if attempt < maxRetries {
+			printTelegramRetryHint(attempt)
+			fmt.Printf("  > ")
+			scanner.Scan()
+		} else {
+			fmt.Println()
+			printTelegramChatIDHelp()
+			manual := promptLine(scanner, "  Chat ID", "")
+			if manual != "" {
+				w.TelegramChatID = manual
+			}
+		}
 	}
 }
 
@@ -294,18 +316,52 @@ func printTelegramGuide() {
 	}
 }
 
+func printTelegramRetryHint(attempt int) {
+	lang := detectLang()
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		if attempt == 1 {
+			fmt.Println("아직 감지되지 않았습니다.")
+			fmt.Println("  📱 텔레그램에서 봇에게 아무 메시지나 보내고 Enter를 눌러주세요.")
+		} else {
+			fmt.Println("아직 감지되지 않았습니다.")
+			fmt.Println("  📱 봇 이름을 검색해서 대화를 열고, /start 를 보내세요.")
+			fmt.Println("     보낸 뒤 Enter를 눌러주세요.")
+		}
+	case strings.HasPrefix(lang, "ja"):
+		if attempt == 1 {
+			fmt.Println("まだ検出されませんでした。")
+			fmt.Println("  📱 Telegramでボットにメッセージを送ってからEnterを押してください。")
+		} else {
+			fmt.Println("まだ検出されませんでした。")
+			fmt.Println("  📱 ボット名を検索して会話を開き、/start を送信してください。")
+			fmt.Println("     送信後にEnterを押してください。")
+		}
+	default:
+		if attempt == 1 {
+			fmt.Println("not found yet.")
+			fmt.Println("  📱 Send any message to the bot in Telegram, then press Enter.")
+		} else {
+			fmt.Println("not found yet.")
+			fmt.Println("  📱 Search for the bot by name, open the chat, and send /start.")
+			fmt.Println("     Then press Enter.")
+		}
+	}
+	fmt.Println()
+}
+
 func printTelegramChatIDHelp() {
 	lang := detectLang()
 	switch {
 	case strings.HasPrefix(lang, "ko"):
-		fmt.Println("  봇에게 메시지를 보냈는지 확인하세요.")
-		fmt.Println("  @userinfobot 에게 메시지를 보내면 Chat ID를 알 수 있습니다.")
+		fmt.Println("  자동 감지에 실패했습니다. Chat ID를 직접 입력해주세요.")
+		fmt.Println("  💡 텔레그램에서 @userinfobot 에게 메시지를 보내면 Chat ID를 알 수 있습니다.")
 	case strings.HasPrefix(lang, "ja"):
-		fmt.Println("  ボットにメッセージを送信したか確認してください。")
-		fmt.Println("  @userinfobot にメッセージを送るとChat IDを確認できます。")
+		fmt.Println("  自動検出に失敗しました。Chat IDを手動で入力してください。")
+		fmt.Println("  💡 Telegramで @userinfobot にメッセージを送るとChat IDを確認できます。")
 	default:
-		fmt.Println("  Make sure you sent a message to the bot.")
-		fmt.Println("  You can also message @userinfobot to find your Chat ID.")
+		fmt.Println("  Auto-detect failed. Please enter your Chat ID manually.")
+		fmt.Println("  💡 Message @userinfobot in Telegram to find your Chat ID.")
 	}
 }
 
@@ -318,12 +374,113 @@ func detectLang() string {
 }
 
 // ---------------------------------------------------------------------------
-// Step [4/4]: Workspace & HTTP
+// Step [3/5]: KakaoTalk
+// ---------------------------------------------------------------------------
+
+func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
+	fmt.Println()
+	fmt.Println("  [3/5] KakaoTalk (optional)")
+
+	var existingKakao *core.KakaoChannelConfig
+	if existing != nil {
+		for _, ch := range existing.Channels {
+			if ch.ChannelType == core.ChannelKakaoTalk && ch.Kakao != nil {
+				existingKakao = ch.Kakao
+				break
+			}
+		}
+	}
+
+	if existingKakao != nil {
+		fmt.Printf("  Current: %s\n", existingKakao.RelayURL)
+	}
+
+	if !promptYesNo(scanner, "  > Connect?", false) {
+		return
+	}
+
+	defRelay := ""
+	if existingKakao != nil {
+		defRelay = existingKakao.RelayURL
+	}
+	relayURL := promptLine(scanner, "  Relay URL", defRelay)
+	if relayURL == "" {
+		fmt.Println("  Skipping KakaoTalk.")
+		return
+	}
+
+	token, err := promptPassword("  User Token: ")
+	if err != nil || token == "" {
+		if existingKakao != nil {
+			fmt.Println("  (keeping existing token)")
+			token = existingKakao.UserToken
+		} else {
+			fmt.Println("  Skipping KakaoTalk.")
+			return
+		}
+	} else {
+		fmt.Printf("  ✓ %s\n", maskKey(token))
+	}
+
+	// Connection test.
+	fmt.Print("  Connecting... ")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := channel.TestKakaoRelay(ctx, relayURL, token); err != nil {
+		fmt.Printf("FAIL (%v)\n", err)
+		if !promptYesNo(scanner, "  Save anyway?", true) {
+			return
+		}
+	} else {
+		fmt.Println("OK")
+	}
+
+	w.KakaoRelayURL = relayURL
+	w.KakaoUserToken = token
+}
+
+// ---------------------------------------------------------------------------
+// Step [4/5]: Web Search
+// ---------------------------------------------------------------------------
+
+func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
+	fmt.Println()
+	fmt.Println("  [4/5] Web Search (optional)")
+
+	hasExisting := existing != nil && existing.Web.FirecrawlKey != ""
+	if hasExisting {
+		fmt.Printf("  Current: Firecrawl (%s)\n", maskKey(existing.Web.FirecrawlKey))
+	} else {
+		fmt.Println("  Default: DuckDuckGo (free, no API key)")
+		fmt.Println("  Upgrade: Firecrawl (higher quality search results)")
+	}
+
+	if !promptYesNo(scanner, "  > Configure Firecrawl?", false) {
+		return
+	}
+
+	key, err := promptPassword("  Firecrawl API Key: ")
+	if err != nil || key == "" {
+		if hasExisting {
+			fmt.Println("  (keeping existing key)")
+		} else {
+			fmt.Println("  Skipping — using DuckDuckGo.")
+		}
+		return
+	}
+
+	fmt.Printf("  ✓ %s\n", maskKey(key))
+	w.FirecrawlKey = key
+}
+
+// ---------------------------------------------------------------------------
+// Step [5/5]: Workspace & HTTP
 // ---------------------------------------------------------------------------
 
 func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [4/4] Workspace & Permissions")
+	fmt.Println("  [5/5] Workspace & Permissions")
 
 	defWS := ""
 	if existing != nil && len(existing.Sandbox.AllowedPaths) > 0 {

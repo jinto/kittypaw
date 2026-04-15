@@ -133,8 +133,17 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 	}
 
 	proc := exec.Command(exe, args...)
-	proc.Stdout = nil
-	proc.Stderr = nil
+	logPath := filepath.Join(filepath.Dir(pidPath), "daemon.log")
+	// Truncate log if it exceeds 10 MB to prevent unbounded growth.
+	if fi, err := os.Stat(logPath); err == nil && fi.Size() > 10<<20 {
+		_ = os.Truncate(logPath, 0)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err == nil {
+		proc.Stdout = logFile
+		proc.Stderr = logFile
+		defer logFile.Close() // safe: child inherits FD via Start(), parent closes on return
+	}
 	setSysProcAttr(proc)
 
 	if err := proc.Start(); err != nil {
