@@ -41,6 +41,11 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 
 	result := &core.ExecutionResult{Success: true}
 
+	// observeSignal is the typed sentinel for Agent.observe() interrupts.
+	// Using a struct type (not a string) prevents confusion with timeout interrupts.
+	type observeSignal struct{}
+	var observations []core.Observation
+
 	// --- console.log capture ---
 	var consoleLogs []string
 	console := vm.NewObject()
@@ -96,6 +101,43 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 		vm.Set(skillName, obj)
 	}
 
+	// --- Agent.observe (VM control flow, not a skill call) ---
+	// Registered after SkillRegistry loop so it's added to the existing Agent object.
+	if agentVal := vm.Get("Agent"); agentVal != nil && agentVal != goja.Undefined() {
+		agentObj := agentVal.ToObject(vm)
+		agentObj.Set("observe", func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				panic(vm.ToValue("Agent.observe requires an argument"))
+			}
+			obs := core.Observation{}
+			exported := call.Arguments[0].Export()
+			switch v := exported.(type) {
+			case map[string]any:
+				if d, ok := v["data"].(string); ok {
+					obs.Data = d
+				} else {
+					// Marshal non-string data
+					if b, err := json.Marshal(v["data"]); err == nil {
+						obs.Data = string(b)
+					}
+				}
+				if l, ok := v["label"].(string); ok {
+					obs.Label = l
+				}
+			default:
+				obs.Data = fmt.Sprintf("%v", exported)
+			}
+			// Truncate to 5000 runes
+			const maxObsLen = 5000
+			if runes := []rune(obs.Data); len(runes) > maxObsLen {
+				obs.Data = string(runes[:maxObsLen])
+			}
+			observations = append(observations, obs)
+			vm.Interrupt(observeSignal{})
+			return goja.Undefined()
+		})
+	}
+
 	// --- inject context ---
 	vm.Set("context", jsContext)
 
@@ -106,11 +148,29 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 	val, err := vm.RunString(script)
 
 	if err != nil {
-		// goja wraps JS exceptions in *goja.Exception.
+		// Check for Agent.observe() interrupt (typed sentinel).
+		if ie, ok := err.(*goja.InterruptedError); ok {
+			if _, isObserve := ie.Value().(observeSignal); isObserve {
+				result.Observe = true
+				result.Observations = observations
+				if len(consoleLogs) > 0 {
+					result.Output = strings.Join(consoleLogs, "\n")
+				}
+				return result, nil
+			}
+			// Other interrupts (timeout)
+			result.Success = false
+			result.Error = "execution timed out"
+			if len(consoleLogs) > 0 {
+				result.Output = strings.Join(consoleLogs, "\n")
+			}
+			return result, nil
+		}
+		// JS exceptions
 		if ex, ok := err.(*goja.Exception); ok {
 			result.Success = false
 			result.Error = ex.Value().String()
-		} else if err.Error() == "execution timed out" || ctx.Err() != nil {
+		} else if ctx.Err() != nil {
 			result.Success = false
 			result.Error = "execution timed out"
 		} else {

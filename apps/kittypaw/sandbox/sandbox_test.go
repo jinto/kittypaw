@@ -220,6 +220,89 @@ func TestResolverErrorUncaughtFails(t *testing.T) {
 	}
 }
 
+func TestAgentObserve(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+	code := `
+		var data = "search results here";
+		Agent.observe({data: data, label: "search"});
+		return "should not reach";
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Observe {
+		t.Fatal("expected Observe = true")
+	}
+	if len(result.Observations) != 1 {
+		t.Fatalf("expected 1 observation, got %d", len(result.Observations))
+	}
+	obs := result.Observations[0]
+	if obs.Label != "search" {
+		t.Errorf("label = %q, want %q", obs.Label, "search")
+	}
+	if obs.Data != "search results here" {
+		t.Errorf("data = %q, want %q", obs.Data, "search results here")
+	}
+	// Output should contain any console.log before observe, not "should not reach"
+	if strings.Contains(result.Output, "should not reach") {
+		t.Error("code after Agent.observe should not execute")
+	}
+}
+
+func TestAgentObserveTruncation(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+	bigData := strings.Repeat("x", 6000)
+	code := fmt.Sprintf(`Agent.observe({data: "%s", label: "big"});`, bigData)
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Observe {
+		t.Fatal("expected Observe = true")
+	}
+	if len(result.Observations[0].Data) != 5000 {
+		t.Errorf("expected data truncated to 5000, got %d", len(result.Observations[0].Data))
+	}
+}
+
+func TestAgentObserveStringArg(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+	code := `Agent.observe("plain string");`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Observe {
+		t.Fatal("expected Observe = true")
+	}
+	if result.Observations[0].Data != "plain string" {
+		t.Errorf("data = %q, want %q", result.Observations[0].Data, "plain string")
+	}
+}
+
+func TestNoObserve_ExistingBehaviorUnchanged(t *testing.T) {
+	// AC #10: When Agent.observe is not called, behavior is identical to before.
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+	code := `return "hello";`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Observe {
+		t.Error("Observe should be false when not called")
+	}
+	if result.Observations != nil {
+		t.Error("Observations should be nil when not called")
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "hello" {
+		t.Errorf("output = %q, want %q", result.Output, "hello")
+	}
+}
+
 func TestAutoReturn(t *testing.T) {
 
 

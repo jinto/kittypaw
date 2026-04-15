@@ -225,44 +225,7 @@ func TestStripHTMLTags(t *testing.T) {
 	}
 }
 
-func TestExtractSearchResults(t *testing.T) {
-	// Minimal DuckDuckGo-like HTML with result__a class
-	html := `<div class="result__a" href="https://example.com">
->Example Title</a>
-<div class="result__snippet">A test snippet</div>
-</div>
-<div class="result__a" href="https://other.com">
->Other Title</a>
-</div>`
-
-	results := extractSearchResults(html)
-	if len(results) == 0 {
-		t.Fatal("extractSearchResults returned no results")
-	}
-	if results[0]["url"] != "https://example.com" {
-		t.Errorf("result[0].url = %q, want %q", results[0]["url"], "https://example.com")
-	}
-}
-
-func TestExtractSearchResultsEmpty(t *testing.T) {
-	results := extractSearchResults("<html><body>no results</body></html>")
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
-	}
-}
-
-func TestExtractSearchResultsMaxTen(t *testing.T) {
-	// Build HTML with 15 results
-	html := ""
-	for i := 0; i < 15; i++ {
-		html += `<div class="result__a" href="https://example.com">` +
-			`>Title</a></div>`
-	}
-	results := extractSearchResults(html)
-	if len(results) > 10 {
-		t.Errorf("expected at most 10 results, got %d", len(results))
-	}
-}
+// extractSearchResults and cleanDuckDuckGoURL tests moved to search_test.go
 
 // ---------------------------------------------------------------------------
 // File index dispatch tests
