@@ -290,6 +290,9 @@ func (f *FirecrawlBackend) Search(ctx context.Context, query string, limit int) 
 	if err := json.Unmarshal(body, &fcResp); err != nil {
 		return nil, fmt.Errorf("firecrawl response parse: %w", err)
 	}
+	if !fcResp.Success {
+		return nil, fmt.Errorf("firecrawl search failed (success=false)")
+	}
 
 	results := make([]WebSearchResult, 0, len(fcResp.Data))
 	for _, d := range fcResp.Data {

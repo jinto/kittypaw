@@ -18,12 +18,14 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/chzyer/readline"
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 
 	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
-	"github.com/jinto/kittypaw/engine"
 	"github.com/jinto/kittypaw/llm"
 	mcpreg "github.com/jinto/kittypaw/mcp"
 	"github.com/jinto/kittypaw/sandbox"
@@ -51,6 +53,27 @@ func main() {
 }
 
 // ---------------------------------------------------------------------------
+// Table helpers — CJK-aware padding and truncation
+// ---------------------------------------------------------------------------
+
+// padW right-pads s to exactly w display columns (CJK = 2 cols).
+func padW(s string, w int) string {
+	sw := runewidth.StringWidth(s)
+	if sw >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-sw)
+}
+
+// truncW truncates s to at most w display columns, appending ".." if cut.
+func truncW(s string, w int) string {
+	if runewidth.StringWidth(s) <= w {
+		return s
+	}
+	return runewidth.Truncate(s, w, "..")
+}
+
+// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
@@ -70,23 +93,18 @@ func newRootCmd() *cobra.Command {
 		newSetupCmd(),
 		newChatCmd(),
 		newStatusCmd(),
-		newSkillsCmd(),
+		newSkillCmd(),
 		newRunCmd(),
-		newTeachCmd(),
 		newConfigCmd(),
 		newAgentCmd(),
 		newLogCmd(),
 		newDaemonCmd(),
-		newPackagesCmd(),
 		newPersonaCmd(),
-		newSuggestionsCmd(),
-		newFixesCmd(),
 		newReflectionCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
 		newReloadCmd(),
-		newInstallCmd(),
-		newSearchCmd(),
+		newResetCmd(),
 	)
 
 	return cmd
@@ -365,19 +383,11 @@ func runChat(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println()
+	closeResources() // restore terminal before any post-chat output
 
-	// Normal exit (Ctrl-D) — ask if auto-started.
-	// Default to keeping daemon alive: stdin may be EOF after readline,
-	// so Scanner.Scan() returns false immediately → default applies.
+	// Auto-started daemon is owned by this chat session — clean up on exit.
 	if !wasRunning && flagRemote == "" {
-		if isTTY() {
-			chatScanner := bufio.NewScanner(os.Stdin)
-			if promptYesNo(chatScanner, "Stop the daemon?", false) {
-				stopDaemon()
-			}
-		} else {
-			stopDaemon()
-		}
+		stopDaemon()
 	}
 
 	return nil
@@ -435,66 +445,354 @@ func runStatus(_ *cobra.Command, _ []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// skills
+// skill — unified skill management
 // ---------------------------------------------------------------------------
 
-func newSkillsCmd() *cobra.Command {
+func newSkillCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "skills",
+		Use:   "skill",
 		Short: "Manage skills",
 	}
 	cmd.AddCommand(
-		newSkillsListCmd(),
-		newSkillsEnableCmd(),
-		newSkillsDisableCmd(),
-		newSkillsDeleteCmd(),
-		newSkillsExplainCmd(),
+		newSkillListCmd(),
+		newSkillSearchCmd(),
+		newSkillInstallCmd(),
+		newSkillUninstallCmd(),
+		newSkillInfoCmd(),
+		newSkillCreateCmd(),
+		newSkillEnableCmd(),
+		newSkillDisableCmd(),
+		newSkillExplainCmd(),
+		newSkillConfigCmd(),
+		newSkillSuggestCmd(),
+		newSkillFixCmd(),
 	)
 	return cmd
 }
 
-func newSkillsListCmd() *cobra.Command {
-	return &cobra.Command{
+// --- skill list ---
+
+func newSkillListCmd() *cobra.Command {
+	var filterType string
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all skills",
-		RunE:  runSkillsList,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			var skills []map[string]any
+			if filterType == "" || filterType == "skill" {
+				if cl, err := connectDaemon(); err == nil {
+					if res, err := cl.Skills(); err == nil {
+						skills = jsonSlice(res, "skills")
+					}
+				}
+			}
+
+			var packages []core.SkillPackage
+			if filterType == "" || filterType == "package" {
+				if secrets, err := core.LoadSecrets(); err == nil {
+					pm := core.NewPackageManager(secrets)
+					packages, _ = pm.ListInstalled()
+				}
+			}
+
+			if len(skills) == 0 && len(packages) == 0 {
+				fmt.Println("No skills found.")
+				return nil
+			}
+
+			fmt.Printf("%s %s %s %s %s\n", padW("NAME", 20), padW("TYPE", 10), padW("VERSION", 10), padW("STATUS", 10), "DESCRIPTION")
+			fmt.Println(strings.Repeat("-", 85))
+
+			for _, s := range skills {
+				status := "enabled"
+				if !jsonBool(s, "enabled") {
+					status = "disabled"
+				}
+				desc := truncW(jsonStr(s, "description"), 30)
+				fmt.Printf("%s %s %s %s %s\n",
+					padW(truncW(jsonStr(s, "name"), 20), 20), padW("skill", 10), padW(jsonStr(s, "version"), 10), padW(status, 10), desc)
+			}
+
+			for _, p := range packages {
+				status := "installed"
+				if p.Meta.Cron != "" {
+					status = "cron"
+				}
+				desc := truncW(p.Meta.Description, 30)
+				fmt.Printf("%s %s %s %s %s\n",
+					padW(truncW(p.Meta.ID, 20), 20), padW("package", 10), padW(p.Meta.Version, 10), padW(status, 10), desc)
+			}
+			return nil
+		},
 	}
+	cmd.Flags().StringVar(&filterType, "type", "", "filter by type: skill or package")
+	return cmd
 }
 
-func runSkillsList(_ *cobra.Command, _ []string) error {
+// --- skill search ---
+
+func newSkillSearchCmd() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "search [query]",
+		Short: "Search the skill registry",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			var query string
+			if len(args) > 0 {
+				query = args[0]
+			}
+			rc, err := registryClient()
+			if err != nil {
+				return err
+			}
+			idx, err := rc.FetchIndexWithMeta()
+			if err != nil {
+				return err
+			}
+			results := core.FilterEntries(idx.Entries, query)
+
+			if jsonOutput {
+				out := map[string]any{"results": results, "from_cache": idx.FromCache}
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
+			}
+
+			if idx.FromCache {
+				ts := "unknown"
+				if !idx.CachedAt.IsZero() {
+					ts = idx.CachedAt.Format("2006-01-02 15:04")
+				}
+				fmt.Printf("(cached results -- last updated: %s)\n\n", ts)
+			}
+
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return nil
+			}
+
+			fmt.Printf("%s %s %s %s %s\n", padW("ID", 20), padW("NAME", 25), padW("VERSION", 10), padW("AUTHOR", 12), "DESCRIPTION")
+			fmt.Println(strings.Repeat("-", 95))
+			for _, e := range results {
+				desc := truncW(e.Description, 40)
+				name := truncW(e.Name, 25)
+				author := truncW(e.Author, 12)
+				fmt.Printf("%s %s %s %s %s\n", padW(e.ID, 20), padW(name, 25), padW(e.Version, 10), padW(author, 12), desc)
+			}
+			fmt.Printf("\nFound %d package(s).\n", len(results))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "output as JSON")
+	return cmd
+}
+
+// --- skill install ---
+
+func newSkillInstallCmd() *cobra.Command {
+	var mdMode string
+	cmd := &cobra.Command{
+		Use:   "install <source>",
+		Short: "Install a skill from GitHub, local path, or registry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			arg := args[0]
+
+			// GitHub URL or local path → daemon install.
+			if strings.HasPrefix(arg, "https://") || strings.HasPrefix(arg, "http://") {
+				return installViaDaemon(arg, mdMode)
+			}
+
+			fi, statErr := os.Stat(arg)
+			if statErr != nil && !os.IsNotExist(statErr) {
+				return statErr
+			}
+			if statErr == nil && fi.IsDir() {
+				absPath, _ := filepath.Abs(arg)
+				return installViaDaemon(absPath, mdMode)
+			}
+
+			// Otherwise treat as a registry package ID.
+			secrets, err := core.LoadSecrets()
+			if err != nil {
+				return err
+			}
+			pm := core.NewPackageManager(secrets)
+			rc, err := registryClient()
+			if err != nil {
+				return err
+			}
+			entry, err := rc.FindEntry(arg)
+			if err != nil {
+				return err
+			}
+			pkg, err := pm.InstallFromRegistry(rc, *entry)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed package %q (%s) v%s from registry\n",
+				pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
+			return promptPackageConfig(pm, pkg)
+		},
+	}
+	cmd.Flags().StringVar(&mdMode, "mode", "", "SKILL.md execution mode (prompt or native)")
+	return cmd
+}
+
+func installViaDaemon(source, mdMode string) error {
 	cl, err := connectDaemon()
 	if err != nil {
 		return err
 	}
-
-	res, err := cl.Skills()
+	result, err := cl.Install(source, mdMode)
 	if err != nil {
-		return fmt.Errorf("load skills: %w", err)
+		return err
 	}
-
-	skills := jsonSlice(res, "skills")
-	if len(skills) == 0 {
-		fmt.Println("No skills found.")
-		return nil
-	}
-
-	fmt.Printf("%-20s %-40s %-8s %s\n", "NAME", "DESCRIPTION", "ENABLED", "TRIGGER")
-	fmt.Println(strings.Repeat("-", 80))
-	for _, s := range skills {
-		enabled := "yes"
-		if !jsonBool(s, "enabled") {
-			enabled = "no"
-		}
-		desc := jsonStr(s, "description")
-		if len(desc) > 38 {
-			desc = desc[:38] + ".."
-		}
-		fmt.Printf("%-20s %-40s %-8s %s\n", jsonStr(s, "name"), desc, enabled, jsonStr(s, "trigger"))
-	}
+	fmt.Printf("Installed: %s (format: %s)\n",
+		jsonStr(result, "SkillName"), jsonStr(result, "Format"))
 	return nil
 }
 
-func newSkillsEnableCmd() *cobra.Command {
+// --- skill uninstall ---
+
+func newSkillUninstallCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall <name>",
+		Short: "Uninstall a skill or package",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			name := args[0]
+
+			// Try package first (local, fast).
+			secrets, err := core.LoadSecrets()
+			if err == nil {
+				pm := core.NewPackageManager(secrets)
+				if err := pm.Uninstall(name); err == nil {
+					fmt.Printf("Package %q uninstalled.\n", name)
+					return nil
+				}
+			}
+
+			// Fall back to skill deletion via daemon.
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.DeleteSkill(name); err != nil {
+				return err
+			}
+			fmt.Printf("Skill %q deleted.\n", name)
+			return nil
+		},
+	}
+}
+
+// --- skill info ---
+
+func newSkillInfoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info <name>",
+		Short: "Show details of an installed skill or package",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			name := args[0]
+
+			// Try package first.
+			secrets, err := core.LoadSecrets()
+			if err == nil {
+				pm := core.NewPackageManager(secrets)
+				if pkg, _, loadErr := pm.LoadPackage(name); loadErr == nil {
+					printPackageInfo(pm, pkg)
+					return nil
+				}
+			}
+
+			// Fall back to skill via daemon.
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			res, err := cl.Skills()
+			if err != nil {
+				return err
+			}
+			for _, s := range jsonSlice(res, "skills") {
+				if jsonStr(s, "name") == name {
+					fmt.Printf("Name:        %s\n", jsonStr(s, "name"))
+					fmt.Printf("Type:        skill\n")
+					if v := jsonStr(s, "version"); v != "" {
+						fmt.Printf("Version:     %s\n", v)
+					}
+					if d := jsonStr(s, "description"); d != "" {
+						fmt.Printf("Description: %s\n", d)
+					}
+					fmt.Printf("Enabled:     %v\n", jsonBool(s, "enabled"))
+					if t := jsonStr(s, "trigger"); t != "" {
+						fmt.Printf("Trigger:     %s\n", t)
+					}
+					return nil
+				}
+			}
+			return fmt.Errorf("skill %q not found", name)
+		},
+	}
+}
+
+func printPackageInfo(pm *core.PackageManager, pkg *core.SkillPackage) {
+	fmt.Printf("ID:          %s\n", pkg.Meta.ID)
+	fmt.Printf("Name:        %s\n", pkg.Meta.Name)
+	fmt.Printf("Type:        package\n")
+	fmt.Printf("Version:     %s\n", pkg.Meta.Version)
+	if pkg.Meta.Description != "" {
+		fmt.Printf("Description: %s\n", pkg.Meta.Description)
+	}
+	if pkg.Meta.Author != "" {
+		fmt.Printf("Author:      %s\n", pkg.Meta.Author)
+	}
+	if pkg.Meta.Cron != "" {
+		fmt.Printf("Cron:        %s\n", pkg.Meta.Cron)
+	}
+	if pkg.Meta.Model != "" {
+		fmt.Printf("Model:       %s\n", pkg.Meta.Model)
+	}
+	if len(pkg.Config) > 0 {
+		fmt.Println("\nConfig Fields:")
+		cfg, _ := pm.GetConfig(pkg.Meta.ID)
+		for _, f := range pkg.Config {
+			val := cfg[f.Key]
+			if f.Secret && val != "" {
+				val = "****"
+			}
+			req := ""
+			if f.Required {
+				req = " (required)"
+			}
+			fmt.Printf("  %-20s %s%s\n", f.Key, val, req)
+		}
+	}
+	if len(pkg.Permissions.Primitives) > 0 {
+		fmt.Printf("\nPermissions: %s\n", strings.Join(pkg.Permissions.Primitives, ", "))
+	}
+	if len(pkg.Permissions.AllowedHosts) > 0 {
+		fmt.Printf("Hosts:       %s\n", strings.Join(pkg.Permissions.AllowedHosts, ", "))
+	}
+}
+
+// --- skill create ---
+
+func newSkillCreateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "create <description...>",
+		Short: "Create a new skill from description",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  runTeach,
+	}
+}
+
+// --- skill enable / disable / delete / explain ---
+
+func newSkillEnableCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "enable <name>",
 		Short: "Enable a skill",
@@ -513,7 +811,27 @@ func newSkillsEnableCmd() *cobra.Command {
 	}
 }
 
-func newSkillsExplainCmd() *cobra.Command {
+func newSkillDisableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disable <name>",
+		Short: "Disable a skill",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cl, err := connectDaemon()
+			if err != nil {
+				return err
+			}
+			if _, err := cl.DisableSkill(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Skill %q disabled.\n", args[0])
+			return nil
+		},
+	}
+}
+
+
+func newSkillExplainCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "explain <name>",
 		Short: "Explain what a skill does",
@@ -533,42 +851,168 @@ func newSkillsExplainCmd() *cobra.Command {
 	}
 }
 
-func newSkillsDisableCmd() *cobra.Command {
+// --- skill config ---
+
+func newSkillConfigCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "disable <name>",
-		Short: "Disable a skill",
-		Args:  cobra.ExactArgs(1),
+		Use:   "config <name> [key] [value]",
+		Short: "Get or set skill configuration",
+		Args:  cobra.RangeArgs(1, 3),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			secrets, err := core.LoadSecrets()
 			if err != nil {
 				return err
 			}
-			if _, err := cl.DisableSkill(args[0]); err != nil {
-				return err
+			pm := core.NewPackageManager(secrets)
+			id := args[0]
+
+			if len(args) == 1 {
+				cfg, err := pm.GetConfig(id)
+				if err != nil {
+					return err
+				}
+				if len(cfg) == 0 {
+					fmt.Println("No configuration fields.")
+					return nil
+				}
+				for k, v := range cfg {
+					fmt.Printf("  %s = %s\n", k, v)
+				}
+				return nil
 			}
-			fmt.Printf("Skill %q disabled.\n", args[0])
-			return nil
+			if len(args) == 3 {
+				return pm.SetConfig(id, args[1], args[2])
+			}
+			return fmt.Errorf("usage: kittypaw skill config <name> [key value]")
 		},
 	}
 }
 
-func newSkillsDeleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a skill",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+// --- skill suggest ---
+
+func newSkillSuggestCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "suggest",
+		Short: "Manage skill suggestions",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			// Default action: list suggestions.
 			cl, err := connectDaemon()
 			if err != nil {
 				return err
 			}
-			if _, err := cl.DeleteSkill(args[0]); err != nil {
+			res, err := cl.SuggestionsList()
+			if err != nil {
 				return err
 			}
-			fmt.Printf("Skill %q deleted.\n", args[0])
+			items := jsonSlice(res, "suggestions")
+			if len(items) == 0 {
+				fmt.Println("No suggestions found.")
+				return nil
+			}
+			fmt.Printf("%s %s\n", padW("SKILL_ID", 20), "DESCRIPTION")
+			fmt.Println(strings.Repeat("-", 60))
+			for _, s := range items {
+				desc := truncW(jsonStr(s, "description"), 50)
+				fmt.Printf("%s %s\n", padW(jsonStr(s, "skill_id"), 20), desc)
+			}
 			return nil
 		},
 	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "accept <skill-id>",
+			Short: "Accept a suggestion",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(_ *cobra.Command, args []string) error {
+				cl, err := connectDaemon()
+				if err != nil {
+					return err
+				}
+				if _, err := cl.SuggestionsAccept(args[0]); err != nil {
+					return err
+				}
+				fmt.Printf("Suggestion %q accepted.\n", args[0])
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:   "dismiss <skill-id>",
+			Short: "Dismiss a suggestion",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(_ *cobra.Command, args []string) error {
+				cl, err := connectDaemon()
+				if err != nil {
+					return err
+				}
+				if _, err := cl.SuggestionsDismiss(args[0]); err != nil {
+					return err
+				}
+				fmt.Printf("Suggestion %q dismissed.\n", args[0])
+				return nil
+			},
+		},
+	)
+	return cmd
+}
+
+// --- skill fix ---
+
+func newSkillFixCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fix",
+		Short: "Manage skill fixes",
+	}
+	cmd.AddCommand(
+		&cobra.Command{
+			Use:   "list <skill>",
+			Short: "List fixes for a skill",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(_ *cobra.Command, args []string) error {
+				cl, err := connectDaemon()
+				if err != nil {
+					return err
+				}
+				res, err := cl.FixesList(args[0])
+				if err != nil {
+					return err
+				}
+				fixes := jsonSlice(res, "fixes")
+				if len(fixes) == 0 {
+					fmt.Println("No fixes found.")
+					return nil
+				}
+				fmt.Printf("%s %s %s %s\n", padW("ID", 6), padW("APPLIED", 8), padW("DATE", 20), "ERROR")
+				fmt.Println(strings.Repeat("-", 60))
+				for _, f := range fixes {
+					applied := "no"
+					if jsonBool(f, "applied") {
+						applied = "yes"
+					}
+					errMsg := truncW(jsonStr(f, "error_message"), 30)
+					fmt.Printf("%s %s %s %s\n",
+						padW(fmt.Sprintf("%d", jsonInt(f, "id")), 6), padW(applied, 8), padW(jsonStr(f, "created_at"), 20), errMsg)
+				}
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:   "approve <id>",
+			Short: "Approve a fix",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(_ *cobra.Command, args []string) error {
+				cl, err := connectDaemon()
+				if err != nil {
+					return err
+				}
+				if _, err := cl.FixesApprove(args[0]); err != nil {
+					return err
+				}
+				fmt.Printf("Fix %s approved.\n", args[0])
+				return nil
+			},
+		},
+	)
+	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -622,17 +1066,8 @@ func runSkill(_ *cobra.Command, args []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// teach
+// teach (shared logic, used by skill create)
 // ---------------------------------------------------------------------------
-
-func newTeachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "teach <description...>",
-		Short: "Teach a new skill from description",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  runTeach,
-	}
-}
 
 func runTeach(_ *cobra.Command, args []string) error {
 	description := strings.Join(args, " ")
@@ -693,35 +1128,6 @@ func runTeach(_ *cobra.Command, args []string) error {
 	}
 	fmt.Printf("스킬 '%s' 저장 완료!\n", name)
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// install
-// ---------------------------------------------------------------------------
-
-func newInstallCmd() *cobra.Command {
-	var mdMode string
-	cmd := &cobra.Command{
-		Use:   "install <github-url|local-path>",
-		Short: "Install a skill from GitHub or a local directory",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			result, err := cl.Install(args[0], mdMode)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Installed: %s (format: %s)\n",
-				jsonStr(result, "SkillName"),
-				jsonStr(result, "Format"))
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&mdMode, "mode", "", "SKILL.md execution mode (default: prompt, from config or fallback)")
-	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -812,10 +1218,10 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-30s %-6s %s\n", "AGENT ID", "TURNS", "UPDATED")
+	fmt.Printf("%s %s %s\n", padW("AGENT ID", 30), padW("TURNS", 6), "UPDATED")
 	fmt.Println(strings.Repeat("-", 60))
 	for _, a := range agents {
-		fmt.Printf("%-30s %-6d %s\n", jsonStr(a, "agent_id"), jsonInt(a, "turn_count"), jsonStr(a, "updated_at"))
+		fmt.Printf("%s %s %s\n", padW(jsonStr(a, "agent_id"), 30), padW(fmt.Sprintf("%d", jsonInt(a, "turn_count")), 6), jsonStr(a, "updated_at"))
 	}
 	return nil
 }
@@ -852,7 +1258,7 @@ func runLog(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-5s %-20s %-20s %-7s %s\n", "ID", "SKILL", "STARTED", "STATUS", "DURATION")
+	fmt.Printf("%s %s %s %s %s\n", padW("ID", 5), padW("SKILL", 20), padW("STARTED", 20), padW("STATUS", 7), "DURATION")
 	fmt.Println(strings.Repeat("-", 80))
 	for _, r := range records {
 		status := "OK"
@@ -860,7 +1266,7 @@ func runLog(_ *cobra.Command, _ []string) error {
 			status = "FAIL"
 		}
 		duration := strconv.FormatInt(jsonInt(r, "duration_ms"), 10) + "ms"
-		fmt.Printf("%-5d %-20s %-20s %-7s %s\n", jsonInt(r, "id"), jsonStr(r, "skill_name"), jsonStr(r, "started_at"), status, duration)
+		fmt.Printf("%s %s %s %s %s\n", padW(fmt.Sprintf("%d", jsonInt(r, "id")), 5), padW(truncW(jsonStr(r, "skill_name"), 20), 20), padW(jsonStr(r, "started_at"), 20), padW(status, 7), duration)
 	}
 	return nil
 }
@@ -994,6 +1400,45 @@ func runDaemonStatus(_ *cobra.Command, _ []string) error {
 // ---------------------------------------------------------------------------
 // stop
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// reset
+// ---------------------------------------------------------------------------
+
+func newResetCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reset [agent-id]",
+		Short: "Reset conversation history",
+		Long:  "Clear conversation history for all agents, or a specific agent if specified.",
+		RunE:  runReset,
+	}
+	return cmd
+}
+
+func runReset(_ *cobra.Command, args []string) error {
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	agentID := ""
+	if len(args) > 0 {
+		agentID = args[0]
+	}
+
+	deleted, err := st.ResetConversations(agentID)
+	if err != nil {
+		return fmt.Errorf("reset: %w", err)
+	}
+
+	if agentID != "" {
+		fmt.Printf("Reset %d turns for agent %q.\n", deleted, agentID)
+	} else {
+		fmt.Printf("Reset %d turns (all agents).\n", deleted)
+	}
+	return nil
+}
 
 func newStopCmd() *cobra.Command {
 	return &cobra.Command{
@@ -1156,14 +1601,11 @@ func newEvolutionListCmd() *cobra.Command {
 				fmt.Println("No pending evolutions.")
 				return nil
 			}
-			fmt.Printf("%-30s %s\n", "ID", "REASON")
+			fmt.Printf("%s %s\n", padW("ID", 30), "REASON")
 			fmt.Println(strings.Repeat("-", 60))
 			for _, e := range evos {
-				reason := jsonStr(e, "Value")
-				if len(reason) > 40 {
-					reason = reason[:40] + ".."
-				}
-				fmt.Printf("%-30s %s\n", jsonStr(e, "Key"), reason)
+				reason := truncW(jsonStr(e, "Value"), 40)
+				fmt.Printf("%s %s\n", padW(jsonStr(e, "Key"), 30), reason)
 			}
 			return nil
 		},
@@ -1233,7 +1675,7 @@ func runPersonaList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-20s %-30s %-12s %s\n", "ID", "DESCRIPTION", "STATUS", "PRESET")
+	fmt.Printf("%s %s %s %s\n", padW("ID", 20), padW("DESCRIPTION", 30), padW("STATUS", 12), "PRESET")
 	fmt.Println(strings.Repeat("-", 75))
 
 	for _, p := range profiles {
@@ -1248,11 +1690,8 @@ func runPersonaList(_ *cobra.Command, _ []string) error {
 		if statusStr == "custom" && presetStr != "-" {
 			presetStr += " (modified)"
 		}
-		desc := jsonStr(p, "description")
-		if len(desc) > 28 {
-			desc = desc[:28] + ".."
-		}
-		fmt.Printf("%-20s %-30s %-12s %s\n", jsonStr(p, "id"), desc, statusStr, presetStr)
+		desc := truncW(jsonStr(p, "description"), 30)
+		fmt.Printf("%s %s %s %s\n", padW(jsonStr(p, "id"), 20), padW(desc, 30), padW(statusStr, 12), presetStr)
 	}
 	return nil
 }
@@ -1286,179 +1725,128 @@ func runPersonaApply(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// packages
-// ---------------------------------------------------------------------------
-
-func newPackagesCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "packages",
-		Aliases: []string{"pkg"},
-		Short:   "Manage skill packages",
+// promptPackageConfig prompts the user to configure package settings after install.
+// Skips silently if there are no config fields or stdin is not a terminal.
+func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error {
+	if len(pkg.Config) == 0 {
+		return nil
 	}
-	cmd.AddCommand(
-		newPkgInstallCmd(),
-		newPkgUninstallCmd(),
-		newPkgListCmd(),
-		newPkgSearchCmd(),
-		newPkgInfoCmd(),
-		newPkgConfigCmd(),
-		newPkgRunCmd(),
-	)
-	return cmd
-}
-
-func newPkgInstallCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "install <path-or-id>",
-		Short: "Install a package from a local directory or the registry",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
-
-			arg := args[0]
-
-			// If arg is an existing directory, install locally.
-			fi, statErr := os.Stat(arg)
-			if statErr != nil && !os.IsNotExist(statErr) {
-				return statErr // permission denied, etc.
-			}
-			if statErr == nil && fi.IsDir() {
-				pkg, err := pm.Install(arg)
-				if err != nil {
-					return err
-				}
-				fmt.Printf("Installed package %q (%s) v%s\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
-				return nil
-			}
-
-			// Otherwise treat as a registry package ID.
-			rc, err := registryClient()
-			if err != nil {
-				return err
-			}
-			entry, err := rc.FindEntry(arg)
-			if err != nil {
-				return err
-			}
-
-			pkg, err := pm.InstallFromRegistry(rc, *entry)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Installed package %q (%s) v%s from registry\n", pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
-			return nil
-		},
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Printf("  Tip: run `kittypaw skill config %s` to configure this package.\n", pkg.Meta.ID)
+		return nil
 	}
-}
 
-func newPkgSearchCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "search [query]",
-		Short: "Search the package registry",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			rc, err := registryClient()
-			if err != nil {
-				return err
-			}
+	// Load existing values so we can skip already-configured fields.
+	existing, _ := pm.GetConfig(pkg.Meta.ID)
 
-			var query string
-			if len(args) > 0 {
-				query = args[0]
+	// Count fields that still need input.
+	var pending []core.ConfigField
+	for _, field := range pkg.Config {
+		cur := existing[field.Key]
+		if cur != "" && cur != field.Default {
+			if field.Source != "" {
+				fmt.Printf("  %s: bound from %s\n", field.Key, field.Source)
 			}
-
-			results, err := rc.SearchEntries(query)
-			if err != nil {
-				return err
-			}
-
-			if len(results) == 0 {
-				fmt.Println("No packages found.")
-				return nil
-			}
-
-			fmt.Printf("%-20s %-25s %-10s %s\n", "ID", "NAME", "VERSION", "DESCRIPTION")
-			fmt.Println(strings.Repeat("-", 80))
-			for _, e := range results {
-				desc := e.Description
-				if len(desc) > 30 {
-					desc = desc[:28] + ".."
-				}
-				name := e.Name
-				if len(name) > 23 {
-					name = name[:21] + ".."
-				}
-				fmt.Printf("%-20s %-25s %-10s %s\n", e.ID, name, e.Version, desc)
-			}
-			return nil
-		},
+			continue // already configured
+		}
+		if !field.Required && cur == field.Default {
+			continue // optional with default — fine as-is
+		}
+		pending = append(pending, field)
 	}
-}
+	if len(pending) == 0 {
+		fmt.Println("  All configuration fields already set.")
+		return nil
+	}
 
-func newPkgInfoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "info <id>",
-		Short: "Show details of an installed package",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
+	fmt.Printf("\nThis package needs %d configuration value(s):\n", len(pending))
+	scanner := bufio.NewScanner(os.Stdin)
 
-			pkg, _, err := pm.LoadPackage(args[0])
-			if err != nil {
-				return err
-			}
+	for _, field := range pending {
+		resolved := field.ResolvedType()
+		label := field.Label
+		if label == "" {
+			label = field.Key
+		}
 
-			fmt.Printf("ID:          %s\n", pkg.Meta.ID)
-			fmt.Printf("Name:        %s\n", pkg.Meta.Name)
-			fmt.Printf("Version:     %s\n", pkg.Meta.Version)
-			if pkg.Meta.Description != "" {
-				fmt.Printf("Description: %s\n", pkg.Meta.Description)
+		var value string
+		switch resolved {
+		case "boolean":
+			defHint := "[y/N]"
+			if strings.EqualFold(field.Default, "true") {
+				defHint = "[Y/n]"
 			}
-			if pkg.Meta.Author != "" {
-				fmt.Printf("Author:      %s\n", pkg.Meta.Author)
-			}
-			if pkg.Meta.Cron != "" {
-				fmt.Printf("Cron:        %s\n", pkg.Meta.Cron)
-			}
-			if pkg.Meta.Model != "" {
-				fmt.Printf("Model:       %s\n", pkg.Meta.Model)
-			}
-
-			if len(pkg.Config) > 0 {
-				fmt.Println("\nConfig Fields:")
-				cfg, _ := pm.GetConfig(args[0])
-				for _, f := range pkg.Config {
-					val := cfg[f.Key]
-					if f.Secret && val != "" {
-						val = "****"
-					}
-					req := ""
-					if f.Required {
-						req = " (required)"
-					}
-					fmt.Printf("  %-20s %s%s\n", f.Key, val, req)
+			fmt.Printf("  %s %s: ", label, defHint)
+			scanner.Scan()
+			input := strings.TrimSpace(scanner.Text())
+			if input == "" {
+				value = field.Default
+			} else {
+				switch strings.ToLower(input) {
+				case "y", "yes", "true", "1":
+					value = "true"
+				default:
+					value = "false"
 				}
 			}
 
-			if len(pkg.Permissions.Primitives) > 0 {
-				fmt.Printf("\nPermissions: %s\n", strings.Join(pkg.Permissions.Primitives, ", "))
+		case "select":
+			fmt.Printf("  %s:\n", label)
+			for i, opt := range field.Options {
+				marker := " "
+				if opt == field.Default {
+					marker = "*"
+				}
+				fmt.Printf("    %s %d) %s\n", marker, i+1, opt)
 			}
-			if len(pkg.Permissions.AllowedHosts) > 0 {
-				fmt.Printf("Hosts:       %s\n", strings.Join(pkg.Permissions.AllowedHosts, ", "))
+			fmt.Printf("  Choose [1-%d]: ", len(field.Options))
+			scanner.Scan()
+			input := strings.TrimSpace(scanner.Text())
+			if input == "" && field.Default != "" {
+				value = field.Default
+			} else if n, err := strconv.Atoi(input); err == nil && n >= 1 && n <= len(field.Options) {
+				value = field.Options[n-1]
+			} else {
+				fmt.Println("    Invalid selection, skipping.")
+				continue
 			}
 
-			return nil
-		},
+		case "secret":
+			fmt.Printf("  %s (hidden): ", label)
+			raw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				return fmt.Errorf("read secret: %w", err)
+			}
+			value = strings.TrimSpace(string(raw))
+
+		default: // string, number
+			hint := ""
+			if field.Default != "" {
+				hint = fmt.Sprintf(" [%s]", field.Default)
+			}
+			fmt.Printf("  %s%s: ", label, hint)
+			scanner.Scan()
+			value = strings.TrimSpace(scanner.Text())
+			if value == "" {
+				value = field.Default
+			}
+		}
+
+		if value == "" && field.Required {
+			fmt.Printf("    Skipped (required — set later with `kittypaw skill config %s %s <value>`).\n", pkg.Meta.ID, field.Key)
+			continue
+		}
+		if value == "" {
+			continue
+		}
+
+		if err := pm.SetConfig(pkg.Meta.ID, field.Key, value); err != nil {
+			fmt.Printf("    Warning: failed to save %s: %v\n", field.Key, err)
+		}
 	}
+	fmt.Println("  Configuration saved.")
+	return nil
 }
 
 // registryClient creates a RegistryClient from config, falling back to DefaultRegistryURL.
@@ -1473,149 +1861,6 @@ func registryClient() (*core.RegistryClient, error) {
 	}
 
 	return core.NewRegistryClient(registryURL)
-}
-
-func newPkgUninstallCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "uninstall <id>",
-		Short: "Uninstall a package",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
-			if err := pm.Uninstall(args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("Package %q uninstalled.\n", args[0])
-			return nil
-		},
-	}
-}
-
-func newPkgListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List installed packages",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
-			packages, err := pm.ListInstalled()
-			if err != nil {
-				return err
-			}
-			if len(packages) == 0 {
-				fmt.Println("No packages installed.")
-				return nil
-			}
-			fmt.Printf("%-20s %-30s %-10s %s\n", "ID", "NAME", "VERSION", "CRON")
-			fmt.Println(strings.Repeat("-", 75))
-			for _, p := range packages {
-				cronStr := p.Meta.Cron
-				if cronStr == "" {
-					cronStr = "-"
-				}
-				name := p.Meta.Name
-				if len(name) > 28 {
-					name = name[:28] + ".."
-				}
-				fmt.Printf("%-20s %-30s %-10s %s\n", p.Meta.ID, name, p.Meta.Version, cronStr)
-			}
-			return nil
-		},
-	}
-}
-
-func newPkgConfigCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "config <id> [key] [value]",
-		Short: "Get or set package configuration",
-		Args:  cobra.RangeArgs(1, 3),
-		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
-
-			id := args[0]
-			if len(args) == 1 {
-				// Show all config.
-				cfg, err := pm.GetConfig(id)
-				if err != nil {
-					return err
-				}
-				if len(cfg) == 0 {
-					fmt.Println("No configuration fields.")
-					return nil
-				}
-				for k, v := range cfg {
-					fmt.Printf("  %s = %s\n", k, v)
-				}
-				return nil
-			}
-			if len(args) == 3 {
-				// Set config.
-				return pm.SetConfig(id, args[1], args[2])
-			}
-			return fmt.Errorf("usage: kittypaw packages config <id> [key value]")
-		},
-	}
-	return cmd
-}
-
-func newPkgRunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run <id>",
-		Short: "Run a package manually",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
-			if err != nil {
-				return err
-			}
-			pm := core.NewPackageManager(secrets)
-			pkg, code, err := pm.LoadPackage(args[0])
-			if err != nil {
-				return err
-			}
-
-			cfg, st, provider, sbox, err := bootstrap()
-			if err != nil {
-				return err
-			}
-			defer st.Close()
-
-			session := &engine.Session{
-				Provider: provider,
-				Sandbox:  sbox,
-				Store:    st,
-				Config:   cfg,
-			}
-
-			payload, _ := json.Marshal(core.ChatPayload{
-				Text:   "skill:pkg:" + pkg.Meta.ID,
-				ChatID: "cli",
-			})
-			event := core.Event{
-				Type:    core.EventDesktop,
-				Payload: payload,
-			}
-
-			_ = code // code is available but session.Run loads it via skill matching
-			resp, err := session.Run(context.Background(), event, nil)
-			if err != nil {
-				return fmt.Errorf("run package %q: %w", args[0], err)
-			}
-			fmt.Println(resp)
-			return nil
-		},
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1652,20 +1897,18 @@ func newMemorySearchCmd() *cobra.Command {
 				fmt.Println("No results found.")
 				return nil
 			}
-			fmt.Printf("%-6s %-20s %-20s %s\n", "ID", "SKILL", "DATE", "INPUT")
+			fmt.Printf("%s %s %s %s\n", padW("ID", 6), padW("SKILL", 20), padW("DATE", 20), "INPUT")
 			fmt.Println(strings.Repeat("-", 80))
 			for _, r := range results {
 				input := jsonStr(r, "input")
 				if input == "" {
 					input = jsonStr(r, "skill_name")
 				}
-				if len(input) > 30 {
-					input = input[:30] + ".."
-				}
-				fmt.Printf("%-6d %-20s %-20s %s\n",
-					jsonInt(r, "id"),
-					jsonStr(r, "skill_name"),
-					jsonStr(r, "started_at"),
+				input = truncW(input, 30)
+				fmt.Printf("%s %s %s %s\n",
+					padW(fmt.Sprintf("%d", jsonInt(r, "id")), 6),
+					padW(truncW(jsonStr(r, "skill_name"), 20), 20),
+					padW(jsonStr(r, "started_at"), 20),
 					input,
 				)
 			}
@@ -1708,16 +1951,16 @@ func newChannelsListCmd() *cobra.Command {
 				fmt.Println("No channels found.")
 				return nil
 			}
-			fmt.Printf("%-20s %-12s %s\n", "NAME", "TYPE", "STATUS")
+			fmt.Printf("%s %s %s\n", padW("NAME", 20), padW("TYPE", 12), "STATUS")
 			fmt.Println(strings.Repeat("-", 50))
 			for _, ch := range channels {
 				status := "stopped"
 				if jsonBool(ch, "running") {
 					status = "running"
 				}
-				fmt.Printf("%-20s %-12s %s\n",
-					jsonStr(ch, "name"),
-					jsonStr(ch, "type"),
+				fmt.Printf("%s %s %s\n",
+					padW(jsonStr(ch, "name"), 20),
+					padW(jsonStr(ch, "type"), 12),
 					status,
 				)
 			}
@@ -1743,165 +1986,6 @@ func newReloadCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println("Config reloaded.")
-			return nil
-		},
-	}
-}
-
-// ---------------------------------------------------------------------------
-// suggestions
-// ---------------------------------------------------------------------------
-
-func newSuggestionsCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "suggestions",
-		Short: "Manage skill suggestions",
-	}
-	cmd.AddCommand(
-		newSuggestionsListCmd(),
-		newSuggestionsAcceptCmd(),
-		newSuggestionsDismissCmd(),
-	)
-	return cmd
-}
-
-func newSuggestionsListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List pending suggestions",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			res, err := cl.SuggestionsList()
-			if err != nil {
-				return err
-			}
-			items := jsonSlice(res, "suggestions")
-			if len(items) == 0 {
-				fmt.Println("No suggestions found.")
-				return nil
-			}
-			fmt.Printf("%-20s %s\n", "SKILL_ID", "DESCRIPTION")
-			fmt.Println(strings.Repeat("-", 60))
-			for _, s := range items {
-				desc := jsonStr(s, "description")
-				if len(desc) > 50 {
-					desc = desc[:50] + ".."
-				}
-				fmt.Printf("%-20s %s\n", jsonStr(s, "skill_id"), desc)
-			}
-			return nil
-		},
-	}
-}
-
-func newSuggestionsAcceptCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "accept <skill-id>",
-		Short: "Accept a suggestion",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.SuggestionsAccept(args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("Suggestion %q accepted.\n", args[0])
-			return nil
-		},
-	}
-}
-
-func newSuggestionsDismissCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "dismiss <skill-id>",
-		Short: "Dismiss a suggestion",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.SuggestionsDismiss(args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("Suggestion %q dismissed.\n", args[0])
-			return nil
-		},
-	}
-}
-
-// ---------------------------------------------------------------------------
-// fixes
-// ---------------------------------------------------------------------------
-
-func newFixesCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "fixes",
-		Short: "Manage skill fixes",
-	}
-	cmd.AddCommand(
-		newFixesListCmd(),
-		newFixesApproveCmd(),
-	)
-	return cmd
-}
-
-func newFixesListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list <skill>",
-		Short: "List fixes for a skill",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			res, err := cl.FixesList(args[0])
-			if err != nil {
-				return err
-			}
-			fixes := jsonSlice(res, "fixes")
-			if len(fixes) == 0 {
-				fmt.Println("No fixes found.")
-				return nil
-			}
-			fmt.Printf("%-6s %-8s %-20s %s\n", "ID", "APPLIED", "DATE", "ERROR")
-			fmt.Println(strings.Repeat("-", 60))
-			for _, f := range fixes {
-				applied := "no"
-				if jsonBool(f, "applied") {
-					applied = "yes"
-				}
-				errMsg := jsonStr(f, "error_message")
-				if len(errMsg) > 30 {
-					errMsg = errMsg[:30] + ".."
-				}
-				fmt.Printf("%-6d %-8s %-20s %s\n", jsonInt(f, "id"), applied, jsonStr(f, "created_at"), errMsg)
-			}
-			return nil
-		},
-	}
-}
-
-func newFixesApproveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "approve <id>",
-		Short: "Approve a fix",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.FixesApprove(args[0]); err != nil {
-				return err
-			}
-			fmt.Printf("Fix %s approved.\n", args[0])
 			return nil
 		},
 	}
@@ -1945,14 +2029,11 @@ func newReflectionListCmd() *cobra.Command {
 				fmt.Println("No reflection candidates found.")
 				return nil
 			}
-			fmt.Printf("%-30s %s\n", "KEY", "VALUE")
+			fmt.Printf("%s %s\n", padW("KEY", 30), "VALUE")
 			fmt.Println(strings.Repeat("-", 60))
 			for _, c := range candidates {
-				val := jsonStr(c, "Value")
-				if len(val) > 40 {
-					val = val[:40] + ".."
-				}
-				fmt.Printf("%-30s %s\n", jsonStr(c, "Key"), val)
+				val := truncW(jsonStr(c, "Value"), 40)
+				fmt.Printf("%s %s\n", padW(jsonStr(c, "Key"), 30), val)
 			}
 			return nil
 		},
@@ -2047,37 +2128,6 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(jsonStr(res, "report"))
-			return nil
-		},
-	}
-}
-
-// ---------------------------------------------------------------------------
-// search
-// ---------------------------------------------------------------------------
-
-func newSearchCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "search <keyword>",
-		Short: "Search the skill registry",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
-			if err != nil {
-				return err
-			}
-			result, err := cl.Search(args[0])
-			if err != nil {
-				return err
-			}
-			results := jsonSlice(result, "results")
-			if len(results) == 0 {
-				fmt.Println("No results found.")
-				return nil
-			}
-			for _, r := range results {
-				fmt.Printf("  %-20s  %s\n", jsonStr(r, "id"), jsonStr(r, "description"))
-			}
 			return nil
 		},
 	}

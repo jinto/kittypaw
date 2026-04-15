@@ -216,13 +216,36 @@ func validateHTTPTarget(urlStr string, allowedHosts []string) error {
 func webSearch(ctx context.Context, query string, cfg *core.Config) (string, error) {
 	backend, err := NewSearchBackend(&cfg.Web)
 	if err != nil {
-		return jsonResult(map[string]any{"error": err.Error()})
+		return jsonResult(map[string]any{"results": []any{}, "error": err.Error()})
 	}
 	results, err := backend.Search(ctx, query, 10)
 	if err != nil {
-		return jsonResult(map[string]any{"error": err.Error()})
+		// Fallback to DuckDuckGo when the primary backend fails (e.g. credits exhausted).
+		if _, isDDG := backend.(*DuckDuckGoBackend); !isDDG {
+			slog.Warn("search backend failed, falling back to DuckDuckGo", "error", err)
+			ddg := &DuckDuckGoBackend{}
+			if fallbackResults, fbErr := ddg.Search(ctx, query, 10); fbErr == nil {
+				warning := fmt.Sprintf("검색 백엔드(%s) 오류: %s — DuckDuckGo로 대체 검색했습니다.", backendName(backend), err.Error())
+				return jsonResult(map[string]any{"results": fallbackResults, "warning": warning})
+			}
+		}
+		return jsonResult(map[string]any{"results": []any{}, "error": err.Error()})
 	}
 	return jsonResult(map[string]any{"results": results})
+}
+
+// backendName returns a human-readable name for a SearchBackend.
+func backendName(b SearchBackend) string {
+	switch b.(type) {
+	case *FirecrawlBackend:
+		return "Firecrawl"
+	case *TavilyBackend:
+		return "Tavily"
+	case *DuckDuckGoBackend:
+		return "DuckDuckGo"
+	default:
+		return "unknown"
+	}
 }
 
 func webFetch(ctx context.Context, url string) (string, error) {
