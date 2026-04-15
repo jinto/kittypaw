@@ -87,12 +87,20 @@ type SkillCall struct {
 	Args      []json.RawMessage `json:"args"`
 }
 
+// Observation holds data from an Agent.observe() call in the sandbox.
+type Observation struct {
+	Label string `json:"label"`
+	Data  string `json:"data"`
+}
+
 // ExecutionResult is the output of a sandbox code execution.
 type ExecutionResult struct {
-	Success    bool        `json:"success"`
-	Output     string      `json:"output"`
-	SkillCalls []SkillCall `json:"skill_calls"`
-	Error      string      `json:"error,omitempty"`
+	Success      bool          `json:"success"`
+	Output       string        `json:"output"`
+	SkillCalls   []SkillCall   `json:"skill_calls"`
+	Error        string        `json:"error,omitempty"`
+	Observe      bool          `json:"observe,omitempty"`
+	Observations []Observation `json:"observations,omitempty"`
 }
 
 // ToEventType maps a channel configuration type to its corresponding event type.

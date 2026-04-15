@@ -107,6 +107,7 @@ var SkillRegistry = []SkillMeta{
 	}},
 	{Name: "Agent", Methods: []SkillMethodMeta{
 		{Name: "delegate", Signature: "Agent.delegate(profileId, task) — delegates task to another agent"},
+		{Name: "observe", Signature: "Agent.observe({data, label}) — pauses execution and sends data back for analysis. Engine re-calls LLM with observations in context."},
 	}},
 	{Name: "Profile", Methods: []SkillMethodMeta{
 		{Name: "list", Signature: "Profile.list()"},
@@ -116,6 +117,6 @@ var SkillRegistry = []SkillMeta{
 	}},
 	{Name: "Web", Methods: []SkillMethodMeta{
 		{Name: "search", Signature: "Web.search(query) — returns {results: [{title, url, snippet}]}"},
-		{Name: "fetch", Signature: "Web.fetch(url) — returns {text, status}"},
+		{Name: "fetch", Signature: "Web.fetch(url) — returns {text, markdown, title, status}"},
 	}},
 }

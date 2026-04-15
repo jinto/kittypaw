@@ -158,7 +158,7 @@ func executeHTTP(ctx context.Context, call core.SkillCall, s *Session) (string, 
 
 	// Web.search uses a search API
 	if call.Method == "search" {
-		return webSearch(ctx, urlStr)
+		return webSearch(ctx, urlStr, s.Config)
 	}
 	// Web.fetch gets page text
 	if call.Method == "fetch" {
@@ -213,24 +213,15 @@ func validateHTTPTarget(urlStr string, allowedHosts []string) error {
 	return nil
 }
 
-func webSearch(ctx context.Context, query string) (string, error) {
-	// Use DuckDuckGo HTML search as a free search backend
-	url := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+func webSearch(ctx context.Context, query string, cfg *core.Config) (string, error) {
+	backend, err := NewSearchBackend(&cfg.Web)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
-	req.Header.Set("User-Agent", "KittyPaw/1.0")
-
-	resp, err := http.DefaultClient.Do(req)
+	results, err := backend.Search(ctx, query, 10)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 200_000))
-	// Simple extraction of results from DuckDuckGo HTML
-	results := extractSearchResults(string(body))
 	return jsonResult(map[string]any{"results": results})
 }
 
@@ -248,12 +239,25 @@ func webFetch(ctx context.Context, url string) (string, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 500_000))
-	// Strip HTML tags for text extraction
-	text := stripHTMLTags(string(body))
-	if len(text) > 10000 {
-		text = text[:10000]
-	}
-	return jsonResult(map[string]any{"text": text, "status": resp.StatusCode})
+	rawHTML := string(body)
+
+	// Existing: strip HTML tags for plain text (backward compatible)
+	text := stripHTMLTags(rawHTML)
+	text = truncate(text, 10000)
+
+	// New: structured markdown conversion
+	md := htmlToMarkdown(rawHTML)
+	md = truncate(md, 10000)
+
+	// New: extract page title
+	title := extractTitle(rawHTML)
+
+	return jsonResult(map[string]any{
+		"text":     text,
+		"markdown": md,
+		"title":    title,
+		"status":   resp.StatusCode,
+	})
 }
 
 // --- File ---
@@ -1146,62 +1150,6 @@ func resolveForValidation(absPath string) string {
 		current = parent
 	}
 	return absPath
-}
-
-func extractSearchResults(html string) []map[string]string {
-	var results []map[string]string
-	// Simple regex-free extraction from DuckDuckGo HTML
-	parts := strings.Split(html, "result__a")
-	for i, part := range parts {
-		if i == 0 {
-			continue
-		}
-		// Extract href
-		hrefIdx := strings.Index(part, "href=\"")
-		if hrefIdx == -1 {
-			continue
-		}
-		href := part[hrefIdx+6:]
-		hrefEnd := strings.Index(href, "\"")
-		if hrefEnd == -1 {
-			continue
-		}
-		url := href[:hrefEnd]
-
-		// Extract title text (between > and </a>)
-		titleStart := strings.Index(part, ">")
-		if titleStart == -1 {
-			continue
-		}
-		titleEnd := strings.Index(part[titleStart:], "</a>")
-		if titleEnd == -1 {
-			continue
-		}
-		title := stripHTMLTags(part[titleStart+1 : titleStart+titleEnd])
-
-		// Extract snippet
-		snippet := ""
-		snippetIdx := strings.Index(part, "result__snippet")
-		if snippetIdx != -1 {
-			snipStart := strings.Index(part[snippetIdx:], ">")
-			if snipStart != -1 {
-				snipEnd := strings.Index(part[snippetIdx+snipStart:], "</")
-				if snipEnd != -1 {
-					snippet = stripHTMLTags(part[snippetIdx+snipStart+1 : snippetIdx+snipStart+snipEnd])
-				}
-			}
-		}
-
-		results = append(results, map[string]string{
-			"title":   strings.TrimSpace(title),
-			"url":     url,
-			"snippet": strings.TrimSpace(snippet),
-		})
-		if len(results) >= 10 {
-			break
-		}
-	}
-	return results
 }
 
 func stripHTMLTags(s string) string {
