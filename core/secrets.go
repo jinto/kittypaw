@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -43,23 +44,37 @@ func LoadSecretsFrom(path string) (*SecretsStore, error) {
 		return nil, fmt.Errorf("read secrets: %w", err)
 	}
 
-	// Try canonical nested format first: {"pkg": {"key": "val"}}.
-	if err := json.Unmarshal(raw, &s.data); err != nil {
-		// Fall back to flat format: {"pkg/key": "val"}.
-		var flat map[string]string
-		if err2 := json.Unmarshal(raw, &flat); err2 != nil {
-			return nil, fmt.Errorf("parse secrets: %w", err)
+	// Handle all formats: pure nested, pure flat, or mixed (migration artifacts).
+	var raw2 map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &raw2); err != nil {
+		return nil, fmt.Errorf("parse secrets: %w", err)
+	}
+	for k, v := range raw2 {
+		// Try as nested map: {"key": "val"}. Skip null (unmarshals to nil map).
+		var nested map[string]string
+		if json.Unmarshal(v, &nested) == nil && nested != nil {
+			s.data[k] = nested
+			continue
 		}
-		for compound, val := range flat {
-			if pkg, key, ok := strings.Cut(compound, "/"); ok {
+		// Try as flat string: "val" with compound key "pkg/key".
+		var str string
+		if json.Unmarshal(v, &str) == nil && str != "" {
+			if pkg, key, ok := strings.Cut(k, "/"); ok {
 				if s.data[pkg] == nil {
 					s.data[pkg] = make(map[string]string)
 				}
-				s.data[pkg][key] = val
+				s.data[pkg][key] = str
 			}
-			// Keys without "/" are silently ignored — no package scope.
 		}
+		// null or other types → skip silently.
 	}
+
+	// Auto-migrate: if file was non-canonical (flat or mixed), rewrite as clean nested.
+	clean, _ := json.MarshalIndent(s.data, "", "  ")
+	if !bytes.Equal(bytes.TrimSpace(raw), bytes.TrimSpace(clean)) {
+		_ = s.persist()
+	}
+
 	return s, nil
 }
 

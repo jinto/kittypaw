@@ -35,6 +35,8 @@ Supports two source formats:
 
 Provenance tracked via `SourceURL`, `SourceHash`, `SourceText` fields on Skill. SHA256 verification for registry packages.
 
+Config fields support `source = "namespace/key"` binding to resolve values from shared `secrets.json` (e.g. `source = "telegram/bot_token"`). Resolution order: package-scoped → source binding → default. Secrets file auto-migrates from flat/mixed formats to canonical nested JSON on first load.
+
 ## Permission System
 
 Destructive operations (Shell.exec, Git.push, etc.) require user approval in `supervised` autonomy mode.
