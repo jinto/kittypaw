@@ -348,7 +348,7 @@ func (s *Server) isOnboardingCompleted() bool {
 	if ok && v == "true" {
 		return true
 	}
-	// CLI `kittypaw init` writes config.toml but doesn't set the DB flag.
+	// CLI `kittypaw setup` writes config.toml but doesn't set the DB flag.
 	// Treat a configured LLM as onboarding complete.
 	s.configMu.RLock()
 	configured := s.config.LLM.APIKey != "" || s.config.LLM.BaseURL != ""
