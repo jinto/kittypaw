@@ -18,8 +18,8 @@ import (
 	"github.com/jinto/kittypaw/llm"
 )
 
-// initFlags holds the cobra flag values for `kittypaw init`.
-type initFlags struct {
+// setupFlags holds the cobra flag values for `kittypaw setup`.
+type setupFlags struct {
 	provider       string
 	apiKey         string
 	localURL       string
@@ -34,9 +34,9 @@ type initFlags struct {
 	force          bool
 }
 
-// runWizard drives the 4-step interactive wizard or applies flags.
+// runWizard drives the 5-step interactive wizard or applies flags.
 // Returns a WizardResult. Never writes files.
-func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error) {
+func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, error) {
 	var w core.WizardResult
 
 	// Non-interactive: populate from flags.
@@ -47,8 +47,8 @@ func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error
 	// TTY check: if not a terminal and no --provider flag, bail.
 	if !isTTY() {
 		return w, fmt.Errorf("not a terminal — use flags for non-interactive setup\n" +
-			"  example: kittypaw init --provider anthropic --api-key $ANTHROPIC_API_KEY\n" +
-			"  run kittypaw init --help for all options")
+			"  example: kittypaw setup --provider anthropic --api-key $ANTHROPIC_API_KEY\n" +
+			"  run kittypaw setup --help for all options")
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -77,7 +77,7 @@ func runWizard(flags initFlags, existing *core.Config) (core.WizardResult, error
 	return w, nil
 }
 
-func runNonInteractive(flags initFlags) (core.WizardResult, error) {
+func runNonInteractive(flags setupFlags) (core.WizardResult, error) {
 	var w core.WizardResult
 
 	provider, model, baseURL := core.ResolveLLMConfig(flags.provider, flags.localURL, flags.localModel)
@@ -130,7 +130,7 @@ func runNonInteractive(flags initFlags) (core.WizardResult, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Step [1/4]: LLM
+// Step [1/5]: LLM
 // ---------------------------------------------------------------------------
 
 func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) error {
@@ -237,15 +237,42 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 }
 
 // ---------------------------------------------------------------------------
-// Step [2/4]: Telegram
+// Step [2/5]: Telegram
 // ---------------------------------------------------------------------------
 
-func wizardTelegram(scanner *bufio.Scanner, _ *core.Config, w *core.WizardResult) {
+func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [2/5] Telegram (optional)")
 
-	if !promptYesNo(scanner, "  > Connect?", false) {
-		return
+	// Detect existing Telegram config.
+	var existingToken string
+	var existingChatID string
+	if existing != nil {
+		for _, ch := range existing.Channels {
+			if ch.ChannelType == core.ChannelTelegram && ch.Token != "" {
+				existingToken = ch.Token
+				break
+			}
+		}
+		if len(existing.AdminChatIDs) > 0 {
+			existingChatID = existing.AdminChatIDs[0]
+		}
+	}
+
+	if existingToken != "" {
+		msg := "  ✓ Already connected"
+		if existingChatID != "" {
+			msg += fmt.Sprintf(" (Chat ID: %s)", maskKey(existingChatID))
+		}
+		fmt.Println(msg)
+		if !promptYesNo(scanner, "  > Reconfigure?", false) {
+			fmt.Println("  (keeping existing connection)")
+			return
+		}
+	} else {
+		if !promptYesNo(scanner, "  > Connect?", false) {
+			return
+		}
 	}
 
 	token, err := promptPassword("  Bot Token: ")
@@ -392,11 +419,15 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 	}
 
 	if existingKakao != nil {
-		fmt.Printf("  Current: %s\n", existingKakao.RelayURL)
-	}
-
-	if !promptYesNo(scanner, "  > Connect?", false) {
-		return
+		fmt.Printf("  ✓ Already connected (%s)\n", existingKakao.RelayURL)
+		if !promptYesNo(scanner, "  > Reconfigure?", false) {
+			fmt.Println("  (keeping existing connection)")
+			return
+		}
+	} else {
+		if !promptYesNo(scanner, "  > Connect?", false) {
+			return
+		}
 	}
 
 	defRelay := ""
@@ -450,14 +481,17 @@ func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.Wiza
 
 	hasExisting := existing != nil && existing.Web.FirecrawlKey != ""
 	if hasExisting {
-		fmt.Printf("  Current: Firecrawl (%s)\n", maskKey(existing.Web.FirecrawlKey))
+		fmt.Printf("  ✓ Firecrawl configured (%s)\n", maskKey(existing.Web.FirecrawlKey))
+		if !promptYesNo(scanner, "  > Reconfigure?", false) {
+			fmt.Println("  (keeping existing Firecrawl key)")
+			return
+		}
 	} else {
 		fmt.Println("  Default: DuckDuckGo (free, no API key)")
 		fmt.Println("  Upgrade: Firecrawl (higher quality search results)")
-	}
-
-	if !promptYesNo(scanner, "  > Configure Firecrawl?", false) {
-		return
+		if !promptYesNo(scanner, "  > Configure Firecrawl?", false) {
+			return
+		}
 	}
 
 	key, err := promptPassword("  Firecrawl API Key: ")
