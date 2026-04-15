@@ -136,6 +136,19 @@ func runNonInteractive(flags setupFlags) (core.WizardResult, error) {
 func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) error {
 	fmt.Println("  [1/5] LLM Selection")
 
+	// Detect existing LLM config.
+	if existing != nil && existing.LLM.Provider != "" {
+		name := existing.LLM.Provider
+		if existing.LLM.Model != "" {
+			name += " (" + existing.LLM.Model + ")"
+		}
+		fmt.Printf("  ✓ Already configured: %s\n", name)
+		if !promptYesNo(scanner, "  > Reconfigure?", false) {
+			fmt.Println("  (keeping existing LLM)")
+			return nil
+		}
+	}
+
 	defaultIdx := 1
 	if existing != nil {
 		switch {

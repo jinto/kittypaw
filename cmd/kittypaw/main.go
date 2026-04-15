@@ -196,26 +196,11 @@ func runSetup(flags *setupFlags) error {
 		}
 	}
 
-	// Check existing config.
+	// Load existing config (each wizard step decides keep/reconfigure independently).
 	cfgPath := filepath.Join(kittypawDir, "config.toml")
 	var existing *core.Config
 	if cfg, err := core.LoadConfig(cfgPath); err == nil {
 		existing = cfg
-		if !flags.force && flags.provider == "" {
-			fmt.Println()
-			fmt.Println("  Existing configuration found.")
-			fmt.Printf("  LLM: %s (%s)\n", cfg.LLM.Provider, cfg.LLM.Model)
-			for _, ch := range cfg.Channels {
-				fmt.Printf("  Channel: %s\n", ch.ChannelType)
-			}
-			fmt.Println()
-
-			scanner := bufio.NewScanner(os.Stdin)
-			if !promptYesNo(scanner, "  Reconfigure?", false) {
-				fmt.Println("  Keeping existing config.")
-				return nil
-			}
-		}
 	}
 
 	// Run wizard.
