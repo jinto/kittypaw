@@ -1,7 +1,7 @@
 version: 2
 
 builds:
-  - main: ./cmd/kittypaw
+  - main: ./cli
     binary: kittypaw
     env:
       - CGO_ENABLED=0
