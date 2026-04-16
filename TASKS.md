@@ -1,3 +1,27 @@
+## Relay Rust Rewrite ← 현재
+
+Plan: `.claude/plans/relay-rust-rewrite.md`
+Spec: `.ina/specs/20260416-1800-think-relay-rust-rewrite.md`
+
+- [x] T0: Cargo 프로젝트 스캐폴드 (TS 파일 삭제, Cargo.toml, .gitignore)
+- [x] T1: types.rs — Wire protocol DTOs, Kakao 타입, 한국어 상수, Config
+- [x] T2: store.rs — Store trait + SqliteStore (WAL, spawn_blocking)
+- [x] T3: state.rs — AppState (DashMap, moka, reqwest, Store)
+- [x] T4: routes.rs — 라우트 핸들러 + WS 세션 + callback dispatch
+- [x] T5: main.rs — 서버 부트스트랩, sweeper, graceful shutdown
+- [x] T6: integration.rs — 8개 E2E 테스트 시나리오
+
+## Package Context Declaration
+
+Plan: `.claude/plans/package-context.md`
+Spec: `.ina/specs/20260416-1300-think-package-context.md`
+
+- [ ] 1. core: PackagePermissions에 Context 필드 추가 + UserConfig 구조체
+- [ ] 2. engine: event-in-context 헬퍼 + buildUserContext + detectLocale
+- [ ] 3. engine: runSkillOrPackage에서 user context 주입 + session에서 event 저장
+- [ ] 4. 테스트: detectLocale + buildUserContext + 하위호환
+- [ ] 5. registry: weather-briefing에 context 선언 + locale 활용
+
 ## Plan 24: Web Tool Quality + Agent Observe Loop ✅
 
 Plan: `.claude/plans/web-tool-quality-observe-loop.md`
