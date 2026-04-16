@@ -21,6 +21,7 @@ import (
 type contextKey string
 
 const ctxKeyAgentID contextKey = "agentID"
+const ctxKeyEvent contextKey = "event"
 
 // ContextWithAgentID stores the agent ID in context for use by skill handlers.
 func ContextWithAgentID(ctx context.Context, agentID string) context.Context {
@@ -33,6 +34,20 @@ func AgentIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// ContextWithEvent stores the inbound event in context so downstream handlers
+// (e.g. runSkillOrPackage) can access channel/user info without signature changes.
+func ContextWithEvent(ctx context.Context, event *core.Event) context.Context {
+	return context.WithValue(ctx, ctxKeyEvent, event)
+}
+
+// EventFromContext retrieves the event from context. Returns nil for scheduler paths.
+func EventFromContext(ctx context.Context) *core.Event {
+	if v, ok := ctx.Value(ctxKeyEvent).(*core.Event); ok {
+		return v
+	}
+	return nil
 }
 
 // needsPermission checks whether a skill call requires explicit user approval
@@ -853,7 +868,7 @@ func executeDiscord(ctx context.Context, call core.SkillCall, s *Session) (strin
 
 // --- Skill Management ---
 
-func executeSkillMgmt(_ context.Context, call core.SkillCall, s *Session) (string, error) {
+func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	switch call.Method {
 	case "list":
 		skills, err := core.LoadAllSkillsFrom(s.BaseDir)
@@ -861,15 +876,37 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, s *Session) (strin
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		var items []map[string]any
-		for _, s := range skills {
+		for _, sk := range skills {
 			items = append(items, map[string]any{
-				"name":        s.Skill.Name,
-				"description": s.Skill.Description,
-				"enabled":     s.Skill.Enabled,
-				"trigger":     s.Skill.Trigger.Type,
+				"name":        sk.Skill.Name,
+				"description": sk.Skill.Description,
+				"enabled":     sk.Skill.Enabled,
+				"trigger":     sk.Skill.Trigger.Type,
 			})
 		}
+		// Include installed packages.
+		if s.PackageManager != nil {
+			packages, pkgErr := s.PackageManager.ListInstalled()
+			if pkgErr == nil {
+				for _, pkg := range packages {
+					items = append(items, map[string]any{
+						"name":        pkg.Meta.ID,
+						"description": pkg.Meta.Description,
+						"enabled":     true,
+						"trigger":     "package",
+					})
+				}
+			}
+		}
 		return jsonResult(map[string]any{"skills": items})
+
+	case "run":
+		if len(call.Args) == 0 {
+			return jsonResult(map[string]any{"error": "name required"})
+		}
+		var name string
+		json.Unmarshal(call.Args[0], &name)
+		return runSkillOrPackage(ctx, name, s)
 
 	case "create":
 		if len(call.Args) < 3 {
@@ -879,6 +916,23 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, s *Session) (strin
 		json.Unmarshal(call.Args[0], &name)
 		json.Unmarshal(call.Args[1], &desc)
 		json.Unmarshal(call.Args[2], &code)
+
+		// Guard: reject if a package with the same ID is already installed.
+		if s.PackageManager != nil {
+			if pkg, _, loadErr := s.PackageManager.LoadPackage(name); loadErr == nil && pkg != nil {
+				return jsonResult(map[string]any{
+					"error": fmt.Sprintf(
+						"package %q (%s, v%s) is already installed. Use Skill.run(%q) to execute it instead of creating a duplicate skill.",
+						pkg.Meta.ID, pkg.Meta.Name, pkg.Meta.Version, pkg.Meta.ID),
+					"installed_package": map[string]any{
+						"id":          pkg.Meta.ID,
+						"name":        pkg.Meta.Name,
+						"version":     pkg.Meta.Version,
+						"description": pkg.Meta.Description,
+					},
+				})
+			}
+		}
 
 		triggerType := "manual"
 		if len(call.Args) > 3 {
@@ -933,6 +987,166 @@ func executeSkillMgmt(_ context.Context, call core.SkillCall, s *Session) (strin
 	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Skill method: %s", call.Method)})
 	}
+}
+
+// runSkillOrPackage executes a user-created skill or installed package by name.
+// User skills take priority over packages with the same name.
+func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, error) {
+	// Try user-created skill first.
+	skill, code, err := core.LoadSkillFrom(s.BaseDir, name)
+	if err == nil && skill != nil && code != "" {
+		if !skill.Enabled {
+			return jsonResult(map[string]any{"error": fmt.Sprintf("skill %q is disabled", name)})
+		}
+		resolver := func(ctx context.Context, call core.SkillCall) (string, error) {
+			return resolveSkillCall(ctx, call, s, nil)
+		}
+		jsContext := map[string]any{}
+		result, execErr := s.Sandbox.ExecuteWithResolver(ctx, code, jsContext, resolver)
+		if execErr != nil {
+			return jsonResult(map[string]any{"error": fmt.Sprintf("skill %q execution failed: %v", name, execErr)})
+		}
+		if !result.Success {
+			return jsonResult(map[string]any{"error": result.Error, "output": result.Output})
+		}
+		return jsonResult(map[string]any{"success": true, "output": result.Output})
+	}
+
+	// Try installed package.
+	if s.PackageManager == nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("skill or package %q not found", name)})
+	}
+	pkg, code, err := s.PackageManager.LoadPackage(name)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("skill or package %q not found: %v", name, err)})
+	}
+
+	// Resolve config (secrets, defaults, source bindings).
+	config, _ := s.PackageManager.GetConfig(name)
+
+	// Build __context__ JSON string — packages use JSON.parse(__context__).
+	// Includes user context based on the package's [permissions].context declaration.
+	event := EventFromContext(ctx)
+	userCtx := buildUserContext(pkg.Permissions.Context, s, event)
+	ctxObj := map[string]any{"config": config}
+	if userCtx != nil {
+		ctxObj["user"] = userCtx
+	}
+	ctxJSON, _ := json.Marshal(ctxObj)
+	ctxStr, _ := json.Marshal(string(ctxJSON)) // double-marshal → JS string literal
+
+	// Strip "await" keywords — goja doesn't support async/await, but all skill
+	// stubs (Http.get, Llm.generate, etc.) are synchronous in the sandbox.
+	syncCode := stripAwait(code)
+	wrappedCode := fmt.Sprintf("const __context__ = %s;\n%s", string(ctxStr), syncCode)
+
+	// Extract locale for Llm.generate auto-injection.
+	var locale string
+	if userCtx != nil {
+		if l, ok := userCtx["locale"].(string); ok {
+			locale = l
+		}
+	}
+	resolver := buildPackageResolver(ctx, pkg, s, locale)
+	result, execErr := s.Sandbox.ExecutePackage(ctx, wrappedCode, map[string]any{}, resolver)
+	if execErr != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("package %q execution failed: %v", name, execErr)})
+	}
+	if !result.Success {
+		return jsonResult(map[string]any{"error": result.Error, "output": result.Output})
+	}
+	return jsonResult(map[string]any{"success": true, "output": result.Output})
+}
+
+// buildPackageResolver creates a sandbox.SkillResolver that restricts skill calls
+// to the package's declared permissions.primitives. HTTP results are unwrapped
+// to return raw body strings — packages expect Http.get to return the response
+// body directly, not a {status, body} wrapper.
+//
+// When locale is non-empty and the package calls Llm.generate, a "Respond in
+// {language}" instruction is appended to the prompt automatically. This means
+// packages never need to handle locale themselves — they just declare
+// context = ["locale"] in package.toml and the engine does the rest.
+func buildPackageResolver(_ context.Context, pkg *core.SkillPackage, s *Session, locale string) func(context.Context, core.SkillCall) (string, error) {
+	allowed := make(map[string]bool, len(pkg.Permissions.Primitives))
+	for _, p := range pkg.Permissions.Primitives {
+		allowed[p] = true
+	}
+	return func(ctx context.Context, call core.SkillCall) (string, error) {
+		if !allowed[call.SkillName] {
+			return jsonResult(map[string]any{
+				"error": fmt.Sprintf("package %q does not have permission for %s", pkg.Meta.ID, call.SkillName),
+			})
+		}
+		// Inject locale instruction for Llm.generate calls.
+		if locale != "" && call.SkillName == "Llm" && call.Method == "generate" {
+			call = injectLocaleInstruction(call, locale)
+		}
+		result, err := resolveSkillCall(ctx, call, s, nil)
+		if err != nil {
+			return result, err
+		}
+		// Unwrap HTTP responses: packages expect the raw body, not {status, body}.
+		if call.SkillName == "Http" || call.SkillName == "Web" {
+			result = unwrapHTTPBody(result)
+		}
+		return result, nil
+	}
+}
+
+// localeToLanguage maps ISO 639-1 codes to English language names for LLM instruction.
+var localeToLanguage = map[string]string{
+	"ko": "Korean",
+	"ja": "Japanese",
+	"zh": "Chinese",
+	"en": "English",
+	"es": "Spanish",
+	"fr": "French",
+	"de": "German",
+	"pt": "Portuguese",
+	"vi": "Vietnamese",
+	"th": "Thai",
+}
+
+// injectLocaleInstruction appends a "Respond in {language}" instruction to the
+// prompt in a Llm.generate call. This lets the engine handle locale transparently
+// so packages never need language-specific prompt fragments.
+func injectLocaleInstruction(call core.SkillCall, locale string) core.SkillCall {
+	if len(call.Args) == 0 || locale == "" || locale == "en" {
+		return call // English is the LLM default — no injection needed
+	}
+	lang, ok := localeToLanguage[locale]
+	if !ok {
+		lang = locale // pass the raw code; LLMs understand "ko", "ja", etc.
+	}
+	var prompt string
+	if json.Unmarshal(call.Args[0], &prompt) != nil {
+		return call
+	}
+	prompt += "\n\nRespond in " + lang + "."
+	b, _ := json.Marshal(prompt)
+	newArgs := make([]json.RawMessage, len(call.Args))
+	copy(newArgs, call.Args)
+	newArgs[0] = b
+	call.Args = newArgs
+	return call
+}
+
+// unwrapHTTPBody extracts the body field from an HTTP result JSON string.
+// Input: `{"status":200,"body":"<response body>"}` → Output: `<response body>`
+// If the result contains an error or can't be unwrapped, it's returned as-is.
+func unwrapHTTPBody(jsonStr string) string {
+	var wrapper struct {
+		Body  string `json:"body"`
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(jsonStr), &wrapper) != nil {
+		return jsonStr
+	}
+	if wrapper.Error != "" {
+		return jsonStr // keep error wrapper so packages can detect failures
+	}
+	return wrapper.Body
 }
 
 // --- Profile Management ---
@@ -1094,6 +1308,101 @@ func executeDelegate(ctx context.Context, call core.SkillCall, s *Session) (stri
 }
 
 // --- Helpers ---
+
+// stripAwait removes "await " from JavaScript source so it can run in goja's
+// synchronous VM. All skill stubs (Http.get, Storage.set, etc.) are already
+// synchronous — "await" is only present because packages target QuickJS/Node
+// which require it for promise-based APIs.
+func stripAwait(code string) string {
+	return strings.ReplaceAll(code, "await ", "")
+}
+
+// buildUserContext constructs the __context__.user object based on the fields
+// declared in the package's [permissions].context. Only requested fields are
+// included; omitted fields remain undefined in JS.
+func buildUserContext(requested []string, s *Session, event *core.Event) map[string]any {
+	if len(requested) == 0 {
+		return nil
+	}
+
+	result := make(map[string]any, len(requested))
+
+	for _, field := range requested {
+		switch field {
+		case "locale":
+			if s.Config.User.Locale != "" {
+				result["locale"] = s.Config.User.Locale
+			} else if event != nil {
+				p, _ := event.ParsePayload()
+				if loc := detectLocale(p.Text); loc != "" {
+					result["locale"] = loc
+				}
+			}
+		case "timezone":
+			if s.Config.User.Timezone != "" {
+				result["timezone"] = s.Config.User.Timezone
+			}
+		case "location":
+			if s.Config.User.City != "" {
+				loc := map[string]any{"city": s.Config.User.City}
+				if s.Config.User.Latitude != 0 || s.Config.User.Longitude != 0 {
+					loc["lat"] = s.Config.User.Latitude
+					loc["lon"] = s.Config.User.Longitude
+				}
+				result["location"] = loc
+			}
+		case "channel":
+			if event != nil {
+				result["channel"] = event.Type.ChannelName()
+			}
+		case "request_text":
+			if event != nil {
+				p, _ := event.ParsePayload()
+				if p.Text != "" {
+					result["request_text"] = p.Text
+				}
+			}
+		case "user_name":
+			if event != nil {
+				p, _ := event.ParsePayload()
+				if p.FromName != "" {
+					result["user_name"] = p.FromName
+				}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// detectLocale guesses the locale from message text using Unicode ranges.
+// Returns "ko", "ja", "zh", or "en". Used as fallback when config.toml
+// doesn't set a locale.
+//
+// Strategy: Hangul and Hiragana/Katakana are script-unique (only Korean/Japanese),
+// so they take priority. CJK Unified Ideographs are shared across Chinese and
+// Japanese, so they only indicate "zh" when no Japanese kana is present.
+func detectLocale(text string) string {
+	hasCJK := false
+	for _, r := range text {
+		if r >= 0xAC00 && r <= 0xD7AF { // Hangul syllables — uniquely Korean
+			return "ko"
+		}
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) { // Hiragana/Katakana — uniquely Japanese
+			return "ja"
+		}
+		if r >= 0x4E00 && r <= 0x9FFF { // CJK Unified Ideographs — Chinese or Japanese kanji
+			hasCJK = true
+		}
+	}
+	if hasCJK {
+		return "zh"
+	}
+	return "en"
+}
 
 func jsonResult(v any) (string, error) {
 	if v == nil {

@@ -43,6 +43,7 @@ type Session struct {
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
 	Indexer          Indexer            // nil when workspace indexer is not initialized
+	PackageManager   *core.PackageManager // nil when packages are not configured
 	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 }
 
@@ -125,8 +126,9 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		return channelName + "-" + channelUserID
 	}()
 
-	// Store agentID in context for skill handlers (e.g., Profile.switch).
+	// Store agentID and event in context for downstream handlers.
 	ctx = ContextWithAgentID(ctx, agentID)
+	ctx = ContextWithEvent(ctx, &event)
 
 	// Load or create agent state
 	state, err := s.Store.LoadState(agentID)
@@ -247,7 +249,7 @@ observeLoop:
 			profile := loadProfileForPrompt(profileName, s.Config, s.BaseDir)
 
 			// Build prompt (observations are volatile — replaced each observe round)
-			messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection, observations)
+			messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection, observations, s.BaseDir)
 
 			slog.Info("prompt built",
 				"phase", core.PhasePrompt,
@@ -311,6 +313,7 @@ observeLoop:
 				"agent_id", agentID,
 				"attempt", attempt,
 				"code_len", len(code),
+				"code_preview", truncate(code, 500),
 			)
 
 			// Build sandbox context
@@ -368,6 +371,7 @@ observeLoop:
 					"phase", core.PhaseFinish,
 					"agent_id", agentID,
 					"output_len", len(output),
+					"output_preview", truncate(output, 300),
 					"skill_calls", len(execResult.SkillCalls),
 				)
 

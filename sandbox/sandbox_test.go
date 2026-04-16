@@ -304,8 +304,6 @@ func TestNoObserve_ExistingBehaviorUnchanged(t *testing.T) {
 }
 
 func TestAutoReturn(t *testing.T) {
-
-
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	// Code without return — autoReturn should add it.
 	result, err := sb.Execute(context.Background(), `"hello from auto-return"`, nil)
@@ -317,5 +315,57 @@ func TestAutoReturn(t *testing.T) {
 	}
 	if result.Output != "hello from auto-return" {
 		t.Errorf("expected %q, got %q", "hello from auto-return", result.Output)
+	}
+}
+
+func TestExecutePackageRawResults(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		// Simulates executeHTTP returning {status, body}
+		return `{"status":200,"body":"{\"daily\":{\"time\":[\"2026-04-16\"]}}"}`, nil
+	}
+
+	// Package code pattern: JSON.parse the raw result, then access body.
+	code := `
+		var raw = Http.get("https://api.example.com/data");
+		var resp = JSON.parse(raw);
+		var data = JSON.parse(resp.body);
+		return data.daily.time[0];
+	`
+	result, err := sb.ExecutePackage(context.Background(), code, nil, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "2026-04-16" {
+		t.Errorf("expected %q, got %q", "2026-04-16", result.Output)
+	}
+}
+
+func TestExecuteWithResolverParsedResults(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		return `{"status":200,"body":"{\"key\":\"value\"}"}`, nil
+	}
+
+	// LLM code pattern: access properties directly on auto-parsed object.
+	code := `
+		var resp = Http.get("https://api.example.com/data");
+		return resp.status + ":" + resp.body;
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	expected := `200:{"key":"value"}`
+	if result.Output != expected {
+		t.Errorf("expected %q, got %q", expected, result.Output)
 	}
 }

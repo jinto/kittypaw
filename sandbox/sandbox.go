@@ -35,12 +35,25 @@ func (s *Sandbox) Execute(ctx context.Context, code string, jsContext map[string
 }
 
 // ExecuteWithResolver runs JavaScript code and resolves skill calls
-// synchronously through the provided callback.
+// synchronously through the provided callback. Resolver results are
+// auto-parsed from JSON into JS objects (for LLM-generated code).
 func (s *Sandbox) ExecuteWithResolver(
 	ctx context.Context,
 	code string,
 	jsContext map[string]any,
 	resolver SkillResolver,
 ) (*core.ExecutionResult, error) {
-	return run(ctx, s.config, code, jsContext, resolver)
+	return run(ctx, s.config, code, jsContext, resolver, execOpts{})
+}
+
+// ExecutePackage runs package code with raw resolver results. Skill stubs
+// return JSON strings instead of parsed objects, matching the convention that
+// packages call JSON.parse() on skill results themselves.
+func (s *Sandbox) ExecutePackage(
+	ctx context.Context,
+	code string,
+	jsContext map[string]any,
+	resolver SkillResolver,
+) (*core.ExecutionResult, error) {
+	return run(ctx, s.config, code, jsContext, resolver, execOpts{rawResolverResults: true})
 }

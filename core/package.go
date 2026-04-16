@@ -33,7 +33,7 @@ type PackageMeta struct {
 
 // Allowed ConfigField type values. Unknown types fall back to "string" with a warning.
 var validConfigTypes = map[string]bool{
-	"string": true, "number": true, "boolean": true, "secret": true, "select": true,
+	"string": true, "number": true, "boolean": true, "secret": true, "select": true, "cron": true,
 }
 
 // ConfigField defines a user-configurable parameter for a package.
@@ -80,11 +80,14 @@ type ChainStep struct {
 	Model     string `toml:"model"      json:"model,omitempty"`
 }
 
-// PackagePermissions declares what a package is allowed to do.
+// PackagePermissions declares what a package is allowed to do and know.
 type PackagePermissions struct {
 	Primitives   []string `toml:"primitives"    json:"primitives"`
 	AllowedHosts []string `toml:"allowed_hosts" json:"allowed_hosts"`
 	CanDisable   *bool    `toml:"can_disable"   json:"can_disable,omitempty"`
+	// Context lists the user-context fields this package needs (e.g. "locale",
+	// "location"). Only declared fields are injected into __context__.user.
+	Context []string `toml:"context" json:"context,omitempty"`
 }
 
 // PackagesDir returns the directory where packages are stored, creating it if needed.
