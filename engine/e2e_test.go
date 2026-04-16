@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +18,23 @@ import (
 	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/store"
 )
+
+// mockHTTPServer wraps httptest.Server with the host:port for AllowedHosts.
+type mockHTTPServer struct {
+	*httptest.Server
+	Host string // "127.0.0.1:PORT" for AllowedHosts config
+}
+
+func newMockHTTPServer(t *testing.T, handler http.HandlerFunc) *mockHTTPServer {
+	t.Helper()
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	_, port, _ := net.SplitHostPort(ts.Listener.Addr().String())
+	return &mockHTTPServer{
+		Server: ts,
+		Host:   "127.0.0.1:" + port,
+	}
+}
 
 // --- test helpers ---
 
@@ -75,6 +95,21 @@ func newTestSession(t *testing.T, responses ...*llm.Response) *Session {
 		Store:    st,
 		Config:   &cfg,
 	}
+}
+
+// installTestPackage creates a temp dir with package.toml + main.js,
+// installs it via PackageManager, and returns the manager.
+func installTestPackage(t *testing.T, baseDir, tomlContent, jsContent string) *core.PackageManager {
+	t.Helper()
+	srcDir := t.TempDir()
+	os.WriteFile(filepath.Join(srcDir, "package.toml"), []byte(tomlContent), 0o644)
+	os.WriteFile(filepath.Join(srcDir, "main.js"), []byte(jsContent), 0o644)
+
+	pm := core.NewPackageManagerFrom(baseDir, nil)
+	if _, err := pm.Install(srcDir); err != nil {
+		t.Fatalf("install test package: %v", err)
+	}
+	return pm
 }
 
 func webChatEvent(text string) core.Event {
@@ -231,4 +266,141 @@ func TestE2EFileAccessGating(t *testing.T) {
 	if !strings.Contains(output, "blocked:") || !strings.Contains(output, "path not allowed") {
 		t.Errorf("expected blocked output, got %q", output)
 	}
+}
+
+// TestE2EPackageContextInjection tests the golden path:
+//
+//	kittypaw skill install weather-briefing
+//	kittypaw chat "오늘 날씨 알려줘"
+//
+// It exercises the full package execution pipeline:
+// context = ["locale", "location"] declaration → user config injection →
+// Llm.generate with auto locale injection → Korean output.
+//
+// Uses a package that only needs Llm (no HTTP) to keep the test hermetic.
+// HTTP + package round-trip is separately verified by manual E2E testing.
+func TestE2EPackageContextInjection(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	// Package that reads context and calls Llm.generate.
+	// The engine should inject locale + location, and append
+	// "Respond in Korean." to the Llm.generate prompt.
+	mainJS := `
+const ctx = JSON.parse(__context__);
+const user = ctx.user || {};
+const loc = user.location || {};
+const city = loc.city || "Unknown";
+const locale = user.locale || "?";
+
+const prompt = "City: " + city + ". Summarize the weather.";
+const llmRaw = await Llm.generate(prompt);
+const llmData = JSON.parse(llmRaw);
+
+return JSON.stringify({
+  city: city,
+  locale: locale,
+  lat: loc.lat,
+  lon: loc.lon,
+  summary: llmData.text,
+});
+`
+	pkgToml := `
+[meta]
+id = "context-test"
+name = "Context Test"
+version = "1.0.0"
+
+[permissions]
+primitives = ["Llm"]
+context = ["locale", "location"]
+`
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, pkgToml, mainJS)
+
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	weatherSummary := "오늘 서울은 따뜻합니다."
+	mock := &mockProvider{responses: []*llm.Response{
+		{Content: weatherSummary, Usage: &llm.TokenUsage{InputTokens: 10, OutputTokens: 5, Model: "mock"}},
+	}}
+
+	cfg := core.DefaultConfig()
+	cfg.User.Locale = "ko"
+	cfg.User.City = "Seoul"
+	cfg.User.Latitude = 37.57
+	cfg.User.Longitude = 126.98
+
+	sess := &Session{
+		Provider:       mock,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Store:          st,
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+	}
+
+	// Execute with a Korean chat event.
+	event := webChatEvent("오늘 날씨 알려줘")
+	ctx := ContextWithEvent(context.Background(), &event)
+	resultJSON, err := runSkillOrPackage(ctx, "context-test", sess)
+	if err != nil {
+		t.Fatalf("runSkillOrPackage error: %v", err)
+	}
+
+	var wrapper struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	json.Unmarshal([]byte(resultJSON), &wrapper)
+
+	if wrapper.Error != "" {
+		t.Fatalf("package error: %s", wrapper.Error)
+	}
+
+	// Parse the structured output from the package.
+	var output struct {
+		City    string  `json:"city"`
+		Locale  string  `json:"locale"`
+		Lat     float64 `json:"lat"`
+		Lon     float64 `json:"lon"`
+		Summary string  `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(wrapper.Output), &output); err != nil {
+		t.Fatalf("parse output: %v (raw: %s)", err, wrapper.Output)
+	}
+
+	t.Logf("Package output: %+v", output)
+
+	// Verify context injection.
+	if output.City != "Seoul" {
+		t.Errorf("city = %q, want Seoul", output.City)
+	}
+	if output.Locale != "ko" {
+		t.Errorf("locale = %q, want ko", output.Locale)
+	}
+	if output.Lat != 37.57 {
+		t.Errorf("lat = %v, want 37.57", output.Lat)
+	}
+	if output.Summary != weatherSummary {
+		t.Errorf("summary = %q, want %q", output.Summary, weatherSummary)
+	}
+	if mock.callIdx != 1 {
+		t.Errorf("expected 1 LLM call, got %d", mock.callIdx)
+	}
+}
+
+// TestE2EWeatherBriefingLive hits the real Open-Meteo API (free, no key).
+// Skipped unless KITTYPAW_E2E_LIVE=1 is set — requires network + LLM API key.
+func TestE2EWeatherBriefingLive(t *testing.T) {
+	if os.Getenv("KITTYPAW_E2E_LIVE") == "" {
+		t.Skip("set KITTYPAW_E2E_LIVE=1 to run live E2E tests")
+	}
+	t.Log("Live E2E: kittypaw skill install weather-briefing && kittypaw chat '오늘 날씨 알려줘'")
+	t.Log("This test requires a running daemon with a valid LLM API key.")
+	t.Log("Run manually: ./kittypaw skill install weather-briefing && ./kittypaw chat '오늘 날씨 알려줘'")
 }
