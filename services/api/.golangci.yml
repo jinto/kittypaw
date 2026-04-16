@@ -1,0 +1,35 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jinto/kittypaw-api
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - misspell
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    misspell:
+      locale: US
+
+run:
+  timeout: 3m
+
+issues:
+  exclude-dirs:
+    - vendor
