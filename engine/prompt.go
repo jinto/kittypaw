@@ -145,6 +145,7 @@ func BuildPrompt(
 	memoryContext string,
 	mcpToolsSection string,
 	observations []core.Observation,
+	baseDir string,
 ) []core.LlmMessage {
 	var sb strings.Builder
 
@@ -174,7 +175,7 @@ func BuildPrompt(
 	}
 
 	// 6. Available skills (dynamic)
-	sb.WriteString(buildSkillsSection(config))
+	sb.WriteString(buildSkillsSection(baseDir))
 	sb.WriteString("\n\n")
 
 	// 7. Skill creation guide
@@ -236,8 +237,8 @@ func BuildPrompt(
 }
 
 // buildSkillsSection generates the available skills documentation
-// from the canonical core.SkillRegistry.
-func buildSkillsSection(_ *core.Config) string {
+// from the canonical core.SkillRegistry, plus installed user skills and packages.
+func buildSkillsSection(baseDir string) string {
 	lines := []string{"## Available skill globals"}
 	for _, skill := range core.SkillRegistry {
 		var sigs []string
@@ -247,6 +248,40 @@ func buildSkillsSection(_ *core.Config) string {
 		lines = append(lines, "- "+strings.Join(sigs, ", "))
 	}
 	lines = append(lines, "- console.log(...args) — Log output (for debugging)")
+
+	// Append installed user skills + packages (callable via Skill.run).
+	if baseDir != "" {
+		var runnable []string
+
+		// User-created skills.
+		if userSkills, err := core.LoadAllSkillsFrom(baseDir); err == nil {
+			for _, sk := range userSkills {
+				if sk.Skill.Enabled && sk.Skill.Description != "" {
+					runnable = append(runnable, fmt.Sprintf("- Skill.run(\"%s\") — %s", sk.Skill.Name, sk.Skill.Description))
+				}
+			}
+		}
+
+		// Installed packages.
+		pm := core.NewPackageManagerFrom(baseDir, nil)
+		if packages, err := pm.ListInstalled(); err == nil {
+			for _, pkg := range packages {
+				runnable = append(runnable, fmt.Sprintf("- Skill.run(\"%s\") — %s", pkg.Meta.ID, pkg.Meta.Description))
+			}
+		}
+
+		if len(runnable) > 0 {
+			lines = append(lines, "\n### Installed skills & packages (use Skill.run(id) to execute on demand)")
+			lines = append(lines, "**PRIORITY**: When a user request matches an installed package, call Skill.run(id) INSTEAD of Web.search. "+
+				"Packages produce higher-quality, structured results from dedicated APIs.")
+			lines = append(lines, "**OUTPUT**: Skill.run returns {success: true, output: \"<message>\"}. "+
+				"The output field already contains a complete, formatted message ready for the user. "+
+				"You MUST return it directly: `return Skill.run(\"weather-briefing\").output;` "+
+				"Do NOT summarize, rephrase, or replace it with your own text like \"전송 완료\".")
+			lines = append(lines, runnable...)
+		}
+	}
+
 	return strings.Join(lines, "\n")
 }
 

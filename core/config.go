@@ -90,6 +90,16 @@ type Config struct {
 	SkillInstall    SkillInstallConfig  `toml:"skill_install"`
 	Permissions     PermissionPolicy    `toml:"permissions"`
 	Web             WebConfig           `toml:"web"`
+	User            UserConfig          `toml:"user"`
+}
+
+// UserConfig holds user-level settings surfaced to packages via __context__.user.
+type UserConfig struct {
+	Locale    string  `toml:"locale"`    // e.g. "ko", "en", "ja"
+	Timezone  string  `toml:"timezone"`  // e.g. "Asia/Seoul"
+	City      string  `toml:"city"`      // e.g. "Seoul"
+	Latitude  float64 `toml:"latitude"`  // e.g. 37.57
+	Longitude float64 `toml:"longitude"` // e.g. 126.98
 }
 
 // WebConfig controls web tool behavior (search backend, etc.).

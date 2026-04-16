@@ -602,3 +602,171 @@ func TestResolveSkillCallGitNonDestructive(t *testing.T) {
 		t.Errorf("Git.status should not require permission, got: %s", result)
 	}
 }
+
+func TestDetectLocale(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"오늘 날씨 알려줘", "ko"},
+		{"서울 날씨", "ko"},
+		{"What's the weather?", "en"},
+		{"今日の天気", "ja"},
+		{"今天天气怎么样", "zh"},
+		{"", "en"},
+		{"Hello 안녕", "ko"}, // first CJK char wins
+	}
+	for _, tt := range tests {
+		got := detectLocale(tt.text)
+		if got != tt.want {
+			t.Errorf("detectLocale(%q) = %q, want %q", tt.text, got, tt.want)
+		}
+	}
+}
+
+func TestBuildUserContext(t *testing.T) {
+	cfg := &core.Config{}
+	cfg.User.Locale = "ko"
+	cfg.User.Timezone = "Asia/Seoul"
+	cfg.User.City = "Seoul"
+	cfg.User.Latitude = 37.57
+	cfg.User.Longitude = 126.98
+
+	sess := &Session{Config: cfg}
+
+	payload, _ := json.Marshal(core.ChatPayload{
+		Text:     "오늘 날씨 알려줘",
+		FromName: "제권",
+	})
+	event := &core.Event{
+		Type:    core.EventTelegram,
+		Payload: payload,
+	}
+
+	t.Run("all fields declared", func(t *testing.T) {
+		requested := []string{"locale", "timezone", "location", "channel", "request_text", "user_name"}
+		result := buildUserContext(requested, sess, event)
+
+		if result["locale"] != "ko" {
+			t.Errorf("locale = %v, want ko", result["locale"])
+		}
+		if result["timezone"] != "Asia/Seoul" {
+			t.Errorf("timezone = %v, want Asia/Seoul", result["timezone"])
+		}
+		loc := result["location"].(map[string]any)
+		if loc["city"] != "Seoul" {
+			t.Errorf("location.city = %v, want Seoul", loc["city"])
+		}
+		if result["channel"] != "telegram" {
+			t.Errorf("channel = %v, want telegram", result["channel"])
+		}
+		if result["request_text"] != "오늘 날씨 알려줘" {
+			t.Errorf("request_text = %v", result["request_text"])
+		}
+		if result["user_name"] != "제권" {
+			t.Errorf("user_name = %v", result["user_name"])
+		}
+	})
+
+	t.Run("only locale declared", func(t *testing.T) {
+		result := buildUserContext([]string{"locale"}, sess, event)
+		if result["locale"] != "ko" {
+			t.Errorf("locale = %v, want ko", result["locale"])
+		}
+		if _, ok := result["timezone"]; ok {
+			t.Error("timezone should not be present")
+		}
+		if _, ok := result["location"]; ok {
+			t.Error("location should not be present")
+		}
+	})
+
+	t.Run("no declaration = nil", func(t *testing.T) {
+		result := buildUserContext(nil, sess, event)
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+	})
+
+	t.Run("nil event = scheduler path", func(t *testing.T) {
+		requested := []string{"locale", "channel", "request_text", "user_name"}
+		result := buildUserContext(requested, sess, nil)
+
+		if result["locale"] != "ko" {
+			t.Errorf("locale = %v, want ko (from config)", result["locale"])
+		}
+		if _, ok := result["channel"]; ok {
+			t.Error("channel should not be present without event")
+		}
+		if _, ok := result["request_text"]; ok {
+			t.Error("request_text should not be present without event")
+		}
+	})
+
+	t.Run("locale fallback to detection", func(t *testing.T) {
+		noLocaleCfg := &core.Config{}
+		noLocaleSess := &Session{Config: noLocaleCfg}
+		result := buildUserContext([]string{"locale"}, noLocaleSess, event)
+		if result["locale"] != "ko" {
+			t.Errorf("locale = %v, want ko (detected from Korean text)", result["locale"])
+		}
+	})
+}
+
+func TestInjectLocaleInstruction(t *testing.T) {
+	makeCall := func(prompt string) core.SkillCall {
+		b, _ := json.Marshal(prompt)
+		return core.SkillCall{
+			SkillName: "Llm",
+			Method:    "generate",
+			Args:      []json.RawMessage{b},
+		}
+	}
+	extractPrompt := func(call core.SkillCall) string {
+		var p string
+		json.Unmarshal(call.Args[0], &p)
+		return p
+	}
+
+	t.Run("Korean locale appends instruction", func(t *testing.T) {
+		call := makeCall("Tell me about the weather.")
+		result := injectLocaleInstruction(call, "ko")
+		prompt := extractPrompt(result)
+		if !strings.HasSuffix(prompt, "\n\nRespond in Korean.") {
+			t.Errorf("got %q, want suffix 'Respond in Korean.'", prompt)
+		}
+	})
+
+	t.Run("English locale is no-op", func(t *testing.T) {
+		call := makeCall("Tell me about the weather.")
+		result := injectLocaleInstruction(call, "en")
+		if extractPrompt(result) != "Tell me about the weather." {
+			t.Error("English locale should not modify prompt")
+		}
+	})
+
+	t.Run("empty locale is no-op", func(t *testing.T) {
+		call := makeCall("Tell me about the weather.")
+		result := injectLocaleInstruction(call, "")
+		if extractPrompt(result) != "Tell me about the weather." {
+			t.Error("empty locale should not modify prompt")
+		}
+	})
+
+	t.Run("unknown locale uses raw code", func(t *testing.T) {
+		call := makeCall("Hello")
+		result := injectLocaleInstruction(call, "ar")
+		prompt := extractPrompt(result)
+		if !strings.HasSuffix(prompt, "\n\nRespond in ar.") {
+			t.Errorf("got %q, want suffix 'Respond in ar.'", prompt)
+		}
+	})
+
+	t.Run("no args is safe", func(t *testing.T) {
+		call := core.SkillCall{SkillName: "Llm", Method: "generate"}
+		result := injectLocaleInstruction(call, "ko")
+		if len(result.Args) != 0 {
+			t.Error("should not add args")
+		}
+	})
+}

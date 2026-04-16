@@ -57,6 +57,13 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		panic(fmt.Sprintf("fatal: config dir unavailable: %v", err))
 	}
 
+	// Initialize shared secrets + package manager (before session so PM is available).
+	secrets, secretsErr := core.LoadSecretsFrom(filepath.Join(cfgDir, "secrets.json"))
+	if secretsErr != nil {
+		slog.Warn("failed to load secrets store, package config will be limited", "error", secretsErr)
+	}
+	pkgMgr := core.NewPackageManagerFrom(cfgDir, secrets)
+
 	session := &engine.Session{
 		Provider:         provider,
 		FallbackProvider: fallback,
@@ -65,6 +72,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		Config:           cfg,
 		McpRegistry:      mcpReg,
 		BaseDir:          cfgDir,
+		PackageManager:   pkgMgr,
 	}
 	if err := session.RefreshAllowedPaths(); err != nil {
 		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
@@ -87,20 +95,14 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		}
 	}()
 
-	// Initialize shared secrets + package manager for API handlers.
-	secrets, secretsErr := core.LoadSecretsFrom(filepath.Join(cfgDir, "secrets.json"))
-	if secretsErr != nil {
-		slog.Warn("failed to load secrets store, package config will be limited", "error", secretsErr)
-	}
-
 	s := &Server{
 		config:     cfg,
 		store:      st,
 		session:    session,
-		scheduler:  engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), nil),
+		scheduler:  engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), pkgMgr),
 		eventCh:    make(chan core.Event, 64),
 		version:    version,
-		pkgManager: core.NewPackageManagerFrom(cfgDir, secrets),
+		pkgManager: pkgMgr,
 		secrets:    secrets,
 	}
 	s.router = s.setupRoutes()
