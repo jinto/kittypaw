@@ -11,10 +11,18 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
+// execOpts controls per-execution behavior.
+type execOpts struct {
+	// rawResolverResults makes skill stubs return raw JSON strings instead of
+	// auto-parsed objects. Package code expects raw strings (it calls JSON.parse
+	// itself), while LLM-generated code expects parsed objects.
+	rawResolverResults bool
+}
+
 // run executes JS code in an in-process goja VM.
 // Skill calls are resolved synchronously: the JS stub calls a Go function
 // that invokes the resolver and returns the result directly.
-func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map[string]any, resolver SkillResolver) (*core.ExecutionResult, error) {
+func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map[string]any, resolver SkillResolver, opts execOpts) (*core.ExecutionResult, error) {
 	if jsContext == nil {
 		jsContext = map[string]any{}
 	}
@@ -89,6 +97,11 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 						panic(vm.ToValue(err.Error()))
 					}
 					if resp != "" {
+						if opts.rawResolverResults {
+							// Package mode: return raw JSON string so
+							// package code can JSON.parse() it directly.
+							return vm.ToValue(resp)
+						}
 						var parsed any
 						if json.Unmarshal([]byte(resp), &parsed) == nil {
 							return vm.ToValue(parsed)

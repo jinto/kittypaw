@@ -196,7 +196,9 @@ func (s *Scheduler) checkPackages(ctx context.Context) {
 	}
 }
 
-// runPackage executes a package's main.js, then runs any chain steps sequentially.
+// runPackage executes a package's main.js directly, then dispatches the output
+// to Telegram if the package has telegram config. Packages return their formatted
+// message — the scheduler handles delivery.
 func (s *Scheduler) runPackage(ctx context.Context, pkg *core.SkillPackage) {
 	schedName := "pkg:" + pkg.Meta.ID
 	if err := s.session.Store.SetLastRun(schedName, time.Now()); err != nil {
@@ -204,22 +206,40 @@ func (s *Scheduler) runPackage(ctx context.Context, pkg *core.SkillPackage) {
 		return
 	}
 
-	// Load the main package code.
-	_, code, err := s.pkgManager.LoadPackage(pkg.Meta.ID)
-	if err != nil {
-		slog.Error("scheduler: load package failed", "id", pkg.Meta.ID, "error", err)
-		return
-	}
-
-	// Execute main.js (package-level model override applies).
-	output, err := s.executePackageCode(ctx, pkg, code, "", pkg.Meta.Model)
+	// Execute package directly (no LLM loop).
+	resultJSON, err := runSkillOrPackage(ctx, pkg.Meta.ID, s.session)
 	if err != nil {
 		slog.Error("scheduler: package execution failed", "id", pkg.Meta.ID, "error", err)
 		_ = s.session.Store.IncrementFailureCount(schedName)
 		return
 	}
 
+	// Parse the result to get the output message.
+	var result map[string]any
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		slog.Error("scheduler: parse result failed", "id", pkg.Meta.ID, "error", err)
+		return
+	}
+	if errMsg, ok := result["error"].(string); ok && errMsg != "" {
+		slog.Error("scheduler: package returned error", "id", pkg.Meta.ID, "error", errMsg)
+		_ = s.session.Store.IncrementFailureCount(schedName)
+		return
+	}
+
+	output, _ := result["output"].(string)
 	_ = s.session.Store.ResetFailureCount(schedName)
+
+	// Dispatch output to Telegram if configured.
+	if output != "" && s.pkgManager != nil {
+		config, _ := s.pkgManager.GetConfig(pkg.Meta.ID)
+		token := config["telegram_token"]
+		chatID := config["chat_id"]
+		if token != "" && chatID != "" {
+			if err := SendTelegramText(ctx, token, chatID, output); err != nil {
+				slog.Error("scheduler: telegram dispatch failed", "id", pkg.Meta.ID, "error", err)
+			}
+		}
+	}
 
 	// Execute chain steps if defined.
 	if len(pkg.Chain) > 0 {

@@ -261,13 +261,16 @@ func runSetup(flags *setupFlags) error {
 
 func newChatCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "chat",
-		Short: "Interactive chat in terminal",
+		Use:   "chat [message]",
+		Short: "Interactive chat in terminal (or one-shot with argument)",
+		Args:  cobra.ArbitraryArgs,
 		RunE:  runChat,
 	}
 }
 
-func runChat(_ *cobra.Command, _ []string) error {
+func runChat(_ *cobra.Command, args []string) error {
+	oneShot := strings.Join(args, " ")
+
 	conn, err := client.NewDaemonConn(flagRemote)
 	if err != nil {
 		return err
@@ -340,6 +343,29 @@ func runChat(_ *cobra.Command, _ []string) error {
 		}
 		os.Exit(0)
 	}()
+
+	// One-shot mode: send the message, print result, exit.
+	if oneShot != "" {
+		spin := newSpinner("paw> ")
+		spin.Start()
+		var chatErr error
+		sendErr := cs.Send(oneShot, client.ChatOptions{
+			OnToken: func(_ string) {},
+			OnDone: func(result string, _ *int64) {
+				spin.Stop()
+				fmt.Println(result)
+			},
+			OnError: func(msg string) {
+				spin.Stop()
+				chatErr = fmt.Errorf("%s", msg)
+			},
+		})
+		spin.Stop()
+		if sendErr != nil {
+			return sendErr
+		}
+		return chatErr
+	}
 
 	for {
 		text, err := rl.Readline()
@@ -627,6 +653,45 @@ func newSkillInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Check for conflicting user skill before install.
+			cfgDir, _ := core.ConfigDir()
+			if cfgDir != "" {
+				if existingSkill, _, loadErr := core.LoadSkillFrom(cfgDir, entry.ID); loadErr == nil && existingSkill != nil {
+					fmt.Println("⚠  같은 이름의 사용자 스킬이 이미 존재합니다.")
+					fmt.Println()
+					fmt.Printf("  [사용자 스킬]  %s\n", existingSkill.Name)
+					fmt.Printf("    설명: %s\n", existingSkill.Description)
+					fmt.Printf("    생성: %s\n", existingSkill.CreatedAt)
+					fmt.Println()
+					fmt.Printf("  [패키지]  %s (%s) v%s\n", entry.Name, entry.ID, entry.Version)
+					fmt.Printf("    설명: %s\n", entry.Description)
+					fmt.Println()
+					fmt.Println("  사용자 스킬이 패키지보다 우선 실행됩니다.")
+					fmt.Println("  A. 사용자 스킬을 삭제하고 패키지 설치")
+					fmt.Println("  B. 사용자 스킬 유지 (패키지도 설치하되 실행되지 않음)")
+					fmt.Println("  C. 설치 취소")
+					fmt.Print("  선택 [A/B/C]: ")
+
+					var choice string
+					fmt.Scanln(&choice)
+					choice = strings.TrimSpace(strings.ToUpper(choice))
+
+					switch choice {
+					case "A":
+						if delErr := core.DeleteSkillFrom(cfgDir, entry.ID); delErr != nil {
+							return fmt.Errorf("사용자 스킬 삭제 실패: %w", delErr)
+						}
+						fmt.Printf("  사용자 스킬 %q 삭제 완료.\n", entry.ID)
+					case "B":
+						fmt.Println("  사용자 스킬 유지. 패키지 설치를 계속합니다.")
+					default:
+						fmt.Println("  설치 취소.")
+						return nil
+					}
+				}
+			}
+
 			pkg, err := pm.InstallFromRegistry(rc, *entry)
 			if err != nil {
 				return err

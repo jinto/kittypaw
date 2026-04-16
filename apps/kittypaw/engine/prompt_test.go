@@ -11,7 +11,7 @@ import (
 )
 
 func TestBuildSkillsSection(t *testing.T) {
-	section := buildSkillsSection(nil)
+	section := buildSkillsSection("")
 
 	// Must start with the header
 	if !strings.HasPrefix(section, "## Available skill globals") {
@@ -33,7 +33,7 @@ func TestBuildSkillsSection(t *testing.T) {
 	}
 
 	// Must be deterministic
-	section2 := buildSkillsSection(nil)
+	section2 := buildSkillsSection("")
 	if section != section2 {
 		t.Error("buildSkillsSection is not deterministic")
 	}
@@ -254,7 +254,7 @@ func TestChannelHint_TelegramDispatch(t *testing.T) {
 func TestBuildPrompt_WithSoul(t *testing.T) {
 	state := &core.AgentState{AgentID: "test", SystemPrompt: SystemPrompt}
 	profile := &core.Profile{ID: "mybot", Soul: "I am a cheerful assistant."}
-	msgs := BuildPrompt(state, "hello", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", profile, "", "", nil)
+	msgs := BuildPrompt(state, "hello", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", profile, "", "", nil, "")
 
 	sys := msgs[0].Content
 	if !strings.Contains(sys, "## Your Identity (SOUL.md)") {
@@ -268,7 +268,7 @@ func TestBuildPrompt_WithSoul(t *testing.T) {
 func TestBuildPrompt_SoulBeforeIdentity(t *testing.T) {
 	state := &core.AgentState{AgentID: "test"}
 	profile := &core.Profile{ID: "mybot", Soul: "I am the soul."}
-	msgs := BuildPrompt(state, "hi", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", profile, "", "", nil)
+	msgs := BuildPrompt(state, "hi", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", profile, "", "", nil, "")
 
 	sys := msgs[0].Content
 	soulIdx := strings.Index(sys, "## Your Identity (SOUL.md)")
@@ -289,7 +289,7 @@ func TestBuildPrompt_WithNickAndUserMD(t *testing.T) {
 		Soul:   "soul",
 		UserMD: "User likes hiking.",
 	}
-	msgs := BuildPrompt(state, "hi", CompactionConfig{RecentWindow: 5}, &core.Config{}, "slack", profile, "", "", nil)
+	msgs := BuildPrompt(state, "hi", CompactionConfig{RecentWindow: 5}, &core.Config{}, "slack", profile, "", "", nil, "")
 
 	sys := msgs[0].Content
 	if !strings.Contains(sys, "Your name/nickname is: Paw") {
@@ -305,7 +305,7 @@ func TestBuildPrompt_WithNickAndUserMD(t *testing.T) {
 
 func TestBuildPrompt_NilProfile(t *testing.T) {
 	state := &core.AgentState{AgentID: "test", SystemPrompt: SystemPrompt}
-	msgs := BuildPrompt(state, "hey", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", nil)
+	msgs := BuildPrompt(state, "hey", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", nil, "")
 
 	sys := msgs[0].Content
 	if strings.Contains(sys, "## Your Identity (SOUL.md)") {
@@ -315,7 +315,7 @@ func TestBuildPrompt_NilProfile(t *testing.T) {
 
 func TestBuildPrompt_BlockPresence(t *testing.T) {
 	state := &core.AgentState{AgentID: "test"}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", nil, "", "", nil)
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", nil, "", "", nil, "")
 
 	sys := msgs[0].Content
 	required := []struct {
@@ -338,7 +338,7 @@ func TestBuildPrompt_BlockPresence(t *testing.T) {
 
 func TestBuildPrompt_ChannelHintInjected(t *testing.T) {
 	state := &core.AgentState{AgentID: "test"}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", nil, "", "", nil)
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "telegram", nil, "", "", nil, "")
 	sys := msgs[0].Content
 	if !strings.Contains(sys, "## Output format (Telegram)") {
 		t.Error("telegram channel hint not injected into prompt")
@@ -347,7 +347,7 @@ func TestBuildPrompt_ChannelHintInjected(t *testing.T) {
 
 func TestBuildPrompt_NoChannelHintForUnknown(t *testing.T) {
 	state := &core.AgentState{AgentID: "test"}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "unknown", nil, "", "", nil)
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "unknown", nil, "", "", nil, "")
 	sys := msgs[0].Content
 	if strings.Contains(sys, "## Output format") {
 		t.Error("unknown channel should not inject output format section")
@@ -360,7 +360,7 @@ func TestBuildPrompt_WithObservations(t *testing.T) {
 		{Label: "search_results", Data: "Found 3 articles about AI."},
 		{Label: "page_content", Data: "Article body text here."},
 	}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", obs)
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", obs, "")
 	sys := msgs[0].Content
 	if !strings.Contains(sys, "## Current Observations") {
 		t.Error("missing observations section")
@@ -379,7 +379,7 @@ func TestBuildPrompt_WithObservations(t *testing.T) {
 func TestBuildPrompt_NilObservations(t *testing.T) {
 	// AC #10: When observations is nil, the prompt should be identical to before.
 	state := &core.AgentState{AgentID: "test"}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", nil)
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", nil, "")
 	sys := msgs[0].Content
 	if strings.Contains(sys, "## Current Observations") {
 		t.Error("nil observations should not inject observations section")
@@ -388,7 +388,7 @@ func TestBuildPrompt_NilObservations(t *testing.T) {
 
 func TestBuildPrompt_EmptyObservations(t *testing.T) {
 	state := &core.AgentState{AgentID: "test"}
-	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", []core.Observation{})
+	msgs := BuildPrompt(state, "test", CompactionConfig{RecentWindow: 5}, &core.Config{}, "web", nil, "", "", []core.Observation{}, "")
 	sys := msgs[0].Content
 	if strings.Contains(sys, "## Current Observations") {
 		t.Error("empty observations should not inject observations section")
