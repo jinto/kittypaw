@@ -44,6 +44,7 @@ type Session struct {
 	Budget           *SharedTokenBudget       // shared across auto-fix, delegation, reflection
 	Indexer          Indexer                  // nil when workspace indexer is not initialized
 	PackageManager   *core.PackageManager     // nil when packages are not configured
+	APITokenMgr      *core.APITokenManager    // nil when API token management is not configured
 	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 }
 

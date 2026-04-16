@@ -150,6 +150,11 @@ func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, perm
 
 // --- HTTP / Web ---
 
+// httpValidatedHostKey stores the hostname that buildPackageResolver already validated
+// against the package's AllowedHosts. executeHTTP compares the actual request hostname
+// against this value instead of a blanket bypass, preventing URL-swap attacks.
+const httpValidatedHostKey contextKey = "httpValidatedHost"
+
 func executeHTTP(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	switch call.Method {
 	case "get", "post", "put", "delete", "patch", "head", "search", "fetch":
@@ -166,9 +171,15 @@ func executeHTTP(ctx context.Context, call core.SkillCall, s *Session) (string, 
 		return jsonResult(map[string]any{"error": "invalid url"})
 	}
 
-	// SSRF prevention: validate URL host.
-	if err := validateHTTPTarget(urlStr, s.Config.Sandbox.AllowedHosts); err != nil {
-		return jsonResult(map[string]any{"error": err.Error()})
+	// SSRF prevention: skip only if the package resolver already validated this exact host.
+	parsedURL, parseErr := url.Parse(urlStr)
+	if parseErr != nil {
+		return jsonResult(map[string]any{"error": "invalid url"})
+	}
+	if validatedHost, ok := ctx.Value(httpValidatedHostKey).(string); !ok || validatedHost != parsedURL.Hostname() {
+		if err := validateHTTPTarget(urlStr, s.Config.Sandbox.AllowedHosts); err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
 	}
 
 	// Web.search uses a search API
@@ -194,6 +205,27 @@ func executeHTTP(ctx context.Context, call core.SkillCall, s *Session) (string, 
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Apply optional headers from the last argument.
+	// Non-body methods (GET/DELETE/HEAD): options at Args[1].
+	// Body methods (POST/PUT/PATCH): options at Args[2].
+	optIdx := 1
+	if method == "POST" || method == "PUT" || method == "PATCH" {
+		optIdx = 2
+	}
+	if len(call.Args) > optIdx {
+		var opts struct {
+			Headers map[string]string `json:"headers"`
+		}
+		if json.Unmarshal(call.Args[optIdx], &opts) == nil && opts.Headers != nil {
+			for k, v := range opts.Headers {
+				if isBlockedHeader(k) {
+					continue
+				}
+				req.Header.Set(k, v)
+			}
+		}
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
@@ -207,16 +239,28 @@ func executeHTTP(ctx context.Context, call core.SkillCall, s *Session) (string, 
 	})
 }
 
-// validateHTTPTarget blocks requests to private/internal addresses and enforces AllowedHosts.
+// isBlockedHeader returns true for hop-by-hop and security-sensitive headers
+// that sandbox code must not override.
+func isBlockedHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "host", "transfer-encoding", "connection", "upgrade", "te", "trailer":
+		return true
+	}
+	return false
+}
+
+// validateHTTPTarget enforces AllowedHosts and blocks requests to private/internal addresses.
+// When an explicit allowlist is provided, it takes priority — listed hosts (including private
+// IPs like localhost) are permitted. This enables packages to declare allowed_hosts = ["localhost"]
+// for local API servers.
 func validateHTTPTarget(urlStr string, allowedHosts []string) error {
 	parsed, err := url.Parse(urlStr)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 	host := parsed.Hostname()
-	if core.IsPrivateIP(host) {
-		return fmt.Errorf("requests to private/internal address %q are blocked", host)
-	}
+
+	// Explicit allowlist takes priority (permits private IPs if listed).
 	if len(allowedHosts) > 0 {
 		for _, h := range allowedHosts {
 			if h == "*" || h == host {
@@ -224,6 +268,11 @@ func validateHTTPTarget(urlStr string, allowedHosts []string) error {
 			}
 		}
 		return fmt.Errorf("host %q not in allowed hosts", host)
+	}
+
+	// Default (no allowlist): block private IPs.
+	if core.IsPrivateIP(host) {
+		return fmt.Errorf("requests to private/internal address %q are blocked", host)
 	}
 	return nil
 }
@@ -1024,6 +1073,19 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 	// Resolve config (secrets, defaults, source bindings).
 	config, _ := s.PackageManager.GetConfig(name)
 
+	// Auto-refresh API tokens for source-bound config fields.
+	if s.APITokenMgr != nil {
+		if apiURL, ok := config["api_url"]; ok && apiURL != "" {
+			for _, f := range pkg.Config {
+				if f.Key == "access_token" && strings.HasPrefix(f.Source, "kittypaw-api/") {
+					if tok, err := s.APITokenMgr.LoadAccessToken(apiURL); err == nil && tok != "" {
+						config["access_token"] = tok
+					}
+				}
+			}
+		}
+	}
+
 	// Build __context__ JSON string — packages use JSON.parse(__context__).
 	// Includes user context based on the package's [permissions].context declaration.
 	event := EventFromContext(ctx)
@@ -1078,6 +1140,25 @@ func buildPackageResolver(_ context.Context, pkg *core.SkillPackage, s *Session,
 				"error": fmt.Sprintf("package %q does not have permission for %s", pkg.Meta.ID, call.SkillName),
 			})
 		}
+
+		// Enforce package-level AllowedHosts for HTTP calls.
+		// The package's allowed_hosts overrides the global SSRF check,
+		// enabling packages to declare private hosts (e.g. localhost).
+		if (call.SkillName == "Http" || call.SkillName == "Web") && len(pkg.Permissions.AllowedHosts) > 0 {
+			if len(call.Args) > 0 {
+				var u string
+				if json.Unmarshal(call.Args[0], &u) == nil {
+					if err := validateHTTPTarget(u, pkg.Permissions.AllowedHosts); err != nil {
+						return jsonResult(map[string]any{"error": err.Error()})
+					}
+					// Store the validated hostname so executeHTTP can verify the match.
+					if parsed, pErr := url.Parse(u); pErr == nil {
+						ctx = context.WithValue(ctx, httpValidatedHostKey, parsed.Hostname())
+					}
+				}
+			}
+		}
+
 		// Inject locale instruction for Llm.generate calls.
 		if locale != "" && call.SkillName == "Llm" && call.Method == "generate" {
 			call = injectLocaleInstruction(call, locale)

@@ -179,7 +179,7 @@ func TestValidateHTTPTarget(t *testing.T) {
 		{"https://example.com/api", nil, false},
 		{"https://example.com/api", []string{}, false},
 
-		// Private IPs blocked
+		// Private IPs blocked (no allowlist)
 		{"http://127.0.0.1:8080/admin", nil, true},
 		{"http://localhost/secret", nil, true},
 		{"http://10.0.0.1/internal", nil, true},
@@ -192,6 +192,14 @@ func TestValidateHTTPTarget(t *testing.T) {
 
 		// Wildcard in allowed hosts
 		{"https://anything.com/path", []string{"*"}, false},
+
+		// AllowedHosts permits private IPs when explicitly listed (package use case).
+		{"http://localhost:8080/api", []string{"localhost"}, false},
+		{"http://127.0.0.1:8080/api", []string{"127.0.0.1"}, false},
+		{"http://localhost:8080/api", []string{"*"}, false},
+
+		// AllowedHosts still rejects unlisted hosts.
+		{"http://evil.com/api", []string{"localhost"}, true},
 
 		// Invalid URL
 		{"://bad", nil, true},

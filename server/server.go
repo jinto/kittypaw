@@ -65,6 +65,8 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 	}
 	pkgMgr := core.NewPackageManagerFrom(cfgDir, secrets)
 
+	apiTokenMgr := core.NewAPITokenManager(cfgDir, secrets)
+
 	session := &engine.Session{
 		Provider:         provider,
 		FallbackProvider: fallback,
@@ -74,6 +76,7 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		McpRegistry:      mcpReg,
 		BaseDir:          cfgDir,
 		PackageManager:   pkgMgr,
+		APITokenMgr:      apiTokenMgr,
 	}
 	if err := session.RefreshAllowedPaths(); err != nil {
 		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
@@ -144,6 +147,7 @@ func (s *Server) setupRoutes() chi.Router {
 			r.Post("/telegram", s.handleSetupTelegram)
 			r.Post("/telegram/chat-id", s.handleSetupTelegramChatID)
 			r.Post("/kakao/register", s.handleSetupKakaoRegister)
+			r.Post("/api-server", s.handleSetupAPIServer)
 			r.Post("/workspace", s.handleSetupWorkspace)
 			r.Post("/http-access", s.handleSetupHttpAccess)
 			r.Post("/complete", s.handleSetupComplete)

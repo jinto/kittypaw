@@ -1,15 +1,16 @@
-// KittyPaw Onboarding — 7-step flow
+// KittyPaw Onboarding — 8-step flow
 
 const Onboarding = {
   root: null,
   step: 1,
-  totalSteps: 7,
+  totalSteps: 8,
   status: {},
   state: {
     llm: { choice: null, localUrl: 'http://localhost:11434/v1', localModel: 'qwen3.5:27b', apiKey: '' },
     telegram: { botToken: '', chatId: '' },
     kakao: { pairCode: '', channelUrl: '' },
     workspace: { path: '' },
+    apiServer: { url: '' },
   },
 
   start(root, status) {
@@ -34,11 +35,12 @@ const Onboarding = {
       4: () => this.stepKakaoTalk(),
       5: () => this.stepWorkspace(),
       6: () => this.stepHttpAccess(),
-      7: () => this.stepComplete(),
+      7: () => this.stepAPIServer(),
+      8: () => this.stepComplete(),
     };
     this.root.innerHTML = '';
-    if (this.step >= 2 && this.step <= 6) this.root.appendChild(this.backButton());
-    if (this.step >= 1 && this.step <= 6) this.root.appendChild(this.dots());
+    if (this.step >= 2 && this.step <= 7) this.root.appendChild(this.backButton());
+    if (this.step >= 1 && this.step <= 7) this.root.appendChild(this.dots());
     const content = (steps[this.step] || steps[1])();
     this.root.appendChild(content);
   },
@@ -54,7 +56,7 @@ const Onboarding = {
 
   dots() {
     const wrap = el('div', { className: 'onboarding-dots' });
-    const steps = [1,2,3,4,5,6].filter(i => i !== 4 || this.status.kakao_available);
+    const steps = [1,2,3,4,5,6,7].filter(i => i !== 4 || this.status.kakao_available);
     steps.forEach(i => {
       const cls = i === this.step ? 'dot current' : i < this.step ? 'dot done' : 'dot';
       wrap.appendChild(el('div', { className: cls }));
@@ -544,7 +546,40 @@ const Onboarding = {
     return card;
   },
 
-  // ── Step 7: Complete ───────────────────────────────────
+  // ── Step 7: API Server ──────────────────────────────────
+
+  stepAPIServer() {
+    const card = el('div', { className: 'card card--center' });
+    card.innerHTML = `
+      <h2 class="large">KittyPaw API \uC11C\uBC84</h2>
+      <p class="note mt-12" style="max-width:420px;margin-left:auto;margin-right:auto">
+        \uB300\uAE30\uC9C8, \uB0A0\uC528 \uB4F1 API \uC2A4\uD0AC\uC744 \uC0AC\uC6A9\uD558\uB824\uBA74 kittypaw-api \uC11C\uBC84 \uC8FC\uC18C\uB97C \uC785\uB825\uD558\uC138\uC694.
+      </p>
+      <div class="form-group mt-24">
+        <label>API Server URL</label>
+        <input type="text" id="api-server-url" placeholder="http://localhost:8080" value="${this.state.apiServer.url || ''}" />
+      </div>
+      <div class="flex justify-center gap-12 mt-24">
+        <button class="btn btn--primary" id="api-save">\uC800\uC7A5</button>
+        <button class="btn btn--secondary" id="api-skip">\uAC74\uB108\uB6F0\uAE30</button>
+      </div>`;
+
+    setTimeout(() => {
+      const input = document.getElementById('api-server-url');
+      document.getElementById('api-save').onclick = async () => {
+        const url = input.value.trim().replace(/\/+$/, '');
+        if (!url) { this.go(8); return; }
+        this.state.apiServer.url = url;
+        await apiPost('/api/setup/api-server', { url });
+        this.go(8);
+      };
+      document.getElementById('api-skip').onclick = () => this.go(8);
+    }, 0);
+
+    return card;
+  },
+
+  // ── Step 8: Complete ───────────────────────────────────
 
   stepComplete() {
     const card = el('div', { className: 'card card--center' });

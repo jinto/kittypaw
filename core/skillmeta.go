@@ -18,12 +18,12 @@ type SkillMeta struct {
 // and what the LLM is told is available.
 var SkillRegistry = []SkillMeta{
 	{Name: "Http", Methods: []SkillMethodMeta{
-		{Name: "get", Signature: "Http.get(url)"},
-		{Name: "post", Signature: "Http.post(url, body)"},
-		{Name: "put", Signature: "Http.put(url, body)"},
-		{Name: "delete", Signature: "Http.delete(url)"},
-		{Name: "patch", Signature: "Http.patch(url, body)"},
-		{Name: "head", Signature: "Http.head(url)"},
+		{Name: "get", Signature: "Http.get(url, options?) — options: {headers: {key: value}}"},
+		{Name: "post", Signature: "Http.post(url, body, options?) — options: {headers: {key: value}}"},
+		{Name: "put", Signature: "Http.put(url, body, options?) — options: {headers: {key: value}}"},
+		{Name: "delete", Signature: "Http.delete(url, options?) — options: {headers: {key: value}}"},
+		{Name: "patch", Signature: "Http.patch(url, body, options?) — options: {headers: {key: value}}"},
+		{Name: "head", Signature: "Http.head(url, options?) — options: {headers: {key: value}}"},
 	}},
 	{Name: "File", Methods: []SkillMethodMeta{
 		{Name: "read", Signature: "File.read(path)"},
