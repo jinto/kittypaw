@@ -1,0 +1,117 @@
+# KittyAPI
+
+[한국어](README.ko.md)
+
+Backend API server for [KittyPaw](https://github.com/kittypaw-app). Provides public data proxying with caching and OAuth authentication for zero-config data access from KittyPaw skills.
+
+```
+KittyPaw Client ──► KittyAPI ──► Public Data APIs (AirKorea, etc.)
+                        │
+                        ├── OAuth (Google, GitHub)
+                        ├── JWT + Refresh Token Rotation
+                        ├── Rate Limiting (anon 5/min, auth 60/min)
+                        └── /discovery (service URLs for SDK)
+```
+
+## Features
+
+- **Data proxy** — cached access to public APIs (AirKorea air quality: realtime, forecast, weekly, unhealthy stations)
+- **OAuth authentication** — Google + GitHub with PKCE, no email/password
+- **CLI login** — `kittypaw login` via HTTP callback or one-time code paste
+- **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection
+- **Rate limiting** — per-IP anonymous (5/min) + per-user authenticated (60/min), daily 10K cap
+- **Service discovery** — `GET /discovery` returns relay, API, and skills registry URLs
+- **Stale-while-revalidate** — serves stale cached data when upstream is down
+
+## Quick Start
+
+```bash
+# Prerequisites: Go 1.22+, PostgreSQL
+
+# Configure
+cp .env.example .env
+# Edit .env — set DATABASE_URL, JWT_SECRET, OAuth credentials
+
+# Database
+createdb kittypaw_api
+migrate -path migrations -database "$DATABASE_URL" up
+
+# Run
+make run
+```
+
+## API
+
+### Public
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/discovery` | Service URLs (relay, API base, skills registry) |
+
+### Auth
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/auth/google` | Google OAuth login |
+| `GET` | `/auth/github` | GitHub OAuth login |
+| `POST` | `/auth/token/refresh` | Refresh access token |
+| `GET` | `/auth/me` | Current user info |
+| `GET` | `/auth/cli/{provider}` | CLI OAuth login (mode=http\|code) |
+| `POST` | `/auth/cli/exchange` | Exchange one-time code for tokens |
+
+### Data Proxy
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/v1/air/airkorea/realtime/station` | Realtime air quality by station |
+| `GET` | `/v1/air/airkorea/realtime/city` | Realtime air quality by city |
+| `GET` | `/v1/air/airkorea/forecast` | Air quality forecast |
+| `GET` | `/v1/air/airkorea/forecast/weekly` | Weekly particulate forecast |
+| `GET` | `/v1/air/airkorea/unhealthy` | Stations exceeding standards |
+
+## Configuration
+
+All configuration is via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8080` | Server port |
+| `BASE_URL` | `http://localhost:8080` | Public base URL |
+| `DATABASE_URL` | *(required)* | PostgreSQL connection string |
+| `JWT_SECRET` | *(required, 32+ chars)* | JWT signing secret |
+| `GOOGLE_CLIENT_ID` | | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | | Google OAuth client secret |
+| `GITHUB_CLIENT_ID` | | GitHub OAuth client ID |
+| `GITHUB_CLIENT_SECRET` | | GitHub OAuth client secret |
+| `CORS_ORIGINS` | `BASE_URL` | Comma-separated allowed origins |
+| `AIRKOREA_API_KEY` | | AirKorea public data API key |
+| `RELAY_URL` | | Messaging relay server URL |
+| `API_BASE_URL` | | API base URL (for /discovery) |
+| `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | Skills package registry |
+
+## Deployment
+
+See [DEPLOY.md](DEPLOY.md) for production deployment with systemd, nginx, and fabric.
+
+```bash
+fab deploy     # Build, upload, restart
+fab status     # Service status
+fab logs       # Tail logs
+fab rollback   # Restore previous binary
+fab migrate    # Run database migrations
+```
+
+## Development
+
+```bash
+make build     # Build binary
+make test      # Run all tests
+make lint      # Run golangci-lint
+make fmt       # Format code (gofmt + goimports)
+make run       # Build and run (loads .env)
+```
+
+## License
+
+Elastic License 2.0. See [LICENSE](LICENSE) for details.
