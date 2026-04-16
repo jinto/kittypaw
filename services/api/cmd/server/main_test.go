@@ -5,10 +5,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jinto/kittypaw-api/internal/config"
 )
 
+func testRouter() http.Handler {
+	cfg := config.LoadForTest()
+	cfg.JWTSecret = "test-secret"
+	return NewRouter(cfg, nil, nil)
+}
+
 func TestHealthEndpoint(t *testing.T) {
-	r := NewRouter()
+	r := testRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -30,7 +38,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
-	r := NewRouter()
+	r := testRouter()
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()

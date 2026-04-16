@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -14,6 +15,7 @@ type Config struct {
 	GitHubClientID     string
 	GitHubClientSecret string
 	BaseURL            string
+	AllowedOrigins     []string
 }
 
 func Load() (*Config, error) {
@@ -38,14 +40,25 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if len(c.JWTSecret) < 32 {
+		return nil, fmt.Errorf("JWT_SECRET must be at least 32 characters")
+	}
+
+	if origins := os.Getenv("CORS_ORIGINS"); origins != "" {
+		c.AllowedOrigins = strings.Split(origins, ",")
+	} else {
+		c.AllowedOrigins = []string{c.BaseURL}
+	}
+
 	return c, nil
 }
 
 // LoadForTest returns a config suitable for testing (no required fields).
 func LoadForTest() *Config {
 	return &Config{
-		Port:    env("PORT", "8080"),
-		BaseURL: env("BASE_URL", "http://localhost:8080"),
+		Port:           env("PORT", "8080"),
+		BaseURL:        env("BASE_URL", "http://localhost:8080"),
+		AllowedOrigins: []string{"http://localhost:8080"},
 	}
 }
 

@@ -1,25 +1,26 @@
 # kittypaw-api v1
 
-## Plan 1: Project Scaffolding ← 현재
+## Plan 1: Project Scaffolding ✅
 
 - [x] **T1: Go module + health endpoint** — `go mod init`, `cmd/server/main.go` (chi + /health), `internal/config/config.go`, 테스트 통과
 - [x] **T2: Makefile + .gitignore + .env.example** — build/test/lint/run 타겟
 - [x] **T3: golangci-lint** — `.golangci.yml` v2, `make lint` 통과
 - [x] **T4: lefthook** — `lefthook.yml` (pre-commit: fmt + lint, commit-msg: conventional commit)
 - [x] **T6: GitHub Actions CI + CLAUDE.md** — `.github/workflows/ci.yml` (lint → test)
-- [ ] **T7: 첫 커밋** — git init, 전체 파일 스테이징
 
-## Plan 2: Auth
+## Plan 2: Auth ✅
 
-- [ ] DB schema + migrations
-- [ ] OAuth flow (Google, GitHub, PKCE)
-- [ ] JWT access token + refresh token rotation
-- [ ] /auth/* endpoints
-- [ ] Auth middleware
+- [x] **T1: Database foundation** — migrations (users, refresh_tokens) + pgx pool + `UserStore` interface + `PostgresUserStore`
+- [x] **T2: JWT package** — `Sign`, `Verify` (HS256, 15min TTL)
+- [x] **T3: OAuth infra** — `StateStore` (10K cap, 10min TTL, lazy eviction) + PKCE helpers
+- [x] **T4: OAuth Google** — `HandleGoogleLogin` + `HandleGoogleCallback` (PKCE + code exchange + upsert + tokens)
+- [x] **T5: OAuth GitHub** — `HandleGitHubLogin` + `HandleGitHubCallback`
+- [x] **T6: Refresh token rotation** — `RefreshTokenStore` + `HandleTokenRefresh` (7-day expiry, reuse detection)
+- [x] **T7: Auth middleware + /auth/me + CORS + route wiring** — JWT middleware, context helpers, CORS, full route wiring
 
-## Plan 3: Data Proxy
+## Plan 3: Data Proxy ✅
 
-- [ ] Cache layer (in-memory TTL, stale-while-revalidate)
-- [ ] Rate limiting middleware (anonymous + authenticated)
-- [ ] /v1/air endpoint (에어코리아 프록시)
-- [ ] Integration test (전체 flow)
+- [x] **T1: In-memory cache** — `Cache` (Get/Set/GetStale, TTL, stale-while-revalidate, background cleanup)
+- [x] **T2: Rate limiting** — fixed window counter + daily 10K cap + Retry-After header + middleware
+- [x] **T3: /v1/air endpoint** — 에어코리아 프록시 (15s timeout, cache, Warning header on stale, 502 on failure)
+- [x] **T4: Route wiring** — cache + ratelimit + proxy integrated into main.go
