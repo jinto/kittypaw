@@ -88,16 +88,54 @@ func (m *APITokenManager) LoadAccessToken(apiURL string) (string, error) {
 	return newAccess, nil
 }
 
-// SaveRelayURL stores the relay server base URL provided by the API server.
+// Namespace invariant: service URLs are stored under the portal host
+// (NamespaceForURL(apiURL)). The stored api_base_url may point to a different
+// host — that's intentional. The namespace tracks auth identity, not service
+// topology, so token refresh keeps working unchanged across relay migrations.
+
+// saveOrDelete writes value under (ns, key), or deletes the key when value is
+// empty. Used by Save*URL helpers so that a /discovery response with an empty
+// field erases a stale value instead of persisting "".
+func (m *APITokenManager) saveOrDelete(ns, key, value string) error {
+	if value == "" {
+		return m.secrets.Delete(ns, key)
+	}
+	return m.secrets.Set(ns, key, value)
+}
+
+// SaveRelayURL stores the relay server base URL from GET /discovery.
+// Empty value deletes the key so stale URLs don't survive relay migrations.
 func (m *APITokenManager) SaveRelayURL(apiURL, relayURL string) error {
-	ns := NamespaceForURL(apiURL)
-	return m.secrets.Set(ns, "relay_url", relayURL)
+	return m.saveOrDelete(NamespaceForURL(apiURL), "relay_url", relayURL)
 }
 
 // LoadRelayURL returns the stored relay server base URL.
 func (m *APITokenManager) LoadRelayURL(apiURL string) (string, bool) {
-	ns := NamespaceForURL(apiURL)
-	return m.secrets.Get(ns, "relay_url")
+	return m.secrets.Get(NamespaceForURL(apiURL), "relay_url")
+}
+
+// SaveAPIBaseURL stores the API base URL from GET /discovery.
+// Save-only for now (see plan D5/D6); reserved for future exchange/refresh routing.
+// Empty value deletes the key.
+func (m *APITokenManager) SaveAPIBaseURL(apiURL, apiBaseURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), "api_base_url", apiBaseURL)
+}
+
+// LoadAPIBaseURL returns the stored API base URL.
+func (m *APITokenManager) LoadAPIBaseURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), "api_base_url")
+}
+
+// SaveSkillsRegistryURL stores the skills registry URL from GET /discovery.
+// Save-only for now (see plan D6); not yet routed into registryClient.
+// Empty value deletes the key.
+func (m *APITokenManager) SaveSkillsRegistryURL(apiURL, skillsRegistryURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), "skills_registry_url", skillsRegistryURL)
+}
+
+// LoadSkillsRegistryURL returns the stored skills registry URL.
+func (m *APITokenManager) LoadSkillsRegistryURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), "skills_registry_url")
 }
 
 // SaveKakaoRelayURL stores the full Kakao relay WebSocket URL built from

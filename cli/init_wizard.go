@@ -478,11 +478,10 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 	mgr := core.NewAPITokenManager("", secrets)
 
 	fmt.Println()
-	var lr *loginResult
 	if isTTY() {
-		lr, err = loginHTTP(apiURL, mgr)
+		err = loginHTTP(apiURL, mgr)
 	} else {
-		lr, err = loginCode(apiURL, mgr)
+		err = loginCode(apiURL, mgr)
 	}
 	if err != nil {
 		fmt.Printf("  로그인 실패: %v\n", err)
@@ -497,25 +496,26 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 	w.KakaoEnabled = true
 	w.APIServerURL = apiURL
 
-	if lr == nil || lr.RelayURL == "" {
+	relayURL, _ := mgr.LoadRelayURL(apiURL)
+	if relayURL == "" {
 		fmt.Println("  ✓ KakaoTalk 활성화 완료 (relay URL이 없어 페어링은 건너뜁니다)")
 		return
 	}
 
-	reg, err := core.RegisterRelaySession(lr.RelayURL)
+	reg, err := core.RegisterRelaySession(relayURL)
 	if err != nil {
 		fmt.Printf("  릴레이 등록 실패: %v\n", err)
 		fmt.Println("  ✓ KakaoTalk 활성화 완료 (나중에 페어링을 재시도하세요)")
 		return
 	}
 
-	wsURL := core.WSURLFromRelay(lr.RelayURL, reg.Token)
+	wsURL := core.WSURLFromRelay(relayURL, reg.Token)
 	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
 		fmt.Printf("  WS URL 저장 실패: %v\n", err)
 		return
 	}
 
-	wizardKakaoPairing(scanner, lr.RelayURL, reg)
+	wizardKakaoPairing(scanner, relayURL, reg)
 }
 
 func wizardKakaoPairing(_ *bufio.Scanner, relayBase string, reg *core.RelayRegistration) {
@@ -674,9 +674,9 @@ func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
 	mgr := core.NewAPITokenManager("", secrets)
 
 	if isTTY() {
-		_, err = loginHTTP(apiURL, mgr)
+		err = loginHTTP(apiURL, mgr)
 	} else {
-		_, err = loginCode(apiURL, mgr)
+		err = loginCode(apiURL, mgr)
 	}
 	if err != nil {
 		fmt.Printf("  로그인 실패: %v\n", err)
