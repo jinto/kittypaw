@@ -48,6 +48,8 @@ Tokens stored in `secrets.json` under namespace `kittypaw-api/{host}` (e.g. `kit
 `APITokenManager` (`core/api_token.go`) handles auto-refresh with single-flight mutex pattern.
 JWT expiry checked client-side via base64 payload decode (no signature verification) with 30-second grace window.
 
+Before OAuth, `loginHTTP`/`loginCode` call unauthenticated `GET {apiURL}/discovery` (see `core/discovery.go`) to resolve service topology. The response persists three URLs per-host under the portal namespace — `api_base_url`, `relay_url`, `skills_registry_url` — with empty-string-deletes semantics so stale URLs don't survive a relay migration. Discovery failures log a warning and fall back to the user-supplied `apiURL` so login works in collapsed deployments.
+
 Packages with `source = "kittypaw-api/access_token"` config fields get auto-refreshed tokens at execution time (`engine/executor.go:runSkillOrPackage`).
 
 ## HTTP Sandbox Security
