@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
 	"github.com/jinto/kittypaw/engine"
 )
 
@@ -55,7 +56,7 @@ func (s *Server) handleReflectionApprove(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Remove candidate.
-	s.store.DeleteUserContext(fullKey)
+	_, _ = s.store.DeleteUserContext(fullKey)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":    true,
@@ -79,7 +80,7 @@ func (s *Server) handleReflectionReject(w http.ResponseWriter, r *http.Request) 
 	_ = s.store.SetUserContext(rejKey, value, "user_rejection")
 
 	// Remove candidate.
-	s.store.DeleteUserContext(fullKey)
+	_, _ = s.store.DeleteUserContext(fullKey)
 
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
@@ -115,5 +116,3 @@ func (s *Server) handleWeeklyReport(w http.ResponseWriter, r *http.Request) {
 	report := engine.BuildWeeklyReport(prefs)
 	writeJSON(w, http.StatusOK, map[string]any{"report": report})
 }
-
-

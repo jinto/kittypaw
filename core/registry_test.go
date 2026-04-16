@@ -328,8 +328,8 @@ func TestFilterEntries(t *testing.T) {
 	}{
 		{"", 3, []string{"rss-digest", "weather", "reminder"}},
 		{"rss", 1, []string{"rss-digest"}},
-		{"RSS", 1, []string{"rss-digest"}},       // case insensitive
-		{"brief", 1, []string{"weather"}},         // matches description
+		{"RSS", 1, []string{"rss-digest"}}, // case insensitive
+		{"brief", 1, []string{"weather"}},  // matches description
 		{"nonexistent", 0, nil},
 		{"re", 1, []string{"reminder"}}, // only "reminder" contains "re"
 	}

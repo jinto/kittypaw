@@ -129,7 +129,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer st.Close() //nolint:errcheck
 
 	// Check port availability before starting channels.
 	if err := checkPort(flagBind); err != nil {
@@ -241,7 +241,7 @@ func runSetup(flags *setupFlags) error {
 	if result.HTTPAccess {
 		if st, err := openStore(); err == nil {
 			_ = st.GrantCapability("http")
-			st.Close()
+			_ = st.Close()
 		}
 	}
 
@@ -323,7 +323,7 @@ func runChat(_ *cobra.Command, args []string) error {
 	var cleanupOnce sync.Once
 	closeResources := func() {
 		cleanupOnce.Do(func() {
-			rl.Close()
+			_ = rl.Close()
 			cs.Close()
 			fmt.Print("\033[?25h") // ensure cursor visible
 		})
@@ -894,7 +894,6 @@ func newSkillDisableCmd() *cobra.Command {
 		},
 	}
 }
-
 
 func newSkillExplainCmd() *cobra.Command {
 	return &cobra.Command{
@@ -1485,7 +1484,7 @@ func runReset(_ *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer st.Close() //nolint:errcheck
 
 	agentID := ""
 	if len(args) > 0 {
@@ -1561,7 +1560,7 @@ func checkPort(addr string) error {
 		}
 		return err
 	}
-	ln.Close()
+	_ = ln.Close()
 	return nil
 }
 
@@ -2274,7 +2273,7 @@ func bootstrap() (*core.Config, *store.Store, llm.Provider, *sandbox.Sandbox, er
 
 	provider, err := llm.NewProviderFromConfig(cfg.LLM)
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, nil, nil, nil, fmt.Errorf("create llm provider: %w", err)
 	}
 

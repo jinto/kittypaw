@@ -16,7 +16,7 @@ import (
 )
 
 // SkillResolver is called for each skill invocation during sandbox execution.
-// It receives a SkillCall and returns the JSON-serialised result string.
+// It receives a SkillCall and returns the JSON-serialized result string.
 type SkillResolver func(ctx context.Context, call core.SkillCall) (string, error)
 
 // Sandbox executes JavaScript code in an isolated subprocess.

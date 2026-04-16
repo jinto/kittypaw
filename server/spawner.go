@@ -13,7 +13,7 @@ import (
 )
 
 // stopTimeout is the maximum time to wait for a channel goroutine to exit
-// after its context is cancelled. This defends against buggy channel
+// after its context is canceled. This defends against buggy channel
 // implementations that ignore context cancellation.
 const stopTimeout = 10 * time.Second
 
@@ -26,7 +26,7 @@ var ErrChannelNotFound = errors.New("channel not found")
 type runningChannel struct {
 	cancel func()             // cancels the context passed to Start
 	ch     channel.Channel    // the live channel instance
-	done   chan struct{}       // closed when the Start goroutine exits
+	done   chan struct{}      // closed when the Start goroutine exits
 	config core.ChannelConfig // config snapshot for Reconcile diff
 }
 

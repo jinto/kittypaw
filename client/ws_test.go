@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestStreamChat_TokensAndDone(t *testing.T) {

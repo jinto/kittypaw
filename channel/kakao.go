@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // --- Kakao relay DTOs ---
@@ -117,7 +118,7 @@ func (k *KakaoChannel) Start(ctx context.Context, eventCh chan<- core.Event) err
 }
 
 // connectAndListen establishes a WebSocket connection and reads messages until
-// the connection drops or context is cancelled.
+// the connection drops or context is canceled.
 func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core.Event) error {
 	conn, _, err := websocket.Dial(ctx, k.wsURL(), nil)
 	if err != nil {

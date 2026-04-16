@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"nhooyr.io/websocket"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
-	"nhooyr.io/websocket"
 )
 
 const (

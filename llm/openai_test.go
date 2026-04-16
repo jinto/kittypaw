@@ -333,7 +333,7 @@ func TestOpenAIRetryCancelledContext(t *testing.T) {
 		{Role: core.RoleUser, Content: "Hi"},
 	})
 	if err == nil {
-		t.Fatal("expected error from cancelled context")
+		t.Fatal("expected error from canceled context")
 	}
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)

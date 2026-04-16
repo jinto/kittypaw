@@ -25,7 +25,6 @@ func TestExecuteSimpleReturn(t *testing.T) {
 
 func TestExecuteConsoleLog(t *testing.T) {
 
-
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	result, err := sb.Execute(context.Background(), `console.log("hello world");`, nil)
 	if err != nil {
@@ -40,7 +39,6 @@ func TestExecuteConsoleLog(t *testing.T) {
 }
 
 func TestExecuteSkillCall(t *testing.T) {
-
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	code := `
@@ -75,7 +73,6 @@ func TestExecuteSkillCall(t *testing.T) {
 
 func TestExecuteWithContext(t *testing.T) {
 
-
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	jsCtx := map[string]any{"user": "alice", "count": 42}
 	code := `return context.user + ":" + context.count;`
@@ -93,7 +90,6 @@ func TestExecuteWithContext(t *testing.T) {
 
 func TestExecuteError(t *testing.T) {
 
-
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	result, err := sb.Execute(context.Background(), `throw new Error("boom");`, nil)
 	if err != nil {
@@ -108,7 +104,6 @@ func TestExecuteError(t *testing.T) {
 }
 
 func TestExecuteWithResolver(t *testing.T) {
-
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 	var resolved []core.SkillCall
@@ -141,7 +136,6 @@ func TestExecuteWithResolver(t *testing.T) {
 }
 
 func TestSynchronousResolver(t *testing.T) {
-
 
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 

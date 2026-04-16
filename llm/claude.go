@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	claudeBaseURL       = "https://api.anthropic.com/v1/messages"
-	claudeAPIVersion    = "2023-06-01"
-	claudeDefaultWindow = 200_000
+	claudeBaseURL        = "https://api.anthropic.com/v1/messages"
+	claudeAPIVersion     = "2023-06-01"
+	claudeDefaultWindow  = 200_000
 	claudeFallbackWindow = 8192
-	claudeMaxRetries    = 3
-	claudeBaseDelay     = 1 * time.Second
+	claudeMaxRetries     = 3
+	claudeBaseDelay      = 1 * time.Second
 )
 
 // ClaudeProvider implements Provider for the Anthropic Messages API.

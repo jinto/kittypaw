@@ -14,8 +14,8 @@ import (
 
 // ReflectionResult holds the parsed output of the LLM intent analysis.
 type ReflectionResult struct {
-	Intents []IntentGroup  `json:"intents"`
-	Topics  []TopicPref    `json:"topics"`
+	Intents []IntentGroup `json:"intents"`
+	Topics  []TopicPref   `json:"topics"`
 }
 
 // IntentGroup is a cluster of similar user intents.

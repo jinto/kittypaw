@@ -16,11 +16,11 @@ import (
 
 func TestResolveVisionProvider(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        core.Config
-		envVars    map[string]string
-		wantProv   string
-		wantErr    bool
+		name     string
+		cfg      core.Config
+		envVars  map[string]string
+		wantProv string
+		wantErr  bool
 	}{
 		{
 			name:     "config anthropic with key",
@@ -384,7 +384,7 @@ func TestImageGenerate_ClaudeOnlyError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for Claude-only")
 	}
-	if !strings.Contains(err.Error(), "Image generation requires") {
+	if !strings.Contains(err.Error(), "image generation requires") {
 		t.Errorf("error = %q, want to contain provider requirement message", err.Error())
 	}
 }
@@ -659,4 +659,3 @@ func TestImageGemini_EmptyPredictions(t *testing.T) {
 		t.Errorf("error = %q, want to contain 'no predictions'", err.Error())
 	}
 }
-

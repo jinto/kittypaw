@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	_ "modernc.org/sqlite"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // WorkspaceFile is a file entry in the workspace index.
@@ -1161,7 +1162,9 @@ func (s *Store) SeedWorkspacesFromConfig(paths []string) error {
 		p = filepath.Clean(p)
 		// Use root_path as a natural dedup key.
 		var exists int
-		s.db.QueryRow("SELECT COUNT(*) FROM workspaces WHERE root_path = ?", p).Scan(&exists)
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM workspaces WHERE root_path = ?", p).Scan(&exists); err != nil {
+			return fmt.Errorf("check workspace %q: %w", p, err)
+		}
 		if exists > 0 {
 			continue
 		}

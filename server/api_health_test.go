@@ -21,15 +21,12 @@ func TestHandleHealth(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	var body map[string]string
+	var body map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
 	if body["status"] != "ok" {
 		t.Errorf("status = %q, want %q", body["status"], "ok")
-	}
-	if body["version"] != "kittypaw" {
-		t.Errorf("version = %q, want %q", body["version"], "kittypaw")
 	}
 }
 

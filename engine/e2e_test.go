@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,23 +15,6 @@ import (
 	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/store"
 )
-
-// mockHTTPServer wraps httptest.Server with the host:port for AllowedHosts.
-type mockHTTPServer struct {
-	*httptest.Server
-	Host string // "127.0.0.1:PORT" for AllowedHosts config
-}
-
-func newMockHTTPServer(t *testing.T, handler http.HandlerFunc) *mockHTTPServer {
-	t.Helper()
-	ts := httptest.NewServer(handler)
-	t.Cleanup(ts.Close)
-	_, port, _ := net.SplitHostPort(ts.Listener.Addr().String())
-	return &mockHTTPServer{
-		Server: ts,
-		Host:   "127.0.0.1:" + port,
-	}
-}
 
 // --- test helpers ---
 

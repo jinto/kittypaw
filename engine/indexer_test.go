@@ -156,7 +156,7 @@ func TestRemove(t *testing.T) {
 	}
 
 	// Verify gone.
-	results, total, _ := st.SearchWorkspaceFTS("handleSearch", "", "", 20, 0)
+	_, total, _ := st.SearchWorkspaceFTS("handleSearch", "", "", 20, 0)
 	if total != 0 {
 		t.Errorf("post-remove search: got %d, want 0", total)
 	}
@@ -196,10 +196,8 @@ func TestIndex_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately.
 
 	_, err := ix.Index(ctx, "ws-cancel", dir)
-	if err != context.Canceled {
-		// walkErr might be context.Canceled or nil depending on timing.
-		// The key point is it should not index all 100 files.
-	}
+	// walkErr might be context.Canceled or nil depending on timing.
+	// The key point is it should not index all 100 files.
 	_ = err
 }
 
@@ -410,7 +408,7 @@ func TestSplitQueryTerms(t *testing.T) {
 		{"handleSearch", 1},
 		{"func main", 2},
 		{`"exact phrase"`, 2},
-		{"term AND other", 2},   // AND stripped
+		{"term AND other", 2}, // AND stripped
 		{"+required -excluded", 2},
 		{"", 0},
 	}

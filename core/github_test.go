@@ -8,19 +8,19 @@ import (
 
 func TestParseGitHubURL(t *testing.T) {
 	tests := []struct {
-		url           string
-		wantOwner     string
-		wantRepo      string
-		wantErr       bool
+		url       string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
 	}{
 		{"https://github.com/user/my-skill", "user", "my-skill", false},
 		{"https://github.com/org/repo.git", "org", "repo", false},
 		{"https://github.com/user/repo/", "user", "repo", false},
-		{"https://gitlab.com/user/repo", "", "", true},      // wrong host
-		{"https://github.com/user", "", "", true},            // no repo
-		{"https://github.com/", "", "", true},                // no path
-		{"not-a-url", "", "", true},                          // invalid
-		{"http://github.com/user/repo", "", "", true},        // HTTP not allowed
+		{"https://gitlab.com/user/repo", "", "", true}, // wrong host
+		{"https://github.com/user", "", "", true},      // no repo
+		{"https://github.com/", "", "", true},          // no path
+		{"not-a-url", "", "", true},                    // invalid
+		{"http://github.com/user/repo", "", "", true},  // HTTP not allowed
 	}
 
 	for _, tt := range tests {

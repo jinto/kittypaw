@@ -388,12 +388,12 @@ func TestExecuteFileRead_StillWorks(t *testing.T) {
 
 func TestNeedsPermission(t *testing.T) {
 	tests := []struct {
-		name      string
-		skill     string
-		method    string
-		autonomy  core.AutonomyLevel
-		custom    []string // nil = use defaults
-		want      bool
+		name     string
+		skill    string
+		method   string
+		autonomy core.AutonomyLevel
+		custom   []string // nil = use defaults
+		want     bool
 	}{
 		// AutonomyFull never needs permission
 		{"full_shell", "Shell", "exec", core.AutonomyFull, nil, false},

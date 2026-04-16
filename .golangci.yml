@@ -1,0 +1,77 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jinto/kittypaw
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - misspell
+
+  settings:
+    errcheck:
+      exclude-functions:
+        # io / close patterns (defer x.Close() is idiomatic Go)
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        # HTTP
+        - (net/http.ResponseWriter).Write
+        # websocket
+        - (*nhooyr.io/websocket.Conn).Close
+        - (*nhooyr.io/websocket.Conn).CloseNow
+        # OS best-effort cleanup
+        - os.Remove
+        - os.RemoveAll
+        - os.WriteFile
+        # interactive I/O / process lifecycle
+        - fmt.Scanln
+        - (*os.Process).Signal
+        - syscall.Flock
+        - (*golang.org/x/term).Restore
+        # goja JS VM setup (panics on error, not recoverable)
+        - (*github.com/dop251/goja.Runtime).Set
+        - (*github.com/dop251/goja.Object).Set
+        # MCP session close (best-effort cleanup)
+        - (*github.com/modelcontextprotocol/go-sdk/client.Session).Close
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019"  # deprecated API — websocket lib migration tracked separately
+        - "-ST1000"  # package comments — add incrementally
+        - "-ST1003"  # naming conventions — existing API surface
+        - "-QF1001"  # De Morgan's law — readability preference
+        - "-QF1012"  # Fprintf over WriteString — readability preference
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+    misspell:
+      locale: US
+
+  exclusions:
+    paths:
+      - vendor
+      - relay
+      - docs
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+run:
+  timeout: 3m

@@ -46,9 +46,12 @@ url = "https://raw.githubusercontent.com/kittypaw/skills/main"
 ## Build from Source
 
 ```bash
-go build -o kittypaw ./cli
-go test ./...
+make build    # Build binary
+make test     # Run tests
+make lint     # Lint (requires golangci-lint)
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and conventions.
 
 ## Release
 

@@ -16,7 +16,7 @@ import (
 // Channels are event producers that emit Events, and can send responses back.
 type Channel interface {
 	// Start begins listening for messages. Received messages are sent to eventCh.
-	// Blocks until ctx is cancelled.
+	// Blocks until ctx is canceled.
 	Start(ctx context.Context, eventCh chan<- core.Event) error
 
 	// SendResponse sends a text response back to the channel.

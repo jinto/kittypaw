@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 )
@@ -19,13 +20,13 @@ const maxCodeSize = 64 * 1024
 
 // TeachResult holds the output of the teach pipeline before user approval.
 type TeachResult struct {
-	SkillName   string           `json:"skill_name"`
-	Code        string           `json:"code"`
-	SyntaxOK    bool             `json:"syntax_ok"`
-	SyntaxError string           `json:"syntax_error,omitempty"`
-	Description string           `json:"description"`
+	SkillName   string            `json:"skill_name"`
+	Code        string            `json:"code"`
+	SyntaxOK    bool              `json:"syntax_ok"`
+	SyntaxError string            `json:"syntax_error,omitempty"`
+	Description string            `json:"description"`
 	Trigger     core.SkillTrigger `json:"trigger"`
-	Permissions []string         `json:"permissions"`
+	Permissions []string          `json:"permissions"`
 }
 
 // HandleTeach runs the full teach pipeline: LLM code generation → fence stripping →
@@ -263,9 +264,9 @@ func DetectPermissions(code string) []string {
 
 // Schedule pattern regexes for inferTrigger.
 var (
-	everyRe  = regexp.MustCompile(`every\s+(\d+[smhd])\b`)
-	dailyKoRe = regexp.MustCompile(`매일|매\s*일`)
-	weeklyKoRe = regexp.MustCompile(`매주|주마다|매\s*주`)
+	everyRe     = regexp.MustCompile(`every\s+(\d+[smhd])\b`)
+	dailyKoRe   = regexp.MustCompile(`매일|매\s*일`)
+	weeklyKoRe  = regexp.MustCompile(`매주|주마다|매\s*주`)
 	keywordEnRe = regexp.MustCompile(`(?i)when\s+(?:someone\s+)?says\s+(\S+)`)
 )
 

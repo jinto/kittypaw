@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 	"github.com/jinto/kittypaw/store"
-	"golang.org/x/sync/errgroup"
 )
 
 // maxDelegateTaskLen caps task description size to prevent prompt explosion.
@@ -209,7 +210,7 @@ func fanOutDelegations(
 
 			// If budget exhausted, cancel all remaining siblings.
 			if budget != nil && budget.Remaining() == 0 {
-				slog.Warn("orchestration: budget exhausted, cancelling remaining", "profile", task.ProfileID)
+				slog.Warn("orchestration: budget exhausted, canceling remaining", "profile", task.ProfileID)
 				cancelAll()
 			}
 
