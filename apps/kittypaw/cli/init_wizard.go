@@ -34,7 +34,7 @@ type setupFlags struct {
 	force          bool
 }
 
-// runWizard drives the 5-step interactive wizard or applies flags.
+// runWizard drives the 6-step interactive wizard or applies flags.
 // Returns a WizardResult. Never writes files.
 func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, error) {
 	var w core.WizardResult
@@ -57,22 +57,25 @@ func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, erro
 	fmt.Println("  KittyPaw — AI Automation Framework")
 	fmt.Println()
 
-	// [1/5] LLM
+	// [1/6] LLM
 	if err := wizardLLM(scanner, existing, &w); err != nil {
 		return w, err
 	}
 
-	// [2/5] Telegram
+	// [2/6] Telegram
 	wizardTelegram(scanner, existing, &w)
 
-	// [3/5] KakaoTalk
+	// [3/6] KakaoTalk
 	wizardKakao(scanner, existing, &w)
 
-	// [4/5] Web Search
+	// [4/6] Web Search
 	wizardWebSearch(scanner, existing, &w)
 
-	// [5/5] Workspace & HTTP
+	// [5/6] Workspace & HTTP
 	wizardWorkspaceHTTP(scanner, existing, &w)
+
+	// [6/6] KittyPaw API Server
+	wizardAPIServer(scanner, &w)
 
 	return w, nil
 }
@@ -134,7 +137,7 @@ func runNonInteractive(flags setupFlags) (core.WizardResult, error) {
 // ---------------------------------------------------------------------------
 
 func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) error {
-	fmt.Println("  [1/5] LLM Selection")
+	fmt.Println("  [1/6] LLM Selection")
 
 	// Detect existing LLM config.
 	if existing != nil && existing.LLM.Provider != "" {
@@ -255,7 +258,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 
 func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [2/5] Telegram (optional)")
+	fmt.Println("  [2/6] Telegram (optional)")
 
 	// Detect existing Telegram config.
 	var existingToken string
@@ -419,7 +422,7 @@ func detectLang() string {
 
 func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [3/5] KakaoTalk (optional)")
+	fmt.Println("  [3/6] KakaoTalk (optional)")
 
 	var existingKakao *core.KakaoChannelConfig
 	if existing != nil {
@@ -490,7 +493,7 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 
 func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [4/5] Web Search (optional)")
+	fmt.Println("  [4/6] Web Search (optional)")
 
 	hasExisting := existing != nil && existing.Web.FirecrawlKey != ""
 	if hasExisting {
@@ -527,7 +530,7 @@ func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.Wiza
 
 func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
-	fmt.Println("  [5/5] Workspace & Permissions")
+	fmt.Println("  [5/6] Workspace & Permissions")
 
 	defWS := ""
 	if existing != nil && len(existing.Sandbox.AllowedPaths) > 0 {
@@ -553,6 +556,30 @@ func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.
 	}
 
 	w.HTTPAccess = promptYesNo(scanner, "  Allow HTTP access?", true)
+}
+
+// ---------------------------------------------------------------------------
+// Step [6/6]: KittyPaw API Server
+// ---------------------------------------------------------------------------
+
+func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
+	fmt.Println()
+	fmt.Println("  [6/6] KittyPaw API Server (optional)")
+	fmt.Println("  API 스킬(대기질 등)을 사용하려면 kittypaw-api 서버 주소를 입력하세요.")
+
+	if !promptYesNo(scanner, "  > Configure?", false) {
+		return
+	}
+
+	apiURL := promptLine(scanner, "  API Server URL", "http://localhost:8080")
+	if apiURL == "" {
+		return
+	}
+	apiURL = strings.TrimRight(apiURL, "/")
+	w.APIServerURL = apiURL
+
+	fmt.Printf("  ✓ %s\n", apiURL)
+	fmt.Println("  로그인: kittypaw login --api-url " + apiURL)
 }
 
 // ---------------------------------------------------------------------------

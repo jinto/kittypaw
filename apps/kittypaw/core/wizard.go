@@ -41,6 +41,9 @@ type WizardResult struct {
 	// Workspace & permissions
 	WorkspacePath string
 	HTTPAccess    bool
+
+	// KittyPaw API server
+	APIServerURL string
 }
 
 // ResolveLLMConfig converts a user-facing provider choice into internal
