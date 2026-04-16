@@ -15,7 +15,7 @@ engine/        Agent loop (observe + retry), skill executor, HTML-to-Markdown, S
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
 server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload)
 client/        REST/WS client + DaemonConn (thin client: auto daemon discovery/start)
-relay/         KakaoTalk relay (Cloudflare Workers, TypeScript)
+relay/         KakaoTalk relay (Rust, axum + SQLite, self-hosted single binary)
 ```
 
 ## Key Design Decisions (vs Rust original)
