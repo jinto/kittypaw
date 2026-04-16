@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use tokio::net::TcpListener;
 use tokio::signal;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -42,12 +41,30 @@ async fn main() -> anyhow::Result<()> {
 
     let app = routes::router(state);
 
-    let listener = TcpListener::bind(&bind_addr).await?;
-    info!("relay listening on {bind_addr}");
+    if bind_addr.starts_with('/') {
+        // Unix domain socket
+        let _ = std::fs::remove_file(&bind_addr);
+        let listener = tokio::net::UnixListener::bind(&bind_addr)?;
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+        // Allow nginx (same user or group) to connect
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bind_addr, std::fs::Permissions::from_mode(0o660))?;
+        }
+
+        info!("relay listening on unix:{bind_addr}");
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+    } else {
+        // TCP socket
+        let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+        info!("relay listening on {bind_addr}");
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+    };
 
     info!("relay shut down");
     Ok(())

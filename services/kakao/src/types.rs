@@ -146,6 +146,9 @@ pub struct AdminStatsResponse {
     pub daily: LimitInfo,
     pub monthly: LimitInfo,
     pub killswitch: bool,
+    pub ws_sessions: usize,
+    pub rss_bytes: u64,
+    pub fd_count: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,8 +201,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(100_000),
-            channel_url: env::var("CHANNEL_URL")
-                .unwrap_or_else(|_| "https://pf.kakao.com/_exjFdX/chat".to_string()),
+            channel_url: env::var("CHANNEL_URL").unwrap_or_default(),
             database_path: env::var("DATABASE_PATH")
                 .unwrap_or_else(|_| "relay.db".to_string()),
             bind_addr: env::var("BIND_ADDR")

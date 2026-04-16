@@ -1,0 +1,15 @@
+[Unit]
+Description=KittyRelay — KakaoTalk WebSocket relay
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/kittyrelay
+EnvironmentFile=/home/ubuntu/kittyrelay/.env
+ExecStart=/home/ubuntu/kittyrelay/kittypaw-relay
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

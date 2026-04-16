@@ -1,2 +1,6 @@
 /target
 *.profraw
+*.db
+*.db-shm
+*.db-wal
+.env

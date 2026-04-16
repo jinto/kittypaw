@@ -228,7 +228,7 @@ async fn ws_session(state: AppStateArc, token: String, socket: WebSocket) {
 
     // Register session
     state.sessions.insert(token.clone(), tx);
-    info!("WS connected: {token}");
+    info!("WS connected: {token} (sessions: {})", state.sessions.len());
 
     // Writer task: forward mpsc messages to WS sink + periodic ping
     let writer = tokio::spawn(async move {
@@ -295,7 +295,7 @@ async fn ws_session(state: AppStateArc, token: String, socket: WebSocket) {
     }
 
     state.sessions.remove(&token);
-    info!("WS disconnected: {token}");
+    info!("WS disconnected: {token} (sessions: {})", state.sessions.len());
 }
 
 async fn handle_ws_message(state: &AppStateArc, text: &str) {
@@ -402,8 +402,75 @@ async fn handle_admin_stats(
             limit: state.config.monthly_limit,
         },
         killswitch,
+        ws_sessions: state.sessions.len(),
+        rss_bytes: get_rss_bytes(),
+        fd_count: get_fd_count(),
     })
     .into_response()
+}
+
+// ── Process metrics ──
+
+fn get_rss_bytes() -> u64 {
+    #[cfg(target_os = "macos")]
+    {
+        #[repr(C)]
+        struct MachTaskBasicInfo {
+            virtual_size: u64,
+            resident_size: u64,
+            resident_size_max: u64,
+            user_time: [u32; 2],
+            system_time: [u32; 2],
+            policy: i32,
+            suspend_count: i32,
+        }
+
+        extern "C" {
+            fn mach_task_self() -> u32;
+            fn task_info(
+                task: u32,
+                flavor: u32,
+                info: *mut MachTaskBasicInfo,
+                count: *mut u32,
+            ) -> i32;
+        }
+
+        const MACH_TASK_BASIC_INFO: u32 = 20;
+
+        unsafe {
+            let mut info: MachTaskBasicInfo = std::mem::zeroed();
+            let mut count =
+                (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<u32>()) as u32;
+            if task_info(mach_task_self(), MACH_TASK_BASIC_INFO, &mut info, &mut count) == 0 {
+                return info.resident_size;
+            }
+        }
+        0
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // /proc/self/statm: field[1] = RSS in pages
+        std::fs::read_to_string("/proc/self/statm")
+            .ok()
+            .and_then(|s| s.split_whitespace().nth(1)?.parse::<u64>().ok())
+            .map(|pages| pages * 4096)
+            .unwrap_or(0)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        0
+    }
+}
+
+fn get_fd_count() -> u64 {
+    #[cfg(target_os = "macos")]
+    let path = "/dev/fd";
+    #[cfg(not(target_os = "macos"))]
+    let path = "/proc/self/fd";
+
+    std::fs::read_dir(path)
+        .map(|entries| entries.count() as u64)
+        .unwrap_or(0)
 }
 
 // ── Helpers ──
