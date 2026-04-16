@@ -43,11 +43,9 @@ func newLoginCmd() *cobra.Command {
 			useCode := flagCode || !term.IsTerminal(int(os.Stdin.Fd()))
 
 			if useCode {
-				_, err = loginCode(apiURL, mgr)
-			} else {
-				_, err = loginHTTP(apiURL, mgr)
+				return loginCode(apiURL, mgr)
 			}
-			return err
+			return loginHTTP(apiURL, mgr)
 		},
 	}
 
@@ -56,11 +54,41 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
-func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
-	// 1. Start local callback server on OS-assigned port.
+// applyDiscovery fetches GET {apiURL}/discovery and persists the three service
+// URLs under the portal host's secrets namespace. Never returns an error:
+// degraded discovery logs a warning and returns apiURL as the effective
+// api_base_url so login continues to work for collapsed deployments.
+//
+// TODO(discovery-url-wiring): the returned api_base_url is currently unused.
+// See .claude/plans/discovery-url-wiring.md for the follow-up that routes
+// exchange/refresh through api_base_url and registryClient through
+// skills_registry_url.
+func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
+	d, err := core.FetchDiscovery(apiURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: %v — falling back to %s\n", err, apiURL)
+		return apiURL
+	}
+	if err := mgr.SaveAPIBaseURL(apiURL, d.APIBaseURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save api_base_url: %v\n", err)
+	}
+	if err := mgr.SaveRelayURL(apiURL, d.RelayURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save relay_url: %v\n", err)
+	}
+	if err := mgr.SaveSkillsRegistryURL(apiURL, d.SkillsRegistryURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save skills_registry_url: %v\n", err)
+	}
+	return d.APIBaseURL
+}
+
+func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
+	// 1. Discovery first: resolves service topology before OAuth begins.
+	_ = applyDiscovery(apiURL, mgr)
+
+	// 2. Start local callback server on OS-assigned port.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("start callback server: %w", err)
+		return fmt.Errorf("start callback server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 
@@ -70,7 +98,6 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		accessToken := r.URL.Query().Get("access_token")
 		refreshToken := r.URL.Query().Get("refresh_token")
-		relayURL := r.URL.Query().Get("relay_url")
 
 		if accessToken == "" {
 			tokenCh <- &tokenResult{err: fmt.Errorf("no access_token in callback")}
@@ -81,7 +108,6 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 		tokenCh <- &tokenResult{
 			accessToken:  accessToken,
 			refreshToken: refreshToken,
-			relayURL:     relayURL,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -96,7 +122,7 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	// 2. Open browser.
+	// 3. Open browser.
 	loginURL := fmt.Sprintf("%s/auth/cli/google?mode=http&port=%d", apiURL, port)
 	fmt.Printf("Opening browser for login...\n")
 	fmt.Printf("If the browser doesn't open, visit:\n  %s\n\n", loginURL)
@@ -105,46 +131,41 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 		fmt.Printf("Could not open browser: %v\n", err)
 	}
 
-	// 3. Wait for callback with timeout.
+	// 4. Wait for callback with timeout.
 	fmt.Printf("Waiting for authentication (5 minute timeout)...\n")
 	select {
 	case result := <-tokenCh:
 		if result.err != nil {
-			return nil, result.err
+			return result.err
 		}
 		if err := mgr.SaveTokens(apiURL, result.accessToken, result.refreshToken); err != nil {
-			return nil, fmt.Errorf("save tokens: %w", err)
+			return fmt.Errorf("save tokens: %w", err)
 		}
-		if result.relayURL != "" {
-			if err := mgr.SaveRelayURL(apiURL, result.relayURL); err != nil {
-				return nil, fmt.Errorf("save relay URL: %w", err)
-			}
-		}
-		if err := verifyAndPrint(apiURL, result.accessToken); err != nil {
-			return nil, err
-		}
-		return &loginResult{RelayURL: result.relayURL}, nil
+		return verifyAndPrint(apiURL, result.accessToken)
 
 	case <-time.After(5 * time.Minute):
-		return nil, fmt.Errorf("login timed out (5 minutes)")
+		return fmt.Errorf("login timed out (5 minutes)")
 	}
 }
 
-func loginCode(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
+func loginCode(apiURL string, mgr *core.APITokenManager) error {
+	// 1. Discovery first: resolves service topology before user pastes code.
+	_ = applyDiscovery(apiURL, mgr)
+
 	loginURL := fmt.Sprintf("%s/auth/cli/google?mode=code", apiURL)
 	fmt.Printf("Open this URL in your browser:\n\n  %s\n\n", loginURL)
 	fmt.Printf("Enter the code from the browser: ")
 
 	var code string
 	if _, err := fmt.Scanln(&code); err != nil {
-		return nil, fmt.Errorf("read code: %w", err)
+		return fmt.Errorf("read code: %w", err)
 	}
 	code = strings.TrimSpace(code)
 	if code == "" {
-		return nil, fmt.Errorf("empty code")
+		return fmt.Errorf("empty code")
 	}
 
-	// Exchange code for tokens.
+	// 2. Exchange code for tokens.
 	payload, _ := json.Marshal(map[string]string{"code": code})
 	resp, err := http.Post(
 		apiURL+"/auth/cli/exchange",
@@ -152,36 +173,27 @@ func loginCode(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 		strings.NewReader(string(payload)),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("exchange request: %w", err)
+		return fmt.Errorf("exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("exchange failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return fmt.Errorf("exchange failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	var result struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
-		RelayURL     string `json:"relay_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return fmt.Errorf("decode response: %w", err)
 	}
 
 	if err := mgr.SaveTokens(apiURL, result.AccessToken, result.RefreshToken); err != nil {
-		return nil, fmt.Errorf("save tokens: %w", err)
+		return fmt.Errorf("save tokens: %w", err)
 	}
-	if result.RelayURL != "" {
-		if err := mgr.SaveRelayURL(apiURL, result.RelayURL); err != nil {
-			return nil, fmt.Errorf("save relay URL: %w", err)
-		}
-	}
-	if err := verifyAndPrint(apiURL, result.AccessToken); err != nil {
-		return nil, err
-	}
-	return &loginResult{RelayURL: result.RelayURL}, nil
+	return verifyAndPrint(apiURL, result.AccessToken)
 }
 
 func verifyAndPrint(apiURL, accessToken string) error {
@@ -220,14 +232,7 @@ func verifyAndPrint(apiURL, accessToken string) error {
 type tokenResult struct {
 	accessToken  string
 	refreshToken string
-	relayURL     string
 	err          error
-}
-
-// loginResult is returned to callers (e.g. the setup wizard) so they can
-// run follow-up flows that need the relay server's base URL.
-type loginResult struct {
-	RelayURL string
 }
 
 const loginSuccessHTML = `<!DOCTYPE html>

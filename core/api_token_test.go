@@ -148,6 +148,84 @@ func TestAPITokenManager_AutoRefresh(t *testing.T) {
 	}
 }
 
+func TestAPITokenManager_SaveAndLoadAPIBaseURL(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "http://localhost:8080"
+
+	if err := mgr.SaveAPIBaseURL(apiURL, "https://api.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadAPIBaseURL(apiURL)
+	if !ok || got != "https://api.kittypaw.app" {
+		t.Errorf("LoadAPIBaseURL = (%q, %v), want (https://api.kittypaw.app, true)", got, ok)
+	}
+
+	// Empty value deletes the key.
+	if err := mgr.SaveAPIBaseURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadAPIBaseURL(apiURL)
+	if ok || got != "" {
+		t.Errorf("after empty save, Load = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
+
+func TestAPITokenManager_SaveAndLoadSkillsRegistryURL(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "http://localhost:8080"
+
+	if err := mgr.SaveSkillsRegistryURL(apiURL, "https://github.com/kittypaw-app/skills"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadSkillsRegistryURL(apiURL)
+	if !ok || got != "https://github.com/kittypaw-app/skills" {
+		t.Errorf("LoadSkillsRegistryURL = (%q, %v)", got, ok)
+	}
+
+	if err := mgr.SaveSkillsRegistryURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, ok = mgr.LoadSkillsRegistryURL(apiURL)
+	if ok {
+		t.Errorf("expected key deleted after empty save")
+	}
+}
+
+func TestAPITokenManager_SaveRelayURL_EmptyDeletes(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "http://localhost:8080"
+
+	// First store a real value.
+	if err := mgr.SaveRelayURL(apiURL, "https://relay.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadRelayURL(apiURL)
+	if !ok || got != "https://relay.kittypaw.app" {
+		t.Fatalf("setup: LoadRelayURL = (%q, %v)", got, ok)
+	}
+
+	// Empty save must delete the key so stale URLs don't persist across relay migrations.
+	if err := mgr.SaveRelayURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadRelayURL(apiURL)
+	if ok || got != "" {
+		t.Errorf("after empty save, Load = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
+
 func TestAPITokenManager_ClearTokens(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",

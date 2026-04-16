@@ -1,4 +1,25 @@
-## Relay Rust Rewrite ← 현재
+## Discovery Endpoint Migration ✅
+
+Plan: `.claude/plans/discovery-endpoint-migration.md`
+
+- [x] T1: `core/discovery.go` + tests — `DiscoveryResponse`, `FetchDiscovery` (10s timeout, 64 KiB body cap, redirect ≤3, strict on HTTP/JSON/missing `api_base_url`, trailing-slash trim); 8 httptest cases
+- [x] T2: `core/api_token.go` extended + tests — `saveOrDelete` helper, `Save/LoadAPIBaseURL`, `Save/LoadSkillsRegistryURL`, `SaveRelayURL` delete-on-empty; 3 new tests
+- [x] T3: `cli/cmd_login.go` Discovery integration — `applyDiscovery(apiURL, mgr) string` called first in both `loginHTTP` and `loginCode`; swallows errors → warns to stderr and falls back to `apiURL`
+- [x] T4: Removed `relay_url` from OAuth transports — callback query + exchange JSON; deleted `loginResult`/`tokenResult.relayURL`; `wizardKakao` now reads via `mgr.LoadRelayURL(apiURL)`
+- [x] T5: Integration + commit — `go test ./...` / `golangci-lint` / `make build` all clean; CLAUDE.md API Token section updated; no orphaned refs
+
+## Package Context Declaration ← 현재
+
+Plan: `.claude/plans/package-context.md`
+Spec: `.ina/specs/20260416-1300-think-package-context.md`
+
+- [ ] 1. core: PackagePermissions에 Context 필드 추가 + UserConfig 구조체
+- [ ] 2. engine: event-in-context 헬퍼 + buildUserContext + detectLocale
+- [ ] 3. engine: runSkillOrPackage에서 user context 주입 + session에서 event 저장
+- [ ] 4. 테스트: detectLocale + buildUserContext + 하위호환
+- [ ] 5. registry: weather-briefing에 context 선언 + locale 활용
+
+## Relay Rust Rewrite ✅
 
 Plan: `.claude/plans/relay-rust-rewrite.md`
 Spec: `.ina/specs/20260416-1800-think-relay-rust-rewrite.md`
@@ -10,17 +31,6 @@ Spec: `.ina/specs/20260416-1800-think-relay-rust-rewrite.md`
 - [x] T4: routes.rs — 라우트 핸들러 + WS 세션 + callback dispatch
 - [x] T5: main.rs — 서버 부트스트랩, sweeper, graceful shutdown
 - [x] T6: integration.rs — 8개 E2E 테스트 시나리오
-
-## Package Context Declaration
-
-Plan: `.claude/plans/package-context.md`
-Spec: `.ina/specs/20260416-1300-think-package-context.md`
-
-- [ ] 1. core: PackagePermissions에 Context 필드 추가 + UserConfig 구조체
-- [ ] 2. engine: event-in-context 헬퍼 + buildUserContext + detectLocale
-- [ ] 3. engine: runSkillOrPackage에서 user context 주입 + session에서 event 저장
-- [ ] 4. 테스트: detectLocale + buildUserContext + 하위호환
-- [ ] 5. registry: weather-briefing에 context 선언 + locale 활용
 
 ## Plan 24: Web Tool Quality + Agent Observe Loop ✅
 
