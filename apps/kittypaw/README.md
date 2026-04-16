@@ -11,17 +11,26 @@ curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
 ## Quick Start
 
 ```bash
-kittypaw setup         # interactive setup (LLM, channels, web search, workspace)
-kittypaw serve         # start the server
-kittypaw chat          # interactive chat (auto-starts daemon)
+kittypaw setup                            # interactive setup (LLM, channels)
+kittypaw skill install weather-briefing   # install a skill from registry
+kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts daemon)
+```
+
+That's it — Korean weather briefing in 3 commands. The skill reads your locale and location from config, fetches live forecast data, and summarizes it in your language.
+
+```bash
+kittypaw chat          # interactive REPL mode
+kittypaw serve         # start as HTTP/WebSocket server
 ```
 
 ## Skills
 
 ```bash
-kittypaw install https://github.com/owner/repo   # install from GitHub
-kittypaw install /path/to/local/skill             # install from local directory
-kittypaw search <keyword>                         # search skill registry
+kittypaw skill install weather-briefing           # install from registry
+kittypaw skill install https://github.com/owner/repo   # install from GitHub
+kittypaw skill install /path/to/local/skill       # install from local directory
+kittypaw skill search <keyword>                   # search skill registry
+kittypaw skill list                               # list installed skills
 kittypaw teach                                    # create a skill from conversation
 ```
 
