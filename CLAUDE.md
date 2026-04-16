@@ -38,6 +38,25 @@ Provenance tracked via `SourceURL`, `SourceHash`, `SourceText` fields on Skill. 
 
 Config fields support `source = "namespace/key"` binding to resolve values from shared `secrets.json` (e.g. `source = "telegram/bot_token"`). Resolution order: package-scoped → source binding → default. Secrets file auto-migrates from flat/mixed formats to canonical nested JSON on first load.
 
+## API Token Management
+
+`kittypaw login` authenticates against a kittypaw-api server via OAuth (Google). Two modes:
+- **HTTP callback** (default): local server on `127.0.0.1:0`, browser-based OAuth flow.
+- **Code-paste** (`--code`): for SSH/remote sessions, enter a one-time code from the browser.
+
+Tokens stored in `secrets.json` under namespace `kittypaw-api/{host}` (e.g. `kittypaw-api/localhost:8080`).
+`APITokenManager` (`core/api_token.go`) handles auto-refresh with single-flight mutex pattern.
+JWT expiry checked client-side via base64 payload decode (no signature verification) with 30-second grace window.
+
+Packages with `source = "kittypaw-api/access_token"` config fields get auto-refreshed tokens at execution time (`engine/executor.go:runSkillOrPackage`).
+
+## HTTP Sandbox Security
+
+`Http.get/post/put/delete/patch/head` support an optional `options` argument: `Http.get(url, {headers: {key: value}})`.
+Hop-by-hop headers (`Host`, `Connection`, `Transfer-Encoding`, `Upgrade`, `TE`, `Trailer`) are blocked.
+
+SSRF validation (`validateHTTPTarget`): explicit `allowed_hosts` in `package.toml` takes priority over private IP blocking — packages can declare `allowed_hosts = ["localhost"]` to reach local API servers. The package resolver validates URLs against the package's AllowedHosts and stores the validated hostname in context; `executeHTTP` verifies the actual request hostname matches.
+
 ## Permission System
 
 Destructive operations (Shell.exec, Git.push, etc.) require user approval in `supervised` autonomy mode.

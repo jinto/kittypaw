@@ -242,6 +242,27 @@ func (s *Server) handleSetupKakaoPairStatus(w http.ResponseWriter, _ *http.Reque
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/setup/api-server
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSetupAPIServer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	body.URL = strings.TrimRight(body.URL, "/")
+	if body.URL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+
+	_ = s.store.SetUserContext("setup:api_server_url", body.URL, "setup")
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "url": body.URL})
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/setup/workspace
 // ---------------------------------------------------------------------------
 
@@ -433,6 +454,9 @@ func (s *Server) wizardResultFromStore() core.WizardResult {
 	if v, ok, _ := s.store.GetUserContext("setup:workspace_path"); ok {
 		w.WorkspacePath = v
 	}
+	if v, ok, _ := s.store.GetUserContext("setup:api_server_url"); ok {
+		w.APIServerURL = v
+	}
 	return w
 }
 
@@ -452,5 +476,14 @@ func (s *Server) generateConfig() error {
 
 	w := s.wizardResultFromStore()
 	merged := core.MergeWizardSettings(&cfg, w)
-	return core.WriteConfigAtomic(merged, cfgPath)
+	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
+		return err
+	}
+
+	// Save API server URL to secrets for package source bindings.
+	if w.APIServerURL != "" && s.secrets != nil {
+		_ = s.secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
+	}
+
+	return nil
 }

@@ -105,6 +105,7 @@ func newRootCmd() *cobra.Command {
 		newChannelsCmd(),
 		newReloadCmd(),
 		newResetCmd(),
+		newLoginCmd(),
 	)
 
 	return cmd
@@ -242,6 +243,14 @@ func runSetup(flags *setupFlags) error {
 		if st, err := openStore(); err == nil {
 			_ = st.GrantCapability("http")
 			_ = st.Close()
+		}
+	}
+
+	// Save API server URL to secrets for package source bindings.
+	if result.APIServerURL != "" {
+		secretsPath := filepath.Join(kittypawDir, "secrets.json")
+		if secrets, err := core.LoadSecretsFrom(secretsPath); err == nil {
+			_ = secrets.Set("kittypaw-api", "api_url", result.APIServerURL)
 		}
 	}
 
