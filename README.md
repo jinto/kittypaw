@@ -46,7 +46,7 @@ url = "https://raw.githubusercontent.com/kittypaw/skills/main"
 ## Build from Source
 
 ```bash
-go build ./cmd/kittypaw
+go build -o kittypaw ./cli
 go test ./...
 ```
 
