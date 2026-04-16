@@ -436,7 +436,7 @@ func executeFileSearch(ctx context.Context, call core.SkillCall, s *Session) (st
 
 	var opts SearchOptions
 	if len(call.Args) > 1 {
-		json.Unmarshal(call.Args[1], &opts)
+		_ = json.Unmarshal(call.Args[1], &opts)
 	}
 
 	result, err := s.Indexer.Search(ctx, query, opts)
@@ -486,7 +486,7 @@ func executeFileReindex(ctx context.Context, call core.SkillCall, s *Session) (s
 	// Determine which workspace(s) to reindex.
 	var targetPath string
 	if len(call.Args) > 0 {
-		json.Unmarshal(call.Args[0], &targetPath)
+		_ = json.Unmarshal(call.Args[0], &targetPath)
 	}
 
 	wss, err := s.Store.ListWorkspaces()
@@ -527,7 +527,7 @@ func executeStorage(_ context.Context, call core.SkillCall, s *Session) (string,
 			return jsonResult(map[string]any{"error": "key required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		val, ok, err := s.Store.StorageGet("default", key)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -542,7 +542,7 @@ func executeStorage(_ context.Context, call core.SkillCall, s *Session) (string,
 			return jsonResult(map[string]any{"error": "key and value required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		val := string(call.Args[1])
 		if err := s.Store.StorageSet("default", key, val); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -554,7 +554,7 @@ func executeStorage(_ context.Context, call core.SkillCall, s *Session) (string,
 			return jsonResult(map[string]any{"error": "key required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		if err := s.Store.StorageDelete("default", key); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -582,7 +582,7 @@ func executeShell(ctx context.Context, call core.SkillCall, s *Session) (string,
 		return jsonResult(map[string]any{"error": "command required"})
 	}
 	var command string
-	json.Unmarshal(call.Args[0], &command)
+	_ = json.Unmarshal(call.Args[0], &command)
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	output, err := cmd.CombinedOutput()
@@ -611,7 +611,7 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, e
 	case "log":
 		n := "10"
 		if len(call.Args) > 0 {
-			json.Unmarshal(call.Args[0], &n)
+			_ = json.Unmarshal(call.Args[0], &n)
 		}
 		args = []string{"log", "--oneline", "-n", n}
 	case "diff":
@@ -621,7 +621,7 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, e
 			args = []string{"add", "."}
 		} else {
 			var path string
-			json.Unmarshal(call.Args[0], &path)
+			_ = json.Unmarshal(call.Args[0], &path)
 			args = []string{"add", path}
 		}
 	case "commit":
@@ -629,7 +629,7 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, e
 			return jsonResult(map[string]any{"error": "commit message required"})
 		}
 		var msg string
-		json.Unmarshal(call.Args[0], &msg)
+		_ = json.Unmarshal(call.Args[0], &msg)
 		args = []string{"commit", "-m", msg}
 	case "push":
 		args = []string{"push"}
@@ -657,7 +657,7 @@ func executeLLM(ctx context.Context, call core.SkillCall, s *Session) (string, e
 		return jsonResult(map[string]any{"error": "prompt required"})
 	}
 	var prompt string
-	json.Unmarshal(call.Args[0], &prompt)
+	_ = json.Unmarshal(call.Args[0], &prompt)
 
 	messages := []core.LlmMessage{
 		{Role: core.RoleUser, Content: prompt},
@@ -687,7 +687,7 @@ func executeMemory(_ context.Context, call core.SkillCall, s *Session) (string, 
 			return jsonResult(map[string]any{"error": "query required"})
 		}
 		var query string
-		json.Unmarshal(call.Args[0], &query)
+		_ = json.Unmarshal(call.Args[0], &query)
 		results, err := s.Store.SearchExecutions(query, 10)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -699,9 +699,9 @@ func executeMemory(_ context.Context, call core.SkillCall, s *Session) (string, 
 			return jsonResult(map[string]any{"error": "key and value required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		var value string
-		json.Unmarshal(call.Args[1], &value)
+		_ = json.Unmarshal(call.Args[1], &value)
 		if err := s.Store.SetUserContext(key, value, "agent"); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -712,7 +712,7 @@ func executeMemory(_ context.Context, call core.SkillCall, s *Session) (string, 
 			return jsonResult(map[string]any{"error": "key required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		val, ok, err := s.Store.GetUserContext(key)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -727,7 +727,7 @@ func executeMemory(_ context.Context, call core.SkillCall, s *Session) (string, 
 			return jsonResult(map[string]any{"error": "key required"})
 		}
 		var key string
-		json.Unmarshal(call.Args[0], &key)
+		_ = json.Unmarshal(call.Args[0], &key)
 		ok, err := s.Store.DeleteUserContext(key)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -761,7 +761,7 @@ func executeTodo(_ context.Context, call core.SkillCall, s *Session) (string, er
 			return jsonResult(map[string]any{"error": "text required"})
 		}
 		var text string
-		json.Unmarshal(call.Args[0], &text)
+		_ = json.Unmarshal(call.Args[0], &text)
 		id := fmt.Sprintf("todo-%d", time.Now().UnixNano())
 		if err := s.Store.StorageSet(ns, id, text); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
@@ -773,8 +773,8 @@ func executeTodo(_ context.Context, call core.SkillCall, s *Session) (string, er
 			return jsonResult(map[string]any{"error": "id and text required"})
 		}
 		var id, text string
-		json.Unmarshal(call.Args[0], &id)
-		json.Unmarshal(call.Args[1], &text)
+		_ = json.Unmarshal(call.Args[0], &id)
+		_ = json.Unmarshal(call.Args[1], &text)
 		if err := s.Store.StorageSet(ns, id, text); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -785,7 +785,7 @@ func executeTodo(_ context.Context, call core.SkillCall, s *Session) (string, er
 			return jsonResult(map[string]any{"error": "id required"})
 		}
 		var id string
-		json.Unmarshal(call.Args[0], &id)
+		_ = json.Unmarshal(call.Args[0], &id)
 		if err := s.Store.StorageDelete(ns, id); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -806,7 +806,7 @@ func executeEnv(call core.SkillCall) (string, error) {
 		return jsonResult(map[string]any{"error": "name required"})
 	}
 	var name string
-	json.Unmarshal(call.Args[0], &name)
+	_ = json.Unmarshal(call.Args[0], &name)
 	if core.IsSecretEnvVar(name) {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("access to secret env var %q is blocked", name)})
 	}
@@ -834,7 +834,7 @@ func executeTelegram(ctx context.Context, call core.SkillCall, s *Session) (stri
 		return jsonResult(map[string]any{"error": "text required"})
 	}
 	var text string
-	json.Unmarshal(call.Args[0], &text)
+	_ = json.Unmarshal(call.Args[0], &text)
 
 	// Send via Telegram Bot API
 	return sendTelegramMessage(ctx, token, text)
@@ -905,7 +905,7 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 			return jsonResult(map[string]any{"error": "name required"})
 		}
 		var name string
-		json.Unmarshal(call.Args[0], &name)
+		_ = json.Unmarshal(call.Args[0], &name)
 		return runSkillOrPackage(ctx, name, s)
 
 	case "create":
@@ -913,9 +913,9 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 			return jsonResult(map[string]any{"error": "name, description, and code required"})
 		}
 		var name, desc, code string
-		json.Unmarshal(call.Args[0], &name)
-		json.Unmarshal(call.Args[1], &desc)
-		json.Unmarshal(call.Args[2], &code)
+		_ = json.Unmarshal(call.Args[0], &name)
+		_ = json.Unmarshal(call.Args[1], &desc)
+		_ = json.Unmarshal(call.Args[2], &code)
 
 		// Guard: reject if a package with the same ID is already installed.
 		if s.PackageManager != nil {
@@ -936,11 +936,11 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 
 		triggerType := "manual"
 		if len(call.Args) > 3 {
-			json.Unmarshal(call.Args[3], &triggerType)
+			_ = json.Unmarshal(call.Args[3], &triggerType)
 		}
 		schedule := ""
 		if len(call.Args) > 4 {
-			json.Unmarshal(call.Args[4], &schedule)
+			_ = json.Unmarshal(call.Args[4], &schedule)
 		}
 
 		skill := &core.Skill{
@@ -967,7 +967,7 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 			return jsonResult(map[string]any{"error": "name required"})
 		}
 		var name string
-		json.Unmarshal(call.Args[0], &name)
+		_ = json.Unmarshal(call.Args[0], &name)
 		if err := core.DisableSkillFrom(s.BaseDir, name); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
@@ -978,7 +978,7 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 			return jsonResult(map[string]any{"error": "name required"})
 		}
 		var name string
-		json.Unmarshal(call.Args[0], &name)
+		_ = json.Unmarshal(call.Args[0], &name)
 		if err := core.RollbackSkillFrom(s.BaseDir, name); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}

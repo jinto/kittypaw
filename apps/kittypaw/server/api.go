@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
 )
@@ -21,7 +22,7 @@ var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
 // JSON helpers
 // ---------------------------------------------------------------------------
 
-// writeJSON serialises v as JSON with the given status code.
+// writeJSON serializes v as JSON with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -35,7 +36,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// decodeBody deserialises the request body into dst and reports errors.
+// decodeBody deserializes the request body into dst and reports errors.
 // Limits request body to 1 MB to prevent memory exhaustion.
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -724,7 +725,7 @@ func (s *Server) handleCheckpointRollback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":      true,
+		"success":       true,
 		"turns_deleted": deleted,
 	})
 }
@@ -969,8 +970,8 @@ func (s *Server) handlePackagesList(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	type pkgResp struct {
-		Meta         core.PackageMeta `json:"meta"`
-		ConfigSchema []configFieldDTO `json:"config_schema"`
+		Meta         core.PackageMeta  `json:"meta"`
+		ConfigSchema []configFieldDTO  `json:"config_schema"`
 		ConfigValues map[string]string `json:"config_values"`
 	}
 
@@ -1195,4 +1196,3 @@ func maskSecrets(fields []core.ConfigField, vals map[string]string) map[string]s
 	}
 	return masked
 }
-

@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 const (
@@ -22,10 +23,10 @@ const (
 // --- Discord Gateway DTOs ---
 
 type discordGatewayPayload struct {
-	Op   int              `json:"op"`
-	D    json.RawMessage  `json:"d"`
-	S    *int64           `json:"s,omitempty"`
-	T    string           `json:"t,omitempty"`
+	Op int             `json:"op"`
+	D  json.RawMessage `json:"d"`
+	S  *int64          `json:"s,omitempty"`
+	T  string          `json:"t,omitempty"`
 }
 
 type discordHello struct {
@@ -33,8 +34,8 @@ type discordHello struct {
 }
 
 type discordIdentify struct {
-	Token      string                   `json:"token"`
-	Intents    int                      `json:"intents"`
+	Token      string                    `json:"token"`
+	Intents    int                       `json:"intents"`
 	Properties discordIdentifyProperties `json:"properties"`
 }
 
@@ -45,10 +46,10 @@ type discordIdentifyProperties struct {
 }
 
 type discordMessageCreate struct {
-	ID        string       `json:"id"`
-	ChannelID string       `json:"channel_id"`
-	Content   string       `json:"content"`
-	Author    discordUser  `json:"author"`
+	ID        string      `json:"id"`
+	ChannelID string      `json:"channel_id"`
+	Content   string      `json:"content"`
+	Author    discordUser `json:"author"`
 }
 
 type discordUser struct {
@@ -142,7 +143,7 @@ func (d *DiscordChannel) runGateway(ctx context.Context, eventCh chan<- core.Eve
 	// Step 2: send Identify (op 2).
 	identify := discordIdentify{
 		Token:   d.botToken,
-		Intents: 1 << 9 | 1 << 15, // GUILD_MESSAGES | MESSAGE_CONTENT
+		Intents: 1<<9 | 1<<15, // GUILD_MESSAGES | MESSAGE_CONTENT
 		Properties: discordIdentifyProperties{
 			OS:      "linux",
 			Browser: "kittypaw",

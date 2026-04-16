@@ -603,7 +603,7 @@ func promptPassword(prompt string) (string, error) {
 		}
 		return strings.TrimSpace(string(b)), nil
 	}
-	defer term.Restore(fd, oldState)
+	defer term.Restore(fd, oldState) //nolint:errcheck
 
 	var buf []byte
 	var b [1]byte

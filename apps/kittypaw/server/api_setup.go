@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
 	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
 )
@@ -142,10 +143,10 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 		apiKey = ""
 	}
 
-	s.store.SetUserContext("setup:llm_provider", provider, "setup")
-	s.store.SetUserContext("setup:llm_api_key", apiKey, "setup")
-	s.store.SetUserContext("setup:llm_model", model, "setup")
-	s.store.SetUserContext("setup:llm_base_url", baseURL, "setup")
+	_ = s.store.SetUserContext("setup:llm_provider", provider, "setup")
+	_ = s.store.SetUserContext("setup:llm_api_key", apiKey, "setup")
+	_ = s.store.SetUserContext("setup:llm_model", model, "setup")
+	_ = s.store.SetUserContext("setup:llm_base_url", baseURL, "setup")
 
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "provider": body.Provider})
 }
@@ -171,8 +172,8 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.store.SetUserContext("setup:telegram_bot_token", body.BotToken, "setup")
-	s.store.SetUserContext("setup:telegram_chat_id", body.ChatID, "setup")
+	_ = s.store.SetUserContext("setup:telegram_bot_token", body.BotToken, "setup")
+	_ = s.store.SetUserContext("setup:telegram_chat_id", body.ChatID, "setup")
 
 	// Immediately spawn the Telegram channel so the user gets instant
 	// feedback during onboarding — no reload required (AC3).
@@ -267,7 +268,7 @@ func (s *Server) handleSetupWorkspace(w http.ResponseWriter, r *http.Request) {
 		canonical = body.Path
 	}
 
-	s.store.SetUserContext("setup:workspace_path", canonical, "setup")
+	_ = s.store.SetUserContext("setup:workspace_path", canonical, "setup")
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "path": canonical})
 }
 
@@ -299,7 +300,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	s.store.SetUserContext("onboarding_completed", "true", "system")
+	_ = s.store.SetUserContext("onboarding_completed", "true", "system")
 
 	// Hot-reload the config into the running server.
 	cfgPath, _ := core.ConfigPath()
@@ -335,7 +336,7 @@ func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.store.SetUserContext("onboarding_completed", "false", "system")
+	_ = s.store.SetUserContext("onboarding_completed", "false", "system")
 	writeJSON(w, http.StatusOK, map[string]any{"reset": true})
 }
 

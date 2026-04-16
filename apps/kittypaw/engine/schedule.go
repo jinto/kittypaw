@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"github.com/robfig/cron/v3"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // Scheduler runs scheduled skills at their configured intervals.
@@ -20,7 +21,7 @@ type Scheduler struct {
 	pkgManager *core.PackageManager
 	stop       chan struct{}
 	stopOnce   sync.Once
-	inflight   sync.Map      // skill name → struct{}: prevents concurrent runs of the same skill
+	inflight   sync.Map       // skill name → struct{}: prevents concurrent runs of the same skill
 	wg         sync.WaitGroup // tracks in-flight runSkill goroutines for graceful drain
 }
 

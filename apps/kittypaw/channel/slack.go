@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 const slackAPI = "https://slack.com/api/"
@@ -25,9 +26,9 @@ type slackWSURL struct {
 }
 
 type slackEnvelope struct {
-	Type      string          `json:"type"`
-	EnvelopeID string        `json:"envelope_id,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
+	Type       string          `json:"type"`
+	EnvelopeID string          `json:"envelope_id,omitempty"`
+	Payload    json.RawMessage `json:"payload,omitempty"`
 
 	// For events_api envelopes, the event is nested.
 	Event *slackEvent `json:"event,omitempty"`

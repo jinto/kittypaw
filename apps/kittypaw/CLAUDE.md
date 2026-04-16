@@ -50,6 +50,36 @@ Callback responses route through channel-internal `sync.Map` (not `eventCh`) to 
 TOML config at `~/.kittypaw/config.toml`. See `core/config.go` for all options.
 Server-wide settings (bind, master API key, tenants) go in `~/.kittypaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
 
+## Development
+
+```bash
+make build          # Build binary
+make test           # All tests (verbose, no cache)
+make test-unit      # Short tests only
+make lint           # golangci-lint (errcheck, staticcheck, revive, misspell, ...)
+make fmt            # gofmt + goimports
+```
+
+### Commit Conventions
+
+Conventional Commits enforced by [lefthook](https://github.com/evilmartians/lefthook):
+
+```
+type(scope): description
+
+types: feat, fix, refactor, perf, docs, chore, test, ci, build, merge
+```
+
+Pre-commit hooks run `gofmt` and `golangci-lint` automatically. Install with:
+
+```bash
+lefthook install
+```
+
+### CI
+
+GitHub Actions runs `lint` and `test` on every push/PR to `main`. See `.github/workflows/ci.yml`.
+
 ## Release
 
 Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints it.
@@ -57,5 +87,7 @@ Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints
 ## Testing
 
 ```bash
-go test ./...
+make test           # All tests
+make test-unit      # Unit tests only (fast)
+go test ./store/... # Single package
 ```

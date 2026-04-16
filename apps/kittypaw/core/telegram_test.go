@@ -18,7 +18,7 @@ func TestValidateTelegramToken_Invalid(t *testing.T) {
 	invalid := []string{
 		"",
 		"not-a-token",
-		"123:short",               // too short after colon
+		"123:short",                            // too short after colon
 		"abc:ABCDefghijklmnopqrstuvwxyz012345", // non-digit prefix
 		":ABCDefghijklmnopqrstuvwxyz012345",    // missing digits
 	}

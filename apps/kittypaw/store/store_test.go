@@ -178,9 +178,12 @@ func TestStorageKV(t *testing.T) {
 func TestExecutionHistory(t *testing.T) {
 	st := openTestStore(t)
 
-	// Use distinct timestamps so ORDER BY started_at DESC is deterministic.
+	// Use distinct timestamps relative to now so CleanupOldExecutions
+	// does not treat them as old. Offsets ensure ORDER BY started_at DESC
+	// is deterministic.
+	now := time.Now().UTC()
 	for i := 0; i < 3; i++ {
-		ts := fmt.Sprintf("2026-04-13 12:00:%02d", i)
+		ts := now.Add(time.Duration(i) * time.Second).Format("2006-01-02 15:04:05")
 		rec := &ExecutionRecord{
 			SkillID:       "sk-1",
 			SkillName:     "greeter",
@@ -1203,7 +1206,7 @@ func TestWorkspaceFTS_UpsertAndSearch(t *testing.T) {
 	}
 
 	// Search for "package" — should match both.
-	results, total, err = st.SearchWorkspaceFTS("package", "", "", 20, 0)
+	_, total, err = st.SearchWorkspaceFTS("package", "", "", 20, 0)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -1287,7 +1290,7 @@ func TestWorkspaceFTS_DeleteByWorkspace(t *testing.T) {
 	}
 
 	// Verify FTS is gone — search should return 0 results.
-	results, total, _ := st.SearchWorkspaceFTS("alpha", "", "", 20, 0)
+	_, total, _ := st.SearchWorkspaceFTS("alpha", "", "", 20, 0)
 	if total != 0 {
 		t.Errorf("post-delete search total: got %d, want 0", total)
 	}

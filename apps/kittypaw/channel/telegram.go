@@ -16,17 +16,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/jinto/kittypaw/core"
 )
 
 const (
-	telegramAPI       = "https://api.telegram.org/bot"
-	telegramFileAPI   = "https://api.telegram.org/file/bot"
-	telegramMaxChunk  = 4096
-	telegramPollSecs  = 30
-	whisperAPI        = "https://api.openai.com/v1/audio/transcriptions"
-	maxBackoff        = 60 * time.Second
-	initialBackoff    = 1 * time.Second
+	telegramAPI      = "https://api.telegram.org/bot"
+	telegramFileAPI  = "https://api.telegram.org/file/bot"
+	telegramMaxChunk = 4096
+	telegramPollSecs = 30
+	whisperAPI       = "https://api.openai.com/v1/audio/transcriptions"
+	maxBackoff       = 60 * time.Second
+	initialBackoff   = 1 * time.Second
 )
 
 // isDuplicateBotError checks if the Telegram error indicates another bot instance is running.
@@ -94,9 +95,9 @@ type telegramInlineKeyboardMarkup struct {
 
 // telegramMessage is the message object inside an update.
 type telegramMessage struct {
-	Chat  telegramChat  `json:"chat"`
-	Text  string        `json:"text"`
-	From  *telegramUser `json:"from,omitempty"`
+	Chat  telegramChat   `json:"chat"`
+	Text  string         `json:"text"`
+	From  *telegramUser  `json:"from,omitempty"`
 	Voice *telegramVoice `json:"voice,omitempty"`
 }
 
@@ -166,7 +167,7 @@ func NewTelegram(botToken string) *TelegramChannel {
 func (t *TelegramChannel) Name() string { return "telegram" }
 
 // Start long-polls the Telegram Bot API for updates. It blocks until
-// ctx is cancelled, emitting core.Event values on eventCh.
+// ctx is canceled, emitting core.Event values on eventCh.
 func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) error {
 	slog.Info("telegram: starting long-poll loop")
 	backoff := initialBackoff
@@ -455,7 +456,7 @@ func (t *TelegramChannel) transcribeVoice(ctx context.Context, fileID string) (s
 	}
 	_ = w.WriteField("model", "whisper-1")
 	_ = w.WriteField("language", "ko")
-	w.Close()
+	_ = w.Close()
 
 	whisperReq, err := http.NewRequestWithContext(ctx, http.MethodPost, whisperAPI, &buf)
 	if err != nil {
@@ -649,4 +650,3 @@ func (t *TelegramChannel) answerCallbackQuery(ctx context.Context, callbackQuery
 
 // Compile-time check: TelegramChannel implements Confirmer.
 var _ Confirmer = (*TelegramChannel)(nil)
-

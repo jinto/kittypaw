@@ -49,13 +49,13 @@ func TestParseAtMention(t *testing.T) {
 		{"@bot hello", "bot", "hello", true},
 		{"@my-agent do something", "my-agent", "do something", true},
 		{"@agent_1", "agent_1", "", true},
-		{"hello @bot", "", "hello @bot", false},    // not at start
-		{"@", "", "@", false},                       // bare @
-		{"", "", "", false},                         // empty
-		{"no mention", "", "no mention", false},     // no @
+		{"hello @bot", "", "hello @bot", false},       // not at start
+		{"@", "", "@", false},                         // bare @
+		{"", "", "", false},                           // empty
+		{"no mention", "", "no mention", false},       // no @
 		{"@inv@lid rest", "", "@inv@lid rest", false}, // invalid char in ID
 		{"@CamelCase text", "CamelCase", "text", true},
-		{"  @spaced text", "spaced", "text", true},  // leading whitespace
+		{"  @spaced text", "spaced", "text", true}, // leading whitespace
 	}
 	for _, tt := range tests {
 		id, rest, ok := ParseAtMention(tt.text)

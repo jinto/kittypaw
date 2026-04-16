@@ -39,7 +39,7 @@ const (
 	PhaseInit     LoopPhase = "init"
 	PhasePrompt   LoopPhase = "prompt"
 	PhaseGenerate LoopPhase = "generate"
-	PhaseRetry LoopPhase = "retry"
+	PhaseRetry    LoopPhase = "retry"
 	PhaseFinish   LoopPhase = "finish"
 )
 
