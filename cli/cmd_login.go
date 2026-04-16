@@ -29,7 +29,7 @@ func newLoginCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			apiURL := flagAPIURL
 			if apiURL == "" {
-				apiURL = "http://localhost:8080"
+				apiURL = core.DefaultAPIServerURL
 			}
 			apiURL = strings.TrimRight(apiURL, "/")
 
@@ -43,22 +43,24 @@ func newLoginCmd() *cobra.Command {
 			useCode := flagCode || !term.IsTerminal(int(os.Stdin.Fd()))
 
 			if useCode {
-				return loginCode(apiURL, mgr)
+				_, err = loginCode(apiURL, mgr)
+			} else {
+				_, err = loginHTTP(apiURL, mgr)
 			}
-			return loginHTTP(apiURL, mgr)
+			return err
 		},
 	}
 
 	cmd.Flags().BoolVar(&flagCode, "code", false, "use code-paste mode (for SSH/remote)")
-	cmd.Flags().StringVar(&flagAPIURL, "api-url", "", "API server URL (default http://localhost:8080)")
+	cmd.Flags().StringVar(&flagAPIURL, "api-url", "", "API server URL (default "+core.DefaultAPIServerURL+")")
 	return cmd
 }
 
-func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
+func loginHTTP(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 	// 1. Start local callback server on OS-assigned port.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Errorf("start callback server: %w", err)
+		return nil, fmt.Errorf("start callback server: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
 
@@ -68,6 +70,7 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		accessToken := r.URL.Query().Get("access_token")
 		refreshToken := r.URL.Query().Get("refresh_token")
+		relayURL := r.URL.Query().Get("relay_url")
 
 		if accessToken == "" {
 			tokenCh <- &tokenResult{err: fmt.Errorf("no access_token in callback")}
@@ -78,6 +81,7 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
 		tokenCh <- &tokenResult{
 			accessToken:  accessToken,
 			refreshToken: refreshToken,
+			relayURL:     relayURL,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -106,31 +110,38 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
 	select {
 	case result := <-tokenCh:
 		if result.err != nil {
-			return result.err
+			return nil, result.err
 		}
 		if err := mgr.SaveTokens(apiURL, result.accessToken, result.refreshToken); err != nil {
-			return fmt.Errorf("save tokens: %w", err)
+			return nil, fmt.Errorf("save tokens: %w", err)
 		}
-		// Verify login.
-		return verifyAndPrint(apiURL, result.accessToken)
+		if result.relayURL != "" {
+			if err := mgr.SaveRelayURL(apiURL, result.relayURL); err != nil {
+				return nil, fmt.Errorf("save relay URL: %w", err)
+			}
+		}
+		if err := verifyAndPrint(apiURL, result.accessToken); err != nil {
+			return nil, err
+		}
+		return &loginResult{RelayURL: result.relayURL}, nil
 
 	case <-time.After(5 * time.Minute):
-		return fmt.Errorf("login timed out (5 minutes)")
+		return nil, fmt.Errorf("login timed out (5 minutes)")
 	}
 }
 
-func loginCode(apiURL string, mgr *core.APITokenManager) error {
+func loginCode(apiURL string, mgr *core.APITokenManager) (*loginResult, error) {
 	loginURL := fmt.Sprintf("%s/auth/cli/google?mode=code", apiURL)
 	fmt.Printf("Open this URL in your browser:\n\n  %s\n\n", loginURL)
 	fmt.Printf("Enter the code from the browser: ")
 
 	var code string
 	if _, err := fmt.Scanln(&code); err != nil {
-		return fmt.Errorf("read code: %w", err)
+		return nil, fmt.Errorf("read code: %w", err)
 	}
 	code = strings.TrimSpace(code)
 	if code == "" {
-		return fmt.Errorf("empty code")
+		return nil, fmt.Errorf("empty code")
 	}
 
 	// Exchange code for tokens.
@@ -141,27 +152,36 @@ func loginCode(apiURL string, mgr *core.APITokenManager) error {
 		strings.NewReader(string(payload)),
 	)
 	if err != nil {
-		return fmt.Errorf("exchange request: %w", err)
+		return nil, fmt.Errorf("exchange request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("exchange failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("exchange failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	var result struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		RelayURL     string `json:"relay_url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	if err := mgr.SaveTokens(apiURL, result.AccessToken, result.RefreshToken); err != nil {
-		return fmt.Errorf("save tokens: %w", err)
+		return nil, fmt.Errorf("save tokens: %w", err)
 	}
-	return verifyAndPrint(apiURL, result.AccessToken)
+	if result.RelayURL != "" {
+		if err := mgr.SaveRelayURL(apiURL, result.RelayURL); err != nil {
+			return nil, fmt.Errorf("save relay URL: %w", err)
+		}
+	}
+	if err := verifyAndPrint(apiURL, result.AccessToken); err != nil {
+		return nil, err
+	}
+	return &loginResult{RelayURL: result.RelayURL}, nil
 }
 
 func verifyAndPrint(apiURL, accessToken string) error {
@@ -200,7 +220,14 @@ func verifyAndPrint(apiURL, accessToken string) error {
 type tokenResult struct {
 	accessToken  string
 	refreshToken string
+	relayURL     string
 	err          error
+}
+
+// loginResult is returned to callers (e.g. the setup wizard) so they can
+// run follow-up flows that need the relay server's base URL.
+type loginResult struct {
+	RelayURL string
 }
 
 const loginSuccessHTML = `<!DOCTYPE html>
