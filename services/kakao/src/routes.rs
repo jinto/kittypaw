@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -41,8 +41,17 @@ struct SecretQuery {
 
 // ── Health ──
 
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
+async fn handle_health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        version: env!("CARGO_PKG_VERSION"),
+        commit: env!("GIT_HASH"),
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    version: &'static str,
+    commit: &'static str,
 }
 
 // ── Register ──
