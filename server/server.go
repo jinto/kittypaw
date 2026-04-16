@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
@@ -34,7 +35,7 @@ type Server struct {
 	scheduler  *engine.Scheduler
 	router     chi.Router
 	spawner    *ChannelSpawner // manages channel lifecycle for hot-reload
-	eventCh    chan core.Event  // shared event channel between channels and dispatch loop
+	eventCh    chan core.Event // shared event channel between channels and dispatch loop
 	version    string
 	pkgManager *core.PackageManager // shared package manager for API handlers
 	secrets    *core.SecretsStore   // shared secrets store for API handlers

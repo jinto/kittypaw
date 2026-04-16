@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+
 	"github.com/jinto/kittypaw/core"
 )
 

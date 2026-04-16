@@ -12,8 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // ToolInfo is a simplified view of an MCP tool for prompt injection.
@@ -88,13 +89,13 @@ func (r *Registry) connectWithSession(ctx context.Context, name string, transpor
 
 	result, err := session.ListTools(ctx, nil)
 	if err != nil {
-		session.Close()
+		_ = session.Close()
 		return fmt.Errorf("MCP server %q: list tools: %w", name, err)
 	}
 
 	r.mu.Lock()
 	if old, ok := r.entries[name]; ok {
-		old.session.Close() // close previous session to avoid leak
+		_ = old.session.Close() // close previous session to avoid leak
 	}
 	r.entries[name] = &serverEntry{
 		session: session,

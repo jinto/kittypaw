@@ -92,18 +92,18 @@ type IndexResult struct {
 
 const (
 	maxIndexFileSize = 1 << 20 // 1 MB content indexing limit
-	binaryProbeSize  = 8192   // first 8 KB for binary detection
-	txChunkSize      = 500    // files per transaction chunk
+	binaryProbeSize  = 8192    // first 8 KB for binary detection
+	txChunkSize      = 500     // files per transaction chunk
 )
 
 // excludedDirs are directories completely skipped during indexing.
 var excludedDirs = map[string]bool{
-	".git":        true,
+	".git":         true,
 	"node_modules": true,
-	"vendor":      true,
-	"__pycache__": true,
-	"build":       true,
-	"dist":        true,
+	"vendor":       true,
+	"__pycache__":  true,
+	"build":        true,
+	"dist":         true,
 }
 
 // excludedFiles are individual filenames completely skipped.

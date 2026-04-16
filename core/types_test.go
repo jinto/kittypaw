@@ -14,15 +14,15 @@ func TestValidateSkillName(t *testing.T) {
 		{"my_skill", false},
 		{"Skill123", false},
 		{"a", false},
-		{"", true},                // empty
-		{"..", true},              // path traversal
-		{"../etc/passwd", true},   // path traversal
-		{"skill/../bad", true},    // embedded traversal
-		{"skill/bad", true},       // slash
-		{"skill\\bad", true},      // backslash
-		{"skill name", true},      // space
-		{"skill!name", true},      // special char
-		{"skill@name", true},      // at sign
+		{"", true},              // empty
+		{"..", true},            // path traversal
+		{"../etc/passwd", true}, // path traversal
+		{"skill/../bad", true},  // embedded traversal
+		{"skill/bad", true},     // slash
+		{"skill\\bad", true},    // backslash
+		{"skill name", true},    // space
+		{"skill!name", true},    // special char
+		{"skill@name", true},    // at sign
 		{"good-skill-name", false},
 		{"x-y_z-123", false},
 	}
@@ -48,9 +48,9 @@ func TestIsSecretEnvVar(t *testing.T) {
 		{"PATH", false},
 		{"LANG", false},
 		{"GOPAW_PORT", false},
-		{"my_secret", true},  // lowercase "secret"
-		{"tokenizer", true},  // contains "token"
-		{"AUTHOR", true},     // contains "AUTH"
+		{"my_secret", true}, // lowercase "secret"
+		{"tokenizer", true}, // contains "token"
+		{"AUTHOR", true},    // contains "AUTH"
 	}
 	for _, tt := range tests {
 		got := IsSecretEnvVar(tt.name)

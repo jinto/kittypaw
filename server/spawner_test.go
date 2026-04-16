@@ -10,12 +10,12 @@ import (
 )
 
 // stubChannel is a minimal Channel implementation for testing.
-// It blocks in Start until ctx is cancelled.
+// It blocks in Start until ctx is canceled.
 type stubChannel struct {
-	name     string
-	started  chan struct{} // closed when Start begins
-	mu       sync.Mutex
-	sends    []string // records SendResponse calls
+	name    string
+	started chan struct{} // closed when Start begins
+	mu      sync.Mutex
+	sends   []string // records SendResponse calls
 }
 
 func newStub(name string) *stubChannel {

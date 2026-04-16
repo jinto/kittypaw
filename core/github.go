@@ -21,10 +21,10 @@ const (
 
 // SourceResult holds the result of resolving a skill source from GitHub.
 type SourceResult struct {
-	Format        SourceFormat
-	SkillMdContent string   // populated for SkillMd format
-	TempDir        string   // populated for Native format (caller must clean up)
-	SourceURL      string   // original GitHub URL
+	Format         SourceFormat
+	SkillMdContent string // populated for SkillMd format
+	TempDir        string // populated for Native format (caller must clean up)
+	SourceURL      string // original GitHub URL
 }
 
 // ParseGitHubURL extracts owner and repo from a GitHub URL.

@@ -11,9 +11,9 @@ func TestFixedLenEqual(t *testing.T) {
 	}{
 		{"secret", "secret", true},
 		{"secret", "wrong", false},
-		{"", "secret", false},   // empty a → false
-		{"secret", "", false},   // empty b → false
-		{"", "", false},         // both empty → false (prevents auth bypass)
+		{"", "secret", false}, // empty a → false
+		{"secret", "", false}, // empty b → false
+		{"", "", false},       // both empty → false (prevents auth bypass)
 		{"short", "longerstring", false},
 		{"abc", "abd", false},
 		{"same-length-1", "same-length-2", false},

@@ -68,29 +68,29 @@ func ServerConfigPath() (string, error) {
 
 // Config is the top-level application configuration, loaded from TOML.
 type Config struct {
-	LLM             LLMConfig           `toml:"llm"`
-	Sandbox         SandboxConfig       `toml:"sandbox"`
-	Agents          []AgentConfig       `toml:"agents"`
-	Channels        []ChannelConfig     `toml:"channels"`
-	AdminChatIDs    []string            `toml:"admin_chat_ids"`
-	FreeformFallback bool              `toml:"freeform_fallback"`
-	Models          []ModelConfig       `toml:"models"`
-	STT             STTConfig           `toml:"stt"`
-	Features        FeatureFlags        `toml:"features"`
-	MCPServers      []MCPServerConfig   `toml:"mcp_servers"`
-	AutonomyLevel   AutonomyLevel       `toml:"autonomy_level"`
-	PairedChatIDs   []string            `toml:"paired_chat_ids"`
-	Server          ServerConfig        `toml:"server"`
-	Profiles        []ProfileConfig     `toml:"profiles"`
-	DefaultProfile  string              `toml:"default_profile"`
-	Reflection      ReflectionConfig    `toml:"reflection"`
-	Evolution       EvolutionConfig     `toml:"evolution"`
-	Orchestration   OrchestrationConfig `toml:"orchestration"`
-	Registry        RegistryConfig      `toml:"registry"`
-	SkillInstall    SkillInstallConfig  `toml:"skill_install"`
-	Permissions     PermissionPolicy    `toml:"permissions"`
-	Web             WebConfig           `toml:"web"`
-	User            UserConfig          `toml:"user"`
+	LLM              LLMConfig           `toml:"llm"`
+	Sandbox          SandboxConfig       `toml:"sandbox"`
+	Agents           []AgentConfig       `toml:"agents"`
+	Channels         []ChannelConfig     `toml:"channels"`
+	AdminChatIDs     []string            `toml:"admin_chat_ids"`
+	FreeformFallback bool                `toml:"freeform_fallback"`
+	Models           []ModelConfig       `toml:"models"`
+	STT              STTConfig           `toml:"stt"`
+	Features         FeatureFlags        `toml:"features"`
+	MCPServers       []MCPServerConfig   `toml:"mcp_servers"`
+	AutonomyLevel    AutonomyLevel       `toml:"autonomy_level"`
+	PairedChatIDs    []string            `toml:"paired_chat_ids"`
+	Server           ServerConfig        `toml:"server"`
+	Profiles         []ProfileConfig     `toml:"profiles"`
+	DefaultProfile   string              `toml:"default_profile"`
+	Reflection       ReflectionConfig    `toml:"reflection"`
+	Evolution        EvolutionConfig     `toml:"evolution"`
+	Orchestration    OrchestrationConfig `toml:"orchestration"`
+	Registry         RegistryConfig      `toml:"registry"`
+	SkillInstall     SkillInstallConfig  `toml:"skill_install"`
+	Permissions      PermissionPolicy    `toml:"permissions"`
+	Web              WebConfig           `toml:"web"`
+	User             UserConfig          `toml:"user"`
 }
 
 // UserConfig holds user-level settings surfaced to packages via __context__.user.
@@ -104,10 +104,10 @@ type UserConfig struct {
 
 // WebConfig controls web tool behavior (search backend, etc.).
 type WebConfig struct {
-	SearchBackend  string `toml:"search_backend"`  // "firecrawl" | "tavily" | "duckduckgo"; empty = auto-detect
-	FirecrawlKey   string `toml:"firecrawl_api_key"`
-	FirecrawlURL   string `toml:"firecrawl_api_url"` // self-hosted; default https://api.firecrawl.dev
-	TavilyAPIKey   string `toml:"tavily_api_key"`
+	SearchBackend string `toml:"search_backend"` // "firecrawl" | "tavily" | "duckduckgo"; empty = auto-detect
+	FirecrawlKey  string `toml:"firecrawl_api_key"`
+	FirecrawlURL  string `toml:"firecrawl_api_url"` // self-hosted; default https://api.firecrawl.dev
+	TavilyAPIKey  string `toml:"tavily_api_key"`
 }
 
 // SkillInstallConfig controls skill installation behavior.
@@ -137,15 +137,15 @@ type LLMConfig struct {
 
 // ModelConfig defines an additional named model.
 type ModelConfig struct {
-	Name          string            `toml:"name"`
-	Provider      string            `toml:"provider"`
-	Model         string            `toml:"model"`
-	APIKey        string            `toml:"api_key"`
-	MaxTokens     uint32            `toml:"max_tokens"`
-	Default       bool              `toml:"default"`
-	BaseURL       string            `toml:"base_url"`
-	ContextWindow uint32            `toml:"context_window"`
-	Tier          *ModelTier        `toml:"tier"`
+	Name          string     `toml:"name"`
+	Provider      string     `toml:"provider"`
+	Model         string     `toml:"model"`
+	APIKey        string     `toml:"api_key"`
+	MaxTokens     uint32     `toml:"max_tokens"`
+	Default       bool       `toml:"default"`
+	BaseURL       string     `toml:"base_url"`
+	ContextWindow uint32     `toml:"context_window"`
+	Tier          *ModelTier `toml:"tier"`
 }
 
 // SandboxConfig controls the JavaScript execution sandbox.
@@ -165,22 +165,22 @@ type STTConfig struct {
 
 // FeatureFlags toggles experimental features.
 type FeatureFlags struct {
-	ProgressiveRetry   bool   `toml:"progressive_retry"`
-	ContextCompaction  bool   `toml:"context_compaction"`
-	ModelRouting       bool   `toml:"model_routing"`
-	BackgroundAgents   bool   `toml:"background_agents"`
-	DailyTokenLimit    uint64 `toml:"daily_token_limit"`
-	MaxObserveRounds   int    `toml:"max_observe_rounds"` // default 5
+	ProgressiveRetry  bool   `toml:"progressive_retry"`
+	ContextCompaction bool   `toml:"context_compaction"`
+	ModelRouting      bool   `toml:"model_routing"`
+	BackgroundAgents  bool   `toml:"background_agents"`
+	DailyTokenLimit   uint64 `toml:"daily_token_limit"`
+	MaxObserveRounds  int    `toml:"max_observe_rounds"` // default 5
 }
 
 // ReflectionConfig controls daily pattern analysis.
 type ReflectionConfig struct {
-	Enabled          bool   `toml:"enabled"`
-	Cron             string `toml:"cron"`
-	MaxInputChars    uint32 `toml:"max_input_chars"`
-	IntentThreshold  uint32 `toml:"intent_threshold"`
-	TTLDays          uint32 `toml:"ttl_days"`
-	WeeklyReportDay  uint32 `toml:"weekly_report_day"`
+	Enabled         bool   `toml:"enabled"`
+	Cron            string `toml:"cron"`
+	MaxInputChars   uint32 `toml:"max_input_chars"`
+	IntentThreshold uint32 `toml:"intent_threshold"`
+	TTLDays         uint32 `toml:"ttl_days"`
+	WeeklyReportDay uint32 `toml:"weekly_report_day"`
 }
 
 // EvolutionConfig controls autonomous skill suggestion.
@@ -226,9 +226,9 @@ type MCPServerConfig struct {
 
 // ChannelConfig defines a messaging channel.
 type ChannelConfig struct {
-	ChannelType ChannelType        `toml:"channel_type"`
-	Token       string             `toml:"token"`
-	BindAddr    string             `toml:"bind_addr"`
+	ChannelType ChannelType         `toml:"channel_type"`
+	Token       string              `toml:"token"`
+	BindAddr    string              `toml:"bind_addr"`
 	Kakao       *KakaoChannelConfig `toml:"kakao"`
 }
 

@@ -388,8 +388,8 @@ func TestClaudeRetryOn429(t *testing.T) {
 	}
 }
 
-func TestClaudeRetryCancelledContext(t *testing.T) {
-	// A cancelled context during backoff must return ctx.Err() promptly,
+func TestClaudeRetryCanceledContext(t *testing.T) {
+	// A canceled context during backoff must return ctx.Err() promptly,
 	// not block until the full delay elapses.
 	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -404,7 +404,7 @@ func TestClaudeRetryCancelledContext(t *testing.T) {
 		{Role: core.RoleUser, Content: "Hi"},
 	})
 	if err == nil {
-		t.Fatal("expected error from cancelled context")
+		t.Fatal("expected error from canceled context")
 	}
 	if err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)

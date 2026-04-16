@@ -20,7 +20,7 @@ import (
 
 // Vision/Image skill constants.
 const (
-	visionMaxTokens    = 1024
+	visionMaxTokens     = 1024
 	visionDefaultPrompt = "Describe this image in detail."
 
 	maxImageDownloadSize = 10 * 1024 * 1024 // 10 MB
@@ -126,7 +126,7 @@ func resolveImageProvider(cfg *core.Config) (provider, apiKey string, err error)
 		return "gemini", key, nil
 	}
 
-	return "", "", fmt.Errorf("Image generation requires OpenAI or Gemini API key")
+	return "", "", fmt.Errorf("image generation requires OpenAI or Gemini API key")
 }
 
 // --- URL Validation ---

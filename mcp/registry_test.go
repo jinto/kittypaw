@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/kittypaw/core"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // --- Test helpers ---
@@ -289,4 +290,3 @@ func TestShutdownIdempotent(t *testing.T) {
 	reg.Shutdown()
 	reg.Shutdown()
 }
-

@@ -162,4 +162,3 @@ func (s *SecretsStore) MaskSecrets(text string) string {
 	}
 	return text
 }
-

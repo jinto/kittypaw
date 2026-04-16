@@ -39,11 +39,11 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
-	BaseDir          string             // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
-	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
-	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
-	Indexer          Indexer            // nil when workspace indexer is not initialized
-	PackageManager   *core.PackageManager // nil when packages are not configured
+	BaseDir          string                   // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
+	McpRegistry      *mcpreg.Registry         // nil when no MCP servers configured
+	Budget           *SharedTokenBudget       // shared across auto-fix, delegation, reflection
+	Indexer          Indexer                  // nil when workspace indexer is not initialized
+	PackageManager   *core.PackageManager     // nil when packages are not configured
 	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 }
 

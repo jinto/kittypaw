@@ -147,7 +147,7 @@ func ApproveEvolution(baseDir string, st *store.Store, profileID string) error {
 	}
 
 	// Remove pending marker.
-	st.DeleteUserContext(pendingKey)
+	_, _ = st.DeleteUserContext(pendingKey)
 	slog.Info("evolution: applied", "profile", profileID)
 	return nil
 }
@@ -169,7 +169,7 @@ func RejectEvolution(st *store.Store, profileID string) error {
 	_ = st.SetUserContext(rejKey, profileID, "evolution")
 
 	// Remove pending.
-	st.DeleteUserContext(pendingKey)
+	_, _ = st.DeleteUserContext(pendingKey)
 	slog.Info("evolution: rejected", "profile", profileID)
 	return nil
 }
