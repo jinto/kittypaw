@@ -20,7 +20,7 @@ fmt:
 	goimports -w .
 
 run: build
-	./$(BINARY)
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && ./$(BINARY)
 
 clean:
 	rm -f $(BINARY)

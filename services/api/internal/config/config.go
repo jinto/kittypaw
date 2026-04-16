@@ -16,6 +16,10 @@ type Config struct {
 	GitHubClientSecret string
 	BaseURL            string
 	AllowedOrigins     []string
+	AirKoreaAPIKey     string
+	RelayURL           string
+	APIBaseURL         string
+	SkillsRegistryURL  string
 }
 
 func Load() (*Config, error) {
@@ -28,6 +32,10 @@ func Load() (*Config, error) {
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		BaseURL:            env("BASE_URL", "http://localhost:8080"),
+		AirKoreaAPIKey:     os.Getenv("AIRKOREA_API_KEY"),
+		RelayURL:           os.Getenv("RELAY_URL"),
+		APIBaseURL:         os.Getenv("API_BASE_URL"),
+		SkillsRegistryURL:  env("SKILLS_REGISTRY_URL", "https://github.com/kittypaw-app/skills"),
 	}
 
 	required := map[string]string{

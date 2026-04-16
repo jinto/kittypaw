@@ -89,13 +89,35 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 	// Data proxy.
 	dataCache := cache.New()
-	airHandler := &proxy.AirHandler{
+	airKorea := &proxy.AirKoreaHandler{
 		Cache:      dataCache,
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		APIKey:     cfg.AirKoreaAPIKey,
+	}
+
+	// Service discovery — SDK reads this once on startup.
+	discovery := map[string]string{
+		"api_base_url":        cfg.APIBaseURL,
+		"skills_registry_url": cfg.SkillsRegistryURL,
+	}
+	if cfg.RelayURL != "" {
+		discovery["relay_url"] = cfg.RelayURL
 	}
 
 	// Routes.
 	r.Get("/health", handleHealth)
+	r.Get("/discovery", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(discovery)
+	})
+
+	// CLI OAuth for kittypaw login (HTTP callback + code-paste modes).
+	cliCodes := auth.NewCLICodeStore()
+	cliCfg := auth.CLILoginConfig{
+		GoogleCfg: googleCfg,
+		CodeStore: cliCodes,
+		BaseURL:   cfg.BaseURL,
+	}
 
 	r.Route("/auth", func(r chi.Router) {
 		r.Get("/google", oauthHandler.HandleGoogleLogin(googleCfg))
@@ -104,9 +126,20 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/github/callback", oauthHandler.HandleGitHubCallback(githubCfg))
 		r.Post("/token/refresh", oauthHandler.HandleTokenRefresh())
 		r.Get("/me", auth.HandleMe)
+
+		// CLI OAuth routes.
+		r.Get("/cli/{provider}", oauthHandler.HandleCLILogin(cliCfg))
+		r.Get("/cli/callback", oauthHandler.HandleCLICallback(cliCfg))
+		r.Post("/cli/exchange", oauthHandler.HandleCLIExchange(cliCfg))
 	})
 
-	r.Get("/v1/air", airHandler.ServeHTTP)
+	r.Route("/v1/air/airkorea", func(r chi.Router) {
+		r.Get("/realtime/station", airKorea.RealtimeByStation())
+		r.Get("/realtime/city", airKorea.RealtimeByCity())
+		r.Get("/forecast", airKorea.Forecast())
+		r.Get("/forecast/weekly", airKorea.WeeklyForecast())
+		r.Get("/unhealthy", airKorea.UnhealthyStations())
+	})
 
 	return r
 }

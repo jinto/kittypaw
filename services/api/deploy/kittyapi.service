@@ -1,0 +1,15 @@
+[Unit]
+Description=KittyAPI — kittypaw data proxy + auth
+After=network.target postgresql.service
+
+[Service]
+User=jinto
+Group=jinto
+WorkingDirectory=/home/jinto/kittyapi
+EnvironmentFile=/home/jinto/kittyapi/.env
+ExecStart=/home/jinto/kittyapi/kittypaw-api
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

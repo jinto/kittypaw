@@ -1,0 +1,13 @@
+upstream kittyapi {
+  server 127.0.0.1:9712;
+}
+
+server {
+  listen 80;
+  server_name {{DOMAIN}} {{PORTAL_DOMAIN}};
+
+  location / {
+    proxy_pass http://kittyapi;
+    include proxy_params;
+  }
+}

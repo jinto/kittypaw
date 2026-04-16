@@ -36,32 +36,12 @@ type OAuthHandler struct {
 }
 
 func (h *OAuthHandler) issueTokens(w http.ResponseWriter, r *http.Request, user *model.User) {
-	accessToken, err := Sign(user.ID, h.JWTSecret, AccessTokenTTL)
+	tokens, err := h.issueTokenPair(r.Context(), user)
 	if err != nil {
-		log.Printf("jwt sign: %v", err)
+		log.Printf("issue tokens: %v", err)
 		http.Error(w, "token generation failed", http.StatusInternalServerError)
 		return
 	}
-
-	rawRefresh, err := GenerateRefreshToken()
-	if err != nil {
-		log.Printf("refresh token generate: %v", err)
-		http.Error(w, "token generation failed", http.StatusInternalServerError)
-		return
-	}
-
-	hash := HashRefreshToken(rawRefresh)
-	if err := h.RefreshTokenStore.Create(r.Context(), user.ID, hash, time.Now().Add(RefreshTokenTTL)); err != nil {
-		log.Printf("refresh token store: %v", err)
-		http.Error(w, "token storage failed", http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(TokenResponse{
-		AccessToken:  accessToken,
-		RefreshToken: rawRefresh,
-		TokenType:    "Bearer",
-		ExpiresIn:    int(AccessTokenTTL.Seconds()),
-	})
+	_ = json.NewEncoder(w).Encode(tokens)
 }

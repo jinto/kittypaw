@@ -16,6 +16,7 @@ const (
 
 type stateEntry struct {
 	codeVerifier string
+	metadata     map[string]string // nil for standard browser flows
 	createdAt    time.Time
 }
 
@@ -39,6 +40,11 @@ func (s *StateStore) Close() {
 }
 
 func (s *StateStore) Create(codeVerifier string) (string, error) {
+	return s.CreateWithMeta(codeVerifier, nil)
+}
+
+// CreateWithMeta creates a state entry with additional metadata (e.g. CLI mode and port).
+func (s *StateStore) CreateWithMeta(codeVerifier string, meta map[string]string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("generate state: %w", err)
@@ -56,25 +62,32 @@ func (s *StateStore) Create(codeVerifier string) (string, error) {
 
 	s.entries[state] = stateEntry{
 		codeVerifier: codeVerifier,
+		metadata:     meta,
 		createdAt:    time.Now(),
 	}
 	return state, nil
 }
 
-func (s *StateStore) Consume(state string) (string, error) {
+// ConsumeMeta consumes a state entry and returns both the verifier and metadata.
+func (s *StateStore) ConsumeMeta(state string) (string, map[string]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	entry, ok := s.entries[state]
 	if !ok {
-		return "", fmt.Errorf("unknown or expired state")
+		return "", nil, fmt.Errorf("unknown or expired state")
 	}
 	delete(s.entries, state)
 
 	if time.Since(entry.createdAt) > stateTTL {
-		return "", fmt.Errorf("state expired")
+		return "", nil, fmt.Errorf("state expired")
 	}
-	return entry.codeVerifier, nil
+	return entry.codeVerifier, entry.metadata, nil
+}
+
+func (s *StateStore) Consume(state string) (string, error) {
+	verifier, _, err := s.ConsumeMeta(state)
+	return verifier, err
 }
 
 func (s *StateStore) evictExpiredLocked() {
