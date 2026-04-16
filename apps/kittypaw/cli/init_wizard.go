@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -13,7 +15,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 
-	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 )
@@ -27,8 +28,6 @@ type setupFlags struct {
 	telegramToken  string
 	telegramChatID string
 	firecrawlKey   string
-	kakaoRelayURL  string
-	kakaoUserToken string
 	workspace      string
 	httpAccess     bool
 	force          bool
@@ -111,14 +110,6 @@ func runNonInteractive(flags setupFlags) (core.WizardResult, error) {
 		w.TelegramChatID = flags.telegramChatID
 	}
 
-	if flags.kakaoRelayURL != "" {
-		if flags.kakaoUserToken == "" {
-			return w, fmt.Errorf("--kakao-user-token is required when --kakao-relay-url is set")
-		}
-		w.KakaoRelayURL = flags.kakaoRelayURL
-		w.KakaoUserToken = flags.kakaoUserToken
-	}
-
 	if flags.workspace != "" {
 		abs, err := filepath.Abs(flags.workspace)
 		if err != nil {
@@ -181,6 +172,9 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		} else if apiKey != "" {
 			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
 		}
+		claudeModels := []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250514"}
+		modelIdx := promptChoice(scanner, "  Model > ", claudeModels, 1)
+		localModel = claudeModels[modelIdx-1]
 	case 2:
 		provider = "openrouter"
 		var err error
@@ -291,6 +285,8 @@ func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.Wizar
 		}
 	}
 
+	printBotFatherGuide()
+
 	token, err := promptPassword("  Bot Token: ")
 	if err != nil || token == "" {
 		fmt.Println("  Skipping Telegram.")
@@ -335,6 +331,27 @@ func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.Wizar
 				w.TelegramChatID = manual
 			}
 		}
+	}
+}
+
+func printBotFatherGuide() {
+	lang := detectLang()
+	switch {
+	case strings.HasPrefix(lang, "ko"):
+		fmt.Println("  1. 텔레그램에서 @BotFather 를 검색하세요")
+		fmt.Println("  2. /newbot 을 보내고 안내에 따라 봇을 만드세요")
+		fmt.Println("  3. BotFather가 발급한 토큰을 아래에 붙여넣으세요")
+		fmt.Println()
+	case strings.HasPrefix(lang, "ja"):
+		fmt.Println("  1. Telegramで @BotFather を検索してください")
+		fmt.Println("  2. /newbot を送信し、案内に従ってボットを作成してください")
+		fmt.Println("  3. BotFatherが発行したトークンを下に貼り付けてください")
+		fmt.Println()
+	default:
+		fmt.Println("  1. Search for @BotFather in Telegram")
+		fmt.Println("  2. Send /newbot and follow the prompts to create a bot")
+		fmt.Println("  3. Paste the token BotFather gives you below")
+		fmt.Println()
 	}
 }
 
@@ -417,74 +434,139 @@ func detectLang() string {
 }
 
 // ---------------------------------------------------------------------------
-// Step [3/5]: KakaoTalk
+// Step [3/6]: KakaoTalk
 // ---------------------------------------------------------------------------
 
 func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [3/6] KakaoTalk (optional)")
 
-	var existingKakao *core.KakaoChannelConfig
+	hasExisting := false
 	if existing != nil {
 		for _, ch := range existing.Channels {
-			if ch.ChannelType == core.ChannelKakaoTalk && ch.Kakao != nil {
-				existingKakao = ch.Kakao
+			if ch.ChannelType == core.ChannelKakaoTalk {
+				hasExisting = true
 				break
 			}
 		}
 	}
 
-	if existingKakao != nil {
-		fmt.Printf("  ✓ Already connected (%s)\n", existingKakao.RelayURL)
-		if !promptYesNo(scanner, "  > Reconfigure?", false) {
-			fmt.Println("  (keeping existing connection)")
-			return
-		}
-	} else {
-		if !promptYesNo(scanner, "  > Connect?", false) {
-			return
-		}
-	}
-
-	defRelay := ""
-	if existingKakao != nil {
-		defRelay = existingKakao.RelayURL
-	}
-	relayURL := promptLine(scanner, "  Relay URL", defRelay)
-	if relayURL == "" {
-		fmt.Println("  Skipping KakaoTalk.")
+	if hasExisting {
+		fmt.Println("  ✓ Already enabled")
 		return
 	}
 
-	token, err := promptPassword("  User Token: ")
-	if err != nil || token == "" {
-		if existingKakao != nil {
-			fmt.Println("  (keeping existing token)")
-			token = existingKakao.UserToken
-		} else {
-			fmt.Println("  Skipping KakaoTalk.")
-			return
-		}
-	} else {
-		fmt.Printf("  ✓ %s\n", maskKey(token))
+	if !promptYesNo(scanner, "  > Enable?", false) {
+		return
 	}
 
-	// Connection test.
-	fmt.Print("  Connecting... ")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// KakaoTalk requires login to the KittyPaw API server.
+	fmt.Println()
+	fmt.Println("  KakaoTalk 연결을 위해 KittyPaw API 서버 로그인이 필요합니다.")
+	apiURL := promptLine(scanner, "  API Server URL", core.DefaultAPIServerURL)
+	if apiURL == "" {
+		fmt.Println("  Skipping KakaoTalk.")
+		return
+	}
+	apiURL = strings.TrimRight(apiURL, "/")
+
+	secrets, err := core.LoadSecrets()
+	if err != nil {
+		fmt.Printf("  로그인 실패: %v\n", err)
+		return
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+
+	fmt.Println()
+	var lr *loginResult
+	if isTTY() {
+		lr, err = loginHTTP(apiURL, mgr)
+	} else {
+		lr, err = loginCode(apiURL, mgr)
+	}
+	if err != nil {
+		fmt.Printf("  로그인 실패: %v\n", err)
+		if !promptYesNo(scanner, "  > 로그인 없이 KakaoTalk을 활성화할까요?", false) {
+			return
+		}
+		w.KakaoEnabled = true
+		w.APIServerURL = apiURL
+		return
+	}
+
+	w.KakaoEnabled = true
+	w.APIServerURL = apiURL
+
+	if lr == nil || lr.RelayURL == "" {
+		fmt.Println("  ✓ KakaoTalk 활성화 완료 (relay URL이 없어 페어링은 건너뜁니다)")
+		return
+	}
+
+	reg, err := core.RegisterRelaySession(lr.RelayURL)
+	if err != nil {
+		fmt.Printf("  릴레이 등록 실패: %v\n", err)
+		fmt.Println("  ✓ KakaoTalk 활성화 완료 (나중에 페어링을 재시도하세요)")
+		return
+	}
+
+	wsURL := core.WSURLFromRelay(lr.RelayURL, reg.Token)
+	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
+		fmt.Printf("  WS URL 저장 실패: %v\n", err)
+		return
+	}
+
+	wizardKakaoPairing(scanner, lr.RelayURL, reg)
+}
+
+func wizardKakaoPairing(_ *bufio.Scanner, relayBase string, reg *core.RelayRegistration) {
+	fmt.Println()
+
+	if err := copyToClipboard(reg.PairCode); err == nil {
+		fmt.Printf("  인증코드 %s 이 클립보드에 복사되었습니다.\n", reg.PairCode)
+	} else {
+		fmt.Printf("  인증코드: %s\n", reg.PairCode)
+	}
+
+	fmt.Printf("  인증코드 %s 을 채널에 전송하세요.\n", reg.PairCode)
+	fmt.Println()
+	if err := core.OpenBrowser(reg.ChannelURL); err != nil {
+		fmt.Printf("  채널 URL: %s\n", reg.ChannelURL)
+	}
+
+	fmt.Print("  페어링 대기 중")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	if err := channel.TestKakaoRelay(ctx, relayURL, token); err != nil {
-		fmt.Printf("FAIL (%v)\n", err)
-		if !promptYesNo(scanner, "  Save anyway?", true) {
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println(" 시간 초과")
+			fmt.Println("  ✓ KakaoTalk 활성화 완료 (나중에 채널에서 인증코드를 전송하세요)")
 			return
+		case <-time.After(3 * time.Second):
+			fmt.Print(".")
+			if core.CheckRelayPairStatus(relayBase, reg.Token) {
+				fmt.Println(" OK")
+				fmt.Println("  ✓ KakaoTalk 페어링 완료!")
+				return
+			}
 		}
-	} else {
-		fmt.Println("OK")
 	}
+}
 
-	w.KakaoRelayURL = relayURL
-	w.KakaoUserToken = token
+func copyToClipboard(text string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	case "linux":
+		cmd := exec.Command("xclip", "-selection", "clipboard")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	default:
+		return fmt.Errorf("unsupported")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -565,21 +647,43 @@ func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.
 func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [6/6] KittyPaw API Server (optional)")
-	fmt.Println("  API 스킬(대기질 등)을 사용하려면 kittypaw-api 서버 주소를 입력하세요.")
 
-	if !promptYesNo(scanner, "  > Configure?", false) {
+	// Already configured via KakaoTalk login step.
+	if w.APIServerURL != "" {
+		fmt.Printf("  ✓ Already configured (%s)\n", w.APIServerURL)
 		return
 	}
 
-	apiURL := promptLine(scanner, "  API Server URL", "http://localhost:8080")
+	fmt.Println("  API 스킬(대기질 등)을 사용하려면 kittypaw-api 서버에 로그인하세요.")
+
+	if !promptYesNo(scanner, "  > Login?", false) {
+		return
+	}
+
+	apiURL := promptLine(scanner, "  API Server URL", core.DefaultAPIServerURL)
 	if apiURL == "" {
 		return
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
-	w.APIServerURL = apiURL
 
-	fmt.Printf("  ✓ %s\n", apiURL)
-	fmt.Println("  로그인: kittypaw login --api-url " + apiURL)
+	secrets, err := core.LoadSecrets()
+	if err != nil {
+		fmt.Printf("  로그인 실패: %v\n", err)
+		return
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+
+	if isTTY() {
+		_, err = loginHTTP(apiURL, mgr)
+	} else {
+		_, err = loginCode(apiURL, mgr)
+	}
+	if err != nil {
+		fmt.Printf("  로그인 실패: %v\n", err)
+		return
+	}
+
+	w.APIServerURL = apiURL
 }
 
 // ---------------------------------------------------------------------------

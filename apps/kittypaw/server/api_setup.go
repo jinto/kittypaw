@@ -220,7 +220,44 @@ func (s *Server) handleSetupTelegramChatID(w http.ResponseWriter, r *http.Reques
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusServiceUnavailable, "kakao registration requires the relay server")
+	apiURL, _, _ := s.store.GetUserContext("setup:api_server_url")
+	if apiURL == "" {
+		apiURL = core.DefaultAPIServerURL
+	}
+	apiURL = strings.TrimRight(apiURL, "/")
+
+	secrets, err := core.LoadSecrets()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "load secrets: "+err.Error())
+		return
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+
+	relayURL, ok := mgr.LoadRelayURL(apiURL)
+	if !ok || relayURL == "" {
+		writeError(w, http.StatusServiceUnavailable, "relay URL not configured — login to the API server first")
+		return
+	}
+
+	reg, err := core.RegisterRelaySession(relayURL)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "relay register: "+err.Error())
+		return
+	}
+
+	wsURL := core.WSURLFromRelay(relayURL, reg.Token)
+	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "save kakao ws url: "+err.Error())
+		return
+	}
+
+	_ = s.store.SetUserContext("setup:kakao_relay_base", relayURL, "setup")
+	_ = s.store.SetUserContext("setup:kakao_relay_token", reg.Token, "setup")
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pair_code":   reg.PairCode,
+		"channel_url": reg.ChannelURL,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -228,17 +265,28 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupKakaoPairStatus(w http.ResponseWriter, _ *http.Request) {
-	hasKakao := false
+	// Already configured: no further pairing needed.
 	s.configMu.RLock()
 	for _, ch := range s.config.Channels {
 		if ch.ChannelType == core.ChannelKakaoTalk {
-			hasKakao = true
-			break
+			s.configMu.RUnlock()
+			writeJSON(w, http.StatusOK, map[string]any{"paired": true})
+			return
 		}
 	}
 	s.configMu.RUnlock()
 
-	writeJSON(w, http.StatusOK, map[string]any{"paired": hasKakao})
+	// Wizard in progress: ask the relay whether the user has completed pairing.
+	relayBase, _, _ := s.store.GetUserContext("setup:kakao_relay_base")
+	token, _, _ := s.store.GetUserContext("setup:kakao_relay_token")
+	if relayBase == "" || token == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"paired": false})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"paired": core.CheckRelayPairStatus(relayBase, token),
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -444,12 +492,6 @@ func (s *Server) wizardResultFromStore() core.WizardResult {
 	}
 	if v, ok, _ := s.store.GetUserContext("setup:telegram_chat_id"); ok {
 		w.TelegramChatID = v
-	}
-	if v, ok, _ := s.store.GetUserContext("setup:kakao_relay_url"); ok {
-		w.KakaoRelayURL = v
-	}
-	if v, ok, _ := s.store.GetUserContext("setup:kakao_user_token"); ok {
-		w.KakaoUserToken = v
 	}
 	if v, ok, _ := s.store.GetUserContext("setup:workspace_path"); ok {
 		w.WorkspacePath = v

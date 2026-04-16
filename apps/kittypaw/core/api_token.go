@@ -88,6 +88,31 @@ func (m *APITokenManager) LoadAccessToken(apiURL string) (string, error) {
 	return newAccess, nil
 }
 
+// SaveRelayURL stores the relay server base URL provided by the API server.
+func (m *APITokenManager) SaveRelayURL(apiURL, relayURL string) error {
+	ns := NamespaceForURL(apiURL)
+	return m.secrets.Set(ns, "relay_url", relayURL)
+}
+
+// LoadRelayURL returns the stored relay server base URL.
+func (m *APITokenManager) LoadRelayURL(apiURL string) (string, bool) {
+	ns := NamespaceForURL(apiURL)
+	return m.secrets.Get(ns, "relay_url")
+}
+
+// SaveKakaoRelayURL stores the full Kakao relay WebSocket URL built from
+// a client-side relay registration (baseURL + /ws/{token}).
+func (m *APITokenManager) SaveKakaoRelayURL(apiURL, wsURL string) error {
+	ns := NamespaceForURL(apiURL)
+	return m.secrets.Set(ns, "kakao_relay_ws_url", wsURL)
+}
+
+// LoadKakaoRelayURL returns the stored Kakao relay WebSocket URL.
+func (m *APITokenManager) LoadKakaoRelayURL(apiURL string) (string, bool) {
+	ns := NamespaceForURL(apiURL)
+	return m.secrets.Get(ns, "kakao_relay_ws_url")
+}
+
 // ClearTokens removes stored tokens for an API.
 func (m *APITokenManager) ClearTokens(apiURL string) error {
 	ns := NamespaceForURL(apiURL)
