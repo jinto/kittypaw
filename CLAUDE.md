@@ -5,7 +5,7 @@ AI agent framework with JavaScript sandbox execution, multi-channel messaging, a
 ## Architecture
 
 ```
-cmd/kittypaw/  CLI binary (Cobra)
+cli/           CLI binary (Cobra)
 core/          Types, config, skill management, persona profiles/presets, tenant isolation, WebSocket protocol, setup wizard shared logic
 llm/           LLM provider abstraction (Claude, OpenAI, Ollama)
 mcp/           MCP client registry (external tool server connections)
@@ -15,6 +15,7 @@ engine/        Agent loop (observe + retry), skill executor, HTML-to-Markdown, S
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
 server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload)
 client/        REST/WS client + DaemonConn (thin client: auto daemon discovery/start)
+relay/         KakaoTalk relay (Cloudflare Workers, TypeScript)
 ```
 
 ## Key Design Decisions (vs Rust original)
