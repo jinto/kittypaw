@@ -30,6 +30,4 @@ linters:
 run:
   timeout: 3m
 
-issues:
-  exclude-dirs:
-    - vendor
+issues: {}
