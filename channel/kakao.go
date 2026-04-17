@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,26 +33,23 @@ type kakaoReplyMessage struct {
 // --- KakaoChannel ---
 
 // KakaoChannel implements Channel by maintaining a WebSocket connection to a
-// Cloudflare Worker relay that bridges KakaoTalk messages.
+// relay server that bridges KakaoTalk messages.
 //
 // Protocol:
 //
-//	WS /ws/{token} — receive messages, send replies
+//	WS — receive messages, send replies
 //	Recv: {"id":"action_id","text":"utterance","user_id":"kakao_user_id"}
 //	Send: {"id":"action_id","text":"response_text"}
 type KakaoChannel struct {
-	relayURL  string
-	userToken string
-	conn      *websocket.Conn
-	mu        sync.Mutex
+	wsEndpoint string // full wss:// URL from login
+	conn       *websocket.Conn
+	mu         sync.Mutex
 }
 
 // TestKakaoRelay attempts a WebSocket connection to the relay and immediately
-// closes it. Returns nil on success. Useful for validating relay URL + token
-// during setup without starting the full message loop.
-func TestKakaoRelay(ctx context.Context, relayURL, userToken string) error {
-	k := &KakaoChannel{relayURL: relayURL, userToken: userToken}
-	conn, _, err := websocket.Dial(ctx, k.wsURL(), nil)
+// closes it. Returns nil on success.
+func TestKakaoRelay(ctx context.Context, wsURL string) error {
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("relay connection failed: %w", err)
 	}
@@ -62,27 +58,30 @@ func TestKakaoRelay(ctx context.Context, relayURL, userToken string) error {
 }
 
 // NewKakao creates a KakaoChannel that connects via WebSocket to the relay.
-func NewKakao(relayURL, userToken string) *KakaoChannel {
-	return &KakaoChannel{
-		relayURL:  relayURL,
-		userToken: userToken,
-	}
+// wsURL is the full WebSocket URL (e.g. wss://relay.kittypaw.app/ws/{token}).
+func NewKakao(wsURL string) *KakaoChannel {
+	return &KakaoChannel{wsEndpoint: wsURL}
 }
 
 func (k *KakaoChannel) Name() string { return "kakao_talk" }
 
-// wsURL builds the WebSocket URL from the relay HTTP URL.
-func (k *KakaoChannel) wsURL() string {
-	u := k.relayURL
-	u = strings.Replace(u, "https://", "wss://", 1)
-	u = strings.Replace(u, "http://", "ws://", 1)
-	return u + "/ws/" + url.PathEscape(k.userToken)
+func (k *KakaoChannel) wsURL() string { return k.wsEndpoint }
+
+// relayHost returns the host portion of a ws(s):// URL, or "unknown" if parsing fails.
+// Used to keep session tokens out of log output.
+func relayHost(wsURL string) string {
+	u, err := url.Parse(wsURL)
+	if err != nil || u.Host == "" {
+		return "unknown"
+	}
+	return u.Host
 }
 
 // Start connects to the relay via WebSocket and emits incoming messages as events.
 // Reconnects automatically on connection loss.
 func (k *KakaoChannel) Start(ctx context.Context, eventCh chan<- core.Event) error {
-	slog.Info("kakao: connecting to relay", "url", k.relayURL)
+	// The WS endpoint embeds a session bearer token in its path; log host only.
+	slog.Info("kakao: connecting to relay", "host", relayHost(k.wsEndpoint))
 
 	backoff := time.Second
 	maxBackoff := 30 * time.Second

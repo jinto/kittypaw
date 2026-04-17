@@ -141,19 +141,12 @@ func (s *ChannelSpawner) ReplaceSpawn(ch channel.Channel, cfg core.ChannelConfig
 	return s.TrySpawn(ch, cfg)
 }
 
-// configEqual compares two ChannelConfig values, handling the Kakao pointer
-// field by comparing dereferenced values.
+// configEqual compares two ChannelConfig values.
 func configEqual(a, b core.ChannelConfig) bool {
-	if a.ChannelType != b.ChannelType || a.Token != b.Token || a.BindAddr != b.BindAddr {
-		return false
-	}
-	if a.Kakao == nil && b.Kakao == nil {
-		return true
-	}
-	if a.Kakao == nil || b.Kakao == nil {
-		return false
-	}
-	return *a.Kakao == *b.Kakao
+	return a.ChannelType == b.ChannelType &&
+		a.Token == b.Token &&
+		a.BindAddr == b.BindAddr &&
+		a.KakaoWSURL == b.KakaoWSURL
 }
 
 // Reconcile compares the currently running channels against the desired
@@ -165,6 +158,9 @@ func configEqual(a, b core.ChannelConfig) bool {
 func (s *ChannelSpawner) Reconcile(configs []core.ChannelConfig) error {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
+
+	// Inject Kakao relay WS URL from secrets into channel configs.
+	core.InjectKakaoWSURL(configs)
 
 	// Build desired map, filtering out WebSocket channels.
 	desired := make(map[string]core.ChannelConfig)

@@ -226,16 +226,43 @@ type MCPServerConfig struct {
 
 // ChannelConfig defines a messaging channel.
 type ChannelConfig struct {
-	ChannelType ChannelType         `toml:"channel_type"`
-	Token       string              `toml:"token"`
-	BindAddr    string              `toml:"bind_addr"`
-	Kakao       *KakaoChannelConfig `toml:"kakao"`
+	ChannelType ChannelType `toml:"channel_type"`
+	Token       string      `toml:"token"`
+	BindAddr    string      `toml:"bind_addr"`
+	KakaoWSURL  string      `toml:"-"` // runtime-injected from secrets (not in config.toml)
 }
 
-// KakaoChannelConfig holds Kakao-specific relay settings.
-type KakaoChannelConfig struct {
-	RelayURL  string `toml:"relay_url"`
-	UserToken string `toml:"user_token"`
+// InjectKakaoWSURL populates KakaoWSURL on kakao_talk channel configs from
+// secrets. Called by ChannelSpawner.Reconcile so hot-reload and initial spawn
+// share the same path. No-op if secrets or relay URL are missing.
+//
+// api_url is written by the setup paths (runSetup / generateConfig) under the
+// bare "kittypaw-api" namespace. When absent — e.g. the user only completed
+// the KakaoTalk step and skipped API server login — fall back to
+// DefaultAPIServerURL so the host-scoped secret saved by wizardKakao
+// still resolves.
+func InjectKakaoWSURL(channels []ChannelConfig) {
+	secrets, err := LoadSecrets()
+	if err != nil {
+		return
+	}
+	mgr := NewAPITokenManager("", secrets)
+
+	apiURL, ok := secrets.Get("kittypaw-api", "api_url")
+	if !ok || apiURL == "" {
+		apiURL = DefaultAPIServerURL
+	}
+
+	wsURL, ok := mgr.LoadKakaoRelayURL(apiURL)
+	if !ok || wsURL == "" {
+		return
+	}
+
+	for i := range channels {
+		if channels[i].ChannelType == ChannelKakaoTalk {
+			channels[i].KakaoWSURL = wsURL
+		}
+	}
 }
 
 // AgentConfig defines a single agent's behavior.

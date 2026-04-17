@@ -50,6 +50,8 @@ JWT expiry checked client-side via base64 payload decode (no signature verificat
 
 Before OAuth, `loginHTTP`/`loginCode` call unauthenticated `GET {apiURL}/discovery` (see `core/discovery.go`) to resolve service topology. The response persists three URLs per-host under the portal namespace — `api_base_url`, `relay_url`, `skills_registry_url` — with empty-string-deletes semantics so stale URLs don't survive a relay migration. Discovery failures log a warning and fall back to the user-supplied `apiURL` so login works in collapsed deployments.
 
+KakaoTalk relay pairing skips OAuth entirely: `wizardKakao` (CLI) and `handleSetupKakaoRegister` (web) hit `/discovery` anonymously, `POST {relay_url}/register` directly, then persist the full `wss://…/ws/{token}` under `kittypaw-api/{host}`. `InjectKakaoWSURL` (invoked by `ChannelSpawner.Reconcile` as the single injection site) reads that secret at spawn time and populates `KakaoWSURL` on the runtime channel config — the token is never written to `config.toml`, so rotations don't require a config edit.
+
 Packages with `source = "kittypaw-api/access_token"` config fields get auto-refreshed tokens at execution time (`engine/executor.go:runSkillOrPackage`).
 
 ## HTTP Sandbox Security
