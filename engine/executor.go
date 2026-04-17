@@ -1073,16 +1073,25 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 	// Resolve config (secrets, defaults, source bindings).
 	config, _ := s.PackageManager.GetConfig(name)
 
-	// Auto-refresh API tokens for source-bound config fields.
+	// Auto-refresh API tokens for source-bound config fields. Fail fast with a
+	// clear message if the user is not logged in — silently omitting the token
+	// would surface later as an unexplained 401 from the remote API.
 	if s.APITokenMgr != nil {
-		if apiURL, ok := config["api_url"]; ok && apiURL != "" {
-			for _, f := range pkg.Config {
-				if f.Key == "access_token" && strings.HasPrefix(f.Source, "kittypaw-api/") {
-					if tok, err := s.APITokenMgr.LoadAccessToken(apiURL); err == nil && tok != "" {
-						config["access_token"] = tok
-					}
-				}
+		for _, f := range pkg.Config {
+			if f.Key != "access_token" || !strings.HasPrefix(f.Source, "kittypaw-api/") {
+				continue
 			}
+			apiURL := config["api_url"]
+			if apiURL == "" {
+				apiURL = core.DefaultAPIServerURL
+			}
+			tok, err := s.APITokenMgr.LoadAccessToken(apiURL)
+			if err != nil || tok == "" {
+				return jsonResult(map[string]any{
+					"error": fmt.Sprintf("skill %q requires API login — run: kittypaw login", name),
+				})
+			}
+			config["access_token"] = tok
 		}
 	}
 
