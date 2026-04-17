@@ -8,7 +8,7 @@ GoPaw 패키지 시스템에 GitHub 기반 레지스트리를 연결하여, `gop
 
 | 결정 | 내용 |
 |------|------|
-| 패키지 소스 | `github.com/kittypaw/skills` — sync JS로 재작성하여 업로드 |
+| 패키지 소스 | `github.com/kittypaw-app/skills` — sync JS로 재작성하여 업로드 |
 | 바이너리 내장 | 안 함. 모든 패키지는 `gopaw pkg install`로 설치 |
 | async 전처리 | 불필요. 레지스트리 패키지가 처음부터 sync JS |
 | 기본 제공 패키지 | 향후 결정. 현재는 수동 install만 지원 |
@@ -16,7 +16,7 @@ GoPaw 패키지 시스템에 GitHub 기반 레지스트리를 연결하여, `gop
 ## Registry Structure
 
 ```
-github.com/kittypaw/skills/
+github.com/kittypaw-app/skills/
 ├── index.json                # 패키지 카탈로그 ([]RegistryEntry)
 ├── rss-digest/
 │   ├── package.toml
@@ -28,7 +28,7 @@ github.com/kittypaw/skills/
     └── ...
 ```
 
-Base URL: `https://raw.githubusercontent.com/kittypaw/skills/main`
+Base URL: `https://raw.githubusercontent.com/kittypaw-app/skills/main`
 
 ### index.json Format
 
@@ -40,7 +40,7 @@ Base URL: `https://raw.githubusercontent.com/kittypaw/skills/main`
     "version": "1.0.0",
     "description": "RSS 피드 요약 → 텔레그램",
     "author": "KittyPaw Team",
-    "url": "https://raw.githubusercontent.com/kittypaw/skills/main/rss-digest"
+    "url": "https://raw.githubusercontent.com/kittypaw-app/skills/main/rss-digest"
   }
 ]
 ```
@@ -62,7 +62,7 @@ DownloadPackage(entry):
 
 기본 레지스트리 URL 상수 추가:
 ```go
-const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw/skills/main"
+const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw-app/skills/main"
 ```
 
 ### 2. `core/config.go` — Registry 설정
@@ -70,7 +70,7 @@ const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw/skills/ma
 Config 구조체에 Registry 섹션 추가:
 ```toml
 [registry]
-url = "https://raw.githubusercontent.com/kittypaw/skills/main"
+url = "https://raw.githubusercontent.com/kittypaw-app/skills/main"
 ```
 
 기본값은 DefaultRegistryURL. 사설 레지스트리/미러 대응.
