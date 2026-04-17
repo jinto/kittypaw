@@ -14,67 +14,50 @@ import (
 )
 
 const (
-	airKoreaBaseURL  = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc"
-	airKoreaCacheTTL = 30 * time.Minute
-	maxResponseBody  = 1 << 20 // 1 MB
+	holidayBaseURL  = "https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService"
+	holidayCacheTTL = 24 * time.Hour
 )
 
-// AirKoreaHandler proxies requests to the AirKorea (에어코리아) public data API.
-type AirKoreaHandler struct {
+// HolidayHandler proxies requests to the KASI (한국천문연구원) special day API.
+type HolidayHandler struct {
 	Cache      *cache.Cache
 	HTTPClient *http.Client
 	APIKey     string
 	BaseURL    string // overridable for testing
 }
 
-func (h *AirKoreaHandler) baseURL() string {
+func (h *HolidayHandler) baseURL() string {
 	if h.BaseURL != "" {
 		return h.BaseURL
 	}
-	return airKoreaBaseURL
+	return holidayBaseURL
 }
 
-// RealtimeByStation proxies 측정소별 실시간 측정정보 조회.
-func (h *AirKoreaHandler) RealtimeByStation() http.HandlerFunc {
-	return h.endpoint("/getMsrstnAcctoRltmMesureDnsty",
-		[]string{"stationName", "dataTerm"},
-		[]string{"stationName", "dataTerm", "pageNo", "numOfRows"},
+// Holidays proxies 공휴일 정보조회.
+func (h *HolidayHandler) Holidays() http.HandlerFunc {
+	return h.endpoint("/getHoliDeInfo",
+		[]string{"solYear"},
+		[]string{"solYear", "solMonth", "pageNo", "numOfRows"},
 	)
 }
 
-// RealtimeByCity proxies 시도별 실시간 측정정보 조회.
-func (h *AirKoreaHandler) RealtimeByCity() http.HandlerFunc {
-	return h.endpoint("/getCtprvnRltmMesureDnsty",
-		[]string{"sidoName"},
-		[]string{"sidoName", "pageNo", "numOfRows"},
+// Anniversaries proxies 기념일 정보조회.
+func (h *HolidayHandler) Anniversaries() http.HandlerFunc {
+	return h.endpoint("/getAnniversaryInfo",
+		[]string{"solYear"},
+		[]string{"solYear", "solMonth", "pageNo", "numOfRows"},
 	)
 }
 
-// Forecast proxies 대기질 예보통보 조회.
-func (h *AirKoreaHandler) Forecast() http.HandlerFunc {
-	return h.endpoint("/getMinuDustFrcstDspth",
-		nil,
-		[]string{"searchDate", "informCode", "pageNo", "numOfRows"},
+// SolarTerms proxies 24절기 정보조회.
+func (h *HolidayHandler) SolarTerms() http.HandlerFunc {
+	return h.endpoint("/get24DivisionsInfo",
+		[]string{"solYear"},
+		[]string{"solYear", "solMonth", "pageNo", "numOfRows"},
 	)
 }
 
-// WeeklyForecast proxies 초미세먼지 주간예보 조회.
-func (h *AirKoreaHandler) WeeklyForecast() http.HandlerFunc {
-	return h.endpoint("/getMinuDustWeekFrcstDspth",
-		nil,
-		[]string{"searchDate", "pageNo", "numOfRows"},
-	)
-}
-
-// UnhealthyStations proxies 통합대기환경지수 나쁨 이상 측정소 목록조회.
-func (h *AirKoreaHandler) UnhealthyStations() http.HandlerFunc {
-	return h.endpoint("/getUnityAirEnvrnIdexSnstiveAboveMsrstnList",
-		nil,
-		[]string{"pageNo", "numOfRows"},
-	)
-}
-
-func (h *AirKoreaHandler) endpoint(path string, required, allowed []string) http.HandlerFunc {
+func (h *HolidayHandler) endpoint(path string, required, allowed []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 
@@ -94,7 +77,7 @@ func (h *AirKoreaHandler) endpoint(path string, required, allowed []string) http
 		upstream.Set("serviceKey", h.APIKey)
 		upstream.Set("returnType", "json")
 
-		key := cacheKey(path, upstream)
+		key := holidayCacheKey(path, upstream)
 
 		if data, ok := h.Cache.Get(key); ok {
 			w.Header().Set("Content-Type", "application/json")
@@ -104,7 +87,7 @@ func (h *AirKoreaHandler) endpoint(path string, required, allowed []string) http
 
 		data, err := h.fetch(path, upstream)
 		if err != nil {
-			log.Printf("airkorea upstream error (%s): %v", path, err)
+			log.Printf("holiday upstream error (%s): %v", path, err)
 			if stale, isStale, found := h.Cache.GetStale(key); found && isStale {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Warning", `110 - "Response is stale"`)
@@ -115,13 +98,13 @@ func (h *AirKoreaHandler) endpoint(path string, required, allowed []string) http
 			return
 		}
 
-		h.Cache.Set(key, data, airKoreaCacheTTL)
+		h.Cache.Set(key, data, holidayCacheTTL)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(data)
 	}
 }
 
-func (h *AirKoreaHandler) fetch(path string, params url.Values) ([]byte, error) {
+func (h *HolidayHandler) fetch(path string, params url.Values) ([]byte, error) {
 	u := h.baseURL() + path + "?" + params.Encode()
 
 	resp, err := h.HTTPClient.Get(u)
@@ -138,7 +121,7 @@ func (h *AirKoreaHandler) fetch(path string, params url.Values) ([]byte, error) 
 	return io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 }
 
-func cacheKey(path string, params url.Values) string {
+func holidayCacheKey(path string, params url.Values) string {
 	keys := make([]string, 0, len(params))
 	for k := range params {
 		if k == "serviceKey" {
@@ -149,7 +132,7 @@ func cacheKey(path string, params url.Values) string {
 	sort.Strings(keys)
 
 	var b strings.Builder
-	b.WriteString("airkorea:")
+	b.WriteString("holiday:")
 	b.WriteString(path)
 	for _, k := range keys {
 		b.WriteByte(':')

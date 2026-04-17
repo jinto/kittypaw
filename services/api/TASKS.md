@@ -24,3 +24,10 @@
 - [x] **T2: Rate limiting** — fixed window counter + daily 10K cap + Retry-After header + middleware
 - [x] **T3: /v1/air endpoint** — 에어코리아 프록시 (15s timeout, cache, Warning header on stale, 502 on failure)
 - [x] **T4: Route wiring** — cache + ratelimit + proxy integrated into main.go
+
+## Plan 4: Calendar API (특일정보) ← 현재
+
+- [x] **T1: Config** — `HOLIDAY_API_KEY` env var + `.env.example`
+- [x] **T2: HolidayHandler** — 한국천문연구원 특일정보 프록시 (공휴일, 기념일, 24절기) + 테스트 10개
+- [x] **T3: Route wiring** — `/v1/calendar/*` 라우트 등록
+- [x] **T4: 검증** — 전체 테스트 65개 통과, lint 0 issues

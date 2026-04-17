@@ -94,6 +94,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 		APIKey:     cfg.AirKoreaAPIKey,
 	}
+	holiday := &proxy.HolidayHandler{
+		Cache:      dataCache,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		APIKey:     cfg.HolidayAPIKey,
+	}
 
 	// Service discovery — SDK reads this once on startup.
 	discovery := map[string]string{
@@ -139,6 +144,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/forecast", airKorea.Forecast())
 		r.Get("/forecast/weekly", airKorea.WeeklyForecast())
 		r.Get("/unhealthy", airKorea.UnhealthyStations())
+	})
+
+	r.Route("/v1/calendar", func(r chi.Router) {
+		r.Get("/holidays", holiday.Holidays())
+		r.Get("/anniversaries", holiday.Anniversaries())
+		r.Get("/solar-terms", holiday.SolarTerms())
 	})
 
 	return r
