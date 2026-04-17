@@ -19,28 +19,30 @@ func ValidateTelegramToken(token string) bool {
 }
 
 // FetchTelegramChatID calls the Telegram Bot API getUpdates to discover the
-// chat ID from the most recent message.
+// chat ID from the most recent message, and ACKs every update it saw so the
+// daemon that takes over afterwards does not inherit a backlog and replay
+// every /start as a fresh conversation.
 func FetchTelegramChatID(ctx context.Context, token string) (string, error) {
 	if !ValidateTelegramToken(token) {
 		return "", fmt.Errorf("invalid token format")
 	}
-	url := "https://api.telegram.org/bot" + token + "/getUpdates?limit=1&timeout=0"
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// Pull every pending update — we need all update_ids in order to ACK
+	// them collectively via the follow-up getUpdates call below.
+	url := "https://api.telegram.org/bot" + token + "/getUpdates?timeout=0"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
-
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
 	if err != nil {
 		return "", err
 	}
@@ -48,7 +50,8 @@ func FetchTelegramChatID(ctx context.Context, token string) (string, error) {
 	var result struct {
 		OK     bool `json:"ok"`
 		Result []struct {
-			Message struct {
+			UpdateID int64 `json:"update_id"`
+			Message  struct {
 				Chat struct {
 					ID int64 `json:"id"`
 				} `json:"chat"`
@@ -65,6 +68,21 @@ func FetchTelegramChatID(ctx context.Context, token string) (string, error) {
 		return "", fmt.Errorf("no messages found — send a message to the bot first")
 	}
 
-	chatID := result.Result[0].Message.Chat.ID
-	return fmt.Sprintf("%d", chatID), nil
+	last := result.Result[len(result.Result)-1]
+
+	// ACK: a second getUpdates with offset=last.UpdateID+1 confirms every
+	// update up to `last` and drops them from Telegram's server-side queue.
+	// Best-effort — if it fails the chat_id is still valid, but the user
+	// may see replayed messages when the daemon starts.
+	ackURL := fmt.Sprintf(
+		"https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=0",
+		token, last.UpdateID+1,
+	)
+	if ackReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ackURL, nil); err == nil {
+		if ackResp, err := http.DefaultClient.Do(ackReq); err == nil {
+			ackResp.Body.Close()
+		}
+	}
+
+	return fmt.Sprintf("%d", last.Message.Chat.ID), nil
 }
