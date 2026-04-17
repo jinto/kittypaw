@@ -38,13 +38,10 @@ func FromConfig(cfg core.ChannelConfig) (Channel, error) {
 		return NewWebSocket(addr), nil
 
 	case core.ChannelKakaoTalk:
-		if cfg.Kakao == nil {
-			return nil, fmt.Errorf("kakao channel requires kakao config section")
+		if cfg.KakaoWSURL == "" {
+			return nil, fmt.Errorf("kakao channel requires login (run: kittypaw login)")
 		}
-		if cfg.Kakao.RelayURL == "" || cfg.Kakao.UserToken == "" {
-			return nil, fmt.Errorf("kakao channel requires relay_url and user_token")
-		}
-		return NewKakao(cfg.Kakao.RelayURL, cfg.Kakao.UserToken), nil
+		return NewKakao(cfg.KakaoWSURL), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported channel type: %q", cfg.ChannelType)

@@ -372,10 +372,9 @@ func TestConfigEqual(t *testing.T) {
 	}{
 		{"identical", core.ChannelConfig{ChannelType: "t", Token: "x"}, core.ChannelConfig{ChannelType: "t", Token: "x"}, true},
 		{"token differs", core.ChannelConfig{Token: "a"}, core.ChannelConfig{Token: "b"}, false},
-		{"both kakao nil", core.ChannelConfig{}, core.ChannelConfig{}, true},
-		{"one kakao nil", core.ChannelConfig{Kakao: &core.KakaoChannelConfig{RelayURL: "x"}}, core.ChannelConfig{}, false},
-		{"kakao equal", core.ChannelConfig{Kakao: &core.KakaoChannelConfig{RelayURL: "x"}}, core.ChannelConfig{Kakao: &core.KakaoChannelConfig{RelayURL: "x"}}, true},
-		{"kakao differ", core.ChannelConfig{Kakao: &core.KakaoChannelConfig{RelayURL: "x"}}, core.ChannelConfig{Kakao: &core.KakaoChannelConfig{RelayURL: "y"}}, false},
+		{"both empty", core.ChannelConfig{}, core.ChannelConfig{}, true},
+		{"kakao ws url equal", core.ChannelConfig{KakaoWSURL: "wss://r.example.com/ws/t"}, core.ChannelConfig{KakaoWSURL: "wss://r.example.com/ws/t"}, true},
+		{"kakao ws url differ", core.ChannelConfig{KakaoWSURL: "wss://r.example.com/ws/a"}, core.ChannelConfig{KakaoWSURL: "wss://r.example.com/ws/b"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

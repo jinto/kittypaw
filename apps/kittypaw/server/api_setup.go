@@ -253,6 +253,10 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 
 	_ = s.store.SetUserContext("setup:kakao_relay_base", relayURL, "setup")
 	_ = s.store.SetUserContext("setup:kakao_relay_token", reg.Token, "setup")
+	// Persist apiURL so generateConfig writes it to the bare "kittypaw-api"
+	// namespace that InjectKakaoWSURL reads at serve time — without this,
+	// users who only complete the Kakao step end up with an unroutable channel.
+	_ = s.store.SetUserContext("setup:api_server_url", apiURL, "setup")
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"pair_code":   reg.PairCode,
@@ -498,6 +502,12 @@ func (s *Server) wizardResultFromStore() core.WizardResult {
 	}
 	if v, ok, _ := s.store.GetUserContext("setup:api_server_url"); ok {
 		w.APIServerURL = v
+	}
+	// Kakao has no toggle field in the web wizard: a successful /setup/kakao/register
+	// leaves a relay token in the store. Treat that as the "enabled" signal so
+	// MergeWizardSettings includes the channel in the final config.
+	if v, ok, _ := s.store.GetUserContext("setup:kakao_relay_token"); ok && v != "" {
+		w.KakaoEnabled = true
 	}
 	return w
 }

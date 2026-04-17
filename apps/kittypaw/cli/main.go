@@ -194,8 +194,6 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.telegramToken, "telegram-token", "", "Telegram bot token")
 	cmd.Flags().StringVar(&flags.telegramChatID, "telegram-chat-id", "", "Telegram chat ID")
 	cmd.Flags().StringVar(&flags.firecrawlKey, "firecrawl-api-key", "", "Firecrawl API key for web search")
-	cmd.Flags().StringVar(&flags.kakaoRelayURL, "kakao-relay-url", "", "KakaoTalk relay WebSocket URL")
-	cmd.Flags().StringVar(&flags.kakaoUserToken, "kakao-user-token", "", "KakaoTalk relay user token")
 	cmd.Flags().StringVar(&flags.workspace, "workspace", "", "Workspace directory path")
 	cmd.Flags().BoolVar(&flags.httpAccess, "http-access", false, "Grant HTTP access capability")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Overwrite existing config without confirmation")

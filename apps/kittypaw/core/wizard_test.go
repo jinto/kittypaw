@@ -283,17 +283,13 @@ func TestMergeWizardSettings_EmptyKakaoPreservesExisting(t *testing.T) {
 	base := DefaultConfig()
 	base.Channels = append(base.Channels, ChannelConfig{
 		ChannelType: ChannelKakaoTalk,
-		Kakao: &KakaoChannelConfig{
-			RelayURL:  "https://relay.example.com",
-			UserToken: "kakao-token-123",
-		},
 	})
 
 	cfg := MergeWizardSettings(&base, WizardResult{})
 
 	found := false
 	for _, ch := range cfg.Channels {
-		if ch.ChannelType == ChannelKakaoTalk && ch.Kakao != nil && ch.Kakao.RelayURL == "https://relay.example.com" {
+		if ch.ChannelType == ChannelKakaoTalk {
 			found = true
 		}
 	}
