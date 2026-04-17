@@ -1,9 +1,10 @@
-BINARY := kittypaw
+BINARY := bin/kittypaw
 PKG    := ./cli
 
 .PHONY: build test test-unit lint fmt run clean
 
 build:
+	@mkdir -p bin
 	go build -o $(BINARY) $(PKG)
 
 test:
