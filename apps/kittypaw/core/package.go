@@ -72,6 +72,18 @@ func (f ConfigField) IsSecret() bool {
 	return f.Secret || f.Type == "secret"
 }
 
+// RequiresAPILogin reports whether any config field sources from the
+// kittypaw-api namespace. Such packages need a valid API session to run;
+// installers warn on this and the executor refuses to run them without login.
+func (p *SkillPackage) RequiresAPILogin() bool {
+	for _, f := range p.Config {
+		if strings.HasPrefix(f.Source, "kittypaw-api/") {
+			return true
+		}
+	}
+	return false
+}
+
 // ChainStep defines one step in a multi-package execution chain.
 // The first step receives the initial input; subsequent steps receive
 // the previous step's output as prev_output.

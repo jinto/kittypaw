@@ -631,31 +631,28 @@ func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.
 func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [6/6] KittyPaw API Server (optional)")
+	fmt.Println("  KittyPaw 는 사용자 편의를 위해 몇 가지 API 를 제공하고 있습니다.")
+	fmt.Println("  대기질·날씨 등 인증이 필요한 스킬을 사용하시려면 로그인 해주세요.")
 
-	// Already configured via KakaoTalk login step.
-	if w.APIServerURL != "" {
-		fmt.Printf("  ✓ Already configured (%s)\n", w.APIServerURL)
+	secrets, err := core.LoadSecrets()
+	if err != nil {
+		fmt.Printf("  secrets 로드 실패: %v\n", err)
 		return
 	}
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := core.DefaultAPIServerURL
 
-	fmt.Println("  API 스킬(대기질 등)을 사용하려면 kittypaw-api 서버에 로그인하세요.")
+	// Already logged in? LoadAccessToken auto-refreshes an expired token using
+	// the stored refresh_token, so a live refresh session counts as "logged in".
+	if tok, err := mgr.LoadAccessToken(apiURL); err == nil && tok != "" {
+		fmt.Printf("  ✓ Logged in (%s)\n", apiURL)
+		w.APIServerURL = apiURL
+		return
+	}
 
 	if !promptYesNo(scanner, "  > Login?", false) {
 		return
 	}
-
-	apiURL := promptLine(scanner, "  API Server URL", core.DefaultAPIServerURL)
-	if apiURL == "" {
-		return
-	}
-	apiURL = strings.TrimRight(apiURL, "/")
-
-	secrets, err := core.LoadSecrets()
-	if err != nil {
-		fmt.Printf("  로그인 실패: %v\n", err)
-		return
-	}
-	mgr := core.NewAPITokenManager("", secrets)
 
 	if isTTY() {
 		err = loginHTTP(apiURL, mgr)

@@ -257,8 +257,18 @@ func runSetup(flags *setupFlags) error {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
-	fmt.Printf("\n  config saved: %s\n", cfgPath)
-	fmt.Println("  next: kittypaw serve or kittypaw chat")
+	fmt.Println()
+	fmt.Println("  ╭──────────────────────────────────────────────╮")
+	fmt.Println("  │")
+	fmt.Println("  │  ✓ 설정 완료")
+	fmt.Printf("  │  %s\n", cfgPath)
+	fmt.Println("  │")
+	fmt.Println("  │  다음 단계")
+	fmt.Println("  │    kittypaw serve    # 메시지 수신 서비스 실행")
+	fmt.Println("  │    kittypaw chat     # 터미널에서 바로 대화")
+	fmt.Println("  │")
+	fmt.Println("  ╰──────────────────────────────────────────────╯")
+	fmt.Println()
 	return nil
 }
 
@@ -705,6 +715,19 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 			fmt.Printf("Installed package %q (%s) v%s from registry\n",
 				pkg.Meta.Name, pkg.Meta.ID, pkg.Meta.Version)
+
+			// API-bound skills need a login. Install still succeeds — we just
+			// warn early so the user sees the requirement instead of a
+			// cryptic 401 at run time.
+			if pkg.RequiresAPILogin() {
+				mgr := core.NewAPITokenManager("", secrets)
+				if tok, _ := mgr.LoadAccessToken(core.DefaultAPIServerURL); tok == "" {
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "  ℹ  이 스킬은 KittyPaw API 로그인이 필요합니다.")
+					fmt.Fprintln(os.Stderr, "     kittypaw login 으로 로그인해 주세요.")
+				}
+			}
+
 			return promptPackageConfig(pm, pkg)
 		},
 	}
