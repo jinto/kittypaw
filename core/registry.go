@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultRegistryURL is the canonical GitHub-hosted skill registry.
-const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw-skills/registry/main"
+const DefaultRegistryURL = "https://raw.githubusercontent.com/kittypaw-app/skills/main"
 
 // RegistryEntry describes a package listing in the remote registry.
 type RegistryEntry struct {

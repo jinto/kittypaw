@@ -40,7 +40,7 @@ TOML config at `~/.kittypaw/config.toml`.
 
 ```toml
 [registry]
-url = "https://raw.githubusercontent.com/kittypaw/skills/main"
+url = "https://raw.githubusercontent.com/kittypaw-app/skills/main"
 ```
 
 ## Build from Source
