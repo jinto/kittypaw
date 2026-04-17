@@ -15,6 +15,7 @@ const (
 	OpenRouterBaseURL      = "https://openrouter.ai/api/v1/chat/completions"
 	OpenRouterDefaultModel = "qwen/qwen3-235b-a22b:free"
 	OllamaDefaultBaseURL   = "http://localhost:11434/v1"
+	DefaultAPIServerURL    = "https://portal.kittypaw.app"
 )
 
 // WizardResult holds all values collected by a setup wizard (CLI or web).
@@ -31,9 +32,8 @@ type WizardResult struct {
 	TelegramBotToken string
 	TelegramChatID   string
 
-	// KakaoTalk
-	KakaoRelayURL  string
-	KakaoUserToken string
+	// KakaoTalk — relay WS URL comes from login (secrets), not wizard
+	KakaoEnabled bool
 
 	// Web search
 	FirecrawlKey string
@@ -47,12 +47,17 @@ type WizardResult struct {
 }
 
 // ResolveLLMConfig converts a user-facing provider choice into internal
-// config values (provider, model, baseURL). The caller should populate
-// WizardResult with the returned values.
-func ResolveLLMConfig(provider, localURL, localModel string) (internalProvider, model, baseURL string) {
+// config values (provider, model, baseURL). modelName overrides the default
+// for hosted providers (Claude) and is required for local/Ollama. localURL
+// is only consulted for local/Ollama.
+func ResolveLLMConfig(provider, localURL, modelName string) (internalProvider, model, baseURL string) {
 	switch strings.ToLower(provider) {
 	case "claude", "anthropic":
-		return "anthropic", ClaudeDefaultModel, ""
+		model := ClaudeDefaultModel
+		if modelName != "" {
+			model = modelName
+		}
+		return "anthropic", model, ""
 	case "openrouter":
 		return "openai", OpenRouterDefaultModel, OpenRouterBaseURL
 	case "local", "ollama":
@@ -61,7 +66,7 @@ func ResolveLLMConfig(provider, localURL, localModel string) (internalProvider, 
 			u = OllamaDefaultBaseURL
 		}
 		u = strings.TrimSuffix(u, "/chat/completions")
-		return "openai", localModel, u + "/chat/completions"
+		return "openai", modelName, u + "/chat/completions"
 	default:
 		return provider, "", ""
 	}
@@ -89,14 +94,13 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 
 	// Channels — only replace wizard-managed types when setup values exist.
 	hasTelegram := w.TelegramBotToken != ""
-	hasKakao := w.KakaoRelayURL != ""
 
 	var kept []ChannelConfig
 	for _, ch := range cfg.Channels {
 		if ch.ChannelType == ChannelTelegram && hasTelegram {
 			continue
 		}
-		if ch.ChannelType == ChannelKakaoTalk && hasKakao {
+		if ch.ChannelType == ChannelKakaoTalk && w.KakaoEnabled {
 			continue
 		}
 		kept = append(kept, ch)
@@ -112,13 +116,10 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 		}
 	}
 
-	if hasKakao {
+	if w.KakaoEnabled {
 		kept = append(kept, ChannelConfig{
 			ChannelType: ChannelKakaoTalk,
-			Kakao: &KakaoChannelConfig{
-				RelayURL:  w.KakaoRelayURL,
-				UserToken: w.KakaoUserToken,
-			},
+			// KakaoWSURL is injected at runtime from secrets
 		})
 	}
 

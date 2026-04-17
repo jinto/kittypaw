@@ -460,62 +460,46 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 		return
 	}
 
-	// KakaoTalk requires login to the KittyPaw API server.
-	fmt.Println()
-	fmt.Println("  KakaoTalk 연결을 위해 KittyPaw API 서버 로그인이 필요합니다.")
-	apiURL := promptLine(scanner, "  API Server URL", core.DefaultAPIServerURL)
-	if apiURL == "" {
-		fmt.Println("  Skipping KakaoTalk.")
+	// KakaoTalk doesn't need an authenticated API session — it only needs the
+	// relay URL, which GET /discovery exposes anonymously.
+	apiURL := core.DefaultAPIServerURL
+
+	d, err := core.FetchDiscovery(apiURL)
+	if err != nil {
+		fmt.Printf("  Discovery 실패: %v\n", err)
+		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
 		return
 	}
-	apiURL = strings.TrimRight(apiURL, "/")
+	if d.RelayURL == "" {
+		fmt.Println("  Discovery 응답에 relay_url이 없어 페어링을 건너뜁니다.")
+		return
+	}
 
 	secrets, err := core.LoadSecrets()
 	if err != nil {
-		fmt.Printf("  로그인 실패: %v\n", err)
+		fmt.Printf("  secrets 로드 실패: %v\n", err)
 		return
 	}
 	mgr := core.NewAPITokenManager("", secrets)
 
-	fmt.Println()
-	if isTTY() {
-		err = loginHTTP(apiURL, mgr)
-	} else {
-		err = loginCode(apiURL, mgr)
-	}
-	if err != nil {
-		fmt.Printf("  로그인 실패: %v\n", err)
-		if !promptYesNo(scanner, "  > 로그인 없이 KakaoTalk을 활성화할까요?", false) {
-			return
-		}
-		w.KakaoEnabled = true
-		w.APIServerURL = apiURL
-		return
-	}
-
-	w.KakaoEnabled = true
-	w.APIServerURL = apiURL
-
-	relayURL, _ := mgr.LoadRelayURL(apiURL)
-	if relayURL == "" {
-		fmt.Println("  ✓ KakaoTalk 활성화 완료 (relay URL이 없어 페어링은 건너뜁니다)")
-		return
-	}
-
-	reg, err := core.RegisterRelaySession(relayURL)
+	reg, err := core.RegisterRelaySession(d.RelayURL)
 	if err != nil {
 		fmt.Printf("  릴레이 등록 실패: %v\n", err)
-		fmt.Println("  ✓ KakaoTalk 활성화 완료 (나중에 페어링을 재시도하세요)")
+		fmt.Println("  KakaoTalk 활성화를 건너뜁니다. 네트워크 확인 후 재실행하세요.")
 		return
 	}
 
-	wsURL := core.WSURLFromRelay(relayURL, reg.Token)
+	wsURL := core.WSURLFromRelay(d.RelayURL, reg.Token)
 	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
 		fmt.Printf("  WS URL 저장 실패: %v\n", err)
 		return
 	}
 
-	wizardKakaoPairing(scanner, relayURL, reg)
+	// Persist apiURL so runSetup writes it to secrets under the bare
+	// "kittypaw-api" namespace that InjectKakaoWSURL reads at serve time.
+	w.APIServerURL = apiURL
+	w.KakaoEnabled = true
+	wizardKakaoPairing(scanner, d.RelayURL, reg)
 }
 
 func wizardKakaoPairing(_ *bufio.Scanner, relayBase string, reg *core.RelayRegistration) {
