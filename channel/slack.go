@@ -45,6 +45,7 @@ type slackEvent struct {
 
 // SlackChannel implements Channel using Slack's Web API and Socket Mode.
 type SlackChannel struct {
+	tenantID  string
 	botToken  string
 	appToken  string
 	client    *http.Client
@@ -53,9 +54,11 @@ type SlackChannel struct {
 }
 
 // NewSlack creates a SlackChannel. botToken is for Web API calls,
-// appToken (xapp-...) is for Socket Mode connections.
-func NewSlack(botToken, appToken string) *SlackChannel {
+// appToken (xapp-...) is for Socket Mode connections. tenantID is stamped
+// on every emitted Event for TenantRouter dispatch.
+func NewSlack(tenantID, botToken, appToken string) *SlackChannel {
 	return &SlackChannel{
+		tenantID: tenantID,
 		botToken: botToken,
 		appToken: appToken,
 		client:   &http.Client{Timeout: 30 * time.Second},
@@ -193,8 +196,9 @@ func (s *SlackChannel) handleEventPayload(ctx context.Context, env slackEnvelope
 	}
 
 	event := core.Event{
-		Type:    core.EventSlack,
-		Payload: raw,
+		Type:     core.EventSlack,
+		TenantID: s.tenantID,
+		Payload:  raw,
 	}
 
 	select {

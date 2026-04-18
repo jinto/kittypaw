@@ -2,10 +2,31 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 	"sync"
 )
+
+// validTenantID restricts tenant names to a safe ASCII subset that can never
+// traverse the filesystem ("../"), collide under case-insensitive FS, or
+// surprise a logging/audit pipeline with unicode. 1-32 chars, lowercase,
+// must start alphanumeric — mirrors npm package name rules.
+var validTenantID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// ValidateTenantID returns nil if id is safe to use as a filesystem
+// directory name and as a TenantRouter map key. A TenantID is trusted as
+// a privacy boundary, so any CLI/HTTP flow that accepts user-supplied
+// IDs must call this before persisting.
+func ValidateTenantID(id string) error {
+	if !validTenantID.MatchString(id) {
+		return fmt.Errorf("invalid tenant id %q: must match %s", id, validTenantID.String())
+	}
+	return nil
+}
 
 // Tenant represents a single user/workspace with isolated data.
 type Tenant struct {
@@ -107,20 +128,6 @@ func (r *TenantRegistry) Get(id string) *Tenant {
 	return r.tenants[id]
 }
 
-// GetOrDefault returns the tenant with the given ID, falling back to the
-// default tenant. Returns nil only if the default tenant is also missing.
-func (r *TenantRegistry) GetOrDefault(id string) *Tenant {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if id == "" {
-		id = r.defaultID
-	}
-	if t, ok := r.tenants[id]; ok {
-		return t
-	}
-	return r.tenants[r.defaultID]
-}
-
 // List returns all registered tenant IDs.
 func (r *TenantRegistry) List() []string {
 	r.mu.RLock()
@@ -142,6 +149,151 @@ func (r *TenantRegistry) BaseDir() string {
 	return r.baseDir
 }
 
+// ValidateTenantChannels fails fast if two tenants declare the same
+// Telegram bot token or Kakao relay WebSocket URL. Without this check the
+// Telegram long-poll would silently race (one tenant's bot would steal
+// updates from another) and the Kakao relay would dual-bind a single
+// user account — both scenarios cause hard-to-diagnose message loss.
+//
+// tenantChannels maps tenantID → channel configs. Returns an aggregated
+// error listing every duplicate.
+func ValidateTenantChannels(tenantChannels map[string][]ChannelConfig) error {
+	telegramSeen := make(map[string]string) // token → owning tenant
+	kakaoSeen := make(map[string]string)    // wsURL → owning tenant
+	var dupes []string
+
+	// Deterministic iteration order for stable error messages.
+	ids := make([]string, 0, len(tenantChannels))
+	for id := range tenantChannels {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, tid := range ids {
+		for _, cfg := range tenantChannels[tid] {
+			switch cfg.ChannelType {
+			case ChannelTelegram:
+				token := strings.TrimSpace(cfg.Token)
+				if token == "" {
+					continue
+				}
+				if prev, ok := telegramSeen[token]; ok {
+					dupes = append(dupes, fmt.Sprintf(
+						"telegram bot_token collides between tenants %q and %q",
+						prev, tid))
+					continue
+				}
+				telegramSeen[token] = tid
+			case ChannelKakaoTalk:
+				url := strings.TrimSpace(cfg.KakaoWSURL)
+				if url == "" {
+					continue
+				}
+				if prev, ok := kakaoSeen[url]; ok {
+					dupes = append(dupes, fmt.Sprintf(
+						"kakao relay URL collides between tenants %q and %q",
+						prev, tid))
+					continue
+				}
+				kakaoSeen[url] = tid
+			}
+		}
+	}
+
+	if len(dupes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("duplicate channel credentials across tenants: %v", dupes)
+}
+
+// MigrateLegacyLayout moves a pre-multi-tenant ~/.kittypaw layout into
+// tenants/default/ so existing v0.x installs upgrade without manual file
+// surgery. It is a one-way, idempotent operation invoked at daemon
+// bootstrap.
+//
+// Detection: legacy layout has config.toml at baseDir AND no tenants/
+// subdirectory yet. If tenants/ already exists (even empty) we step
+// aside — the user may have scaffolded a tenant manually and we must
+// not drop legacy files on top of it.
+//
+// Moved (tenant-scoped): config.toml, secrets.json, data/, skills/,
+// profiles/, packages/. Left in place (server-wide): server.toml,
+// daemon.pid, daemon.log, anything else under baseDir.
+//
+// Atomicity: files are first relocated into a staging directory
+// (tenants/.default.staging/), and only once every move succeeds is the
+// staging dir renamed to tenants/default/. If any intermediate step
+// fails, the caller sees an error, nothing has moved from the user's
+// perspective, and the next boot can retry cleanly — the legacy-guard
+// (config.toml-at-baseDir) still holds.
+func MigrateLegacyLayout(baseDir string) error {
+	legacyCfg := filepath.Join(baseDir, "config.toml")
+	if _, err := os.Stat(legacyCfg); os.IsNotExist(err) {
+		return nil // Fresh install or already migrated.
+	} else if err != nil {
+		return fmt.Errorf("stat legacy config: %w", err)
+	}
+
+	// Clean up any abandoned staging dir from a previous crashed run
+	// BEFORE the "tenants/ exists" guard, otherwise we'd wedge
+	// permanently — the guard would see tenants/ and bail, but tenants/
+	// holds only the half-done staging dir.
+	tenantsDir := filepath.Join(baseDir, "tenants")
+	stagingDir := filepath.Join(tenantsDir, ".default.staging")
+	_ = os.RemoveAll(stagingDir)
+
+	if _, err := os.Stat(tenantsDir); err == nil {
+		// tenants/ is non-empty (has real tenant dirs) — step aside.
+		// Only the staging path is ours to clean up.
+		if isEmptyDir(tenantsDir) {
+			_ = os.Remove(tenantsDir)
+		} else {
+			slog.Warn("legacy config detected but tenants/ is non-empty — skipping migration; move config manually into tenants/default/",
+				"legacy_config", legacyCfg, "tenants_dir", tenantsDir)
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat tenants dir: %w", err)
+	}
+
+	// Stage into tenants/.default.staging/ so an error mid-flight leaves
+	// the user's legacy tree intact.
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		return fmt.Errorf("create staging dir: %w", err)
+	}
+
+	for _, name := range []string{"config.toml", "secrets.json", "data", "skills", "profiles", "packages"} {
+		src := filepath.Join(baseDir, name)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return fmt.Errorf("stat %s: %w", src, err)
+		}
+		dst := filepath.Join(stagingDir, name)
+		if err := os.Rename(src, dst); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return fmt.Errorf("stage %s → %s: %w", src, dst, err)
+		}
+	}
+
+	finalDir := filepath.Join(tenantsDir, "default")
+	if err := os.Rename(stagingDir, finalDir); err != nil {
+		return fmt.Errorf("commit staging → %s: %w", finalDir, err)
+	}
+	return nil
+}
+
+// isEmptyDir returns true if dir exists and contains no entries.
+// Used to detect a tenants/ that only ever held our own staging dir.
+func isEmptyDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(entries) == 0
+}
+
 // DiscoverTenants scans baseDir for tenant directories, loads their
 // configs, and returns Tenant values. It does NOT register them — the
 // caller is responsible for bootstrapping (Store, Session, etc.) and
@@ -161,6 +313,13 @@ func DiscoverTenants(baseDir string) ([]*Tenant, error) {
 			continue
 		}
 		id := entry.Name()
+		// Reject anything that could traverse the filesystem or collide
+		// with a case-insensitive FS — TenantID is a privacy boundary.
+		if err := ValidateTenantID(id); err != nil {
+			slog.Warn("discover: rejecting unsafe tenant dir name",
+				"name", id, "error", err)
+			continue
+		}
 		tenantDir := filepath.Join(baseDir, id)
 		cfgPath := filepath.Join(tenantDir, "config.toml")
 

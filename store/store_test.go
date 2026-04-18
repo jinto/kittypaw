@@ -28,8 +28,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 17 {
-		t.Fatalf("expected 16 migrations, got %d", count)
+	if count != 18 {
+		t.Fatalf("expected 18 migrations, got %d", count)
 	}
 }
 
@@ -1002,11 +1002,11 @@ func TestPendingResponsesRoundTrip(t *testing.T) {
 		t.Fatalf("expected 0, got %d", len(pending))
 	}
 
-	// Enqueue two responses.
-	if err := st.EnqueueResponse("telegram", "chat-1", "Hello!"); err != nil {
+	// Enqueue two responses, each tagged to a different tenant.
+	if err := st.EnqueueResponse("alice", "telegram", "chat-1", "Hello!"); err != nil {
 		t.Fatalf("enqueue 1: %v", err)
 	}
-	if err := st.EnqueueResponse("slack", "chat-2", "World!"); err != nil {
+	if err := st.EnqueueResponse("bob", "slack", "chat-2", "World!"); err != nil {
 		t.Fatalf("enqueue 2: %v", err)
 	}
 
@@ -1018,10 +1018,10 @@ func TestPendingResponsesRoundTrip(t *testing.T) {
 	if len(pending) != 2 {
 		t.Fatalf("expected 2, got %d", len(pending))
 	}
-	if pending[0].EventType != "telegram" || pending[0].ChatID != "chat-1" || pending[0].Response != "Hello!" {
+	if pending[0].EventType != "telegram" || pending[0].ChatID != "chat-1" || pending[0].Response != "Hello!" || pending[0].TenantID != "alice" {
 		t.Errorf("pending[0] mismatch: %+v", pending[0])
 	}
-	if pending[1].EventType != "slack" || pending[1].Response != "World!" {
+	if pending[1].EventType != "slack" || pending[1].Response != "World!" || pending[1].TenantID != "bob" {
 		t.Errorf("pending[1] mismatch: %+v", pending[1])
 	}
 
@@ -1038,7 +1038,7 @@ func TestPendingResponsesRoundTrip(t *testing.T) {
 func TestPendingResponseRetryIncrement(t *testing.T) {
 	st := openTestStore(t)
 
-	st.EnqueueResponse("discord", "ch-1", "retry-me")
+	st.EnqueueResponse("default", "discord", "ch-1", "retry-me")
 	pending, _ := st.DequeuePendingResponses(1)
 	id := pending[0].ID
 
@@ -1063,7 +1063,7 @@ func TestPendingResponseRetryIncrement(t *testing.T) {
 func TestPendingResponseMaxRetries(t *testing.T) {
 	st := openTestStore(t)
 
-	st.EnqueueResponse("kakao_talk", "ch-1", "will-expire")
+	st.EnqueueResponse("default", "kakao_talk", "ch-1", "will-expire")
 	pending, _ := st.DequeuePendingResponses(1)
 	id := pending[0].ID
 
@@ -1103,7 +1103,7 @@ func TestCleanupExpiredResponses(t *testing.T) {
 	st.db.Exec(`
 		INSERT INTO pending_responses (event_type, chat_id, response, created_at, next_retry)
 		VALUES ('web_chat', 'ch-1', 'old msg', datetime('now', '-25 hours'), datetime('now'))`)
-	st.EnqueueResponse("web_chat", "ch-2", "fresh msg")
+	st.EnqueueResponse("default", "web_chat", "ch-2", "fresh msg")
 
 	n, err := st.CleanupExpiredResponses(24)
 	if err != nil {

@@ -60,9 +60,13 @@ type ConversationTurn struct {
 }
 
 // Event is an inbound message from any channel.
+// TenantID identifies which tenant the event belongs to. Empty TenantID is
+// rejected by the TenantRouter (no default fallback) to prevent cross-tenant
+// leaks in multi-tenant deployments.
 type Event struct {
-	Type    EventType       `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+	Type     EventType       `json:"type"`
+	TenantID string          `json:"tenant_id,omitempty"`
+	Payload  json.RawMessage `json:"payload"`
 }
 
 // ChatPayload is the common structure inside Event.Payload.

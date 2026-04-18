@@ -179,10 +179,10 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 	// feedback during onboarding — no reload required (AC3).
 	if s.spawner != nil {
 		chCfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: body.BotToken}
-		ch, err := channel.FromConfig(chCfg)
+		ch, err := channel.FromConfig(DefaultTenantID, chCfg)
 		if err != nil {
 			slog.Warn("setup: telegram channel create failed", "error", err)
-		} else if err := s.spawner.TrySpawn(ch, chCfg); err != nil {
+		} else if err := s.spawner.TrySpawn(DefaultTenantID, ch, chCfg); err != nil {
 			slog.Warn("setup: telegram channel spawn failed", "error", err)
 		}
 	}
@@ -386,7 +386,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 		// Reconcile channels with the generated config. TrySpawn is idempotent,
 		// so channels already started by handleSetupTelegram are safely skipped.
 		if s.spawner != nil {
-			if rErr := s.spawner.Reconcile(cfg.Channels); rErr != nil {
+			if rErr := s.spawner.Reconcile(DefaultTenantID, cfg.Channels); rErr != nil {
 				slog.Warn("setup: channel reconcile partial failure", "error", rErr)
 			}
 		}

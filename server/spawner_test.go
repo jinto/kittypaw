@@ -47,6 +47,9 @@ func (s *stubChannel) waitStarted(t *testing.T) {
 	}
 }
 
+// Test helper: the default tenant used for legacy single-tenant tests.
+const testTenant = DefaultTenantID
+
 // --- Tests ---
 
 func TestTrySpawn_StartsChannel(t *testing.T) {
@@ -56,13 +59,13 @@ func TestTrySpawn_StartsChannel(t *testing.T) {
 	stub := newStub("telegram")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
 
-	if err := sp.TrySpawn(stub, cfg); err != nil {
+	if err := sp.TrySpawn(testTenant, stub, cfg); err != nil {
 		t.Fatalf("TrySpawn: %v", err)
 	}
 	stub.waitStarted(t)
 
 	// Verify it appears in List and GetChannel.
-	ch, ok := sp.GetChannel(core.EventTelegram)
+	ch, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if !ok || ch == nil {
 		t.Fatal("GetChannel returned false after TrySpawn")
 	}
@@ -71,12 +74,12 @@ func TestTrySpawn_StartsChannel(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("List: got %d, want 1", len(statuses))
 	}
-	if statuses[0].Name != "telegram" || statuses[0].Type != "telegram" || !statuses[0].Running {
+	if statuses[0].Name != "telegram" || statuses[0].Type != "telegram" || !statuses[0].Running || statuses[0].TenantID != testTenant {
 		t.Errorf("List: unexpected status %+v", statuses[0])
 	}
 
 	// Cleanup.
-	sp.Stop("telegram")
+	sp.Stop(testTenant, "telegram")
 }
 
 func TestTrySpawn_Idempotent(t *testing.T) {
@@ -87,21 +90,21 @@ func TestTrySpawn_Idempotent(t *testing.T) {
 	stub2 := newStub("telegram")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
 
-	sp.TrySpawn(stub1, cfg)
+	sp.TrySpawn(testTenant, stub1, cfg)
 	stub1.waitStarted(t)
 
-	// Second TrySpawn with same name should be a no-op.
-	if err := sp.TrySpawn(stub2, cfg); err != nil {
+	// Second TrySpawn with same (tenant, type) should be a no-op.
+	if err := sp.TrySpawn(testTenant, stub2, cfg); err != nil {
 		t.Fatalf("second TrySpawn: %v", err)
 	}
 
 	// Original stub should still be the one returned.
-	ch, _ := sp.GetChannel(core.EventTelegram)
+	ch, _ := sp.GetChannel(testTenant, core.EventTelegram)
 	if ch != stub1 {
 		t.Error("TrySpawn replaced existing channel — should be idempotent")
 	}
 
-	sp.Stop("telegram")
+	sp.Stop(testTenant, "telegram")
 }
 
 func TestStop_CloseDone(t *testing.T) {
@@ -110,15 +113,15 @@ func TestStop_CloseDone(t *testing.T) {
 
 	stub := newStub("slack")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelSlack, Token: "tok"}
-	sp.TrySpawn(stub, cfg)
+	sp.TrySpawn(testTenant, stub, cfg)
 	stub.waitStarted(t)
 
-	if err := sp.Stop("slack"); err != nil {
+	if err := sp.Stop(testTenant, "slack"); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 
 	// After Stop, GetChannel should return false.
-	_, ok := sp.GetChannel(core.EventSlack)
+	_, ok := sp.GetChannel(testTenant, core.EventSlack)
 	if ok {
 		t.Error("GetChannel returned true after Stop")
 	}
@@ -126,14 +129,14 @@ func TestStop_CloseDone(t *testing.T) {
 
 func TestStop_NotFound(t *testing.T) {
 	sp := NewChannelSpawner(context.Background(), make(chan core.Event, 1))
-	if err := sp.Stop("nonexistent"); err != ErrChannelNotFound {
+	if err := sp.Stop(testTenant, "nonexistent"); err != ErrChannelNotFound {
 		t.Errorf("Stop nonexistent: got %v, want ErrChannelNotFound", err)
 	}
 }
 
 func TestGetChannel_EmptySpawner(t *testing.T) {
 	sp := NewChannelSpawner(context.Background(), make(chan core.Event, 1))
-	ch, ok := sp.GetChannel(core.EventTelegram)
+	ch, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if ok || ch != nil {
 		t.Error("GetChannel on empty spawner should return nil, false")
 	}
@@ -158,7 +161,7 @@ func TestList_MultipleChannels(t *testing.T) {
 	}
 
 	for i, stub := range stubs {
-		sp.TrySpawn(stub, cfgs[i])
+		sp.TrySpawn(testTenant, stub, cfgs[i])
 		stub.waitStarted(t)
 	}
 
@@ -168,8 +171,8 @@ func TestList_MultipleChannels(t *testing.T) {
 	}
 
 	// Cleanup.
-	sp.Stop("telegram")
-	sp.Stop("slack")
+	sp.Stop(testTenant, "telegram")
+	sp.Stop(testTenant, "slack")
 }
 
 // --- Reconcile / ReplaceSpawn / StopAll tests ---
@@ -180,24 +183,24 @@ func TestReplaceSpawn(t *testing.T) {
 
 	stub1 := newStub("telegram")
 	cfg1 := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "old"}
-	sp.TrySpawn(stub1, cfg1)
+	sp.TrySpawn(testTenant, stub1, cfg1)
 	stub1.waitStarted(t)
 
 	// Replace with new stub.
 	stub2 := newStub("telegram")
 	cfg2 := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "new"}
-	if err := sp.ReplaceSpawn(stub2, cfg2); err != nil {
+	if err := sp.ReplaceSpawn(testTenant, stub2, cfg2); err != nil {
 		t.Fatalf("ReplaceSpawn: %v", err)
 	}
 	stub2.waitStarted(t)
 
 	// Verify new channel is returned.
-	ch, ok := sp.GetChannel(core.EventTelegram)
+	ch, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if !ok || ch != stub2 {
 		t.Error("GetChannel should return the replacement channel")
 	}
 
-	sp.Stop("telegram")
+	sp.Stop(testTenant, "telegram")
 }
 
 func TestReconcile_AddNewChannel(t *testing.T) {
@@ -207,14 +210,14 @@ func TestReconcile_AddNewChannel(t *testing.T) {
 	configs := []core.ChannelConfig{
 		{ChannelType: core.ChannelTelegram, Token: "tok"},
 	}
-	if err := sp.Reconcile(configs); err != nil {
+	if err := sp.Reconcile(testTenant, configs); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
 	// Give goroutine time to start.
 	time.Sleep(50 * time.Millisecond)
 
-	ch, ok := sp.GetChannel(core.EventTelegram)
+	ch, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if !ok || ch == nil {
 		t.Error("Reconcile should have spawned telegram channel")
 	}
@@ -228,15 +231,15 @@ func TestReconcile_RemoveChannel(t *testing.T) {
 
 	stub := newStub("telegram")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
-	sp.TrySpawn(stub, cfg)
+	sp.TrySpawn(testTenant, stub, cfg)
 	stub.waitStarted(t)
 
 	// Reconcile with empty config → should stop telegram.
-	if err := sp.Reconcile(nil); err != nil {
+	if err := sp.Reconcile(testTenant, nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	_, ok := sp.GetChannel(core.EventTelegram)
+	_, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if ok {
 		t.Error("telegram should be removed after Reconcile with empty config")
 	}
@@ -248,18 +251,18 @@ func TestReconcile_ReplaceChanged(t *testing.T) {
 
 	stub := newStub("telegram")
 	cfgOld := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "old-token"}
-	sp.TrySpawn(stub, cfgOld)
+	sp.TrySpawn(testTenant, stub, cfgOld)
 	stub.waitStarted(t)
 
 	// Reconcile with changed token → should replace.
 	cfgNew := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "new-token"}
-	if err := sp.Reconcile([]core.ChannelConfig{cfgNew}); err != nil {
+	if err := sp.Reconcile(testTenant, []core.ChannelConfig{cfgNew}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
 	time.Sleep(50 * time.Millisecond)
 
-	ch, ok := sp.GetChannel(core.EventTelegram)
+	ch, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if !ok || ch == nil {
 		t.Error("Reconcile should have spawned replacement channel")
 	}
@@ -277,20 +280,20 @@ func TestReconcile_SkipUnchanged(t *testing.T) {
 
 	stub := newStub("telegram")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
-	sp.TrySpawn(stub, cfg)
+	sp.TrySpawn(testTenant, stub, cfg)
 	stub.waitStarted(t)
 
 	// Reconcile with same config → should keep existing channel.
-	if err := sp.Reconcile([]core.ChannelConfig{cfg}); err != nil {
+	if err := sp.Reconcile(testTenant, []core.ChannelConfig{cfg}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	ch, _ := sp.GetChannel(core.EventTelegram)
+	ch, _ := sp.GetChannel(testTenant, core.EventTelegram)
 	if ch != stub {
 		t.Error("Reconcile replaced a channel whose config did not change")
 	}
 
-	sp.Stop("telegram")
+	sp.Stop(testTenant, "telegram")
 }
 
 func TestReconcile_SkipsWebSocket(t *testing.T) {
@@ -300,9 +303,9 @@ func TestReconcile_SkipsWebSocket(t *testing.T) {
 	configs := []core.ChannelConfig{
 		{ChannelType: core.ChannelWeb, BindAddr: ":8080"},
 	}
-	sp.Reconcile(configs)
+	sp.Reconcile(testTenant, configs)
 
-	_, ok := sp.GetChannel(core.EventWebChat)
+	_, ok := sp.GetChannel(testTenant, core.EventWebChat)
 	if ok {
 		t.Error("Reconcile should skip WebSocket channels")
 	}
@@ -317,7 +320,7 @@ func TestReconcile_BestEffort(t *testing.T) {
 		{ChannelType: core.ChannelTelegram, Token: "tok"},
 		{ChannelType: core.ChannelSlack, Token: ""},
 	}
-	err := sp.Reconcile(configs)
+	err := sp.Reconcile(testTenant, configs)
 	if err == nil {
 		t.Fatal("Reconcile should return error for invalid slack config")
 	}
@@ -325,7 +328,7 @@ func TestReconcile_BestEffort(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Telegram should still have been spawned despite Slack failure.
-	_, ok := sp.GetChannel(core.EventTelegram)
+	_, ok := sp.GetChannel(testTenant, core.EventTelegram)
 	if !ok {
 		t.Error("Telegram should be running even though Slack failed")
 	}
@@ -345,7 +348,7 @@ func TestStopAll_Parallel(t *testing.T) {
 	}
 
 	for i, stub := range stubs {
-		sp.TrySpawn(stub, cfgs[i])
+		sp.TrySpawn(testTenant, stub, cfgs[i])
 		stub.waitStarted(t)
 	}
 
@@ -392,7 +395,7 @@ func TestStop_ConcurrentGetChannel(t *testing.T) {
 
 	stub := newStub("telegram")
 	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
-	sp.TrySpawn(stub, cfg)
+	sp.TrySpawn(testTenant, stub, cfg)
 	stub.waitStarted(t)
 
 	done := make(chan struct{})
@@ -400,14 +403,99 @@ func TestStop_ConcurrentGetChannel(t *testing.T) {
 		defer close(done)
 		// Rapidly call GetChannel while Stop is in progress.
 		for i := 0; i < 100; i++ {
-			sp.GetChannel(core.EventTelegram)
+			sp.GetChannel(testTenant, core.EventTelegram)
 		}
 	}()
 
-	sp.Stop("telegram")
+	sp.Stop(testTenant, "telegram")
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("deadlock: GetChannel blocked during Stop")
 	}
+}
+
+// --- Multi-tenant isolation tests ---
+
+// TestTrySpawn_SameChannelTypeDifferentTenants enforces the composite-key
+// invariant: two tenants can both run a "telegram" channel without
+// collision. Without per-tenant keys, TrySpawn(bob) would silently skip
+// because the key "telegram" would already be taken by alice.
+func TestTrySpawn_SameChannelTypeDifferentTenants(t *testing.T) {
+	eventCh := make(chan core.Event, 8)
+	sp := NewChannelSpawner(context.Background(), eventCh)
+
+	aliceBot := newStub("telegram")
+	bobBot := newStub("telegram")
+	cfgA := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "alice-tok"}
+	cfgB := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "bob-tok"}
+
+	if err := sp.TrySpawn("alice", aliceBot, cfgA); err != nil {
+		t.Fatalf("TrySpawn(alice): %v", err)
+	}
+	if err := sp.TrySpawn("bob", bobBot, cfgB); err != nil {
+		t.Fatalf("TrySpawn(bob): %v", err)
+	}
+	aliceBot.waitStarted(t)
+	bobBot.waitStarted(t)
+
+	ch, ok := sp.GetChannel("alice", core.EventTelegram)
+	if !ok || ch != aliceBot {
+		t.Errorf("GetChannel(alice) = %v, want aliceBot", ch)
+	}
+	ch, ok = sp.GetChannel("bob", core.EventTelegram)
+	if !ok || ch != bobBot {
+		t.Errorf("GetChannel(bob) = %v, want bobBot", ch)
+	}
+
+	if len(sp.List()) != 2 {
+		t.Errorf("List len = %d, want 2 (alice + bob)", len(sp.List()))
+	}
+
+	sp.StopAll()
+}
+
+// TestGetChannel_TenantIsolation enforces I1: a channel under tenant A
+// must not be reachable via tenant B's ID.
+func TestGetChannel_TenantIsolation(t *testing.T) {
+	eventCh := make(chan core.Event, 8)
+	sp := NewChannelSpawner(context.Background(), eventCh)
+
+	stub := newStub("telegram")
+	cfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "tok"}
+	sp.TrySpawn("alice", stub, cfg)
+	stub.waitStarted(t)
+
+	if _, ok := sp.GetChannel("bob", core.EventTelegram); ok {
+		t.Error("GetChannel(bob) unexpectedly found alice's channel")
+	}
+	if _, ok := sp.GetChannel("", core.EventTelegram); ok {
+		t.Error("GetChannel(\"\") unexpectedly found alice's channel")
+	}
+
+	sp.StopAll()
+}
+
+// TestReconcile_PerTenantScope enforces that Reconcile only touches the
+// given tenant's channels. Otherwise reconciling bob with an empty config
+// would stop alice's channels — catastrophic in a multi-tenant setup.
+func TestReconcile_PerTenantScope(t *testing.T) {
+	eventCh := make(chan core.Event, 8)
+	sp := NewChannelSpawner(context.Background(), eventCh)
+
+	alice := newStub("telegram")
+	cfgA := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: "alice"}
+	sp.TrySpawn("alice", alice, cfgA)
+	alice.waitStarted(t)
+
+	// Bob's reconcile with empty config must leave alice alone.
+	if err := sp.Reconcile("bob", nil); err != nil {
+		t.Fatalf("Reconcile(bob, nil): %v", err)
+	}
+
+	if _, ok := sp.GetChannel("alice", core.EventTelegram); !ok {
+		t.Error("alice's channel was removed by bob's reconcile — tenant leak")
+	}
+
+	sp.StopAll()
 }
