@@ -46,6 +46,21 @@ type Session struct {
 	PackageManager   *core.PackageManager     // nil when packages are not configured
 	APITokenMgr      *core.APITokenManager    // nil when API token management is not configured
 	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
+
+	// TenantID is the tenant this Session belongs to. Empty only for
+	// legacy single-tenant callers that haven't migrated to the tenant
+	// router yet. Share.read / Fanout.* use this as the *reader* identity
+	// when consulting the owner tenant's Share allowlist.
+	TenantID string
+	// TenantRegistry lets the Session look up peer tenants (for cross-
+	// tenant reads + fanout) without coupling to server state. Nil in
+	// single-tenant mode; Share.read returns an "unavailable" error
+	// rather than panicking when the field is unset.
+	TenantRegistry *core.TenantRegistry
+	// Fanout is non-nil only for the family tenant. When nil, the sandbox
+	// skips the Fanout global so personal skills see
+	// `typeof Fanout === "undefined"`.
+	Fanout core.Fanout
 }
 
 // AllowedPaths returns the cached list of workspace root paths.
@@ -332,7 +347,9 @@ observeLoop:
 				}
 			}
 
-			execResult, err := s.Sandbox.ExecuteWithResolver(ctx, code, jsContext, resolver)
+			execResult, err := s.Sandbox.ExecuteWithResolverOpts(ctx, code, jsContext, resolver, sandbox.Options{
+				ExposeFanout: s.Fanout != nil,
+			})
 			if err != nil {
 				return "", fmt.Errorf("sandbox execute: %w", err)
 			}

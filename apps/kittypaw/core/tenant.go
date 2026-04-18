@@ -206,6 +206,35 @@ func ValidateTenantChannels(tenantChannels map[string][]ChannelConfig) error {
 	return fmt.Errorf("duplicate channel credentials across tenants: %v", dupes)
 }
 
+// ValidateFamilyTenants fails fast when a tenant marked `is_family=true`
+// declares channel configs. Family tenants are coordinators (scheduled
+// skills + fanout push); they never own a Telegram/Kakao account of their
+// own. A misconfigured `[telegram]` on family would race the real
+// personal bot for updates — that race must never boot in the first place.
+//
+// Pair with ValidateTenantChannels at server startup; this covers the
+// family-specific rule that the token/URL collision check cannot see.
+func ValidateFamilyTenants(tenants []*Tenant) error {
+	var offenders []string
+	for _, t := range tenants {
+		if t == nil || t.Config == nil || !t.Config.IsFamily {
+			continue
+		}
+		if len(t.Config.Channels) == 0 {
+			continue
+		}
+		types := make([]string, 0, len(t.Config.Channels))
+		for _, ch := range t.Config.Channels {
+			types = append(types, string(ch.ChannelType))
+		}
+		offenders = append(offenders, fmt.Sprintf("%s:%v", t.ID, types))
+	}
+	if len(offenders) == 0 {
+		return nil
+	}
+	return fmt.Errorf("family tenant must not declare channels: %v", offenders)
+}
+
 // MigrateLegacyLayout moves a pre-multi-tenant ~/.kittypaw layout into
 // tenants/default/ so existing v0.x installs upgrade without manual file
 // surgery. It is a one-way, idempotent operation invoked at daemon

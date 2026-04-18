@@ -18,6 +18,13 @@ type execOpts struct {
 	// auto-parsed objects. Package code expects raw strings (it calls JSON.parse
 	// itself), while LLM-generated code expects parsed objects.
 	rawResolverResults bool
+
+	// exposeFanout registers the Fanout global. Off by default: only family
+	// tenants (Session.Fanout != nil) may push to peers, and we want personal
+	// tenants to see `typeof Fanout === "undefined"` at the JS layer — not a
+	// bound object that happens to error on call. Defense in depth against a
+	// skill that probes the API surface.
+	exposeFanout bool
 }
 
 // run executes JS code in an in-process goja VM.
@@ -70,6 +77,10 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 
 	// --- skill stubs ---
 	for _, skill := range core.SkillRegistry {
+		if skill.Name == "Fanout" && !opts.exposeFanout {
+			// Personal tenants never even see the global; see execOpts doc.
+			continue
+		}
 		obj := vm.NewObject()
 		skillName := skill.Name
 		for _, method := range skill.Methods {
