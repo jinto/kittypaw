@@ -363,3 +363,50 @@ func TestExecuteWithResolverParsedResults(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, result.Output)
 	}
 }
+
+// TestFanoutHiddenByDefault locks in the defense-in-depth gate: a personal
+// tenant must see `typeof Fanout === "undefined"`. The engine-level nil check
+// would also refuse, but hiding the binding means a buggy skill can't even
+// discover the API exists.
+func TestFanoutHiddenByDefault(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	result, err := sb.Execute(context.Background(), `return typeof Fanout;`, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "undefined" {
+		t.Errorf("Fanout must be hidden on personal tenants; got typeof=%q", result.Output)
+	}
+}
+
+// TestFanoutExposedWhenOpted verifies the family-tenant path. When the engine
+// opts in (Session.Fanout != nil), the global appears with the expected method
+// surface. We check for the two methods explicitly — a bare `typeof` would
+// also pass if the binding was half-wired.
+func TestFanoutExposedWhenOpted(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, _ core.SkillCall) (string, error) {
+		return `{"success":true}`, nil
+	}
+	code := `
+		if (typeof Fanout !== "object") return "missing:" + typeof Fanout;
+		if (typeof Fanout.send !== "function") return "no-send";
+		if (typeof Fanout.broadcast !== "function") return "no-broadcast";
+		return "ok";
+	`
+	result, err := sb.ExecuteWithResolverOpts(context.Background(), code, nil, resolver, Options{ExposeFanout: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "ok" {
+		t.Errorf("expected ok, got %q", result.Output)
+	}
+}

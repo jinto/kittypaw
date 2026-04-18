@@ -18,17 +18,17 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 - [x] A7. 통합 테스트 — alice/bob 2 tenant, alice 봇 이벤트 → alice.Store 만 row, bob.eventCh 비어있음 (AC-T3)
 - [x] A8. Legacy 마이그레이션 기초 — `~/.kittypaw/config.toml` + `tenants/` 부재 → `tenants/default/` 로 auto-move (AC-T9 기초)
 
-### Plan B: Share + Fanout — Family Specialization ← 현재
+### Plan B: Share + Fanout — Family Specialization ✅
 
-- [ ] B1. `Config.IsFamily bool`, `Config.Share map[string]ShareConfig` 추가 + TOML 파싱 테스트 (`[share.family] read=[...]`)
-- [ ] B2. `core/share.go` 신규 — `ValidateSharedReadPath` + path traversal/symlink/hardlink/absolute 4종 매트릭스 테스트 (AC-T6, **C2**)
-- [ ] B3. `sandbox/fs.go` 에 cross-tenant 읽기 훅 — `<tenant>/path` prefix 감지 시 validate, Session.TenantBaseDirs 주입
-- [ ] B4. family 채널 config 거부 — startup 에서 family 에 `[telegram]` 등 있으면 fail-fast (AC-T4, **C6**)
-- [ ] B5. `core/fanout.go` 신규 — `Fanout.send(tenantID, payload)` → `Event{TenantID, Type:"family.push"}` eventCh 투입, TenantRouter 가 대상 Session 에 전달
-- [ ] B6. `sandbox/fanout.go` 신규 — JS binding, **family Session 에만** 노출 (개인 스킬은 `Fanout is not defined`)
-- [ ] B7. 통합 — family 가 `family/memory/weather.json` 씀 → alice allowlist 읽기 성공 + `cross_tenant_read` 감사 로그 (AC-U2)
+- [x] B1. `Config.IsFamily bool`, `Config.Share map[string]ShareConfig` 추가 + TOML 파싱 테스트 (`[share.family] read=[...]`)
+- [x] B2. `core/share.go` 신규 — `ValidateSharedReadPath` + path traversal/symlink/hardlink/absolute 4종 매트릭스 테스트 (AC-T6, **C2**)
+- [x] B3. `engine/share.go` 신규 — `Share.read(tenantID, path)` 스킬 (Session.TenantID/TenantRegistry 필드 추가, `cross_tenant_read` 감사 로그)
+- [x] B4. family 채널 config 거부 — `core.ValidateFamilyTenants` fail-fast (AC-T4, **C6**)
+- [x] B5. `core/fanout.go` 신규 — `Fanout.Send/Broadcast` → `Event{TenantID, Type:"family.push"}` eventCh 투입 (dispatch 는 A3 TenantRouter 로 커버)
+- [x] B6. `sandbox` 조건부 JS binding — `Options.ExposeFanout` 로 family Session 에만 `Fanout` 노출 (개인은 `typeof Fanout === "undefined"`)
+- [x] B7. E2E 통합 — alice `Share.read` 성공 + bob 거부 + `cross_tenant_read` 감사 로그 + family `Fanout.send` → eventCh 에 `EventFamilyPush` (AC-U2)
 
-### Plan C: Operations + Demo — Tenant add, Isolation, E2E
+### Plan C: Operations + Demo — Tenant add, Isolation, E2E ← 현재
 
 - [ ] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `Session.Health` atomic
 - [ ] C2. goroutine recover + Degraded 전환 — scheduler/dispatch loop 에 `defer recover` + tenantID 로그 + 다른 7 tenant tick 계속 (AC-T8, **C4**)
@@ -38,6 +38,13 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 - [ ] C6. Legacy 마이그레이션 완성 — DB rows 보존 + 기동 재현 테스트 (AC-T9 완성)
 - [ ] C7. E2E AC-U1 — family `morning-brief` scheduled → alice/bob/charlie 개인 Telegram mock 각자 맞춤 SendMessage
 - [ ] C8. E2E AC-U3 — `tenant add charlie` 후 30초 내 charlie 봇 이벤트 dispatch 시작
+
+#### Plan B → C 이월 (리뷰 findings)
+
+- [ ] C9. server bootstrap 에서 Session.TenantID/TenantRegistry/Fanout 3 필드 배선 — 현재는 zero-value 로 dead code 상태
+- [ ] C10. `ValidateFamilyTenants` 를 server startup (StartChannels 이전) 에서 호출 — 정의만 있고 caller 없음
+- [ ] C11. `sandbox.Options.ExposeShare` 도입 — Share 도 Fanout 과 동일하게 family-only JS global 로 전환 (현재는 모든 tenant 에 바인딩, allowlist 로만 제어)
+- [ ] C12. family.push payload → ChatPayload 호환 브리지 — dispatchLoop/prompt.go 가 기대하는 구조와 맞추고 응답 라우팅 복구
 
 ### Commit Map
 - Plan A → `feat(core): multi-tenant routing foundation`

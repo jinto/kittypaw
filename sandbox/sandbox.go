@@ -19,6 +19,16 @@ import (
 // It receives a SkillCall and returns the JSON-serialized result string.
 type SkillResolver func(ctx context.Context, call core.SkillCall) (string, error)
 
+// Options controls per-execution behavior that varies per Session (not per
+// Sandbox instance). The Sandbox is shared across tenants, so tenant-scoped
+// toggles must travel on the call — not the constructor.
+type Options struct {
+	// ExposeFanout registers the Fanout.* global. Off by default because only
+	// family tenants may push to peers; personal tenants must not see the API
+	// surface at all (so a skill can't even probe `typeof Fanout`).
+	ExposeFanout bool
+}
+
 // Sandbox executes JavaScript code in an isolated subprocess.
 type Sandbox struct {
 	config core.SandboxConfig
@@ -46,6 +56,22 @@ func (s *Sandbox) ExecuteWithResolver(
 	return run(ctx, s.config, code, jsContext, resolver, execOpts{})
 }
 
+// ExecuteWithResolverOpts is the full-control variant of ExecuteWithResolver.
+// Callers that need to vary behavior per Session (e.g. enabling Fanout for a
+// family tenant) use this. Personal-tenant call sites can keep calling the
+// plain ExecuteWithResolver — the zero Options has all gates closed.
+func (s *Sandbox) ExecuteWithResolverOpts(
+	ctx context.Context,
+	code string,
+	jsContext map[string]any,
+	resolver SkillResolver,
+	opts Options,
+) (*core.ExecutionResult, error) {
+	return run(ctx, s.config, code, jsContext, resolver, execOpts{
+		exposeFanout: opts.ExposeFanout,
+	})
+}
+
 // ExecutePackage runs package code with raw resolver results. Skill stubs
 // return JSON strings instead of parsed objects, matching the convention that
 // packages call JSON.parse() on skill results themselves.
@@ -56,4 +82,19 @@ func (s *Sandbox) ExecutePackage(
 	resolver SkillResolver,
 ) (*core.ExecutionResult, error) {
 	return run(ctx, s.config, code, jsContext, resolver, execOpts{rawResolverResults: true})
+}
+
+// ExecutePackageOpts is the full-control variant of ExecutePackage. See
+// ExecuteWithResolverOpts for the rationale.
+func (s *Sandbox) ExecutePackageOpts(
+	ctx context.Context,
+	code string,
+	jsContext map[string]any,
+	resolver SkillResolver,
+	opts Options,
+) (*core.ExecutionResult, error) {
+	return run(ctx, s.config, code, jsContext, resolver, execOpts{
+		rawResolverResults: true,
+		exposeFanout:       opts.ExposeFanout,
+	})
 }
