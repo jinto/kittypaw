@@ -126,11 +126,15 @@ func newServeCmd() *cobra.Command {
 }
 
 func runServe(_ *cobra.Command, _ []string) error {
-	cfg, st, provider, sbox, err := bootstrap()
+	deps, err := bootstrap()
 	if err != nil {
 		return err
 	}
-	defer st.Close() //nolint:errcheck
+	defer func() {
+		for _, td := range deps {
+			_ = td.Store.Close()
+		}
+	}()
 
 	// Check port availability before starting channels.
 	if err := checkPort(flagBind); err != nil {
@@ -141,32 +145,12 @@ func runServe(_ *cobra.Command, _ []string) error {
 	writePidFile()
 	defer removePidFile()
 
-	// Resolve fallback provider if a secondary model is configured.
-	var fallback llm.Provider
-	if m := cfg.DefaultModel(); m != nil {
-		fallback, _ = llm.NewProviderFromModelConfig(*m)
-	}
-
-	// Connect to configured MCP servers.
-	var mcpReg *mcpreg.Registry
-	if len(cfg.MCPServers) > 0 {
-		if err := mcpreg.ValidateConfig(cfg.MCPServers); err != nil {
-			return fmt.Errorf("MCP config: %w", err)
-		}
-		mcpReg = mcpreg.NewRegistry(cfg.MCPServers)
-		connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
-			slog.Warn("some MCP servers failed to connect", "failures", len(errs))
-		}
-		connectCancel()
-	}
-
 	// The server owns the engine session, channel spawner, and dispatch loop.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.New(cfg, st, provider, fallback, sbox, mcpReg, version)
-	if err := srv.StartChannels(ctx, cfg.Channels); err != nil {
+	srv := server.New(deps, version)
+	if err := srv.StartChannels(ctx); err != nil {
 		return fmt.Errorf("start channels: %w", err)
 	}
 
@@ -2286,32 +2270,103 @@ func jsonSlice(m map[string]any, key string) []map[string]any {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// bootstrap loads config, opens the store, creates the LLM provider and sandbox.
-func bootstrap() (*core.Config, *store.Store, llm.Provider, *sandbox.Sandbox, error) {
-	cfgPath, err := core.ConfigPath()
+// bootstrap discovers every tenant under ~/.kittypaw/tenants/ and opens
+// per-tenant dependencies (store, LLM provider, sandbox, MCP, secrets,
+// package manager, API token manager).
+//
+// Before discovery, a legacy ~/.kittypaw layout (config.toml at root, no
+// tenants/) is migrated into tenants/default/ via MigrateLegacyLayout so
+// v0.x installs upgrade transparently. Discovery fails loudly when no
+// tenants are present — a daemon with nothing to route is not useful.
+func bootstrap() ([]*server.TenantDeps, error) {
+	baseDir, err := core.ConfigDir()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("config path: %w", err)
+		return nil, fmt.Errorf("config dir: %w", err)
 	}
 
-	cfg, err := core.LoadConfig(cfgPath)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("load config: %w", err)
+	if err := core.MigrateLegacyLayout(baseDir); err != nil {
+		return nil, fmt.Errorf("migrate legacy layout: %w", err)
 	}
 
-	st, err := openStore()
+	tenantsRoot := filepath.Join(baseDir, "tenants")
+	tenants, err := core.DiscoverTenants(tenantsRoot)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, fmt.Errorf("discover tenants: %w", err)
+	}
+	if len(tenants) == 0 {
+		return nil, fmt.Errorf("no tenants found under %s (run `kittypaw setup` first)", tenantsRoot)
 	}
 
-	provider, err := llm.NewProviderFromConfig(cfg.LLM)
-	if err != nil {
-		_ = st.Close()
-		return nil, nil, nil, nil, fmt.Errorf("create llm provider: %w", err)
+	deps := make([]*server.TenantDeps, 0, len(tenants))
+	closeOnErr := func() {
+		for _, td := range deps {
+			_ = td.Store.Close()
+		}
 	}
 
-	sbox := sandbox.New(cfg.Sandbox)
+	for _, t := range tenants {
+		if err := t.EnsureDirs(); err != nil {
+			closeOnErr()
+			return nil, fmt.Errorf("ensure dirs for %s: %w", t.ID, err)
+		}
 
-	return cfg, st, provider, sbox, nil
+		st, err := store.Open(t.DBPath())
+		if err != nil {
+			closeOnErr()
+			return nil, fmt.Errorf("open store for %s: %w", t.ID, err)
+		}
+
+		provider, err := llm.NewProviderFromConfig(t.Config.LLM)
+		if err != nil {
+			_ = st.Close()
+			closeOnErr()
+			return nil, fmt.Errorf("create llm provider for %s: %w", t.ID, err)
+		}
+
+		var fallback llm.Provider
+		if m := t.Config.DefaultModel(); m != nil {
+			fallback, _ = llm.NewProviderFromModelConfig(*m)
+		}
+
+		sbox := sandbox.New(t.Config.Sandbox)
+
+		secrets, secretsErr := core.LoadSecretsFrom(t.SecretsPath())
+		if secretsErr != nil {
+			slog.Warn("failed to load secrets store, package config will be limited",
+				"tenant", t.ID, "error", secretsErr)
+		}
+		pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
+		apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
+
+		var mcpReg *mcpreg.Registry
+		if len(t.Config.MCPServers) > 0 {
+			if err := mcpreg.ValidateConfig(t.Config.MCPServers); err != nil {
+				_ = st.Close()
+				closeOnErr()
+				return nil, fmt.Errorf("MCP config for %s: %w", t.ID, err)
+			}
+			mcpReg = mcpreg.NewRegistry(t.Config.MCPServers)
+			connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
+				slog.Warn("some MCP servers failed to connect",
+					"tenant", t.ID, "failures", len(errs))
+			}
+			connectCancel()
+		}
+
+		deps = append(deps, &server.TenantDeps{
+			Tenant:      t,
+			Store:       st,
+			Provider:    provider,
+			Fallback:    fallback,
+			Sandbox:     sbox,
+			McpRegistry: mcpReg,
+			PkgMgr:      pkgMgr,
+			APITokenMgr: apiTokenMgr,
+			Secrets:     secrets,
+		})
+	}
+	return deps, nil
 }
 
 // openStore opens the SQLite store at the default path.
