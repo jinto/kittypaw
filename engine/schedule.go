@@ -55,9 +55,22 @@ func (s *Scheduler) Start(ctx context.Context) {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			s.checkAndRun(ctx)
+			s.tickOnce(ctx)
 		}
 	}
+}
+
+// tickOnce wraps a single checkAndRun invocation in a recover block so a
+// panic in skill loading or dispatch does not exit the scheduler loop.
+// Per-skill and per-package goroutines have their own recover; this one
+// guards the tick dispatcher itself.
+func (s *Scheduler) tickOnce(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			RecoverTenantPanic(s.session, "scheduler.tick", r)
+		}
+	}()
+	s.checkAndRun(ctx)
 }
 
 // runReflectionLoop checks once per hour whether the daily reflection cycle
@@ -77,28 +90,40 @@ func (s *Scheduler) runReflectionLoop(ctx context.Context) {
 		case <-s.stop:
 			return
 		case <-ticker.C:
-			if !s.isReflectionDue() {
-				continue
-			}
-			slog.Info("scheduler: running reflection cycle")
-			if err := RunReflectionCycle(ctx, s.session, &s.session.Config.Reflection); err != nil {
-				slog.Error("scheduler: reflection cycle failed", "error", err)
-			}
-
-			// After reflection, check evolution trigger conditions.
-			if s.session.Config.Evolution.Enabled {
-				profiles, err := s.session.Store.ListActiveProfiles()
-				if err == nil {
-					for _, p := range profiles {
-						_ = TriggerEvolution(ctx, p.ID, s.session, &s.session.Config.Evolution)
-					}
-				}
-			}
-
-			// Record last run.
-			_ = s.session.Store.SetLastRun("__reflection__", time.Now())
+			s.reflectionTick(ctx)
 		}
 	}
+}
+
+// reflectionTick runs one reflection + evolution check with panic recovery
+// so a failure in the daily cycle does not exit the reflection goroutine
+// for the whole process lifetime.
+func (s *Scheduler) reflectionTick(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			RecoverTenantPanic(s.session, "scheduler.reflection", r)
+		}
+	}()
+	if !s.isReflectionDue() {
+		return
+	}
+	slog.Info("scheduler: running reflection cycle")
+	if err := RunReflectionCycle(ctx, s.session, &s.session.Config.Reflection); err != nil {
+		slog.Error("scheduler: reflection cycle failed", "error", err)
+	}
+
+	// After reflection, check evolution trigger conditions.
+	if s.session.Config.Evolution.Enabled {
+		profiles, err := s.session.Store.ListActiveProfiles()
+		if err == nil {
+			for _, p := range profiles {
+				_ = TriggerEvolution(ctx, p.ID, s.session, &s.session.Config.Evolution)
+			}
+		}
+	}
+
+	// Record last run.
+	_ = s.session.Store.SetLastRun("__reflection__", time.Now())
 }
 
 // isReflectionDue returns true if the reflection cycle should run now.
@@ -151,7 +176,9 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 			go func(sk core.SkillWithCode) {
 				defer s.wg.Done()
 				defer s.inflight.Delete(sk.Skill.Name)
-				s.runSkill(ctx, &sk)
+				runWithTenantRecover(s.session, "scheduler.runSkill", func() {
+					s.runSkill(ctx, &sk)
+				})
 			}(sk)
 		}
 	}
@@ -192,7 +219,9 @@ func (s *Scheduler) checkPackages(ctx context.Context) {
 		go func(pkg core.SkillPackage) {
 			defer s.wg.Done()
 			defer s.inflight.Delete("pkg:" + pkg.Meta.ID)
-			s.runPackage(ctx, &pkg)
+			runWithTenantRecover(s.session, "scheduler.runPackage", func() {
+				s.runPackage(ctx, &pkg)
+			})
 		}(pkg)
 	}
 }
