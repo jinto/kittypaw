@@ -30,8 +30,8 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 
 ### Plan C: Operations + Demo — Tenant add, Isolation, E2E ← 현재
 
-- [ ] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `Session.Health` atomic
-- [ ] C2. goroutine recover + Degraded 전환 — scheduler/dispatch loop 에 `defer recover` + tenantID 로그 + 다른 7 tenant tick 계속 (AC-T8, **C4**)
+- [x] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `HealthState` (atomic, Stopped terminal) + `Session.Health` 배선 ✅ (merged with C2)
+- [x] C2. goroutine recover + Degraded 전환 — `engine/recover.go` (`RecoverTenantPanic`/`MarkTenantReady`, nil-safe) + scheduler tickOnce/reflectionTick/runSkill/runPackage + `server.dispatchLoop` per-event recover + AC-T8 isolation test ✅ (merged with C1)
 - [ ] C3. CLI `kittypaw tenant add <name> --telegram-bot-token=<T>` subcommand + 공통 setup 헬퍼 (OQ7)
 - [ ] C4. HTTP `POST /api/v1/admin/tenants` — daemon hot-reload (Registry.Register + Spawner.Reconcile), 재시작 없이 dispatch 시작
 - [ ] C5. Cross-routing 감지 (AC-T7) — alice 봇에 bob chat_id 위조 메시지 → chat_id ownership 검증 후 drop + `tenant_routing_mismatch_total{from=alice}`

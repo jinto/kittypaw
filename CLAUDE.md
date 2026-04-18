@@ -28,6 +28,7 @@ relay/         KakaoTalk relay (Rust, axum + SQLite, self-hosted single binary)
 - **Cobra CLI**: Replaces Clap for command-line parsing
 - **Multi-tenant BaseDir**: All filesystem operations use `Session.BaseDir` via `*From(baseDir, ...)` function variants, enabling per-tenant data isolation without engine/handler changes
 - **Tenant routing**: Single daemon serves N personal tenants + optional `family` tenant. `TenantRouter` fans inbound events to the right `Session` by `Event.TenantID`; `ChannelSpawner` keys by `(tenantID, channel, alias)` so the same bot token can't be duplicated across tenants. See `core/tenant.go`, `server/tenant_router.go`.
+- **Tenant panic isolation (AC-T8)**: Every worker goroutine wraps work in `engine.RecoverTenantPanic` (or the `engine.runWithTenantRecover` helper). A panic marks only the owning tenant `Degraded` via `core.HealthState` (atomic state machine: Ready / Degraded / Stopped-terminal) and never propagates to siblings; clean completion promotes back to `Ready`. Chokepoints: scheduler `tickOnce` / `reflectionTick` / skill goroutine / package goroutine, and `server.dispatchLoop` per-event. Health state is nil-safe for bare-struct test fixtures.
 
 ## Family Tenant (cross-tenant read + fanout)
 
