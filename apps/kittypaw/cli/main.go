@@ -166,7 +166,9 @@ func runServe(_ *cobra.Command, _ []string) error {
 	defer cancel()
 
 	srv := server.New(cfg, st, provider, fallback, sbox, mcpReg, version)
-	srv.StartChannels(ctx, cfg.Channels)
+	if err := srv.StartChannels(ctx, cfg.Channels); err != nil {
+		return fmt.Errorf("start channels: %w", err)
+	}
 
 	// Start HTTP server (blocks until shutdown signal).
 	slog.Info("kittypaw serving", "bind", flagBind)
