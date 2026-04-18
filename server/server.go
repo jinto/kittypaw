@@ -18,9 +18,6 @@ import (
 	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
-	"github.com/jinto/kittypaw/llm"
-	mcpreg "github.com/jinto/kittypaw/mcp"
-	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/store"
 )
 
@@ -28,18 +25,20 @@ import (
 // to the agent engine. It owns the chi router, the engine session, the
 // scheduler, channel spawner, tenant router, and all handler state.
 type Server struct {
-	config     *core.Config
-	configMu   sync.RWMutex // protects config during hot-reload
-	store      *store.Store
-	session    *engine.Session // default-tenant session; HTTP handlers use this
-	scheduler  *engine.Scheduler
-	router     chi.Router
-	spawner    *ChannelSpawner // manages channel lifecycle for hot-reload
-	tenants    *TenantRouter   // routes channel events to tenant-scoped sessions
-	eventCh    chan core.Event // shared event channel between channels and dispatch loop
-	version    string
-	pkgManager *core.PackageManager // shared package manager for API handlers
-	secrets    *core.SecretsStore   // shared secrets store for API handlers
+	config         *core.Config
+	configMu       sync.RWMutex // protects config during hot-reload
+	store          *store.Store
+	session        *engine.Session // default-tenant session; HTTP handlers use this
+	scheduler      *engine.Scheduler
+	router         chi.Router
+	spawner        *ChannelSpawner      // manages channel lifecycle for hot-reload
+	tenants        *TenantRouter        // routes channel events to tenant-scoped sessions
+	tenantList     []*core.Tenant       // ordered tenant metadata for startup validation
+	tenantRegistry *core.TenantRegistry // shared cross-tenant registry (Share.read / Fanout)
+	eventCh        chan core.Event      // shared event channel between channels and dispatch loop
+	version        string
+	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
+	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
 }
 
 // DefaultTenantID is the tenant ID used when the daemon runs without an
@@ -47,76 +46,120 @@ type Server struct {
 const DefaultTenantID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
-// mcpReg may be nil when no MCP servers are configured.
-// Call StartChannels before ListenAndServe to activate messaging channels.
-func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.Provider, sb *sandbox.Sandbox, mcpReg *mcpreg.Registry, version string) *Server {
-	// Seed TOML-configured workspace paths into DB (idempotent).
-	if len(cfg.Sandbox.AllowedPaths) > 0 {
-		if err := st.SeedWorkspacesFromConfig(cfg.Sandbox.AllowedPaths); err != nil {
-			slog.Error("seed workspaces from config", "error", err)
+// Callers must pass at least one TenantDeps; New panics on an empty slice
+// because a daemon with no tenants has nothing to route to.
+//
+// One engine.Session is built per tenant. The family tenant (IsFamily=true)
+// receives a ChannelFanout wired to the shared eventCh so its skills can
+// push to personal tenants via Fanout.send; personal tenants keep Fanout
+// nil so the JS global stays hidden (I5 — personal cannot reach personal).
+// Every session shares the same *core.TenantRegistry pointer so Share.read
+// can resolve peer tenants by ID.
+//
+// The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
+// the default tenant in PR-1; multi-tenant HTTP routing is scoped to a
+// follow-up. Call StartChannels before ListenAndServe to activate messaging.
+func New(tenants []*TenantDeps, version string) *Server {
+	if len(tenants) == 0 {
+		panic("server.New: tenants slice must be non-empty")
+	}
+
+	// Identify the default tenant: explicit DefaultTenantID match wins; the
+	// first entry is the fallback so a single-tenant install with a non-
+	// "default" ID still boots.
+	defaultDeps := tenants[0]
+	for _, td := range tenants {
+		if td.Tenant.ID == DefaultTenantID {
+			defaultDeps = td
+			break
 		}
 	}
+	cfg := defaultDeps.Tenant.Config
 
-	cfgDir, err := core.ConfigDir()
-	if err != nil {
-		// ConfigDir only fails if $HOME is unset — catastrophic for the server.
-		panic(fmt.Sprintf("fatal: config dir unavailable: %v", err))
+	// eventCh MUST exist before Fanout construction — ChannelFanout retains
+	// a reference for every future send.
+	eventCh := make(chan core.Event, 64)
+
+	// Shared cross-tenant registry. BaseDir points at the tenants/ root
+	// (the parent of each tenant's BaseDir) so Share.read and future
+	// listing operations have a consistent anchor.
+	tenantsRoot := filepath.Dir(defaultDeps.Tenant.BaseDir)
+	registry := core.NewTenantRegistry(tenantsRoot, DefaultTenantID)
+	tenantList := make([]*core.Tenant, 0, len(tenants))
+	for _, td := range tenants {
+		registry.Register(td.Tenant)
+		tenantList = append(tenantList, td.Tenant)
 	}
 
-	// Initialize shared secrets + package manager (before session so PM is available).
-	secrets, secretsErr := core.LoadSecretsFrom(filepath.Join(cfgDir, "secrets.json"))
-	if secretsErr != nil {
-		slog.Warn("failed to load secrets store, package config will be limited", "error", secretsErr)
-	}
-	pkgMgr := core.NewPackageManagerFrom(cfgDir, secrets)
-
-	apiTokenMgr := core.NewAPITokenManager(cfgDir, secrets)
-
-	session := &engine.Session{
-		Provider:         provider,
-		FallbackProvider: fallback,
-		Sandbox:          sb,
-		Store:            st,
-		Config:           cfg,
-		McpRegistry:      mcpReg,
-		BaseDir:          cfgDir,
-		PackageManager:   pkgMgr,
-		APITokenMgr:      apiTokenMgr,
-	}
-	if err := session.RefreshAllowedPaths(); err != nil {
-		slog.Warn("startup: failed to load workspace paths, file access denied by default", "error", err)
-	}
-
-	// Create workspace indexer and trigger initial background indexing.
-	indexer := engine.NewFTS5Indexer(st)
-	session.Indexer = indexer
-	go func() {
-		wss, err := st.ListWorkspaces()
-		if err != nil {
-			slog.Warn("startup: failed to list workspaces for indexing", "error", err)
-			return
-		}
-		for _, ws := range wss {
-			if _, err := indexer.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
-				slog.Warn("startup: workspace indexing failed",
-					"workspace_id", ws.ID, "root_path", ws.RootPath, "error", err)
+	router := NewTenantRouter()
+	var defaultSession *engine.Session
+	for _, td := range tenants {
+		if len(td.Tenant.Config.Sandbox.AllowedPaths) > 0 {
+			if err := td.Store.SeedWorkspacesFromConfig(td.Tenant.Config.Sandbox.AllowedPaths); err != nil {
+				slog.Error("seed workspaces from config", "tenant", td.Tenant.ID, "error", err)
 			}
 		}
-	}()
 
-	tenants := NewTenantRouter()
-	tenants.Register(DefaultTenantID, session)
+		sess := &engine.Session{
+			Provider:         td.Provider,
+			FallbackProvider: td.Fallback,
+			Sandbox:          td.Sandbox,
+			Store:            td.Store,
+			Config:           td.Tenant.Config,
+			McpRegistry:      td.McpRegistry,
+			BaseDir:          td.Tenant.BaseDir,
+			PackageManager:   td.PkgMgr,
+			APITokenMgr:      td.APITokenMgr,
+			TenantID:         td.Tenant.ID,
+			TenantRegistry:   registry,
+		}
+		// I5 — only family may fan out. Personal tenants never see the
+		// Fanout JS global because the sandbox keys on sess.Fanout != nil.
+		if td.Tenant.Config != nil && td.Tenant.Config.IsFamily {
+			sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Tenant.ID)
+		}
+
+		if err := sess.RefreshAllowedPaths(); err != nil {
+			slog.Warn("startup: failed to load workspace paths, file access denied by default",
+				"tenant", td.Tenant.ID, "error", err)
+		}
+
+		indexer := engine.NewFTS5Indexer(td.Store)
+		sess.Indexer = indexer
+		go func(tenantID string, st *store.Store, idx engine.Indexer) {
+			wss, err := st.ListWorkspaces()
+			if err != nil {
+				slog.Warn("startup: failed to list workspaces for indexing",
+					"tenant", tenantID, "error", err)
+				return
+			}
+			for _, ws := range wss {
+				if _, err := idx.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
+					slog.Warn("startup: workspace indexing failed",
+						"tenant", tenantID, "workspace_id", ws.ID,
+						"root_path", ws.RootPath, "error", err)
+				}
+			}
+		}(td.Tenant.ID, td.Store, indexer)
+
+		router.Register(td.Tenant.ID, sess)
+		if td == defaultDeps {
+			defaultSession = sess
+		}
+	}
 
 	s := &Server{
-		config:     cfg,
-		store:      st,
-		session:    session,
-		scheduler:  engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), pkgMgr),
-		tenants:    tenants,
-		eventCh:    make(chan core.Event, 64),
-		version:    version,
-		pkgManager: pkgMgr,
-		secrets:    secrets,
+		config:         cfg,
+		store:          defaultDeps.Store,
+		session:        defaultSession,
+		scheduler:      engine.NewScheduler(defaultSession, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), defaultDeps.PkgMgr),
+		tenants:        router,
+		tenantList:     tenantList,
+		tenantRegistry: registry,
+		eventCh:        eventCh,
+		version:        version,
+		pkgManager:     defaultDeps.PkgMgr,
+		secrets:        defaultDeps.Secrets,
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -277,25 +320,42 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 	return s.session.Run(ctx, event, nil)
 }
 
-// StartChannels creates the ChannelSpawner, reconciles the initial channel
-// configs, and starts the dispatch and retry goroutines.
-// Must be called before ListenAndServe.
+// StartChannels creates the ChannelSpawner, reconciles each tenant's
+// channel configs, and starts the dispatch and retry goroutines. Must be
+// called before ListenAndServe.
 //
-// Before spawning any channel, StartChannels runs ValidateTenantChannels
-// across every tenant's config so duplicate bot tokens / Kakao relay URLs
-// surface as fatal log warnings at boot rather than silent update races
-// at runtime (family-multi-tenant spec C3).
-func (s *Server) StartChannels(ctx context.Context, configs []core.ChannelConfig) error {
-	tenantChannels := map[string][]core.ChannelConfig{
-		DefaultTenantID: configs,
+// Two startup validations run BEFORE any channel spawns:
+//   - ValidateTenantChannels: a single Telegram bot token / Kakao relay
+//     URL cannot be claimed by two tenants (C3 — prevents silent update
+//     races where one tenant's bot steals another's messages).
+//   - ValidateFamilyTenants: the family tenant must not declare channels
+//     (C10 — family is a coordinator, not a channel owner; a misconfigured
+//     [telegram] on family would race the real personal bot for updates).
+func (s *Server) StartChannels(ctx context.Context) error {
+	tenantChannels := make(map[string][]core.ChannelConfig, len(s.tenantList))
+	for _, t := range s.tenantList {
+		if t.Config == nil {
+			continue
+		}
+		tenantChannels[t.ID] = t.Config.Channels
 	}
+
 	if err := core.ValidateTenantChannels(tenantChannels); err != nil {
 		return fmt.Errorf("channel config validation: %w", err)
 	}
+	if err := core.ValidateFamilyTenants(s.tenantList); err != nil {
+		return fmt.Errorf("family tenant validation: %w", err)
+	}
 
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)
-	if err := s.spawner.Reconcile(DefaultTenantID, configs); err != nil {
-		slog.Warn("initial channel reconcile: some channels failed", "error", err)
+	for tenantID, configs := range tenantChannels {
+		if len(configs) == 0 {
+			continue
+		}
+		if err := s.spawner.Reconcile(tenantID, configs); err != nil {
+			slog.Warn("initial channel reconcile: some channels failed",
+				"tenant", tenantID, "error", err)
+		}
 	}
 	go s.dispatchLoop(ctx)
 	go s.retryPendingResponses(ctx)
