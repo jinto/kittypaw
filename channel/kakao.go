@@ -41,6 +41,7 @@ type kakaoReplyMessage struct {
 //	Recv: {"id":"action_id","text":"utterance","user_id":"kakao_user_id"}
 //	Send: {"id":"action_id","text":"response_text"}
 type KakaoChannel struct {
+	tenantID   string
 	wsEndpoint string // full wss:// URL from login
 	conn       *websocket.Conn
 	mu         sync.Mutex
@@ -59,8 +60,9 @@ func TestKakaoRelay(ctx context.Context, wsURL string) error {
 
 // NewKakao creates a KakaoChannel that connects via WebSocket to the relay.
 // wsURL is the full WebSocket URL (e.g. wss://relay.kittypaw.app/ws/{token}).
-func NewKakao(wsURL string) *KakaoChannel {
-	return &KakaoChannel{wsEndpoint: wsURL}
+// tenantID is stamped on every emitted Event for TenantRouter dispatch.
+func NewKakao(tenantID, wsURL string) *KakaoChannel {
+	return &KakaoChannel{tenantID: tenantID, wsEndpoint: wsURL}
 }
 
 func (k *KakaoChannel) Name() string { return "kakao_talk" }
@@ -163,8 +165,9 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 		}
 
 		event := core.Event{
-			Type:    core.EventKakaoTalk,
-			Payload: raw,
+			Type:     core.EventKakaoTalk,
+			TenantID: k.tenantID,
+			Payload:  raw,
 		}
 
 		select {

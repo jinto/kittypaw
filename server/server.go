@@ -26,20 +26,25 @@ import (
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
 // to the agent engine. It owns the chi router, the engine session, the
-// scheduler, channel spawner, and all handler state.
+// scheduler, channel spawner, tenant router, and all handler state.
 type Server struct {
 	config     *core.Config
 	configMu   sync.RWMutex // protects config during hot-reload
 	store      *store.Store
-	session    *engine.Session
+	session    *engine.Session // default-tenant session; HTTP handlers use this
 	scheduler  *engine.Scheduler
 	router     chi.Router
 	spawner    *ChannelSpawner // manages channel lifecycle for hot-reload
+	tenants    *TenantRouter   // routes channel events to tenant-scoped sessions
 	eventCh    chan core.Event // shared event channel between channels and dispatch loop
 	version    string
 	pkgManager *core.PackageManager // shared package manager for API handlers
 	secrets    *core.SecretsStore   // shared secrets store for API handlers
 }
+
+// DefaultTenantID is the tenant ID used when the daemon runs without an
+// explicit tenants/ directory (legacy single-tenant deployments).
+const DefaultTenantID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
 // mcpReg may be nil when no MCP servers are configured.
@@ -99,11 +104,15 @@ func New(cfg *core.Config, st *store.Store, provider llm.Provider, fallback llm.
 		}
 	}()
 
+	tenants := NewTenantRouter()
+	tenants.Register(DefaultTenantID, session)
+
 	s := &Server{
 		config:     cfg,
 		store:      st,
 		session:    session,
 		scheduler:  engine.NewScheduler(session, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), pkgMgr),
+		tenants:    tenants,
 		eventCh:    make(chan core.Event, 64),
 		version:    version,
 		pkgManager: pkgMgr,
@@ -271,17 +280,34 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 // StartChannels creates the ChannelSpawner, reconciles the initial channel
 // configs, and starts the dispatch and retry goroutines.
 // Must be called before ListenAndServe.
-func (s *Server) StartChannels(ctx context.Context, configs []core.ChannelConfig) {
+//
+// Before spawning any channel, StartChannels runs ValidateTenantChannels
+// across every tenant's config so duplicate bot tokens / Kakao relay URLs
+// surface as fatal log warnings at boot rather than silent update races
+// at runtime (family-multi-tenant spec C3).
+func (s *Server) StartChannels(ctx context.Context, configs []core.ChannelConfig) error {
+	tenantChannels := map[string][]core.ChannelConfig{
+		DefaultTenantID: configs,
+	}
+	if err := core.ValidateTenantChannels(tenantChannels); err != nil {
+		return fmt.Errorf("channel config validation: %w", err)
+	}
+
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)
-	if err := s.spawner.Reconcile(configs); err != nil {
+	if err := s.spawner.Reconcile(DefaultTenantID, configs); err != nil {
 		slog.Warn("initial channel reconcile: some channels failed", "error", err)
 	}
 	go s.dispatchLoop(ctx)
 	go s.retryPendingResponses(ctx)
+	return nil
 }
 
-// dispatchLoop reads events from the shared eventCh, processes them through
-// the engine, and routes responses back via the spawner.
+// dispatchLoop reads events from the shared eventCh, routes them to the
+// tenant-scoped engine session, and returns responses via the spawner.
+//
+// Events with an empty or unknown TenantID are dropped by the TenantRouter
+// (no default fallback) to avoid cross-tenant privacy leaks — see C1 in
+// the family-multi-tenant spec.
 func (s *Server) dispatchLoop(ctx context.Context) {
 	for {
 		select {
@@ -297,15 +323,22 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
+			session := s.tenants.Route(event)
+			if session == nil {
+				// Drop was already logged + counted by TenantRouter.
+				continue
+			}
+
 			slog.Info("processing channel event",
 				"type", event.Type,
+				"tenant", event.TenantID,
 				"chat_id", payload.ChatID,
 				"from", payload.FromName,
 			)
 
 			// Build RunOptions with Confirmer-based permission callback if available.
 			var runOpts *engine.RunOptions
-			ch, chOK := s.spawner.GetChannel(event.Type)
+			ch, chOK := s.spawner.GetChannel(event.TenantID, event.Type)
 			if chOK {
 				if confirmer, ok := ch.(channel.Confirmer); ok {
 					evType := string(event.Type)
@@ -335,10 +368,11 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				}
 			}
 
-			response, err := s.session.Run(ctx, event, runOpts)
+			response, err := session.Run(ctx, event, runOpts)
 			if err != nil {
 				slog.Error("channel event: engine error",
 					"type", event.Type,
+					"tenant", event.TenantID,
 					"chat_id", payload.ChatID,
 					"error", err,
 				)
@@ -346,9 +380,10 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			}
 
 			if !chOK {
-				slog.Warn("channel event: no channel for response routing, enqueuing for retry", "type", event.Type)
+				slog.Warn("channel event: no channel for response routing, enqueuing for retry",
+					"type", event.Type, "tenant", event.TenantID)
 				if event.Type != core.EventKakaoTalk {
-					_ = s.store.EnqueueResponse(string(event.Type), payload.ChatID, response)
+					_ = s.store.EnqueueResponse(event.TenantID, string(event.Type), payload.ChatID, response)
 				}
 				continue
 			}
@@ -356,12 +391,13 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			if err := ch.SendResponse(ctx, payload.ChatID, response); err != nil {
 				slog.Error("channel event: send response failed",
 					"type", event.Type,
+					"tenant", event.TenantID,
 					"chat_id", payload.ChatID,
 					"error", err,
 				)
 				// Kakao uses ephemeral action IDs — retry is futile.
 				if event.Type != core.EventKakaoTalk {
-					if qErr := s.store.EnqueueResponse(string(event.Type), payload.ChatID, response); qErr != nil {
+					if qErr := s.store.EnqueueResponse(event.TenantID, string(event.Type), payload.ChatID, response); qErr != nil {
 						slog.Error("channel event: enqueue response failed", "error", qErr)
 					}
 				}
@@ -409,7 +445,24 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 				continue
 			}
 			for _, p := range pending {
-				ch, ok := s.spawner.GetChannel(core.EventType(p.EventType))
+				tenantID := p.TenantID
+				if tenantID == "" {
+					// Pre-migration rows: safe to route to default ONLY while
+					// the daemon is single-tenant. Once a second tenant is
+					// registered, an empty tenant_id is ambiguous and could
+					// leak across the privacy boundary (spec C1) — drop it
+					// instead of guessing. Uses MarkResponseDelivered for
+					// cleanup until a dedicated dropped-audit table is
+					// introduced (Plan B).
+					if len(s.tenants.Sessions()) > 1 {
+						slog.Warn("retry: PERMANENTLY dropping pending row with empty tenant_id (C1 privacy guard)",
+							"id", p.ID, "chat_id", p.ChatID, "tenants", len(s.tenants.Sessions()))
+						_ = s.store.MarkResponseDelivered(p.ID)
+						continue
+					}
+					tenantID = DefaultTenantID
+				}
+				ch, ok := s.spawner.GetChannel(tenantID, core.EventType(p.EventType))
 				if !ok {
 					// Channel absent — do NOT drop. Leave in queue for next tick.
 					continue

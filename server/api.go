@@ -821,7 +821,7 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	// Reconcile channels with the new config.
 	result := map[string]any{"success": true}
 	if s.spawner != nil {
-		if err := s.spawner.Reconcile(cfg.Channels); err != nil {
+		if err := s.spawner.Reconcile(DefaultTenantID, cfg.Channels); err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
 		}

@@ -1,3 +1,51 @@
+## Plan 25: Family Multi-Tenant on macOS (S3-lite) ← 현재
+
+Plan: `.claude/plans/family-multi-tenant.md`
+Spec: `.ina/specs/20260418-0450-think-family-multi-tenant.md`
+
+Goal: macOS 단일 데몬에서 7 개인 tenant + 1 family tenant 병렬 서빙.
+Scope: S3-lite (cross-tenant read + family→개인 push; 쓰기 없음).
+Total: 23 태스크 = 3 commits (Plan A/B/C).
+
+### Plan A: Foundation — Tenant Routing Infrastructure ✅
+
+- [x] A1. `core.Event` 에 `TenantID string` 필드 추가 (`json:"tenant_id,omitempty"`) + 하위호환 JSON 테스트
+- [x] A2. `Server.session` → `sessions map[string]*engine.Session` 도입 (default 하나로 legacy 유지) + `server.New` 테스트
+- [x] A3. `server/tenant_router.go` 신규 — event.TenantID 로 Session dispatch, mismatch/empty/unknown 은 drop + `tenant_routing_drop` metric; **fallback 금지 (C1)**
+- [x] A4. `ChannelSpawner.running` 키 `{tenantID,channelType}` 로 확장; `GetChannel(tenantID, eventType)` + 같은 타입 다른 tenant 7개 running 테스트
+- [x] A5. Channel 생성자에 tenantID 주입 — `channel.FromConfig(cfg, tenantID)` + 각 Channel struct 에 `tenantID`, Start 가 내보내는 Event 에 태깅
+- [x] A6. 봇 토큰/Kakao account 중복 startup 감지 — fail-fast `duplicate telegram bot_token in tenants [a,b]` (**C3**)
+- [x] A7. 통합 테스트 — alice/bob 2 tenant, alice 봇 이벤트 → alice.Store 만 row, bob.eventCh 비어있음 (AC-T3)
+- [x] A8. Legacy 마이그레이션 기초 — `~/.kittypaw/config.toml` + `tenants/` 부재 → `tenants/default/` 로 auto-move (AC-T9 기초)
+
+### Plan B: Share + Fanout — Family Specialization ← 현재
+
+- [ ] B1. `Config.IsFamily bool`, `Config.Share map[string]ShareConfig` 추가 + TOML 파싱 테스트 (`[share.family] read=[...]`)
+- [ ] B2. `core/share.go` 신규 — `ValidateSharedReadPath` + path traversal/symlink/hardlink/absolute 4종 매트릭스 테스트 (AC-T6, **C2**)
+- [ ] B3. `sandbox/fs.go` 에 cross-tenant 읽기 훅 — `<tenant>/path` prefix 감지 시 validate, Session.TenantBaseDirs 주입
+- [ ] B4. family 채널 config 거부 — startup 에서 family 에 `[telegram]` 등 있으면 fail-fast (AC-T4, **C6**)
+- [ ] B5. `core/fanout.go` 신규 — `Fanout.send(tenantID, payload)` → `Event{TenantID, Type:"family.push"}` eventCh 투입, TenantRouter 가 대상 Session 에 전달
+- [ ] B6. `sandbox/fanout.go` 신규 — JS binding, **family Session 에만** 노출 (개인 스킬은 `Fanout is not defined`)
+- [ ] B7. 통합 — family 가 `family/memory/weather.json` 씀 → alice allowlist 읽기 성공 + `cross_tenant_read` 감사 로그 (AC-U2)
+
+### Plan C: Operations + Demo — Tenant add, Isolation, E2E
+
+- [ ] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `Session.Health` atomic
+- [ ] C2. goroutine recover + Degraded 전환 — scheduler/dispatch loop 에 `defer recover` + tenantID 로그 + 다른 7 tenant tick 계속 (AC-T8, **C4**)
+- [ ] C3. CLI `kittypaw tenant add <name> --telegram-bot-token=<T>` subcommand + 공통 setup 헬퍼 (OQ7)
+- [ ] C4. HTTP `POST /api/v1/admin/tenants` — daemon hot-reload (Registry.Register + Spawner.Reconcile), 재시작 없이 dispatch 시작
+- [ ] C5. Cross-routing 감지 (AC-T7) — alice 봇에 bob chat_id 위조 메시지 → chat_id ownership 검증 후 drop + `tenant_routing_mismatch_total{from=alice}`
+- [ ] C6. Legacy 마이그레이션 완성 — DB rows 보존 + 기동 재현 테스트 (AC-T9 완성)
+- [ ] C7. E2E AC-U1 — family `morning-brief` scheduled → alice/bob/charlie 개인 Telegram mock 각자 맞춤 SendMessage
+- [ ] C8. E2E AC-U3 — `tenant add charlie` 후 30초 내 charlie 봇 이벤트 dispatch 시작
+
+### Commit Map
+- Plan A → `feat(core): multi-tenant routing foundation`
+- Plan B → `feat(core): family tenant with cross-tenant read + fanout`
+- Plan C → `feat(ops): kittypaw tenant add + E2E family demos`
+
+---
+
 ## Discovery Endpoint Migration ✅
 
 Plan: `.claude/plans/discovery-endpoint-migration.md`
@@ -8,7 +56,7 @@ Plan: `.claude/plans/discovery-endpoint-migration.md`
 - [x] T4: Removed `relay_url` from OAuth transports — callback query + exchange JSON; deleted `loginResult`/`tokenResult.relayURL`; `wizardKakao` now reads via `mgr.LoadRelayURL(apiURL)`
 - [x] T5: Integration + commit — `go test ./...` / `golangci-lint` / `make build` all clean; CLAUDE.md API Token section updated; no orphaned refs
 
-## Package Context Declaration ← 현재
+## Package Context Declaration (paused)
 
 Plan: `.claude/plans/package-context.md`
 Spec: `.ina/specs/20260416-1300-think-package-context.md`

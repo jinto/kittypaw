@@ -159,6 +159,7 @@ type AuditRecord struct {
 // PendingResponse is a response that failed delivery and is queued for retry.
 type PendingResponse struct {
 	ID         int64
+	TenantID   string
 	EventType  string
 	ChatID     string
 	Response   string
@@ -1617,18 +1618,20 @@ func (s *Store) QueryPermissionLog(limit int) ([]AuditRecord, error) {
 
 const maxPendingRetries = 5
 
-// EnqueueResponse saves a failed response for later retry.
-func (s *Store) EnqueueResponse(eventType, chatID, response string) error {
+// EnqueueResponse saves a failed response for later retry, tagged with the
+// owning tenantID so retryPendingResponses can route back to the correct
+// per-tenant channel instance.
+func (s *Store) EnqueueResponse(tenantID, eventType, chatID, response string) error {
 	_, err := s.db.Exec(`
-		INSERT INTO pending_responses (event_type, chat_id, response)
-		VALUES (?, ?, ?)`, eventType, chatID, response)
+		INSERT INTO pending_responses (tenant_id, event_type, chat_id, response)
+		VALUES (?, ?, ?, ?)`, tenantID, eventType, chatID, response)
 	return err
 }
 
 // DequeuePendingResponses returns up to limit responses whose next_retry is in the past.
 func (s *Store) DequeuePendingResponses(limit int) ([]PendingResponse, error) {
 	rows, err := s.db.Query(`
-		SELECT id, event_type, chat_id, response, retry_count, created_at, next_retry
+		SELECT id, tenant_id, event_type, chat_id, response, retry_count, created_at, next_retry
 		FROM pending_responses
 		WHERE next_retry <= datetime('now')
 		ORDER BY next_retry ASC
@@ -1641,7 +1644,7 @@ func (s *Store) DequeuePendingResponses(limit int) ([]PendingResponse, error) {
 	var out []PendingResponse
 	for rows.Next() {
 		var p PendingResponse
-		if err := rows.Scan(&p.ID, &p.EventType, &p.ChatID, &p.Response,
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.EventType, &p.ChatID, &p.Response,
 			&p.RetryCount, &p.CreatedAt, &p.NextRetry); err != nil {
 			return nil, err
 		}
