@@ -41,9 +41,27 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 		return jsonResult(map[string]any{"error": "path must be a string"})
 	}
 
+	// Family-only target gate (I5). Closes the case where a personal tenant's
+	// config contains a [share.<peer>] allowlist — the allowlist says "these
+	// paths are safe to share", but it does NOT say "the owner is reachable".
+	// Reachability is a property of the target tenant's role, and only the
+	// family tenant plays the owner role. Without this gate, a sloppy or
+	// hostile config could turn Plan B's "personal ↔ personal forbidden" rule
+	// into a documentation-only invariant.
+	//
+	// "unknown tenant" and "not family" collapse into one externally-visible
+	// outcome so a caller cannot enumerate tenant IDs by probing for which
+	// error string comes back; the audit log keeps the distinction internally
+	// for forensics. Same reason both branches share the rejection message.
 	owner := s.TenantRegistry.Get(targetID)
-	if owner == nil {
-		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown tenant: %s", targetID)})
+	if owner == nil || owner.Config == nil || !owner.Config.IsFamily {
+		reason := "target_not_family"
+		if owner == nil {
+			reason = "unknown_tenant"
+		}
+		slog.Warn("cross_tenant_read_rejected",
+			"from", s.TenantID, "to", targetID, "path", filepath.Clean(reqPath), "reason", reason)
+		return jsonResult(map[string]any{"error": "cross-tenant read: target is not the family tenant"})
 	}
 
 	realPath, err := core.ValidateSharedReadPath(owner.Config, owner.BaseDir, s.TenantID, reqPath)

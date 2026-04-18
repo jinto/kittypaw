@@ -25,6 +25,12 @@ type execOpts struct {
 	// bound object that happens to error on call. Defense in depth against a
 	// skill that probes the API surface.
 	exposeFanout bool
+
+	// exposeShare registers the Share global. Off by default: only personal
+	// tenants read from family (family is the authoritative source and has no
+	// peer to read from), so family sessions must see `typeof Share ===
+	// "undefined"`. Mirror of exposeFanout — same defense-in-depth intent.
+	exposeShare bool
 }
 
 // run executes JS code in an in-process goja VM.
@@ -79,6 +85,10 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 	for _, skill := range core.SkillRegistry {
 		if skill.Name == "Fanout" && !opts.exposeFanout {
 			// Personal tenants never even see the global; see execOpts doc.
+			continue
+		}
+		if skill.Name == "Share" && !opts.exposeShare {
+			// Family tenants never even see the global; see execOpts doc.
 			continue
 		}
 		obj := vm.NewObject()
