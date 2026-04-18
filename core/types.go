@@ -30,6 +30,11 @@ const (
 	EventKakaoTalk EventType = "kakao_talk"
 	EventSlack     EventType = "slack"
 	EventDiscord   EventType = "discord"
+	// EventFamilyPush is emitted by ChannelFanout when the family tenant
+	// pushes a message to a personal tenant. TenantRouter dispatches to
+	// the target Session the same way it dispatches inbound chat events,
+	// so the personal agent can treat it as a normal observation.
+	EventFamilyPush EventType = "family.push"
 )
 
 // LoopPhase tracks the agent loop state machine position.

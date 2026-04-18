@@ -27,6 +27,16 @@ relay/         KakaoTalk relay (Rust, axum + SQLite, self-hosted single binary)
 - **Chi router**: Replaces Axum for HTTP routing
 - **Cobra CLI**: Replaces Clap for command-line parsing
 - **Multi-tenant BaseDir**: All filesystem operations use `Session.BaseDir` via `*From(baseDir, ...)` function variants, enabling per-tenant data isolation without engine/handler changes
+- **Tenant routing**: Single daemon serves N personal tenants + optional `family` tenant. `TenantRouter` fans inbound events to the right `Session` by `Event.TenantID`; `ChannelSpawner` keys by `(tenantID, channel, alias)` so the same bot token can't be duplicated across tenants. See `core/tenant.go`, `server/tenant_router.go`.
+
+## Family Tenant (cross-tenant read + fanout)
+
+`Config.IsFamily = true` marks a tenant as the family-only shared space. Two JS skills are conditionally exposed to it:
+
+- **`Share.read(tenantID, path)`** — reads a file from another tenant's BaseDir if the owner's `[share.<reader>]` allowlist includes the requested path (exact match, no globs). Every call emits a `cross_tenant_read` (or `cross_tenant_read_rejected`) audit log. Defense: `core.ValidateSharedReadPath` blocks `..`, absolute paths, symlinks, and hardlink escapes; `ValidateTenantID` rejects hostile IDs before any log/registry touch. Size-capped at `maxFileReadSize` (10 MB).
+- **`Fanout.send(tenantID, {text, channel_hint})` / `Fanout.broadcast({...})`** — emits `Event{Type: EventFamilyPush, TenantID: target}` onto the shared eventCh; `TenantRouter` dispatches to the target `Session`. Personal tenants never see the `Fanout` JS global (`typeof Fanout === "undefined"`), gated by `sandbox.Options.ExposeFanout` threaded through `ExecuteWithResolverOpts`/`ExecutePackageOpts`. The engine sets the flag from `Session.Fanout != nil`.
+
+Personal tenants cannot invoke `Share.read` against each other — only family's `[share.<personal>]` entries grant access, and only family's Session has a non-nil `Fanout`. Channel configs on the family tenant are rejected at config load (`ValidateFamilyTenants`).
 
 ## Skill Install Internals
 

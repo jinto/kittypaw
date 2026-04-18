@@ -91,6 +91,31 @@ type Config struct {
 	Permissions      PermissionPolicy    `toml:"permissions"`
 	Web              WebConfig           `toml:"web"`
 	User             UserConfig          `toml:"user"`
+
+	// IsFamily marks a tenant as the shared/coordinator account. Family
+	// tenants run scheduled skills on behalf of the household (e.g. weather
+	// fetch) and fanout to individual tenants, but MUST NOT own chat
+	// channels — a misconfigured [telegram] on family would silently
+	// intercept updates meant for alice/bob. Enforced at startup by
+	// ValidateFamilyTenants.
+	IsFamily bool `toml:"is_family"`
+
+	// Share declares which per-path reads this tenant grants to specific
+	// peers, keyed by peer TenantID. Personal tenants list the family
+	// tenant as a peer ("alice grants family read access to these paths"),
+	// and family tenants likewise list personals. The check always runs
+	// against the *owning* tenant's config — alice reading family/x checks
+	// family.Share["alice"].Read. Empty map = no sharing (default).
+	Share map[string]ShareConfig `toml:"share"`
+}
+
+// ShareConfig is the per-peer read allowlist for cross-tenant filesystem
+// access. Read paths are tenant-relative (e.g. "memory/weather.json") and
+// must match exactly after traversal/symlink validation in ValidateSharedReadPath.
+// Write sharing is intentionally absent — the S3-lite scope forbids cross-tenant
+// writes so a family skill bug can't corrupt alice's store.
+type ShareConfig struct {
+	Read []string `toml:"read"`
 }
 
 // UserConfig holds user-level settings surfaced to packages via __context__.user.
