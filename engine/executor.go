@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/jinto/kittypaw/core"
-	"github.com/jinto/kittypaw/sandbox"
 )
 
 type contextKey string
@@ -1056,9 +1055,7 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 			return resolveSkillCall(ctx, call, s, nil)
 		}
 		jsContext := map[string]any{}
-		result, execErr := s.Sandbox.ExecuteWithResolverOpts(ctx, code, jsContext, resolver, sandbox.Options{
-			ExposeFanout: s.Fanout != nil,
-		})
+		result, execErr := s.Sandbox.ExecuteWithResolverOpts(ctx, code, jsContext, resolver, s.sandboxOptions())
 		if execErr != nil {
 			return jsonResult(map[string]any{"error": fmt.Sprintf("skill %q execution failed: %v", name, execErr)})
 		}
@@ -1126,9 +1123,7 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 		}
 	}
 	resolver := buildPackageResolver(ctx, pkg, s, locale)
-	result, execErr := s.Sandbox.ExecutePackageOpts(ctx, wrappedCode, map[string]any{}, resolver, sandbox.Options{
-		ExposeFanout: s.Fanout != nil,
-	})
+	result, execErr := s.Sandbox.ExecutePackageOpts(ctx, wrappedCode, map[string]any{}, resolver, s.sandboxOptions())
 	if execErr != nil {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("package %q execution failed: %v", name, execErr)})
 	}

@@ -410,3 +410,54 @@ func TestFanoutExposedWhenOpted(t *testing.T) {
 		t.Errorf("expected ok, got %q", result.Output)
 	}
 }
+
+// TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal mirrors the
+// Fanout defense-in-depth model for Share. Family tenants do not read from
+// peers — they're the authoritative source — so the Share global must be
+// absent there. A personal tenant probing `typeof Share` on the family
+// session should see undefined, not a bound object that errors on call.
+func TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, _ core.SkillCall) (string, error) {
+		return `{"success":true}`, nil
+	}
+	result, err := sb.ExecuteWithResolverOpts(context.Background(), `return typeof Share;`, nil, resolver,
+		Options{ExposeShare: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "undefined" {
+		t.Errorf("Share must be hidden when ExposeShare=false; got typeof=%q", result.Output)
+	}
+}
+
+// TestExecuteWithResolverOpts_ExposeShareTrue_ShowsShareGlobal is the positive
+// counterpart — personal tenants (the Share readers) must get the full API
+// surface. We check Share.read is a callable function so a half-wired binding
+// wouldn't slip through as "object".
+func TestExecuteWithResolverOpts_ExposeShareTrue_ShowsShareGlobal(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, _ core.SkillCall) (string, error) {
+		return `{"content":"ok"}`, nil
+	}
+	code := `
+		if (typeof Share !== "object") return "missing:" + typeof Share;
+		if (typeof Share.read !== "function") return "no-read";
+		return "ok";
+	`
+	result, err := sb.ExecuteWithResolverOpts(context.Background(), code, nil, resolver, Options{ExposeShare: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if result.Output != "ok" {
+		t.Errorf("expected ok, got %q", result.Output)
+	}
+}

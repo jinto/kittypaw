@@ -41,10 +41,11 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 
 #### Plan B → C 이월 (리뷰 findings)
 
-- [ ] C9. server bootstrap 에서 Session.TenantID/TenantRegistry/Fanout 3 필드 배선 — 현재는 zero-value 로 dead code 상태
-- [ ] C10. `ValidateFamilyTenants` 를 server startup (StartChannels 이전) 에서 호출 — 정의만 있고 caller 없음
-- [ ] C11. `sandbox.Options.ExposeShare` 도입 — Share 도 Fanout 과 동일하게 family-only JS global 로 전환 (현재는 모든 tenant 에 바인딩, allowlist 로만 제어)
-- [ ] C12. family.push payload → ChatPayload 호환 브리지 — dispatchLoop/prompt.go 가 기대하는 구조와 맞추고 응답 라우팅 복구
+- [x] C9. server bootstrap 에서 Session.TenantID/TenantRegistry/Fanout 3 필드 배선 ✅ (83a986b)
+- [x] C10. `ValidateFamilyTenants` 를 server startup (StartChannels 이전) 에서 호출 ✅ (83a986b)
+- [x] A8+. Legacy 마이그레이션 + DiscoverTenants 를 bootstrap 에서 실제 호출 ✅ (83a986b — Plan A A8 이 dead code 였던 것 활성화)
+- [x] C11. `Share.read` 타겟 family-only 강제 ✅ — `engine/share.go` owner.Config.IsFamily 게이트 + `cross_tenant_read_rejected` 감사 + `sandbox.Options.ExposeShare` defense-in-depth
+- [x] C12. `dispatchLoop` 의 `EventFamilyPush` 분기 ✅ — `deliverFamilyPush` helper 가 FanoutPayload 파싱 + 채널 선택 (hint 또는 Channels[0]) + AdminChatIDs[0] 로 SendResponse + 실패 시 pending_responses 큐
 
 ### Commit Map
 - Plan A → `feat(core): multi-tenant routing foundation`

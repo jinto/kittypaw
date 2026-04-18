@@ -65,7 +65,8 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		var r = Share.read("family", "memory/weather.json");
 		return r.content;
 	`
-	result, err := sbox.ExecuteWithResolver(context.Background(), code, nil, resolver)
+	result, err := sbox.ExecuteWithResolverOpts(context.Background(), code, nil, resolver,
+		sandbox.Options{ExposeShare: !aliceSess.Config.IsFamily})
 	if err != nil {
 		t.Fatalf("alice sandbox: %v", err)
 	}
@@ -98,7 +99,8 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		var r = Share.read("family", "memory/weather.json");
 		return JSON.stringify(r);
 	`
-	result, err = sbox.ExecuteWithResolver(context.Background(), denyCode, nil, bobResolver)
+	result, err = sbox.ExecuteWithResolverOpts(context.Background(), denyCode, nil, bobResolver,
+		sandbox.Options{ExposeShare: !bobSess.Config.IsFamily})
 	if err != nil {
 		t.Fatalf("bob sandbox: %v", err)
 	}

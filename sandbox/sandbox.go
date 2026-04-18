@@ -27,6 +27,12 @@ type Options struct {
 	// family tenants may push to peers; personal tenants must not see the API
 	// surface at all (so a skill can't even probe `typeof Fanout`).
 	ExposeFanout bool
+
+	// ExposeShare registers the Share.* global. Off by default because only
+	// personal tenants read from family; the family tenant itself is the
+	// authoritative owner and has no peer to read from. Defense in depth on
+	// top of the Go-layer family-only gate in engine/share.go.
+	ExposeShare bool
 }
 
 // Sandbox executes JavaScript code in an isolated subprocess.
@@ -69,6 +75,7 @@ func (s *Sandbox) ExecuteWithResolverOpts(
 ) (*core.ExecutionResult, error) {
 	return run(ctx, s.config, code, jsContext, resolver, execOpts{
 		exposeFanout: opts.ExposeFanout,
+		exposeShare:  opts.ExposeShare,
 	})
 }
 
@@ -96,5 +103,6 @@ func (s *Sandbox) ExecutePackageOpts(
 	return run(ctx, s.config, code, jsContext, resolver, execOpts{
 		rawResolverResults: true,
 		exposeFanout:       opts.ExposeFanout,
+		exposeShare:        opts.ExposeShare,
 	})
 }

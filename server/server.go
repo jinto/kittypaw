@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -377,6 +378,16 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
+			// EventFamilyPush carries a FanoutPayload (not a ChatPayload) and
+			// delivers an already-composed message to the target tenant —
+			// skip the agent loop entirely. Without this branch the generic
+			// ParsePayload below silently produces a zero-valued ChatPayload,
+			// the event routes through session.Run, and the push text never
+			// reaches the target channel.
+			if event.Type == core.EventFamilyPush {
+				s.deliverFamilyPush(ctx, event)
+				continue
+			}
 			payload, err := event.ParsePayload()
 			if err != nil {
 				slog.Warn("channel event: bad payload", "type", event.Type, "error", err)
@@ -464,6 +475,110 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// deliverFamilyPush routes an EventFamilyPush to the target tenant's channel
+// and bypasses the agent loop. The payload is a finished outbound message
+// (Fanout.send already gave a skill author's hand-authored text), so we do
+// not re-invoke the LLM — doing so would paraphrase, translate, or drop the
+// message entirely depending on prompt context.
+//
+// Routing order:
+//  1. Target tenant must exist + have at least one declared channel.
+//  2. ChannelHint picks a specific channel type; fall back to Channels[0].
+//  3. AdminChatIDs[0] is the destination chat; empty = log + drop (nowhere
+//     to send).
+//  4. If the channel is not currently running (hot-reload, post-restart),
+//     enqueue to pending_responses so the retry loop can pick it up.
+func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
+	var p core.FanoutPayload
+	if err := json.Unmarshal(event.Payload, &p); err != nil {
+		slog.Warn("family_push: bad payload", "tenant", event.TenantID, "error", err)
+		return
+	}
+
+	target := s.tenantRegistry.Get(event.TenantID)
+	if target == nil || target.Config == nil {
+		slog.Warn("family_push: unknown target tenant", "tenant", event.TenantID)
+		return
+	}
+	if len(target.Config.Channels) == 0 {
+		slog.Warn("family_push: target has no channels configured; dropping",
+			"tenant", event.TenantID)
+		return
+	}
+
+	channelType := resolveFamilyPushChannel(target.Config.Channels, p.ChannelHint)
+
+	chatID := ""
+	if len(target.Config.AdminChatIDs) > 0 {
+		chatID = target.Config.AdminChatIDs[0]
+	}
+	if chatID == "" {
+		slog.Warn("family_push: target has no admin chat; dropping",
+			"tenant", event.TenantID, "channel", channelType)
+		return
+	}
+
+	ch, chOK := s.spawner.GetChannel(event.TenantID, channelType)
+	if !chOK {
+		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text, "channel not running")
+		return
+	}
+
+	if err := ch.SendResponse(ctx, chatID, p.Text); err != nil {
+		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text,
+			fmt.Sprintf("send failed: %v", err))
+		return
+	}
+
+	slog.Info("family_push_delivered",
+		"from", "family", "to", event.TenantID, "channel", channelType, "chat_id", chatID)
+}
+
+// enqueueFamilyPushForRetry parks an undelivered family push in pending_responses
+// so the retry loop can pick it up after the channel comes back. Kakao is
+// excluded because its action IDs are ephemeral — by the time the retry fires,
+// the originating action no longer exists, so re-sending would 4xx-loop forever.
+func (s *Server) enqueueFamilyPushForRetry(tenantID string, channelType core.EventType, chatID, text, reason string) {
+	slog.Warn("family_push: deferred to retry queue",
+		"tenant", tenantID, "channel", channelType, "reason", reason)
+	if channelType == core.EventKakaoTalk {
+		return
+	}
+	if qErr := s.store.EnqueueResponse(tenantID, string(channelType), chatID, text); qErr != nil {
+		slog.Error("family_push: enqueue failed", "tenant", tenantID, "channel", channelType, "error", qErr)
+	}
+}
+
+// resolveFamilyPushChannel picks which target channel a FamilyPush lands on.
+// Hint matching is exact on the ChannelType string ("telegram", "slack",
+// "kakao_talk"); a miss falls back to the first persistent push channel so
+// delivery degrades instead of dropping.
+//
+// web_chat is excluded from the fallback (but honored if explicitly hinted
+// — caller's explicit ask wins). web_chat is per-WebSocket-session: there
+// is no durable destination to push to in the background, so silently
+// landing every "no hint" family push on it would simply discard the
+// message. Persistent channels (telegram/slack/discord/kakao_talk) own
+// their own queueing semantics and are safe defaults.
+func resolveFamilyPushChannel(channels []core.ChannelConfig, hint string) core.EventType {
+	if hint != "" {
+		for _, c := range channels {
+			if string(c.ChannelType) == hint {
+				return c.ChannelType.ToEventType()
+			}
+		}
+	}
+	for _, c := range channels {
+		if c.ChannelType == core.ChannelWeb {
+			continue
+		}
+		return c.ChannelType.ToEventType()
+	}
+	// Only web_chat configured — return it so the caller's "no channel
+	// running" branch can enqueue to pending_responses rather than crashing.
+	return channels[0].ChannelType.ToEventType()
 }
 
 // permissionTimeout returns the configured permission timeout duration.
