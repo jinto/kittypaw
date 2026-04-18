@@ -113,6 +113,7 @@ func New(tenants []*TenantDeps, version string) *Server {
 			APITokenMgr:      td.APITokenMgr,
 			TenantID:         td.Tenant.ID,
 			TenantRegistry:   registry,
+			Health:           core.NewHealthState(),
 		}
 		// I5 — only family may fan out. Personal tenants never see the
 		// Fanout JS global because the sandbox keys on sess.Fanout != nil.
@@ -439,16 +440,37 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				}
 			}
 
-			response, err := session.Run(ctx, event, runOpts)
-			if err != nil {
+			var response string
+			var runErr error
+			panicked := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+						engine.RecoverTenantPanic(session, "server.dispatchLoop", r)
+					}
+				}()
+				response, runErr = session.Run(ctx, event, runOpts)
+			}()
+			if panicked {
+				// Health marked Degraded inside the recover helper.
+				// Drop this event — re-invoking the same panicking run
+				// on the same input would loop; AC-T8 only requires that
+				// the daemon survive and other tenants keep ticking.
+				continue
+			}
+			if runErr != nil {
 				slog.Error("channel event: engine error",
 					"type", event.Type,
 					"tenant", event.TenantID,
 					"chat_id", payload.ChatID,
-					"error", err,
+					"error", runErr,
 				)
 				continue
 			}
+			// Clean completion re-promotes the tenant to Ready so a
+			// transient panic self-heals without operator action.
+			engine.MarkTenantReady(session)
 
 			if !chOK {
 				slog.Warn("channel event: no channel for response routing, enqueuing for retry",

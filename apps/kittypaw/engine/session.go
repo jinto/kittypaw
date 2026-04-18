@@ -61,6 +61,11 @@ type Session struct {
 	// skips the Fanout global so personal skills see
 	// `typeof Fanout === "undefined"`.
 	Fanout core.Fanout
+
+	// Health tracks tenant-level liveness for panic isolation (AC-T8).
+	// nil on bare-struct test fixtures; RecoverTenantPanic /
+	// MarkTenantReady are nil-safe, so callers don't need to guard.
+	Health *core.HealthState
 }
 
 // sandboxOptions returns the sandbox.Options that govern which tenant-scoped
