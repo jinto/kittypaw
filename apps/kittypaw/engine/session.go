@@ -63,6 +63,17 @@ type Session struct {
 	Fanout core.Fanout
 }
 
+// sandboxOptions returns the sandbox.Options that govern which tenant-scoped
+// JS globals (Share, Fanout) are exposed for this session. Centralized so
+// every sandbox callsite stays consistent — a personal session that wires
+// Share but not Fanout (or vice versa) would silently break the I5 invariant.
+func (s *Session) sandboxOptions() sandbox.Options {
+	return sandbox.Options{
+		ExposeFanout: s.Fanout != nil,
+		ExposeShare:  s.Config != nil && !s.Config.IsFamily,
+	}
+}
+
 // AllowedPaths returns the cached list of workspace root paths.
 // Returns nil when no workspaces are registered (deny-all by default).
 func (s *Session) AllowedPaths() []string {
@@ -347,9 +358,7 @@ observeLoop:
 				}
 			}
 
-			execResult, err := s.Sandbox.ExecuteWithResolverOpts(ctx, code, jsContext, resolver, sandbox.Options{
-				ExposeFanout: s.Fanout != nil,
-			})
+			execResult, err := s.Sandbox.ExecuteWithResolverOpts(ctx, code, jsContext, resolver, s.sandboxOptions())
 			if err != nil {
 				return "", fmt.Errorf("sandbox execute: %w", err)
 			}

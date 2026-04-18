@@ -111,14 +111,26 @@ func TestShareRead_AllowlistMiss(t *testing.T) {
 // NOT fall through to some default tenant lookup. The whole value of
 // TenantRouter's strict routing vanishes if share reads silently
 // rewrite unknown targets.
+//
+// The externally-visible error string is the same as a non-family target
+// (defense against tenant ID enumeration via error oracle); the audit log
+// carries reason=unknown_tenant for forensics.
 func TestShareRead_UnknownTenant(t *testing.T) {
 	sess, _ := newShareFixture(t)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	out, _ := executeShare(context.Background(), mustCall(t, "grandma", "memory/weather.json"), sess)
 	var resp map[string]string
 	_ = json.Unmarshal([]byte(out), &resp)
-	if !strings.Contains(resp["error"], "unknown tenant") {
-		t.Errorf("expected unknown tenant error, got %q", resp["error"])
+	if !strings.Contains(resp["error"], "target is not the family tenant") {
+		t.Errorf("expected unified family-target error, got %q", resp["error"])
+	}
+	if !strings.Contains(buf.String(), `"reason":"unknown_tenant"`) {
+		t.Errorf("audit log should carry unknown_tenant reason; got: %s", buf.String())
 	}
 }
 
@@ -160,5 +172,104 @@ func TestShareRead_NoRegistry(t *testing.T) {
 	_ = json.Unmarshal([]byte(out), &resp)
 	if !strings.Contains(resp["error"], "unavailable") {
 		t.Errorf("expected unavailable error, got %q", resp["error"])
+	}
+}
+
+// TestShareRead_RejectsNonFamilyTarget is the invariant that closes the I5
+// hole: even if bob's config legally contains `[share.alice] read = [...]`,
+// alice cannot read from bob because bob is not the family tenant. The
+// allowlist grants a path inside the owner; the family-only gate decides
+// whether the owner is even reachable. Without this, Plan B's "personal ↔
+// personal forbidden" rule would depend entirely on admins never adding a
+// Share block to a personal config — a policy we can't enforce at the doc
+// layer.
+func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+
+	bobDir := filepath.Join(root, "tenants", "bob")
+	aliceDir := filepath.Join(root, "tenants", "alice")
+	if err := os.MkdirAll(filepath.Join(bobDir, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir bob: %v", err)
+	}
+	if err := os.MkdirAll(aliceDir, 0o755); err != nil {
+		t.Fatalf("mkdir alice: %v", err)
+	}
+	// Drop a file bob would "share" if the gate were absent — proves the
+	// gate fires before any filesystem read, not after.
+	if err := os.WriteFile(filepath.Join(bobDir, "memory", "notes.json"), []byte(`{"secret":true}`), 0o644); err != nil {
+		t.Fatalf("write bob: %v", err)
+	}
+
+	reg := core.NewTenantRegistry(filepath.Join(root, "tenants"), "family")
+	// bob is a personal tenant (IsFamily=false) that has improperly granted
+	// alice a read allowlist. The gate MUST reject regardless.
+	reg.Register(&core.Tenant{
+		ID:      "bob",
+		BaseDir: bobDir,
+		Config: &core.Config{
+			IsFamily: false,
+			Share:    map[string]core.ShareConfig{"alice": {Read: []string{"memory/notes.json"}}},
+		},
+	})
+	reg.Register(&core.Tenant{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
+
+	sess := &Session{
+		Config:         &core.Config{},
+		TenantID:       "alice",
+		TenantRegistry: reg,
+	}
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	out, err := executeShare(context.Background(), mustCall(t, "bob", "memory/notes.json"), sess)
+	if err != nil {
+		t.Fatalf("executeShare: %v", err)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// The error surface is checked loosely (substring "family") so future
+	// wording changes don't force test churn, but the key property —
+	// rejected without a "content" field — is pinned.
+	if _, ok := resp["content"]; ok {
+		t.Errorf("must not return content for non-family target: %q", resp["content"])
+	}
+	if resp["error"] == "" {
+		t.Errorf("expected an error field, got %+v", resp)
+	}
+	if !strings.Contains(strings.ToLower(resp["error"]), "family") {
+		t.Errorf("expected family-only error, got %q", resp["error"])
+	}
+
+	log := buf.String()
+	if !strings.Contains(log, "cross_tenant_read_rejected") {
+		t.Errorf("expected rejection audit record, got: %s", log)
+	}
+	if !strings.Contains(log, `"to":"bob"`) {
+		t.Errorf("expected audit to capture target identity, got: %s", log)
+	}
+}
+
+// TestShareRead_RejectsSelfTarget pins the edge case where alice targets
+// "alice" — self-reads should never need Share.read (direct fs access is
+// the intended path) and allowing them would create a subtle bypass where
+// a personal tenant writes a loopback Share config to exercise the
+// audit/read code path on its own data.
+func TestShareRead_RejectsSelfTarget(t *testing.T) {
+	sess, _ := newShareFixture(t)
+
+	out, _ := executeShare(context.Background(), mustCall(t, "alice", "memory/weather.json"), sess)
+	var resp map[string]string
+	_ = json.Unmarshal([]byte(out), &resp)
+	if resp["content"] != "" {
+		t.Errorf("self-target must not return content: %q", resp["content"])
+	}
+	if !strings.Contains(strings.ToLower(resp["error"]), "family") {
+		t.Errorf("expected family-only error for self target, got %q", resp["error"])
 	}
 }
