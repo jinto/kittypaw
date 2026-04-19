@@ -121,6 +121,20 @@ func (r *TenantRegistry) Register(t *Tenant) {
 	r.tenants[t.ID] = t
 }
 
+// Unregister removes a tenant from the registry. Returns true if one was
+// present. Used by hot-add rollback when a downstream step fails after
+// the registry has already accepted the tenant — we must retract the
+// Share.read / Fanout surface so peers cannot resolve a half-bound tenant.
+func (r *TenantRegistry) Unregister(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tenants[id]; !ok {
+		return false
+	}
+	delete(r.tenants, id)
+	return true
+}
+
 // Get returns the tenant with the given ID, or nil if not found.
 func (r *TenantRegistry) Get(id string) *Tenant {
 	r.mu.RLock()

@@ -133,6 +133,17 @@ func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
 }
 
+// TenantActivate registers an on-disk tenant with the running daemon, spawning
+// its channels without a restart. The tenant directory must already exist
+// (typically created by `kittypaw tenant add`). Errors surface the HTTP status
+// verbatim so callers can distinguish 404 (not-provisioned) from 409 (already
+// active) from 400 (invalid config).
+func (c *Client) TenantActivate(tenantID string) (map[string]any, error) {
+	return c.post("/api/v1/admin/tenants", map[string]string{
+		"tenant_id": tenantID,
+	})
+}
+
 // EnableSkill sets a skill's enabled state to true.
 func (c *Client) EnableSkill(name string) (map[string]any, error) {
 	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/enable", nil)
