@@ -152,6 +152,36 @@ func TestLoadPackageToml_NotFound(t *testing.T) {
 	}
 }
 
+func TestLoadPackageToml_ContextPermissions(t *testing.T) {
+	dir := t.TempDir()
+	tomlContent := `
+[meta]
+id = "ctx-pkg"
+name = "Context Package"
+version = "1.0.0"
+
+[permissions]
+primitives = ["Http", "Llm"]
+context = ["locale", "location"]
+`
+	path := filepath.Join(dir, "package.toml")
+	if err := os.WriteFile(path, []byte(tomlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := LoadPackageToml(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(pkg.Permissions.Context); got != 2 {
+		t.Fatalf("Permissions.Context len = %d, want 2; got %v", got, pkg.Permissions.Context)
+	}
+	if pkg.Permissions.Context[0] != "locale" || pkg.Permissions.Context[1] != "location" {
+		t.Errorf("Permissions.Context = %v, want [locale location]", pkg.Permissions.Context)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // CanDisable
 // ---------------------------------------------------------------------------

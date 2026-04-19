@@ -64,16 +64,16 @@ Plan: `.claude/plans/discovery-endpoint-migration.md`
 - [x] T4: Removed `relay_url` from OAuth transports — callback query + exchange JSON; deleted `loginResult`/`tokenResult.relayURL`; `wizardKakao` now reads via `mgr.LoadRelayURL(apiURL)`
 - [x] T5: Integration + commit — `go test ./...` / `golangci-lint` / `make build` all clean; CLAUDE.md API Token section updated; no orphaned refs
 
-## Package Context Declaration (paused)
+## Package Context Declaration ✅
 
 Plan: `.claude/plans/package-context.md`
 Spec: `.ina/specs/20260416-1300-think-package-context.md`
 
-- [ ] 1. core: PackagePermissions에 Context 필드 추가 + UserConfig 구조체
-- [ ] 2. engine: event-in-context 헬퍼 + buildUserContext + detectLocale
-- [ ] 3. engine: runSkillOrPackage에서 user context 주입 + session에서 event 저장
-- [ ] 4. 테스트: detectLocale + buildUserContext + 하위호환
-- [ ] 5. registry: weather-briefing에 context 선언 + locale 활용
+- [x] 1. core: PackagePermissions에 Context 필드 추가 + UserConfig 구조체 (18cac99)
+- [x] 2. engine: event-in-context 헬퍼 + buildUserContext + detectLocale (18cac99)
+- [x] 3. engine: runSkillOrPackage에서 user context 주입 + session에서 event 저장 (18cac99, fd71ab0)
+- [x] 4. 테스트: detectLocale + buildUserContext + 하위호환 + AC#1 파싱 + AC#3 config-우선 명시
+- [x] 5. registry: weather-briefing에 context 선언 + locale 활용 (skills repo 7294df5) — AC#6 실제 LLM 검증은 수동
 
 ## Relay Rust Rewrite ✅
 

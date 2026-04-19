@@ -719,6 +719,17 @@ func TestBuildUserContext(t *testing.T) {
 			t.Errorf("locale = %v, want ko (detected from Korean text)", result["locale"])
 		}
 	})
+
+	t.Run("config locale beats detection", func(t *testing.T) {
+		// AC #3: event text is Korean but config says "en" — config must win.
+		enCfg := &core.Config{}
+		enCfg.User.Locale = "en"
+		enSess := &Session{Config: enCfg}
+		result := buildUserContext([]string{"locale"}, enSess, event)
+		if result["locale"] != "en" {
+			t.Errorf("locale = %v, want en (config must beat detection)", result["locale"])
+		}
+	})
 }
 
 func TestInjectLocaleInstruction(t *testing.T) {
