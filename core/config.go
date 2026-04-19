@@ -250,8 +250,19 @@ type MCPServerConfig struct {
 }
 
 // ChannelConfig defines a messaging channel.
+//
+// Alias is infrastructure-only for this commit: it distinguishes
+// multiple channels of the same ChannelType under one tenant in
+// spawnerKey, but is NOT yet exposed through TOML (toml:"-") because
+// the inbound routing path in server.dispatchLoop still looks up
+// channels with alias="". Lifting the TOML tag without first wiring
+// alias through Event/ChatPayload → dispatchLoop → family push →
+// retry queue would silently break responses for any channel whose
+// alias is non-empty. Tests and future migration code may assign
+// Alias directly in Go; real config.toml cannot.
 type ChannelConfig struct {
 	ChannelType ChannelType `toml:"channel_type"`
+	Alias       string      `toml:"-"`
 	Token       string      `toml:"token"`
 	BindAddr    string      `toml:"bind_addr"`
 	KakaoWSURL  string      `toml:"-"` // runtime-injected from secrets (not in config.toml)

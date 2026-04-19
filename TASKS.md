@@ -1,4 +1,22 @@
-## Plan 25: Family Multi-Tenant on macOS (S3-lite) ← 현재
+## Multi-user Blockers (A묶음) ✅
+
+Plan: `.claude/plans/multi-user-blockers.md`
+Spec: `.ina/specs/20260420-0324-auto-multi-user-blockers.md`
+
+Goal: multi-user 스펙 구현 전 3개 기술 블로커 제거 (작고 독립적, 단일 커밋).
+
+- [x] MB1. `core/tenant.go` validTenantID regex → `^[a-z0-9_][a-z0-9_-]{0,31}$` + `_default_`/`_shared_` accept 테스트
+- [x] MB2. `server/spawner.go` spawnerKey 에 `Alias string` 추가 + `ChannelConfig.Alias` (TOML-hidden, 인프라 전용) + Stop/GetChannel/ReplaceSpawn/Reconcile 3-인자화 + 같은 tenant+type+다른 alias 동시 running 테스트
+- [x] MB3. `core/types.go` ChatPayload 에 `FromID string` 추가 + Telegram/Slack/Discord/Kakao 채움 + SessionID 주석 명확화 + 채널별 FromID 회귀 테스트
+- [x] MB4. `make test` + `make lint` 그린
+- [x] MB5. diff self-review + 커밋 (codex adversarial: TOML alias 노출 시 dispatchLoop hardcoded `""` 경로 붕괴 — `toml:"-"` 로 봉인, 라우팅 wiring 은 follow-up)
+
+### Commit Map
+- MB1~5 → `feat(core): multi-user routing prerequisites`
+
+---
+
+## Plan 25: Family Multi-Tenant on macOS (S3-lite) ✅
 
 Plan: `.claude/plans/family-multi-tenant.md`
 Spec: `.ina/specs/20260418-0450-think-family-multi-tenant.md`

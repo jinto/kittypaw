@@ -389,7 +389,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 
 			// Build RunOptions with Confirmer-based permission callback if available.
 			var runOpts *engine.RunOptions
-			ch, chOK := s.spawner.GetChannel(event.TenantID, event.Type)
+			ch, chOK := s.spawner.GetChannel(event.TenantID, event.Type, "")
 			if chOK {
 				if confirmer, ok := ch.(channel.Confirmer); ok {
 					evType := string(event.Type)
@@ -521,7 +521,7 @@ func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
 		return
 	}
 
-	ch, chOK := s.spawner.GetChannel(event.TenantID, channelType)
+	ch, chOK := s.spawner.GetChannel(event.TenantID, channelType, "")
 	if !chOK {
 		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text, "channel not running")
 		return
@@ -638,7 +638,7 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 					}
 					tenantID = DefaultTenantID
 				}
-				ch, ok := s.spawner.GetChannel(tenantID, core.EventType(p.EventType))
+				ch, ok := s.spawner.GetChannel(tenantID, core.EventType(p.EventType), "")
 				if !ok {
 					// Channel absent — do NOT drop. Leave in queue for next tick.
 					continue
