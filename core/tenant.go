@@ -220,6 +220,28 @@ func ValidateTenantChannels(tenantChannels map[string][]ChannelConfig) error {
 	return fmt.Errorf("duplicate channel credentials across tenants: %v", dupes)
 }
 
+// ChatBelongsToTenant reports whether chatID belongs to the tenant whose
+// Config is cfg. A tenant with no AdminChatIDs configured returns true —
+// the check is permissive for legacy single-tenant installs and for channels
+// like web_chat whose ownership is tracked by SessionID, not chat_id.
+//
+// When AdminChatIDs is non-empty the check is strict: only IDs in that list
+// pass. This is the last line of defense against a compromised bot token or
+// a crafted inbound payload that claims TenantID=alice while carrying bob's
+// chat_id — a mismatch must never reach the agent loop or it would mix
+// tenants' conversation histories in the DB (AC-T7).
+func ChatBelongsToTenant(cfg *Config, chatID string) bool {
+	if cfg == nil || len(cfg.AdminChatIDs) == 0 {
+		return true
+	}
+	for _, owned := range cfg.AdminChatIDs {
+		if owned == chatID {
+			return true
+		}
+	}
+	return false
+}
+
 // ValidateFamilyTenants fails fast when a tenant marked `is_family=true`
 // declares channel configs. Family tenants are coordinators (scheduled
 // skills + fanout push); they never own a Telegram/Kakao account of their

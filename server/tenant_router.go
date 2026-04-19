@@ -20,6 +20,11 @@ type TenantRouter struct {
 	mu        sync.RWMutex
 	sessions  map[string]*engine.Session
 	dropCount atomic.Int64
+	// mismatchCount tracks per-tenant chat_id ownership violations (AC-T7).
+	// Keyed by the tenant ID the event claimed, not the real owner —
+	// `tenant_routing_mismatch_total{from=<tenantID>}` is the spec's
+	// external-facing metric label, so the local key mirrors that shape.
+	mismatchCount sync.Map // map[string]*atomic.Int64
 }
 
 // NewTenantRouter returns an empty router. Callers must Register sessions
@@ -98,4 +103,24 @@ func (r *TenantRouter) Session(tenantID string) *engine.Session {
 // TenantID was empty or unknown.
 func (r *TenantRouter) DropCount() int64 {
 	return r.dropCount.Load()
+}
+
+// RecordMismatch increments the per-tenant chat_id ownership violation
+// counter. Callers use this *after* a successful Route() when the routed
+// session's Config.AdminChatIDs rejects the event's chat_id — the event
+// must be dropped and not fed to Session.Run (AC-T7).
+func (r *TenantRouter) RecordMismatch(tenantID string) {
+	v, _ := r.mismatchCount.LoadOrStore(tenantID, &atomic.Int64{})
+	v.(*atomic.Int64).Add(1)
+}
+
+// MismatchCount returns the cumulative mismatch count for tenantID, or 0
+// when no mismatches have been recorded for that tenant. Used by tests and
+// the /metrics endpoint to expose `tenant_routing_mismatch_total{from=...}`.
+func (r *TenantRouter) MismatchCount(tenantID string) int64 {
+	v, ok := r.mismatchCount.Load(tenantID)
+	if !ok {
+		return 0
+	}
+	return v.(*atomic.Int64).Load()
 }

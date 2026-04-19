@@ -104,6 +104,163 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 	}
 }
 
+// TestFamilyMorningBrief_FansOutToAllPersonalTenants enforces AC-U1: the
+// family tenant's skills (here simulated by direct Fanout.Send calls, one
+// per target) deliver to each personal tenant's own channel with that
+// tenant's own chat_id. A regression here is the defining family-tenant
+// failure mode — either the wrong target gets the wrong message, or the
+// chat_id falls back to the family's own (non-existent) AdminChatIDs.
+//
+// The scheduled-skill trigger is exercised elsewhere in engine/schedule;
+// this test narrows in on the Fanout → dispatchLoop → channel.SendResponse
+// leg, which is the delivery surface the AC actually describes.
+func TestFamilyMorningBrief_FansOutToAllPersonalTenants(t *testing.T) {
+	root := t.TempDir()
+
+	// Family drives fanout; three personal tenants receive their own tailored text.
+	familyDeps := buildTenantDeps(t, root, "family", &core.Config{IsFamily: true})
+	aliceDeps := buildTenantDeps(t, root, "alice", &core.Config{
+		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AdminChatIDs: []string{"alice-chat"},
+	})
+	bobDeps := buildTenantDeps(t, root, "bob", &core.Config{
+		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AdminChatIDs: []string{"bob-chat"},
+	})
+	charlieDeps := buildTenantDeps(t, root, "charlie", &core.Config{
+		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AdminChatIDs: []string{"charlie-chat"},
+	})
+	srv := New([]*TenantDeps{familyDeps, aliceDeps, bobDeps, charlieDeps}, "test")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
+	defer srv.spawner.StopAll()
+
+	// Wire a mockPushChannel per personal tenant so SendResponse calls are
+	// captured per destination. Each mock's Name() must match the telegram
+	// EventType string to match ChannelSpawner's lookup key.
+	mocks := map[string]*mockPushChannel{
+		"alice":   {name: string(core.EventTelegram)},
+		"bob":     {name: string(core.EventTelegram)},
+		"charlie": {name: string(core.EventTelegram)},
+	}
+	for id, m := range mocks {
+		if err := srv.spawner.TrySpawn(id, m, core.ChannelConfig{
+			ChannelType: core.ChannelTelegram,
+		}); err != nil {
+			t.Fatalf("TrySpawn %s: %v", id, err)
+		}
+	}
+
+	go srv.dispatchLoop(ctx)
+
+	familySess := srv.tenants.Session("family")
+	if familySess == nil {
+		t.Fatal("family session not registered")
+	}
+	if familySess.Fanout == nil {
+		t.Fatal("family session's Fanout is nil (IsFamily wiring regression)")
+	}
+
+	// Simulated morning-brief skill output — three tenant-specific texts.
+	// In production these would be LLM-generated; here the test controls
+	// the exact strings so assertion failures point to delivery bugs, not
+	// prompt changes.
+	pushes := map[string]string{
+		"alice":   "🍚 알리스 오늘 숙제: 수학 드릴",
+		"bob":     "🏀 봅 오늘 농구 연습 5시",
+		"charlie": "📚 찰리 오늘 독서 30분",
+	}
+	for target, text := range pushes {
+		if err := familySess.Fanout.Send(ctx, target, core.FanoutPayload{Text: text}); err != nil {
+			t.Fatalf("Fanout.Send(%s): %v", target, err)
+		}
+	}
+
+	for id, m := range mocks {
+		calls := waitForCalls(t, m, 1, 2*time.Second)
+		if len(calls) != 1 {
+			t.Fatalf("%s: expected 1 SendResponse, got %d", id, len(calls))
+		}
+		wantChat := id + "-chat"
+		if calls[0].ChatID != wantChat {
+			t.Errorf("%s: chat_id = %q, want %q", id, calls[0].ChatID, wantChat)
+		}
+		if calls[0].Response != pushes[id] {
+			t.Errorf("%s: response = %q, want %q", id, calls[0].Response, pushes[id])
+		}
+	}
+
+	// Negative: family itself must not receive any push (self-loop guard).
+	// No family mock registered, so spawner lookup would fail; but we can
+	// also confirm no cross-pollution by inspecting each personal mock for
+	// exactly-one call, which the loop above already does.
+}
+
+// TestFamilyMorningBrief_BroadcastFansOutToAllPeers is the Broadcast
+// variant of AC-U1: one call, N-1 targets (the source tenant is excluded).
+// Locks in that Broadcast's "except source" guard works in the multi-
+// personal case — without it, family would push to itself and the event
+// would bounce through dispatchLoop with no destination channel.
+func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
+	root := t.TempDir()
+
+	familyDeps := buildTenantDeps(t, root, "family", &core.Config{IsFamily: true})
+	aliceDeps := buildTenantDeps(t, root, "alice", &core.Config{
+		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AdminChatIDs: []string{"alice-chat"},
+	})
+	bobDeps := buildTenantDeps(t, root, "bob", &core.Config{
+		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AdminChatIDs: []string{"bob-chat"},
+	})
+	srv := New([]*TenantDeps{familyDeps, aliceDeps, bobDeps}, "test")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
+	defer srv.spawner.StopAll()
+
+	mocks := map[string]*mockPushChannel{
+		"alice": {name: string(core.EventTelegram)},
+		"bob":   {name: string(core.EventTelegram)},
+	}
+	for id, m := range mocks {
+		if err := srv.spawner.TrySpawn(id, m, core.ChannelConfig{
+			ChannelType: core.ChannelTelegram,
+		}); err != nil {
+			t.Fatalf("TrySpawn %s: %v", id, err)
+		}
+	}
+
+	go srv.dispatchLoop(ctx)
+
+	familySess := srv.tenants.Session("family")
+	if familySess == nil || familySess.Fanout == nil {
+		t.Fatal("family session / Fanout missing")
+	}
+
+	shared := "🌤 오늘 날씨 맑음 — 외출 추천"
+	if err := familySess.Fanout.Broadcast(ctx, core.FanoutPayload{Text: shared}); err != nil {
+		t.Fatalf("Broadcast: %v", err)
+	}
+
+	for id, m := range mocks {
+		calls := waitForCalls(t, m, 1, 2*time.Second)
+		if len(calls) != 1 {
+			t.Fatalf("%s: expected 1 SendResponse, got %d", id, len(calls))
+		}
+		if calls[0].Response != shared {
+			t.Errorf("%s: response = %q, want %q", id, calls[0].Response, shared)
+		}
+		if calls[0].ChatID != id+"-chat" {
+			t.Errorf("%s: chat_id = %q, want %s-chat", id, calls[0].ChatID, id)
+		}
+	}
+}
+
 func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 	t.Helper()
 	body, err := json.Marshal(p)
