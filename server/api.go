@@ -826,9 +826,9 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	// call, which this lock brackets entirely.
 	result := map[string]any{"success": true}
 	if s.spawner != nil {
-		s.addTenantMu.Lock()
+		s.tenantMu.Lock()
 		err := s.spawner.Reconcile(DefaultTenantID, cfg.Channels)
-		s.addTenantMu.Unlock()
+		s.tenantMu.Unlock()
 		if err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
