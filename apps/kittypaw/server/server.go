@@ -32,12 +32,13 @@ type Server struct {
 	session        *engine.Session // default-tenant session; HTTP handlers use this
 	scheduler      *engine.Scheduler
 	router         chi.Router
-	spawner        *ChannelSpawner      // manages channel lifecycle for hot-reload
-	tenants        *TenantRouter        // routes channel events to tenant-scoped sessions
-	tenantList     []*core.Tenant       // ordered tenant metadata for startup validation
-	tenantRegistry *core.TenantRegistry // shared cross-tenant registry (Share.read / Fanout)
-	eventCh        chan core.Event      // shared event channel between channels and dispatch loop
-	addTenantMu    sync.Mutex           // serializes Server.AddTenant — validation→register→reconcile must not interleave
+	spawner        *ChannelSpawner        // manages channel lifecycle for hot-reload
+	tenants        *TenantRouter          // routes channel events to tenant-scoped sessions
+	tenantList     []*core.Tenant         // ordered tenant metadata for startup validation
+	tenantRegistry *core.TenantRegistry   // shared cross-tenant registry (Share.read / Fanout)
+	eventCh        chan core.Event        // shared event channel between channels and dispatch loop
+	tenantMu       sync.Mutex             // serializes AddTenant/RemoveTenant — validation→register→reconcile must not interleave
+	tenantDeps     map[string]*TenantDeps // retained close-targets (Store+MCP) for RemoveTenant; populated on successful AddTenant
 	version        string
 	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
 	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
@@ -95,9 +96,11 @@ func New(tenants []*TenantDeps, version string) *Server {
 
 	router := NewTenantRouter()
 	var defaultSession *engine.Session
+	depsByID := make(map[string]*TenantDeps, len(tenants))
 	for _, td := range tenants {
 		sess := buildTenantSession(td, registry, eventCh)
 		router.Register(td.Tenant.ID, sess)
+		depsByID[td.Tenant.ID] = td
 		if td == defaultDeps {
 			defaultSession = sess
 		}
@@ -112,6 +115,7 @@ func New(tenants []*TenantDeps, version string) *Server {
 		tenantList:     tenantList,
 		tenantRegistry: registry,
 		eventCh:        eventCh,
+		tenantDeps:     depsByID,
 		version:        version,
 		pkgManager:     defaultDeps.PkgMgr,
 		secrets:        defaultDeps.Secrets,
@@ -211,6 +215,7 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.requireLocalhost)
 			r.Post("/tenants", s.handleAdminTenantAdd)
+			r.Post("/tenants/{id}/delete", s.handleAdminTenantRemove)
 		})
 
 		// Install

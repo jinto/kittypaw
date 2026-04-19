@@ -144,6 +144,13 @@ func (c *Client) TenantActivate(tenantID string) (map[string]any, error) {
 	})
 }
 
+// TenantRemove deactivates a live tenant. Mirrors TenantActivate. 200 on
+// success, 404 if not currently active (caller treats as "nothing to do"),
+// 400 on malformed ID, 500 if the daemon can't drain channels cleanly.
+func (c *Client) TenantRemove(tenantID string) (map[string]any, error) {
+	return c.post("/api/v1/admin/tenants/"+url.PathEscape(tenantID)+"/delete", nil)
+}
+
 // EnableSkill sets a skill's enabled state to true.
 func (c *Client) EnableSkill(name string) (map[string]any, error) {
 	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/enable", nil)
