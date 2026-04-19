@@ -106,6 +106,7 @@ func newRootCmd() *cobra.Command {
 		newReloadCmd(),
 		newResetCmd(),
 		newLoginCmd(),
+		newTenantCmd(),
 	)
 
 	return cmd
