@@ -5,6 +5,43 @@ import (
 	"testing"
 )
 
+// TestChatBelongsToTenant_StrictMatch pins the ownership check: when a
+// tenant has AdminChatIDs configured, only chat_ids in that list are
+// accepted. A mismatch is the AC-T7 attack surface — a bot-token leak
+// must not let a foreign chat_id leak into this tenant's session state.
+func TestChatBelongsToTenant_StrictMatch(t *testing.T) {
+	cfg := &Config{AdminChatIDs: []string{"111", "222"}}
+	if !ChatBelongsToTenant(cfg, "111") {
+		t.Error("chat_id 111 should match AdminChatIDs")
+	}
+	if !ChatBelongsToTenant(cfg, "222") {
+		t.Error("chat_id 222 should match AdminChatIDs")
+	}
+	if ChatBelongsToTenant(cfg, "999") {
+		t.Error("chat_id 999 must NOT match; AC-T7 violation")
+	}
+	if ChatBelongsToTenant(cfg, "") {
+		t.Error("empty chat_id must NOT match a configured tenant")
+	}
+}
+
+// TestChatBelongsToTenant_PermissiveUnconfigured locks in the back-compat
+// path: a tenant with no AdminChatIDs (fresh install, WebChat-only tenant)
+// accepts every chat_id. Without this the migration would silently drop
+// every inbound message on existing installs.
+func TestChatBelongsToTenant_PermissiveUnconfigured(t *testing.T) {
+	cases := []*Config{
+		nil,
+		{AdminChatIDs: nil},
+		{AdminChatIDs: []string{}},
+	}
+	for i, cfg := range cases {
+		if !ChatBelongsToTenant(cfg, "anything") {
+			t.Errorf("case %d: unconfigured tenant must be permissive", i)
+		}
+	}
+}
+
 // TestValidateTenantChannels_NoDuplicates confirms the happy path —
 // distinct tokens across tenants return nil.
 func TestValidateTenantChannels_NoDuplicates(t *testing.T) {

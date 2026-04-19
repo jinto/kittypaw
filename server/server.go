@@ -363,6 +363,23 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
+			// AC-T7: chat_id ownership check. Route() matched TenantID to a
+			// Session, but a compromised/leaked bot token could still inject
+			// an event whose chat_id belongs to a different tenant. Without
+			// this gate alice's Session.Run would persist bob's conversation
+			// under alice's store — a privacy breach the TenantID check
+			// alone cannot catch. Permissive when AdminChatIDs is empty
+			// (legacy single-tenant installs, web_chat-only tenants).
+			if !core.ChatBelongsToTenant(session.Config, payload.ChatID) {
+				s.tenants.RecordMismatch(event.TenantID)
+				slog.Warn("tenant_routing_mismatch",
+					"tenant", event.TenantID,
+					"chat_id", payload.ChatID,
+					"type", event.Type,
+				)
+				continue
+			}
+
 			slog.Info("processing channel event",
 				"type", event.Type,
 				"tenant", event.TenantID,

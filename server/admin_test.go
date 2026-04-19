@@ -2,12 +2,14 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jinto/kittypaw/core"
 )
@@ -272,5 +274,69 @@ func TestHandleAdminTenantAdd_NonLocalhostRejected(t *testing.T) {
 	}
 	if srv.tenants.Session("alice") != nil {
 		t.Error("alice registered despite localhost-gate rejection")
+	}
+}
+
+// TestHandleAdminTenantAdd_HotReloadRouterReflectsImmediately is the AC-U3
+// end-to-end guard: once POST /api/v1/admin/tenants returns 200, the
+// dispatch path must see the new tenant *without* a daemon restart. A
+// regression here would push every new family member through a kill-9 +
+// relaunch, which is the exact pain AC-U3 exists to eliminate. The 30s
+// budget comes directly from the spec; in practice AddTenant is synchronous
+// and completes in milliseconds, so the bounded wait also guards against a
+// regression where hot-add silently defers work to a background goroutine.
+func TestHandleAdminTenantAdd_HotReloadRouterReflectsImmediately(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+	stageTenantOnDisk(t, root, "charlie", true, nil)
+
+	// Pre-add: charlie is unknown — Route() must drop with no fallback.
+	preDrop := srv.tenants.DropCount()
+	if got := srv.tenants.Route(core.Event{
+		Type:     core.EventTelegram,
+		TenantID: "charlie",
+	}); got != nil {
+		t.Fatal("pre-add: charlie should drop (no fallback) but Route returned a session")
+	}
+	if got := srv.tenants.DropCount(); got != preDrop+1 {
+		t.Errorf("pre-add DropCount = %d, want %d", got, preDrop+1)
+	}
+
+	// Hot-add — enforce the 30s AC-U3 budget on the HTTP round-trip. The
+	// goroutine + select pattern also catches the regression where AddTenant
+	// blocks indefinitely (e.g. a bad channel spawn waiting on a network
+	// dial) instead of returning an error promptly.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- postAdminTenant(t, srv, "charlie", "127.0.0.1:4242")
+	}()
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-ctx.Done():
+		t.Fatal("AddTenant exceeded 30s AC-U3 budget")
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("AddTenant HTTP status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	t.Logf("AddTenant completed in %v (AC-U3 budget: 30s)", time.Since(start))
+
+	// Post-add: charlie is immediately in the router and fresh events route
+	// cleanly without bumping the drop counter.
+	if got := srv.tenants.Session("charlie"); got == nil {
+		t.Fatal("post-add: charlie missing from router — hot-reload failed")
+	}
+	dropBefore := srv.tenants.DropCount()
+	if got := srv.tenants.Route(core.Event{
+		Type:     core.EventTelegram,
+		TenantID: "charlie",
+	}); got == nil {
+		t.Fatal("post-add: charlie event dropped — hot-reload did not reach dispatch path")
+	}
+	if got := srv.tenants.DropCount(); got != dropBefore {
+		t.Errorf("post-add: DropCount advanced (%d → %d) — legitimate traffic is being dropped", dropBefore, got)
 	}
 }

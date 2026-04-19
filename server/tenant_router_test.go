@@ -80,6 +80,33 @@ func TestTenantRouter_RemoveAndSessions(t *testing.T) {
 	}
 }
 
+// TestTenantRouter_MismatchCounters locks in the AC-T7 metric surface:
+// RecordMismatch bumps a per-tenant counter; MismatchCount reads only that
+// tenant's count and returns 0 for untouched tenants without allocating.
+// The /metrics endpoint surfaces this as
+// `tenant_routing_mismatch_total{from=<tenantID>}`.
+func TestTenantRouter_MismatchCounters(t *testing.T) {
+	r := NewTenantRouter()
+
+	if n := r.MismatchCount("alice"); n != 0 {
+		t.Errorf("MismatchCount(alice) initial = %d, want 0", n)
+	}
+
+	r.RecordMismatch("alice")
+	r.RecordMismatch("alice")
+	r.RecordMismatch("bob")
+
+	if n := r.MismatchCount("alice"); n != 2 {
+		t.Errorf("MismatchCount(alice) = %d, want 2", n)
+	}
+	if n := r.MismatchCount("bob"); n != 1 {
+		t.Errorf("MismatchCount(bob) = %d, want 1", n)
+	}
+	if n := r.MismatchCount("charlie"); n != 0 {
+		t.Errorf("MismatchCount(charlie) = %d, want 0 (unseen tenant)", n)
+	}
+}
+
 func TestTenantRouter_ConcurrentAccess(t *testing.T) {
 	r := NewTenantRouter()
 	sess := &engine.Session{}
