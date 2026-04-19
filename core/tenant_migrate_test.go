@@ -176,8 +176,7 @@ func TestValidateTenantID_Hostile(t *testing.T) {
 		"Alice",  // uppercase — case-insensitive FS collision risk
 		"alice ", // trailing space
 		" alice",
-		"-alice", // must start alphanumeric
-		"_alice",
+		"-alice",                              // leading hyphen not allowed (leading underscore IS, see Accepts)
 		"가족",                                  // non-ASCII
 		"abcdefghijklmnopqrstuvwxyz012345678", // 35 chars
 	} {
@@ -189,9 +188,13 @@ func TestValidateTenantID_Hostile(t *testing.T) {
 
 // TestValidateTenantID_Accepts enumerates the shapes we DO allow so a
 // future tightening of the regex is a deliberate decision, not a
-// regression that breaks existing family setups.
+// regression that breaks existing family setups. Leading underscore
+// is accepted to reserve `_default_` / `_shared_` for multi-user.
 func TestValidateTenantID_Accepts(t *testing.T) {
-	for _, good := range []string{"default", "alice", "bob-2", "family_01", "a", "0abc"} {
+	for _, good := range []string{
+		"default", "alice", "bob-2", "family_01", "a", "0abc",
+		"_default_", "_shared_", "_alice",
+	} {
 		if err := ValidateTenantID(good); err != nil {
 			t.Errorf("ValidateTenantID(%q) should accept: %v", good, err)
 		}

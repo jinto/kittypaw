@@ -75,10 +75,23 @@ type Event struct {
 }
 
 // ChatPayload is the common structure inside Event.Payload.
+//
+// FromID is the external user identifier scoped to the channel
+// (Telegram user ID, Slack user, Discord author ID, Kakao userID).
+// Empty for channels without a per-user identity concept (WebSocket
+// anonymous sessions, API-triggered synthetic events, scheduler).
+// It is distinct from SessionID: a future Telegram group-chat
+// integration would set SessionID=chat and FromID=speaker.
+//
+// SessionID is the conversation continuity key — groups a single
+// speaker's consecutive messages into one session. Most channels
+// currently set this to the user ID (same speaker = same session);
+// WebSocket uses the per-socket session token.
 type ChatPayload struct {
 	ChatID      string `json:"chat_id"`
 	Text        string `json:"text"`
 	FromName    string `json:"from_name,omitempty"`
+	FromID      string `json:"from_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 }

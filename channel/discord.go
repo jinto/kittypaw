@@ -211,6 +211,7 @@ func (d *DiscordChannel) handleMessage(ctx context.Context, data json.RawMessage
 		ChatID:    msg.ChannelID,
 		Text:      msg.Content,
 		FromName:  msg.Author.Username,
+		FromID:    msg.Author.ID,
 		SessionID: msg.Author.ID,
 	}
 	raw, err := json.Marshal(payload)

@@ -244,22 +244,27 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 			}
 
 			fromName := ""
+			fromID := ""
 			if msg.From != nil {
 				fromName = msg.From.displayName()
+				if msg.From.ID != 0 {
+					fromID = strconv.FormatInt(msg.From.ID, 10)
+				}
 			}
 
 			chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
 
 			// Use user ID as SessionID for per-user session continuity.
 			sessionID := chatIDStr
-			if msg.From != nil && msg.From.ID != 0 {
-				sessionID = strconv.FormatInt(msg.From.ID, 10)
+			if fromID != "" {
+				sessionID = fromID
 			}
 
 			payload := core.ChatPayload{
 				ChatID:    chatIDStr,
 				Text:      text,
 				FromName:  fromName,
+				FromID:    fromID,
 				SessionID: sessionID,
 			}
 			raw, err := json.Marshal(payload)
