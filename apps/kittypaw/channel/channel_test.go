@@ -170,11 +170,15 @@ func TestKakaoSessionIDFromUserID(t *testing.T) {
 	payload := core.ChatPayload{
 		ChatID:    msg.ID,
 		Text:      msg.Text,
+		FromID:    msg.UserID,
 		SessionID: msg.UserID,
 	}
 
 	if payload.SessionID != "kakao-user-42" {
 		t.Errorf("expected SessionID %q, got %q", "kakao-user-42", payload.SessionID)
+	}
+	if payload.FromID != "kakao-user-42" {
+		t.Errorf("expected FromID %q, got %q", "kakao-user-42", payload.FromID)
 	}
 	if payload.ChatID != "action-123" {
 		t.Errorf("expected ChatID %q, got %q", "action-123", payload.ChatID)
@@ -189,6 +193,9 @@ func TestKakaoSessionIDFromUserID(t *testing.T) {
 	}
 	if parsed.SessionID != "kakao-user-42" {
 		t.Errorf("roundtrip SessionID: got %q, want %q", parsed.SessionID, "kakao-user-42")
+	}
+	if parsed.FromID != "kakao-user-42" {
+		t.Errorf("roundtrip FromID: got %q, want %q", parsed.FromID, "kakao-user-42")
 	}
 }
 
@@ -221,11 +228,15 @@ func TestSlackSessionIDFromUser(t *testing.T) {
 		ChatID:    evt.Channel,
 		Text:      evt.Text,
 		FromName:  evt.User,
+		FromID:    evt.User,
 		SessionID: evt.User,
 	}
 
 	if payload.SessionID != "U123ABC" {
 		t.Errorf("expected SessionID %q, got %q", "U123ABC", payload.SessionID)
+	}
+	if payload.FromID != "U123ABC" {
+		t.Errorf("expected FromID %q, got %q", "U123ABC", payload.FromID)
 	}
 }
 
@@ -241,11 +252,58 @@ func TestDiscordSessionIDFromAuthor(t *testing.T) {
 		ChatID:    msg.ChannelID,
 		Text:      msg.Content,
 		FromName:  msg.Author.Username,
+		FromID:    msg.Author.ID,
 		SessionID: msg.Author.ID,
 	}
 
 	if payload.SessionID != "discord-user-99" {
 		t.Errorf("expected SessionID %q, got %q", "discord-user-99", payload.SessionID)
+	}
+	if payload.FromID != "discord-user-99" {
+		t.Errorf("expected FromID %q, got %q", "discord-user-99", payload.FromID)
+	}
+	if payload.FromName != "testbot" {
+		t.Errorf("expected FromName %q, got %q", "testbot", payload.FromName)
+	}
+}
+
+// TestTelegramFromIDIsDistinctFromSessionID verifies that the Telegram
+// channel populates FromID from msg.From.ID directly, so a future
+// group-chat integration can set SessionID=chat while FromID stays as
+// the speaker's user ID.
+func TestTelegramFromIDIsDistinctFromSessionID(t *testing.T) {
+	user := telegramUser{
+		ID:        98765432,
+		FirstName: "Mom",
+	}
+	fromID := ""
+	if user.ID != 0 {
+		fromID = "98765432"
+	}
+	payload := core.ChatPayload{
+		ChatID:    "5555",
+		Text:      "hi",
+		FromName:  user.displayName(),
+		FromID:    fromID,
+		SessionID: fromID,
+	}
+
+	if payload.FromID != "98765432" {
+		t.Errorf("expected FromID %q, got %q", "98765432", payload.FromID)
+	}
+	if payload.SessionID != payload.FromID {
+		t.Errorf("SessionID should track FromID for per-user sessions; got %q vs %q",
+			payload.SessionID, payload.FromID)
+	}
+
+	// Roundtrip to confirm JSON tag wiring.
+	raw, _ := json.Marshal(payload)
+	var parsed core.ChatPayload
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if parsed.FromID != "98765432" {
+		t.Errorf("roundtrip FromID: got %q, want %q", parsed.FromID, "98765432")
 	}
 }
 

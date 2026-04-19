@@ -13,9 +13,10 @@ import (
 
 // validTenantID restricts tenant names to a safe ASCII subset that can never
 // traverse the filesystem ("../"), collide under case-insensitive FS, or
-// surprise a logging/audit pipeline with unicode. 1-32 chars, lowercase,
-// must start alphanumeric — mirrors npm package name rules.
-var validTenantID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+// surprise a logging/audit pipeline with unicode. 1-32 chars, lowercase.
+// Leading underscore is allowed to accommodate reserved-form IDs like
+// `_default_` / `_shared_` for future multi-user support.
+var validTenantID = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]{0,31}$`)
 
 // ValidateTenantID returns nil if id is safe to use as a filesystem
 // directory name and as a TenantRouter map key. A TenantID is trusted as

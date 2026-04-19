@@ -186,6 +186,7 @@ func (s *SlackChannel) handleEventPayload(ctx context.Context, env slackEnvelope
 		ChatID:      evt.Channel,
 		Text:        evt.Text,
 		FromName:    evt.User,
+		FromID:      evt.User,
 		WorkspaceID: "", // TODO: extract team_id if needed
 		SessionID:   evt.User,
 	}
