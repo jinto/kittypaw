@@ -37,6 +37,7 @@ type Server struct {
 	tenantList     []*core.Tenant       // ordered tenant metadata for startup validation
 	tenantRegistry *core.TenantRegistry // shared cross-tenant registry (Share.read / Fanout)
 	eventCh        chan core.Event      // shared event channel between channels and dispatch loop
+	addTenantMu    sync.Mutex           // serializes Server.AddTenant — validation→register→reconcile must not interleave
 	version        string
 	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
 	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
@@ -95,55 +96,7 @@ func New(tenants []*TenantDeps, version string) *Server {
 	router := NewTenantRouter()
 	var defaultSession *engine.Session
 	for _, td := range tenants {
-		if len(td.Tenant.Config.Sandbox.AllowedPaths) > 0 {
-			if err := td.Store.SeedWorkspacesFromConfig(td.Tenant.Config.Sandbox.AllowedPaths); err != nil {
-				slog.Error("seed workspaces from config", "tenant", td.Tenant.ID, "error", err)
-			}
-		}
-
-		sess := &engine.Session{
-			Provider:         td.Provider,
-			FallbackProvider: td.Fallback,
-			Sandbox:          td.Sandbox,
-			Store:            td.Store,
-			Config:           td.Tenant.Config,
-			McpRegistry:      td.McpRegistry,
-			BaseDir:          td.Tenant.BaseDir,
-			PackageManager:   td.PkgMgr,
-			APITokenMgr:      td.APITokenMgr,
-			TenantID:         td.Tenant.ID,
-			TenantRegistry:   registry,
-			Health:           core.NewHealthState(),
-		}
-		// I5 — only family may fan out. Personal tenants never see the
-		// Fanout JS global because the sandbox keys on sess.Fanout != nil.
-		if td.Tenant.Config != nil && td.Tenant.Config.IsFamily {
-			sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Tenant.ID)
-		}
-
-		if err := sess.RefreshAllowedPaths(); err != nil {
-			slog.Warn("startup: failed to load workspace paths, file access denied by default",
-				"tenant", td.Tenant.ID, "error", err)
-		}
-
-		indexer := engine.NewFTS5Indexer(td.Store)
-		sess.Indexer = indexer
-		go func(tenantID string, st *store.Store, idx engine.Indexer) {
-			wss, err := st.ListWorkspaces()
-			if err != nil {
-				slog.Warn("startup: failed to list workspaces for indexing",
-					"tenant", tenantID, "error", err)
-				return
-			}
-			for _, ws := range wss {
-				if _, err := idx.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
-					slog.Warn("startup: workspace indexing failed",
-						"tenant", tenantID, "workspace_id", ws.ID,
-						"root_path", ws.RootPath, "error", err)
-				}
-			}
-		}(td.Tenant.ID, td.Store, indexer)
-
+		sess := buildTenantSession(td, registry, eventCh)
 		router.Register(td.Tenant.ID, sess)
 		if td == defaultDeps {
 			defaultSession = sess
@@ -250,6 +203,15 @@ func (s *Server) setupRoutes() chi.Router {
 		// Config
 		r.Get("/config/check", s.handleConfigCheck)
 		r.Post("/reload", s.handleReload)
+
+		// Admin — runtime tenant lifecycle. Localhost-only on top of the
+		// /api/v1 requireAPIKey gate: the daemon binds to 127.0.0.1 by
+		// default, but if a future deployment exposes it, admin mutations
+		// still require local access.
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(s.requireLocalhost)
+			r.Post("/tenants", s.handleAdminTenantAdd)
+		})
 
 		// Install
 		r.Post("/install", s.handleInstall)

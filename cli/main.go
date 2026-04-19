@@ -26,9 +26,6 @@ import (
 
 	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
-	"github.com/jinto/kittypaw/llm"
-	mcpreg "github.com/jinto/kittypaw/mcp"
-	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/server"
 	"github.com/jinto/kittypaw/store"
 )
@@ -2301,71 +2298,17 @@ func bootstrap() ([]*server.TenantDeps, error) {
 	deps := make([]*server.TenantDeps, 0, len(tenants))
 	closeOnErr := func() {
 		for _, td := range deps {
-			_ = td.Store.Close()
+			_ = td.Close()
 		}
 	}
 
 	for _, t := range tenants {
-		if err := t.EnsureDirs(); err != nil {
-			closeOnErr()
-			return nil, fmt.Errorf("ensure dirs for %s: %w", t.ID, err)
-		}
-
-		st, err := store.Open(t.DBPath())
+		td, err := server.OpenTenantDeps(t)
 		if err != nil {
 			closeOnErr()
-			return nil, fmt.Errorf("open store for %s: %w", t.ID, err)
+			return nil, err
 		}
-
-		provider, err := llm.NewProviderFromConfig(t.Config.LLM)
-		if err != nil {
-			_ = st.Close()
-			closeOnErr()
-			return nil, fmt.Errorf("create llm provider for %s: %w", t.ID, err)
-		}
-
-		var fallback llm.Provider
-		if m := t.Config.DefaultModel(); m != nil {
-			fallback, _ = llm.NewProviderFromModelConfig(*m)
-		}
-
-		sbox := sandbox.New(t.Config.Sandbox)
-
-		secrets, secretsErr := core.LoadSecretsFrom(t.SecretsPath())
-		if secretsErr != nil {
-			slog.Warn("failed to load secrets store, package config will be limited",
-				"tenant", t.ID, "error", secretsErr)
-		}
-		pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
-		apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
-
-		var mcpReg *mcpreg.Registry
-		if len(t.Config.MCPServers) > 0 {
-			if err := mcpreg.ValidateConfig(t.Config.MCPServers); err != nil {
-				_ = st.Close()
-				closeOnErr()
-				return nil, fmt.Errorf("MCP config for %s: %w", t.ID, err)
-			}
-			mcpReg = mcpreg.NewRegistry(t.Config.MCPServers)
-			connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
-			if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
-				slog.Warn("some MCP servers failed to connect",
-					"tenant", t.ID, "failures", len(errs))
-			}
-			connectCancel()
-		}
-
-		deps = append(deps, &server.TenantDeps{
-			Tenant:      t,
-			Store:       st,
-			Provider:    provider,
-			Fallback:    fallback,
-			Sandbox:     sbox,
-			McpRegistry: mcpReg,
-			PkgMgr:      pkgMgr,
-			APITokenMgr: apiTokenMgr,
-			Secrets:     secrets,
-		})
+		deps = append(deps, td)
 	}
 	return deps, nil
 }

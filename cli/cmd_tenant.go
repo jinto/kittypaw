@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
 )
 
@@ -23,6 +24,7 @@ type tenantAddFlags struct {
 	llmProvider        string
 	llmAPIKey          string
 	llmModel           string
+	noActivate         bool
 }
 
 const tenantEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
@@ -50,7 +52,9 @@ Bot-token sources (highest priority wins):
   2. $` + tenantEnvBotToken + `
   3. --telegram-bot-token        (visible in process list; prints a warning)
 
-Hot-reload is not yet supported; restart 'kittypaw serve' to activate.`,
+If a daemon is already running, the tenant is hot-activated: channels spawn
+and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
+the activation RPC and only stage files on disk.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTenantAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
@@ -63,6 +67,7 @@ Hot-reload is not yet supported; restart 'kittypaw serve' to activate.`,
 	cmd.Flags().StringVar(&f.llmProvider, "llm-provider", "", "LLM provider (anthropic|openai|local)")
 	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")
+	cmd.Flags().BoolVar(&f.noActivate, "no-activate", false, "Stage files only; skip hot-activation against a running daemon")
 	return cmd
 }
 
@@ -139,6 +144,44 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 	}
 
 	_, _ = fmt.Fprintf(stdout, "tenant %q created at %s\n", tt.ID, tt.BaseDir)
-	_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate (hot-reload coming in C4).")
+
+	if f.noActivate {
+		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw serve' or re-run without the flag to activate.")
+		return nil
+	}
+	if err := activateTenantOnDaemon(tt.ID, stdout, stderr); err != nil {
+		// Don't fail the whole command — files are already on disk; the user
+		// can recover with a daemon restart. Surface the error clearly so
+		// they know hot-activate didn't take.
+		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed: %v\n", err)
+		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate, or re-run `kittypaw tenant add` after starting the daemon.")
+	}
+	return nil
+}
+
+// activateTenantOnDaemon calls POST /api/v1/admin/tenants if a daemon is
+// already running locally. Absence of a daemon is not an error — the user
+// may be provisioning offline before first boot — so we fall back to a
+// restart hint printed by the caller.
+func activateTenantOnDaemon(tenantID string, stdout, stderr io.Writer) error {
+	conn, err := client.NewDaemonConn("")
+	if err != nil {
+		return fmt.Errorf("read daemon config: %w", err)
+	}
+	if !conn.IsRunning() {
+		_, _ = fmt.Fprintln(stdout, "Daemon is not running; start 'kittypaw serve' to activate this tenant.")
+		return nil
+	}
+
+	cl := client.New(conn.BaseURL, conn.APIKey)
+	resp, err := cl.TenantActivate(tenantID)
+	if err != nil {
+		return err
+	}
+
+	channels, _ := resp["channels"].(float64)
+	isFamily, _ := resp["is_family"].(bool)
+	_, _ = fmt.Fprintf(stdout, "tenant %q activated (channels=%d, is_family=%t)\n",
+		tenantID, int(channels), isFamily)
 	return nil
 }

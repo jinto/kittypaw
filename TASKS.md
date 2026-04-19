@@ -33,7 +33,7 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 - [x] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `HealthState` (atomic, Stopped terminal) + `Session.Health` 배선 ✅ (merged with C2)
 - [x] C2. goroutine recover + Degraded 전환 — `engine/recover.go` (`RecoverTenantPanic`/`MarkTenantReady`, nil-safe) + scheduler tickOnce/reflectionTick/runSkill/runPackage + `server.dispatchLoop` per-event recover + AC-T8 isolation test ✅ (merged with C1)
 - [x] C3. CLI `kittypaw tenant add <name> --telegram-bot-token=<T>` subcommand + 공통 setup 헬퍼 (OQ7) ✅ — `core.InitTenant` (staging→rename atomic), `resolveTenantToken` (stdin > env > flag), family/token 상호배타, 중복 토큰 사전 검사. OQ7 결정: 새 헬퍼 추출보단 기존 `MergeWizardSettings` + `ValidateTelegramToken` + `FetchTelegramChatID` 를 양쪽이 공유 (TTY wizard 와 one-shot CLI 는 상호작용 모델이 달라 억지 추출 시 복잡도만 증가).
-- [ ] C4. HTTP `POST /api/v1/admin/tenants` — daemon hot-reload (Registry.Register + Spawner.Reconcile), 재시작 없이 dispatch 시작
+- [x] C4. HTTP `POST /api/v1/admin/tenants` — daemon hot-reload ✅ — `Server.AddTenant` (addTenantMu 직렬화, ValidateTenantChannels 스냅샷 + ValidateFamilyTenants 사전검사, OpenTenantDeps + buildTenantSession 경유로 startup 과 동일 경로, rollback stack 으로 LIFO 언와인드) + `handleAdminTenantAdd` (localhost-only gate on top of /api/v1 api-key, 409/404/400 mapping) + `Client.TenantActivate` + `kittypaw tenant add` 자동 활성화 (daemon 실행 중일 때만; `--no-activate` 로 스테이징만)
 - [ ] C5. Cross-routing 감지 (AC-T7) — alice 봇에 bob chat_id 위조 메시지 → chat_id ownership 검증 후 drop + `tenant_routing_mismatch_total{from=alice}`
 - [ ] C6. Legacy 마이그레이션 완성 — DB rows 보존 + 기동 재현 테스트 (AC-T9 완성)
 - [ ] C7. E2E AC-U1 — family `morning-brief` scheduled → alice/bob/charlie 개인 Telegram mock 각자 맞춤 SendMessage

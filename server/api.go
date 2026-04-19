@@ -818,10 +818,18 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	s.configMu.Unlock()
 	slog.Info("config reloaded")
 
-	// Reconcile channels with the new config.
+	// Reconcile channels with the new config. Serialize against AddTenant —
+	// otherwise an admin-driven hot-add could spawn a channel whose token
+	// was just freed by this reload, with neither side seeing the other's
+	// snapshot. Spawner's own reconcileMu is not enough: the race window is
+	// between AddTenant's ValidateTenantChannels snapshot and its Reconcile
+	// call, which this lock brackets entirely.
 	result := map[string]any{"success": true}
 	if s.spawner != nil {
-		if err := s.spawner.Reconcile(DefaultTenantID, cfg.Channels); err != nil {
+		s.addTenantMu.Lock()
+		err := s.spawner.Reconcile(DefaultTenantID, cfg.Channels)
+		s.addTenantMu.Unlock()
+		if err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
 		}

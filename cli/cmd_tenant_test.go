@@ -94,8 +94,10 @@ func TestRunTenantAdd_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout.String(), "alice") {
 		t.Errorf("stdout should confirm tenant name, got %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "hot-reload coming") {
-		t.Errorf("stdout should mention restart requirement, got %q", stdout.String())
+	// No daemon running → fallback hint should surface; exact phrasing
+	// may shift, but the operator must see a recovery path.
+	if !strings.Contains(stdout.String(), "kittypaw serve") {
+		t.Errorf("stdout should mention how to activate, got %q", stdout.String())
 	}
 }
 
