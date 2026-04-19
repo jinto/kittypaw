@@ -1,3 +1,23 @@
+## Family Init Wizard (α) ← 현재
+
+Plan: `.claude/plans/family-init-wizard.md`
+Spec: `.ina/specs/20260420-0431-auto-family-init-wizard.md`
+
+Goal: `kittypaw family init` 인터랙티브 CLI — 한 번에 가족 멤버 N명 온보딩 (user ≡ tenant, scenario A).
+
+- [x] FW1. `cli/cmd_family.go` 뼈대 — 타입 선언 + `familyInitFlags` + TTY guard + `runFamilyInit` 진입점. 테스트: `TestFamilyInit_NonTTY_Rejects`.
+- [x] FW2. `scanExistingTenants` — `tenants/*/config.toml` 순회하여 기존 ID + Telegram token 맵 구성 (idempotency + in-run token dedup 데이터소스). 테스트: `TestScanExistingTenants_BuildsSeenSet`.
+- [x] FW3. `provisionMember` — `InitTenant` + `activateTenantOnDaemon` + 상태 분류(ok/skipped_existing/failed). 테스트: `TestProvisionMember_AlreadyExistsSkips`, `TestProvisionMember_InvalidTokenFails`.
+- [x] FW4. `promptMembers` — name/token/chatID 순차 입력, `ValidateTenantID`·`ValidateTelegramToken`·token dedup·blank/EOF/max 종료. 테스트 5개: 3명 성공, blank stop, max reached, 이름 재프롬프트, 토큰 중복 재프롬프트.
+- [x] FW5. `createFamilyTenant` — IsFamily=true + `[share.family]` 빈 allowlist seed, `--no-family` 스킵, idempotent. 테스트 3개: default / skip flag / already exists.
+- [x] FW6. `printSummary` + signal handling + Cobra 배선 + E2E — `signal.NotifyContext(Interrupt)`, BotFather 안내 출력, root.go 등록. 테스트: `TestPrintSummary_ExitCodes`, `TestRunFamilyInit_EndToEnd_HappyPath`, `TestRunFamilyInit_InterruptCleansStaging`.
+- [x] FW7. `make test` + `make lint` 그린 → CLAUDE.md 갱신 → 자체 리뷰 → 커밋.
+
+### Commit Map
+- FW1~7 → `feat(cli): kittypaw family init onboarding wizard`
+
+---
+
 ## Multi-user Blockers (A묶음) ✅
 
 Plan: `.claude/plans/multi-user-blockers.md`
@@ -46,7 +66,7 @@ Total: 23 태스크 = 3 commits (Plan A/B/C).
 - [x] B6. `sandbox` 조건부 JS binding — `Options.ExposeFanout` 로 family Session 에만 `Fanout` 노출 (개인은 `typeof Fanout === "undefined"`)
 - [x] B7. E2E 통합 — alice `Share.read` 성공 + bob 거부 + `cross_tenant_read` 감사 로그 + family `Fanout.send` → eventCh 에 `EventFamilyPush` (AC-U2)
 
-### Plan C: Operations + Demo — Tenant add, Isolation, E2E ← 현재
+### Plan C: Operations + Demo — Tenant add, Isolation, E2E ✅
 
 - [x] C1. `core/health.go` 신규 — `TenantHealth` enum (Ready/Degraded/Stopped) + `HealthState` (atomic, Stopped terminal) + `Session.Health` 배선 ✅ (merged with C2)
 - [x] C2. goroutine recover + Degraded 전환 — `engine/recover.go` (`RecoverTenantPanic`/`MarkTenantReady`, nil-safe) + scheduler tickOnce/reflectionTick/runSkill/runPackage + `server.dispatchLoop` per-event recover + AC-T8 isolation test ✅ (merged with C1)
