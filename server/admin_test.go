@@ -107,6 +107,55 @@ func TestAddTenant_DuplicateReturnsSentinel(t *testing.T) {
 	}
 }
 
+// TestAddTenant_StoresDeps guards the close-target wiring: AddTenant must
+// retain the *TenantDeps so RemoveTenant can close the SQLite store and
+// shut down the MCP registry symmetrically. Without this, every hot-added
+// tenant would leak its deps on removal.
+func TestAddTenant_StoresDeps(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	alice := tenantForDirectAdd(root, "alice", true, nil)
+	if err := srv.AddTenant(alice); err != nil {
+		t.Fatalf("AddTenant: %v", err)
+	}
+
+	srv.tenantMu.Lock()
+	td, ok := srv.tenantDeps["alice"]
+	srv.tenantMu.Unlock()
+	if !ok || td == nil {
+		t.Fatalf("tenantDeps[alice] missing after AddTenant: ok=%v td=%v", ok, td)
+	}
+	if td.Tenant == nil || td.Tenant.ID != "alice" {
+		t.Errorf("stored td points at wrong tenant: %+v", td.Tenant)
+	}
+	if td.Store == nil {
+		t.Error("stored td has nil Store — Close would no-op")
+	}
+}
+
+// TestAddTenant_RollbackRemovesDeps: if AddTenant fails after storing deps,
+// the map entry must be cleaned up. Use a family-with-channels failure which
+// rejects AFTER ValidateTenantID but BEFORE tenantDeps insertion — we just
+// need to ensure the map never ends up with a dangling entry.
+func TestAddTenant_RollbackPreservesDepsMap(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	// family with channels is rejected by ValidateFamilyTenants BEFORE OpenTenantDeps
+	fam := tenantForDirectAdd(root, "family", true, []core.ChannelConfig{
+		{ChannelType: core.ChannelTelegram, Token: "f"},
+	})
+	_ = srv.AddTenant(fam)
+
+	srv.tenantMu.Lock()
+	_, ok := srv.tenantDeps["family"]
+	srv.tenantMu.Unlock()
+	if ok {
+		t.Error("tenantDeps[family] leaked after rejected AddTenant")
+	}
+}
+
 func TestAddTenant_NilInputs(t *testing.T) {
 	root := t.TempDir()
 	srv := newServerForAdminTest(t, root, nil)
@@ -177,6 +226,90 @@ func TestAddTenant_FamilyWithChannelsRejected(t *testing.T) {
 	}
 }
 
+// --- Server.RemoveTenant (unit) ---
+
+// TestRemoveTenant_HappyPath mirrors AddTenant end-to-end: after remove, none
+// of the five registries (router, list, registry, deps map, session cache)
+// retain the tenant. Closes AC-RM1 a/b at the server layer (channel-less).
+func TestRemoveTenant_HappyPath(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	alice := tenantForDirectAdd(root, "alice", true, nil)
+	if err := srv.AddTenant(alice); err != nil {
+		t.Fatalf("AddTenant: %v", err)
+	}
+
+	if err := srv.RemoveTenant("alice"); err != nil {
+		t.Fatalf("RemoveTenant: %v", err)
+	}
+
+	if sess := srv.tenants.Session("alice"); sess != nil {
+		t.Error("alice still in TenantRouter after RemoveTenant")
+	}
+	if srv.tenantRegistry.Get("alice") != nil {
+		t.Error("alice still in TenantRegistry after RemoveTenant")
+	}
+	for _, peer := range srv.tenantList {
+		if peer != nil && peer.ID == "alice" {
+			t.Fatal("alice still in tenantList after RemoveTenant")
+		}
+	}
+	srv.tenantMu.Lock()
+	_, ok := srv.tenantDeps["alice"]
+	srv.tenantMu.Unlock()
+	if ok {
+		t.Error("alice still in tenantDeps after RemoveTenant")
+	}
+}
+
+// TestRemoveTenant_NotActive returns a distinct sentinel so the HTTP layer
+// can map it to 404 (not 500). AC-RM3 server-side piece — CLI layer handles
+// the user-facing message.
+func TestRemoveTenant_NotActive(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	err := srv.RemoveTenant("zzz")
+	if !errors.Is(err, ErrTenantNotActive) {
+		t.Fatalf("want ErrTenantNotActive, got %v", err)
+	}
+}
+
+// TestRemoveTenant_InvalidIDRejectedStateUnchanged guards AC-RM5's spirit:
+// any pre-reconcile rejection (here: malformed ID) must leave every registry
+// untouched so a retry picks up clean state. Using ValidateTenantID as the
+// failure lever because Reconcile's channel-stop path aggregates errors
+// internally (slog) rather than propagating them — the "abort before mutate"
+// invariant is what matters for AC-RM5.
+func TestRemoveTenant_InvalidIDRejectedStateUnchanged(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	alice := tenantForDirectAdd(root, "alice", true, nil)
+	if err := srv.AddTenant(alice); err != nil {
+		t.Fatalf("AddTenant: %v", err)
+	}
+
+	// Malformed ID rejected at entry — alice untouched.
+	if err := srv.RemoveTenant("../escape"); err == nil {
+		t.Error("want validation error, got nil")
+	}
+
+	if srv.tenants.Session("alice") == nil {
+		t.Error("alice dropped from router after rejected RemoveTenant")
+	}
+	if srv.tenantRegistry.Get("alice") == nil {
+		t.Error("alice dropped from registry after rejected RemoveTenant")
+	}
+	srv.tenantMu.Lock()
+	_, ok := srv.tenantDeps["alice"]
+	srv.tenantMu.Unlock()
+	if !ok {
+		t.Error("alice dropped from tenantDeps after rejected RemoveTenant")
+	}
+}
+
 // --- HTTP handler ---
 
 func postAdminTenant(t *testing.T, srv *Server, tenantID, remoteAddr string) *httptest.ResponseRecorder {
@@ -188,6 +321,84 @@ func postAdminTenant(t *testing.T, srv *Server, tenantID, remoteAddr string) *ht
 	w := httptest.NewRecorder()
 	srv.router.ServeHTTP(w, req)
 	return w
+}
+
+// deleteAdminTenant posts to POST /api/v1/admin/tenants/{id}/delete so we
+// can assert the full Chi route chain (localhost gate + handler + RemoveTenant).
+func deleteAdminTenant(t *testing.T, srv *Server, tenantID, remoteAddr string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/v1/admin/tenants/"+tenantID+"/delete", nil)
+	req.RemoteAddr = remoteAddr
+	w := httptest.NewRecorder()
+	srv.router.ServeHTTP(w, req)
+	return w
+}
+
+func TestHandleAdminTenantRemove_Success(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+	stageTenantOnDisk(t, root, "alice", true, nil)
+	if w := postAdminTenant(t, srv, "alice", "127.0.0.1:1"); w.Code != http.StatusOK {
+		t.Fatalf("setup: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w := deleteAdminTenant(t, srv, "alice", "127.0.0.1:1")
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["status"] != "deactivated" {
+		t.Errorf("status = %v, want \"deactivated\"", resp["status"])
+	}
+	if resp["tenant_id"] != "alice" {
+		t.Errorf("tenant_id = %v, want \"alice\"", resp["tenant_id"])
+	}
+	if srv.tenants.Session("alice") != nil {
+		t.Error("alice still registered after 200 deactivation")
+	}
+}
+
+func TestHandleAdminTenantRemove_NotActive404(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	w := deleteAdminTenant(t, srv, "ghost", "127.0.0.1:1")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAdminTenantRemove_InvalidID400(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+
+	w := deleteAdminTenant(t, srv, "../escape", "127.0.0.1:1")
+	// Chi's URL parameter contains "../escape" URL-decoded — either 400 or 404
+	// is acceptable (invalid vs not found). What matters: not 200, not 500.
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusNotFound {
+		t.Fatalf("want 400 or 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAdminTenantRemove_NonLocalhostRejected(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+	stageTenantOnDisk(t, root, "alice", true, nil)
+	if w := postAdminTenant(t, srv, "alice", "127.0.0.1:1"); w.Code != http.StatusOK {
+		t.Fatalf("setup: want 200, got %d", w.Code)
+	}
+
+	w := deleteAdminTenant(t, srv, "alice", "10.0.0.5:44444")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if srv.tenants.Session("alice") == nil {
+		t.Error("alice dropped despite localhost-gate rejection")
+	}
 }
 
 func TestHandleAdminTenantAdd_Success(t *testing.T) {

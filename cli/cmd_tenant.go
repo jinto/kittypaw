@@ -36,6 +36,7 @@ func newTenantCmd() *cobra.Command {
 		Long:  "Create and inspect tenant workspaces under ~/.kittypaw/tenants/. Each tenant owns its own DB, secrets, skills, and channel bindings.",
 	}
 	cmd.AddCommand(newTenantAddCmd())
+	cmd.AddCommand(newTenantRemoveCmd())
 	return cmd
 }
 
@@ -157,6 +158,168 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate, or re-run `kittypaw tenant add` after starting the daemon.")
 	}
 	return nil
+}
+
+func newTenantRemoveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Decommission a tenant (safe, reversible via .trash/)",
+		Long: `Decommission a tenant safely:
+
+  1. If a daemon is running, deactivate the tenant (stops channels, drains
+     sessions) via admin RPC — no restart required.
+  2. If the removed tenant is personal and a family tenant exists, delete
+     the matching [share.<name>] stanza from family/config.toml so stale
+     allowlist entries don't re-grant access if the name is re-used later.
+  3. Move ~/.kittypaw/tenants/<name>/ to ~/.kittypaw/.trash/<name>-<ts>/.
+     The move is atomic (same partition) and reversible by manual rename.
+  4. Print a warning that the Telegram bot token is still valid — the admin
+     must revoke it via @BotFather /revoke.
+
+The command aborts BEFORE touching the family config or the tenant
+directory if the daemon returns an error, so a failed step 1 leaves the
+tenant fully runnable. Re-running after the daemon reports healthy
+completes the decommission.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTenantRemove(args[0], cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}
+
+func runTenantRemove(name string, stdout, stderr io.Writer) error {
+	if err := core.ValidateTenantID(name); err != nil {
+		return err
+	}
+
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("resolve config dir: %w", err)
+	}
+	tenantsDir := filepath.Join(cfgDir, "tenants")
+	tenantDir := filepath.Join(tenantsDir, name)
+
+	info, err := os.Stat(tenantDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("tenant %q does not exist at %s", name, tenantDir)
+	}
+
+	// Load tenant's own config to learn is_family (so we can skip the
+	// self-cleanup step and surface the extra warning). A missing
+	// config.toml is treated as personal — the worst case is a no-op scrub.
+	selfCfg, _ := core.LoadConfig(filepath.Join(tenantDir, "config.toml"))
+	removedIsFamily := selfCfg != nil && selfCfg.IsFamily
+
+	if err := deactivateTenantOnDaemon(name, stdout, stderr); err != nil {
+		return fmt.Errorf("deactivate on daemon: %w", err)
+	}
+
+	if !removedIsFamily {
+		if err := scrubFamilyShare(tenantsDir, name, stderr); err != nil {
+			return fmt.Errorf("update family config: %w", err)
+		}
+	}
+
+	trashedPath, err := moveTenantToTrash(cfgDir, tenantsDir, name)
+	if err != nil {
+		return fmt.Errorf("move to trash: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(stdout, "tenant %q decommissioned → %s\n", name, trashedPath)
+	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for tenant %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
+	if removedIsFamily {
+		_, _ = fmt.Fprintln(stderr, "note: family tenant removed — personal tenants will no longer see cross-tenant shares or fanout until a new family is provisioned.")
+	}
+	return nil
+}
+
+// deactivateTenantOnDaemon calls POST /api/v1/admin/tenants/{id}/delete when
+// a daemon is running. Absence of a daemon is not an error (AC-RM2 offline
+// path); 404 from the daemon means the tenant isn't currently active, which
+// is also fine (already decommissioned or never booted with it).
+func deactivateTenantOnDaemon(name string, stdout, stderr io.Writer) error {
+	conn, err := client.NewDaemonConn("")
+	if err != nil {
+		// Missing config.toml (pre-onboarding) is treated as offline — the
+		// filesystem part of decommission still matters even if the user
+		// never booted the daemon with this tenant.
+		_, _ = fmt.Fprintf(stdout, "Daemon config unavailable (%v); skipping hot-deactivation.\n", err)
+		return nil
+	}
+	if !conn.IsRunning() {
+		_, _ = fmt.Fprintln(stdout, "Daemon is not running; skipping hot-deactivation.")
+		return nil
+	}
+
+	cl := client.New(conn.BaseURL, conn.APIKey)
+	if _, err := cl.TenantRemove(name); err != nil {
+		// Treat 404 as benign (already gone). Everything else aborts so the
+		// CLI doesn't mutate family config or the filesystem while a real
+		// drain error is pending — AC-RM5.
+		if strings.Contains(err.Error(), "404") {
+			_, _ = fmt.Fprintf(stderr, "info: daemon reports tenant %q not active (already decommissioned?); continuing.\n", name)
+			return nil
+		}
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "tenant %q deactivated on daemon\n", name)
+	return nil
+}
+
+// scrubFamilyShare removes the [share.<removed>] stanza from the family
+// tenant's config.toml. No-op if no family tenant exists (AC-RM4) or the
+// stanza is already absent. Uses WriteConfigAtomic so a crash mid-write
+// never leaves the file truncated (AC-RM6).
+func scrubFamilyShare(tenantsDir, removed string, stderr io.Writer) error {
+	tenants, err := core.DiscoverTenants(tenantsDir)
+	if err != nil {
+		return err
+	}
+	var family *core.Tenant
+	for _, tt := range tenants {
+		if tt != nil && tt.Config != nil && tt.Config.IsFamily {
+			family = tt
+			break
+		}
+	}
+	if family == nil {
+		return nil
+	}
+	if _, ok := family.Config.Share[removed]; !ok {
+		return nil
+	}
+	delete(family.Config.Share, removed)
+	cfgPath := filepath.Join(family.BaseDir, "config.toml")
+	if err := core.WriteConfigAtomic(family.Config, cfgPath); err != nil {
+		return fmt.Errorf("atomic write %s: %w", cfgPath, err)
+	}
+	_, _ = fmt.Fprintf(stderr, "info: removed [share.%s] from family config at %s\n", removed, cfgPath)
+	return nil
+}
+
+// moveTenantToTrash renames tenants/<name>/ to .trash/<name>-<ts>/ atomically
+// within the same filesystem. On collision (same-second re-runs or prior
+// residue) it appends a -2, -3, ... suffix rather than overwriting (AC-RM8).
+func moveTenantToTrash(cfgDir, tenantsDir, name string) (string, error) {
+	trashDir := filepath.Join(cfgDir, ".trash")
+	if err := os.MkdirAll(trashDir, 0o700); err != nil {
+		return "", fmt.Errorf("create trash dir: %w", err)
+	}
+	ts := time.Now().UTC().Format("20060102150405")
+	base := filepath.Join(trashDir, name+"-"+ts)
+	candidate := base
+	for i := 2; ; i++ {
+		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i)
+	}
+	src := filepath.Join(tenantsDir, name)
+	if err := os.Rename(src, candidate); err != nil {
+		return "", fmt.Errorf("rename %s → %s: %w", src, candidate, err)
+	}
+	return candidate, nil
 }
 
 // activateTenantOnDaemon calls POST /api/v1/admin/tenants if a daemon is
