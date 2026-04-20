@@ -162,6 +162,110 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestIndexFile_CreateModifyCycle(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := t.TempDir()
+
+	abs := filepath.Join(dir, "live.go")
+	writeFile(t, dir, "live.go", "package live\nfunc UniqueInitialToken() {}\n")
+
+	if err := ix.IndexFile(context.Background(), "ws-live", dir, abs); err != nil {
+		t.Fatalf("initial IndexFile: %v", err)
+	}
+	results, _, _ := st.SearchWorkspaceFTS("UniqueInitialToken", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Fatalf("after initial index: got %d results, want 1", len(results))
+	}
+
+	// Rewrite content; initial token should no longer match, new one should.
+	writeFile(t, dir, "live.go", "package live\nfunc UniqueModifiedToken() {}\n")
+	if err := ix.IndexFile(context.Background(), "ws-live", dir, abs); err != nil {
+		t.Fatalf("reindex IndexFile: %v", err)
+	}
+
+	results, _, _ = st.SearchWorkspaceFTS("UniqueInitialToken", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("stale token still matches after rewrite: %d results", len(results))
+	}
+	results, _, _ = st.SearchWorkspaceFTS("UniqueModifiedToken", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Errorf("new token not indexed: %d results", len(results))
+	}
+}
+
+func TestIndexFile_ExcludedFileNoOp(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := t.TempDir()
+
+	abs := filepath.Join(dir, ".DS_Store")
+	if err := os.WriteFile(abs, []byte{0x00, 0x01}, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := ix.IndexFile(context.Background(), "ws-excl", dir, abs); err != nil {
+		t.Fatalf("IndexFile on .DS_Store: %v", err)
+	}
+	// Excluded filename must not land in the index.
+	results, _, _ := st.SearchWorkspaceFTS("DS_Store", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("excluded file indexed: %d results", len(results))
+	}
+}
+
+func TestIndexFile_MissingFileIsNoOp(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := t.TempDir()
+
+	// IndexFile should not error if the file was deleted between fsnotify
+	// event and the callback. Real delete flow goes through RemoveFile.
+	if err := ix.IndexFile(context.Background(), "ws-miss", dir, filepath.Join(dir, "gone.go")); err != nil {
+		t.Fatalf("missing file returned error: %v", err)
+	}
+}
+
+func TestRemoveFile_RemovesSingleFile(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+
+	if _, err := ix.Index(context.Background(), "ws-rmfile", dir); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	// Sanity: util.go indexed.
+	results, _, _ := st.SearchWorkspaceFTS("formatOutput", "", "", 20, 0)
+	if len(results) == 0 {
+		t.Fatal("formatOutput should match before RemoveFile")
+	}
+
+	utilAbs, _ := filepath.Abs(filepath.Join(dir, "util.go"))
+	if err := ix.RemoveFile("ws-rmfile", utilAbs); err != nil {
+		t.Fatalf("RemoveFile: %v", err)
+	}
+
+	// util.go gone but main.go survives.
+	results, _, _ = st.SearchWorkspaceFTS("formatOutput", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("util.go still matches after RemoveFile: %d results", len(results))
+	}
+	results, _, _ = st.SearchWorkspaceFTS("handleSearch", "", "", 20, 0)
+	if len(results) == 0 {
+		t.Error("main.go should still match after removing util.go")
+	}
+}
+
+func TestRemoveFile_UnknownPathNoError(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+
+	if err := ix.RemoveFile("ws-unknown", "/does/not/exist/file.go"); err != nil {
+		t.Fatalf("RemoveFile on unknown path: %v", err)
+	}
+}
+
 func TestIndex_ConcurrentGuard(t *testing.T) {
 	st := openTestStore(t)
 	ix := NewFTS5Indexer(st)

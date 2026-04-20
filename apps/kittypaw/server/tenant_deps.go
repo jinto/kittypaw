@@ -20,7 +20,10 @@ import (
 // before handing the slice to server.New — the server package stays out
 // of discovery/migration business.
 //
-// Fallback and McpRegistry may be nil. Everything else is required.
+// Fallback, McpRegistry, and LiveIndexer may be nil. Everything else is
+// required. LiveIndexer is nil when [workspace] live_index = false or
+// when the OS watcher could not be created (inotify limit, etc.) — the
+// tenant is then in lazy-reindex mode.
 type TenantDeps struct {
 	Tenant      *core.Tenant
 	Store       *store.Store
@@ -31,15 +34,24 @@ type TenantDeps struct {
 	PkgMgr      *core.PackageManager
 	APITokenMgr *core.APITokenManager
 	Secrets     *core.SecretsStore
+	LiveIndexer *engine.LiveIndexer
 }
 
-// Close releases OS-owned resources: the SQLite store and every connected
-// MCP server session. Provider/Sandbox/PkgMgr hold no file handles or
-// child processes, so they are left to GC. Safe to call once; subsequent
-// calls on a store that is already closed return the underlying error.
+// Close releases OS-owned resources: the LiveIndexer (fsnotify watchers),
+// the SQLite store, and every connected MCP server session. LiveIndexer
+// closes before the store so any in-flight IndexFile call on the indexer
+// finishes against a live DB. Provider/Sandbox/PkgMgr hold no file
+// handles or child processes, so they are left to GC. Safe to call once;
+// subsequent calls on a store that is already closed return the
+// underlying error.
 func (td *TenantDeps) Close() error {
 	if td == nil {
 		return nil
+	}
+	if td.LiveIndexer != nil {
+		if err := td.LiveIndexer.Close(); err != nil {
+			slog.Warn("close live indexer", "tenant", td.Tenant.ID, "error", err)
+		}
 	}
 	if td.McpRegistry != nil {
 		td.McpRegistry.Shutdown()
@@ -175,12 +187,42 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 
 	indexer := engine.NewFTS5Indexer(td.Store)
 	sess.Indexer = indexer
-	go func(tenantID string, st *store.Store, idx engine.Indexer) {
+
+	// Live indexing is opt-out via [workspace] live_index = false. Attempt
+	// to open an fsnotify watcher eagerly; a failure (OS limit, etc.)
+	// drops us into lazy mode — the bulk Index still runs, File.reindex
+	// still works, just no automatic re-index on filesystem changes.
+	var liveIdx *engine.LiveIndexer
+	if td.Tenant.Config.Workspace.LiveIndex {
+		li, err := engine.NewLiveIndexer(indexer, engine.DefaultLiveInterval, engine.DefaultLiveCap)
+		if err != nil {
+			slog.Warn("workspace entering lazy index mode",
+				"tenant", td.Tenant.ID, "reason", "watcher init failed", "error", err)
+		} else {
+			liveIdx = li
+			td.LiveIndexer = li
+		}
+	}
+
+	go func(tenantID string, st *store.Store, idx engine.Indexer, live *engine.LiveIndexer) {
 		wss, err := st.ListWorkspaces()
 		if err != nil {
 			slog.Warn("startup: failed to list workspaces for indexing",
 				"tenant", tenantID, "error", err)
 			return
+		}
+		// Watch BEFORE bulk index: a filesystem change during the initial
+		// walk would otherwise land after the walker passed and before
+		// fsnotify is listening, leaving FTS permanently out-of-sync.
+		// IndexFile is idempotent, so overlap is safe.
+		if live != nil {
+			live.Start()
+			for _, ws := range wss {
+				if err := live.AddWorkspace(ws.ID, ws.RootPath); err != nil {
+					slog.Warn("workspace entering lazy index mode",
+						"tenant", tenantID, "workspace_id", ws.ID, "error", err)
+				}
+			}
 		}
 		for _, ws := range wss {
 			if _, err := idx.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
@@ -189,7 +231,7 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 					"root_path", ws.RootPath, "error", err)
 			}
 		}
-	}(td.Tenant.ID, td.Store, indexer)
+	}(td.Tenant.ID, td.Store, indexer, liveIdx)
 
 	return sess
 }

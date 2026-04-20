@@ -132,7 +132,7 @@ func runServe(_ *cobra.Command, _ []string) error {
 	}
 	defer func() {
 		for _, td := range deps {
-			_ = td.Store.Close()
+			_ = td.Close()
 		}
 	}()
 

@@ -1155,12 +1155,17 @@ func (s *Store) ListWorkspaceRootPaths() ([]string, error) {
 }
 
 // SeedWorkspacesFromConfig inserts TOML-configured paths into the workspaces
-// table if they don't already exist. Paths are cleaned before insertion.
-// Idempotent.
+// table if they don't already exist. Paths are canonicalised (Clean +
+// EvalSymlinks when the target exists) before insertion so the live-indexer
+// prefix match against fsnotify-emitted paths (which arrive symlink-resolved
+// on macOS) stays consistent. Idempotent.
 func (s *Store) SeedWorkspacesFromConfig(paths []string) error {
 	ts := time.Now().UnixNano()
 	for i, p := range paths {
 		p = filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
 		// Use root_path as a natural dedup key.
 		var exists int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM workspaces WHERE root_path = ?", p).Scan(&exists); err != nil {
@@ -1809,6 +1814,32 @@ func (s *Store) DeleteWorkspaceIndex(wsID string) error {
 		return err
 	}
 	if _, err := tx.Exec("DELETE FROM workspace_files WHERE workspace_id = ?", wsID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteWorkspaceFileByAbsPath removes a single file's metadata and FTS entry
+// atomically. Returns nil if no matching row exists (idempotent). Used by the
+// live indexer when an fsnotify Remove event fires.
+func (s *Store) DeleteWorkspaceFileByAbsPath(workspaceID, absPath string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM workspace_fts
+		WHERE rowid IN (
+			SELECT id FROM workspace_files
+			WHERE workspace_id = ? AND abs_path = ?
+		)`, workspaceID, absPath); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		"DELETE FROM workspace_files WHERE workspace_id = ? AND abs_path = ?",
+		workspaceID, absPath); err != nil {
 		return err
 	}
 	return tx.Commit()
