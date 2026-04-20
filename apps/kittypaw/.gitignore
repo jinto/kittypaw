@@ -46,3 +46,6 @@ node_modules/
 target/
 /registry/
 /api/
+
+# Personal workspace (think/spec notes, not shared)
+.ina/
