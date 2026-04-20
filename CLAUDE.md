@@ -84,6 +84,12 @@ Callback responses route through channel-internal `sync.Map` (not `eventCh`) to 
 TOML config at `~/.kittypaw/config.toml`. See `core/config.go` for all options.
 Server-wide settings (bind, master API key, tenants) go in `~/.kittypaw/server.toml`. See `core/config.go:TopLevelServerConfig`.
 
+## Onboarding → Chat Auto-Entry
+
+After `kittypaw setup` completes, the CLI drops the user straight into the `kittypaw chat` REPL when four conditions all hold (`cli/cmd_setup.go:autoChatEligible`): stdin is a TTY, stdout is a TTY, no `--provider` flag was passed (that path is non-interactive/CI), and `--no-chat` was not passed. Any one of those false → setup exits normally, preserving CI/scripted paths. The prompt wording (`setupPromptAutoChat` etc.) is golden-string tested — an incidental rewording must be a deliberate test update. Setup also calls `maybeReloadDaemon` before printing the completion box: if a daemon is running it POSTs `/api/v1/reload` so the subsequent chat REPL connects to a server that already sees the new channels; daemon-off prints a hint and returns (never fatal). `maybeReloadDaemon` returns a 3-state `reloadOutcome` (`DaemonOff` / `Reloaded` / `Failed`); if the running daemon **rejects** Reload, `runSetup` prints `setupMsgAutoChatBlocked` and skips auto-entry — attaching chat to a server still holding the previous config would silently run with stale LLM keys or channel tokens. `DaemonOff` and `Reloaded` both allow auto-entry (a fresh daemon reads the new config on spawn). The CLI deliberately does NOT write `user_context.onboarding_completed` to the DB — `server.isOnboardingCompleted` falls back to `cfg.LLM.APIKey != ""` and that fallback is load-bearing (pinned by `TestIsOnboardingCompleted_FallbackToLLMKey`).
+
+**Load-bearing sync contract in `handleReload`**: the handler calls `spawner.Reconcile` synchronously under `tenantMu` and returns only after it completes. `cli/cmd_setup.maybeReloadDaemon` → `runChat` depends on this — if Reconcile ran async, chat would connect before the new channel set was wired up. Pinned by `TestHandleReload_WaitsForReconcile` (barrier-blocking stub) and `TestAutoEntryNoRace` (`-race -count 50` happens-before loop). Converting Reconcile to a goroutine requires updating both the CLI wiring AND those tests.
+
 ## Development
 
 ```bash

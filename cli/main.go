@@ -21,6 +21,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/chzyer/readline"
+	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 
@@ -168,8 +169,8 @@ func newSetupCmd() *cobra.Command {
 		Use:   "setup",
 		Short: "Set up or reconfigure KittyPaw",
 		Long:  "Set up KittyPaw interactively (LLM, channels, web search, workspace) or via flags for CI.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runSetup(flags)
+		RunE: func(c *cobra.Command, _ []string) error {
+			return runSetup(c, flags)
 		},
 	}
 	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openrouter|local)")
@@ -182,10 +183,11 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flags.workspace, "workspace", "", "Workspace directory path")
 	cmd.Flags().BoolVar(&flags.httpAccess, "http-access", false, "Grant HTTP access capability")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Overwrite existing config without confirmation")
+	cmd.Flags().BoolVar(&flags.noChat, "no-chat", false, "Skip the post-setup chat REPL prompt (auto-entry)")
 	return cmd
 }
 
-func runSetup(flags *setupFlags) error {
+func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -242,6 +244,11 @@ func runSetup(flags *setupFlags) error {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
+	// Ask a live daemon to reload before we display the completion box — a
+	// subsequent `kittypaw chat` connects to a server that already sees the
+	// new config (AC-RELOAD-SYNC). Outcome gates auto-entry below.
+	reloadRes := maybeReloadDaemon(defaultDaemonDial, os.Stdout, os.Stderr)
+
 	fmt.Println()
 	fmt.Println("  ╭──────────────────────────────────────────────╮")
 	fmt.Println("  │")
@@ -254,7 +261,27 @@ func runSetup(flags *setupFlags) error {
 	fmt.Println("  │")
 	fmt.Println("  ╰──────────────────────────────────────────────╯")
 	fmt.Println()
-	return nil
+
+	// Auto-entry: when setup ran interactively, offer to drop straight into
+	// the chat REPL. Non-interactive (provider flag set) and explicit
+	// --no-chat paths skip this entirely (AC-1 / AC-2 / AC-3).
+	stdinTTY := isatty.IsTerminal(os.Stdin.Fd())
+	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
+	if !autoChatEligible(*flags, stdinTTY, stdoutTTY) {
+		return nil
+	}
+	// If a live daemon refused our reload, chat would attach to a server that
+	// still holds the PREVIOUS config — silently running the old LLM key /
+	// channels. Surface that and bail out instead of auto-entering.
+	if reloadRes == reloadOutcomeFailed {
+		_, _ = fmt.Fprintln(os.Stderr, setupMsgAutoChatBlocked)
+		return nil
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	if !promptYesNo(scanner, setupPromptAutoChat, true) {
+		return nil
+	}
+	return runChat(cmd, nil)
 }
 
 // ---------------------------------------------------------------------------

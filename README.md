@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
 ## Quick Start
 
 ```bash
-kittypaw setup                            # interactive setup (LLM, channels)
+kittypaw setup                            # interactive setup (LLM, channels); auto-enters chat on TTY — pass --no-chat to skip
 kittypaw skill install weather-briefing   # install a skill from registry
 kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts daemon)
 ```
