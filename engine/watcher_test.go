@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // waitForEvent waits up to timeout for a matching event predicate.
@@ -325,6 +329,62 @@ func TestWatcher_PartialAddFailures_SafeAfterClose(t *testing.T) {
 	}
 	// Must not panic post-Close (atomic field, not guarded state).
 	_ = w.PartialAddFailures()
+}
+
+func TestWatcher_OverflowError_TriggersHandler(t *testing.T) {
+	w, err := NewWatcher()
+	if err != nil {
+		t.Skipf("fsnotify unavailable: %v", err)
+	}
+	defer w.Close()
+
+	var called atomic.Int64
+	w.SetOverflowHandler(func() { called.Add(1) })
+
+	w.handleError(fsnotify.ErrEventOverflow)
+	if got := w.OverflowCount(); got != 1 {
+		t.Errorf("OverflowCount after overflow: got %d, want 1", got)
+	}
+	if got := called.Load(); got != 1 {
+		t.Errorf("handler invocations after overflow: got %d, want 1", got)
+	}
+
+	// Non-overflow error: count must stay, handler must NOT fire.
+	w.handleError(errors.New("some generic backend hiccup"))
+	if got := w.OverflowCount(); got != 1 {
+		t.Errorf("OverflowCount after non-overflow: got %d, want 1", got)
+	}
+	if got := called.Load(); got != 1 {
+		t.Errorf("handler invocations after non-overflow: got %d, want 1", got)
+	}
+}
+
+func TestWatcher_OverflowError_NoHandler_NoPanic(t *testing.T) {
+	w, err := NewWatcher()
+	if err != nil {
+		t.Skipf("fsnotify unavailable: %v", err)
+	}
+	defer w.Close()
+
+	// No handler registered — must not panic.
+	w.handleError(fsnotify.ErrEventOverflow)
+	if got := w.OverflowCount(); got != 1 {
+		t.Errorf("OverflowCount: got %d, want 1", got)
+	}
+}
+
+func TestWatcher_OverflowCount_SafeAfterClose(t *testing.T) {
+	w, err := NewWatcher()
+	if err != nil {
+		t.Skipf("fsnotify unavailable: %v", err)
+	}
+	w.handleError(fsnotify.ErrEventOverflow)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got := w.OverflowCount(); got != 1 {
+		t.Errorf("post-Close OverflowCount: got %d, want 1", got)
+	}
 }
 
 func TestIsEditorTempFile(t *testing.T) {

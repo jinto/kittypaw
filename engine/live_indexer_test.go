@@ -4,21 +4,30 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
-// mockIndexer records IndexFile / RemoveFile calls for assertions.
+// mockIndexer records IndexFile / RemoveFile / Reindex calls for assertions.
 type mockIndexer struct {
-	mu       sync.Mutex
-	indexed  map[string]int
-	removed  map[string]int
-	indexErr error
+	mu          sync.Mutex
+	indexed     map[string]int
+	removed     map[string]int
+	reindexed   map[string]int
+	indexErr    error
+	reindexHook func(ctx context.Context) // optional: called inside Reindex for blocking/ctx tests
 }
 
 func newMockIndexer() *mockIndexer {
-	return &mockIndexer{indexed: map[string]int{}, removed: map[string]int{}}
+	return &mockIndexer{
+		indexed:   map[string]int{},
+		removed:   map[string]int{},
+		reindexed: map[string]int{},
+	}
 }
 
 func (m *mockIndexer) Index(ctx context.Context, workspaceID, rootPath string) (*IndexResult, error) {
@@ -50,7 +59,20 @@ func (m *mockIndexer) Stats(ctx context.Context, opts StatsOptions) (*IndexStats
 }
 
 func (m *mockIndexer) Reindex(ctx context.Context, workspaceID, rootPath string) (*IndexResult, error) {
+	m.mu.Lock()
+	m.reindexed[workspaceID]++
+	hook := m.reindexHook
+	m.mu.Unlock()
+	if hook != nil {
+		hook(ctx)
+	}
 	return &IndexResult{}, nil
+}
+
+func (m *mockIndexer) reindexCount(wsID string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reindexed[wsID]
 }
 
 func (m *mockIndexer) Close() error { return nil }
@@ -319,6 +341,181 @@ func TestLiveIndexer_DirRemove_CascadesToIndexer(t *testing.T) {
 	}
 	if c := mi.removeCount(sub); c < 1 {
 		t.Fatalf("expected RemoveFile called with dir path %s, got %d", sub, c)
+	}
+}
+
+// TestLiveIndexer_Overflow_ReindexesAllWorkspaces verifies the full wiring:
+// Watcher.handleError(ErrEventOverflow) → overflowHandler.Signal → timer
+// fires → runRecovery → Reindex for every registered workspace. Uses
+// fakeClock to drive the handler deterministically.
+func TestLiveIndexer_Overflow_ReindexesAllWorkspaces(t *testing.T) {
+	mi := newMockIndexer()
+	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+	if err != nil {
+		t.Skipf("live indexer unavailable: %v", err)
+	}
+	defer li.Close()
+
+	// Swap in a fakeClock-driven overflow handler for deterministic timing.
+	li.overflow.Close()
+	fc := newFakeClock()
+	li.overflow = newOverflowHandler(fc, 10*time.Millisecond, 100*time.Millisecond, li.runRecovery)
+	li.watcher.SetOverflowHandler(li.overflow.Signal)
+
+	dirA, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval A: %v", err)
+	}
+	dirB, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval B: %v", err)
+	}
+	if err := li.AddWorkspace("A", dirA); err != nil {
+		t.Fatalf("AddWorkspace A: %v", err)
+	}
+	if err := li.AddWorkspace("B", dirB); err != nil {
+		t.Fatalf("AddWorkspace B: %v", err)
+	}
+
+	li.overflow.Signal()
+	fc.Advance(11 * time.Millisecond)
+	li.overflow.inFlight.Wait()
+
+	if got := mi.reindexCount("A"); got != 1 {
+		t.Errorf("Reindex(A): got %d, want 1", got)
+	}
+	if got := mi.reindexCount("B"); got != 1 {
+		t.Errorf("Reindex(B): got %d, want 1", got)
+	}
+	if got := li.RecoveryCount(); got != 1 {
+		t.Errorf("RecoveryCount: got %d, want 1", got)
+	}
+}
+
+// TestLiveIndexer_OverflowWiring_EndToEnd verifies Watcher.handleError routes
+// into the overflow handler without needing to swap clocks. The real handler
+// runs with a 500ms debounce, so we wait for the fire/run cycle.
+func TestLiveIndexer_OverflowWiring_EndToEnd(t *testing.T) {
+	mi := newMockIndexer()
+	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+	if err != nil {
+		t.Skipf("live indexer unavailable: %v", err)
+	}
+	defer li.Close()
+
+	// Shorten the real-clock handler so the test finishes fast while still
+	// exercising the production RealClock path.
+	li.overflow.Close()
+	li.overflow = newOverflowHandler(RealClock{}, 20*time.Millisecond, 1*time.Second, li.runRecovery)
+	li.watcher.SetOverflowHandler(li.overflow.Signal)
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if err := li.AddWorkspace("ws", dir); err != nil {
+		t.Fatalf("AddWorkspace: %v", err)
+	}
+
+	// Inject overflow directly on the Watcher's error path.
+	li.watcher.handleError(fsnotify.ErrEventOverflow)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if mi.reindexCount("ws") >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := mi.reindexCount("ws"); got != 1 {
+		t.Errorf("Reindex: got %d, want 1", got)
+	}
+}
+
+// TestLiveIndexer_Close_DuringRecovery_CtxCancelled verifies Close cancels
+// ctx so an in-flight Reindex can return early, preventing goroutine leak.
+func TestLiveIndexer_Close_DuringRecovery_CtxCancelled(t *testing.T) {
+	mi := newMockIndexer()
+	entered := make(chan struct{})
+	mi.reindexHook = func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+	}
+
+	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+	if err != nil {
+		t.Skipf("live indexer unavailable: %v", err)
+	}
+
+	// Shorten the overflow handler so the test finishes fast.
+	li.overflow.Close()
+	li.overflow = newOverflowHandler(RealClock{}, 5*time.Millisecond, 1*time.Second, li.runRecovery)
+	li.watcher.SetOverflowHandler(li.overflow.Signal)
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	if err := li.AddWorkspace("ws", dir); err != nil {
+		t.Fatalf("AddWorkspace: %v", err)
+	}
+
+	li.watcher.handleError(fsnotify.ErrEventOverflow)
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reindex hook never entered")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = li.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after ctx cancel — likely goroutine leak")
+	}
+}
+
+// TestLiveIndexer_Close_NoGoroutineLeak_WithOverflow drives the create/close
+// cycle with an overflow signal in flight each iteration to ensure neither
+// the overflow handler nor runRecovery leaks goroutines.
+func TestLiveIndexer_Close_NoGoroutineLeak_WithOverflow(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	for range 3 {
+		mi := newMockIndexer()
+		li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+		if err != nil {
+			t.Skipf("live indexer unavailable: %v", err)
+		}
+
+		li.overflow.Close()
+		li.overflow = newOverflowHandler(RealClock{}, 5*time.Millisecond, 1*time.Second, li.runRecovery)
+		li.watcher.SetOverflowHandler(li.overflow.Signal)
+
+		dir, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatalf("eval: %v", err)
+		}
+		_ = li.AddWorkspace("ws", dir)
+		li.Start()
+
+		li.watcher.handleError(fsnotify.ErrEventOverflow)
+
+		if err := li.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	after := runtime.NumGoroutine()
+	if after > before+3 {
+		t.Errorf("goroutine leak with overflow: before=%d after=%d", before, after)
 	}
 }
 

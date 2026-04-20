@@ -39,6 +39,14 @@ type Watcher struct {
 	// partialAdds: root Add failures are returned as terminal errors; this
 	// counts the subtree failures that would otherwise be silent.
 	partialAdds atomic.Int64
+
+	// overflowCount: fsnotify.ErrEventOverflow occurrences since process start.
+	// Events were already lost when this fires; see SetOverflowHandler to wire
+	// recovery (LiveIndexer does this).
+	overflowCount atomic.Int64
+
+	handlerMu  sync.RWMutex
+	onOverflow func()
 }
 
 // NewWatcher creates a Watcher backed by fsnotify. Returns an error if the
@@ -113,6 +121,22 @@ func (w *Watcher) PartialAddFailures() int64 {
 	return w.partialAdds.Load()
 }
 
+// OverflowCount returns the cumulative count of fsnotify.ErrEventOverflow
+// occurrences. Atomic — safe to read before Start or after Close.
+func (w *Watcher) OverflowCount() int64 {
+	return w.overflowCount.Load()
+}
+
+// SetOverflowHandler registers a callback invoked when the backend reports
+// a queue overflow (kernel event queue exceeded its capacity). Pass nil to
+// clear. The callback runs inline on the Watcher's run goroutine — keep it
+// cheap (typically just Signal() into an overflowHandler).
+func (w *Watcher) SetOverflowHandler(h func()) {
+	w.handlerMu.Lock()
+	w.onOverflow = h
+	w.handlerMu.Unlock()
+}
+
 // RemoveWorkspace unregisters a workspace. Best-effort Remove on each dir;
 // fsnotify also drops entries automatically when dirs are deleted.
 func (w *Watcher) RemoveWorkspace(workspaceID string) {
@@ -168,16 +192,34 @@ func (w *Watcher) run() {
 			w.handleEvent(ev)
 		case err, ok := <-w.fs.Errors:
 			// Drain Errors unconditionally — a blocked error send on the
-			// fsnotify side would freeze the event loop. Kernel-queue
-			// overflow (inotify IN_Q_OVERFLOW) means we have already lost
-			// events for this workspace; log so operators can trigger a
-			// manual Reindex. No automatic recovery in v2.
+			// fsnotify side would freeze the event loop.
 			if !ok {
 				return
 			}
-			slog.Warn("watcher: backend error", "error", err)
+			w.handleError(err)
 		}
 	}
+}
+
+// handleError routes backend errors. fsnotify.ErrEventOverflow means the
+// kernel queue exceeded capacity and events were silently dropped — bump a
+// counter and invoke the registered overflow handler so the caller (usually
+// LiveIndexer) can trigger a full workspace reindex. Other errors are
+// informational for operators.
+func (w *Watcher) handleError(err error) {
+	if errors.Is(err, fsnotify.ErrEventOverflow) {
+		total := w.overflowCount.Add(1)
+		slog.Warn("watcher: fsnotify queue overflow — events dropped, triggering recovery",
+			"overflow_total", total)
+		w.handlerMu.RLock()
+		handler := w.onOverflow
+		w.handlerMu.RUnlock()
+		if handler != nil {
+			handler()
+		}
+		return
+	}
+	slog.Warn("watcher: backend error", "error", err)
 }
 
 func (w *Watcher) handleEvent(ev fsnotify.Event) {
