@@ -42,6 +42,12 @@ type Server struct {
 	version        string
 	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
 	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
+
+	// reloadReconcile, if non-nil, replaces s.spawner.Reconcile inside
+	// handleReload. Test-only hook that lets AC-RELOAD-SYNC inject a barrier
+	// to observe the synchronous contract; production always leaves this nil
+	// and falls through to the live spawner.
+	reloadReconcile func(tenantID string, cfgs []core.ChannelConfig) error
 }
 
 // DefaultTenantID is the tenant ID used when the daemon runs without an

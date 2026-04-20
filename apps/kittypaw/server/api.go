@@ -799,6 +799,14 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/reload
 // ---------------------------------------------------------------------------
 
+// handleReload reloads config.toml and reconciles each tenant's channel set.
+//
+// Load-bearing sync contract (pinned by TestHandleReload_WaitsForReconcile):
+// callers — notably cli/cmd_setup.maybeReloadDaemon → runChat — assume this
+// handler returns only AFTER spawner.Reconcile completes, so the subsequent
+// chat REPL connects to a server that already sees the new channel set. Do
+// NOT convert Reconcile to a goroutine without first updating the CLI
+// wiring AND TestHandleReload_WaitsForReconcile.
 func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	cfgPath, err := core.ConfigPath()
 	if err != nil {
@@ -825,9 +833,9 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	// between AddTenant's ValidateTenantChannels snapshot and its Reconcile
 	// call, which this lock brackets entirely.
 	result := map[string]any{"success": true}
-	if s.spawner != nil {
+	if reconcile := s.reconcileFunc(); reconcile != nil {
 		s.tenantMu.Lock()
-		err := s.spawner.Reconcile(DefaultTenantID, cfg.Channels)
+		err := reconcile(DefaultTenantID, cfg.Channels)
 		s.tenantMu.Unlock()
 		if err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
@@ -835,6 +843,19 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// reconcileFunc returns the effective reconcile function: a test-injected
+// hook if set, otherwise the live spawner's Reconcile method, otherwise nil
+// (pre-StartChannels case, where reload is still safe but a no-op).
+func (s *Server) reconcileFunc() func(string, []core.ChannelConfig) error {
+	if s.reloadReconcile != nil {
+		return s.reloadReconcile
+	}
+	if s.spawner != nil {
+		return s.spawner.Reconcile
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

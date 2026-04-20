@@ -31,6 +31,7 @@ type setupFlags struct {
 	workspace      string
 	httpAccess     bool
 	force          bool
+	noChat         bool
 }
 
 // runWizard drives the 6-step interactive wizard or applies flags.
