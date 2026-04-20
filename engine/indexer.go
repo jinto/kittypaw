@@ -22,9 +22,15 @@ import (
 // ---------------------------------------------------------------------------
 
 // Indexer provides full-text search over workspace files.
+//
+// Index/Remove operate on whole workspaces (bulk walk). IndexFile/RemoveFile
+// operate on single files — used by the live indexer (fsnotify) for
+// incremental updates after initial Index.
 type Indexer interface {
 	Index(ctx context.Context, workspaceID, rootPath string) (*IndexResult, error)
+	IndexFile(ctx context.Context, workspaceID, rootPath, absPath string) error
 	Remove(workspaceID string) error
+	RemoveFile(workspaceID, absPath string) error
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
 	Stats(ctx context.Context, opts StatsOptions) (*IndexStats, error)
 	Reindex(ctx context.Context, workspaceID, rootPath string) (*IndexResult, error)
@@ -122,6 +128,63 @@ func NewFTS5Indexer(st *store.Store) *FTS5Indexer {
 	return &FTS5Indexer{store: st}
 }
 
+// fileIndexOp captures data needed to update the FTS index for a single file
+// after the metadata transaction commits. FTS5 DELETE+INSERT on the same
+// rowid inside a transaction can produce stale tokens, so FTS upserts run
+// after the metadata tx commits.
+type fileIndexOp struct {
+	id       int64
+	filename string
+	body     string
+}
+
+// processFileTx reads the file at absPath, determines content eligibility
+// (size ≤ maxIndexFileSize + non-binary), and upserts metadata in tx.
+// Returns the FTS payload for post-commit upsert.
+//
+// Shared between Index (bulk walk) and IndexFile (single file). The readErr
+// return is non-fatal — content-read failure still upserts metadata with
+// hasContent=false so the file remains searchable by path. Callers use it
+// only to bump error counters. A non-nil error return indicates a terminal
+// failure (rel-path or metadata upsert) that prevented the upsert.
+func (ix *FTS5Indexer) processFileTx(tx *sql.Tx, workspaceID, rootPath, absPath string, info fs.FileInfo) (op fileIndexOp, readErr error, err error) {
+	name := filepath.Base(absPath)
+	relPath, relErr := filepath.Rel(rootPath, absPath)
+	if relErr != nil {
+		return fileIndexOp{}, nil, fmt.Errorf("rel path: %w", relErr)
+	}
+	ext := filepath.Ext(name)
+
+	hasContent := false
+	var body string
+	if info.Size() <= maxIndexFileSize && !isBinary(absPath) {
+		data, rErr := readBounded(absPath, maxIndexFileSize)
+		if rErr != nil {
+			readErr = rErr
+		} else {
+			hasContent = true
+			body = string(data)
+		}
+	}
+
+	wf := &store.WorkspaceFile{
+		WorkspaceID: workspaceID,
+		AbsPath:     absPath,
+		RelPath:     relPath,
+		Filename:    name,
+		Extension:   ext,
+		Size:        info.Size(),
+		ModifiedAt:  info.ModTime().UTC().Format(time.RFC3339),
+		HasContent:  hasContent,
+	}
+
+	id, upErr := ix.store.UpsertWorkspaceFileTx(tx, wf)
+	if upErr != nil {
+		return fileIndexOp{}, readErr, fmt.Errorf("upsert metadata: %w", upErr)
+	}
+	return fileIndexOp{id: id, filename: name, body: body}, readErr, nil
+}
+
 // Index walks rootPath and indexes all eligible files for the given workspace.
 // If the workspace is already being indexed, returns immediately with nil.
 func (ix *FTS5Indexer) Index(ctx context.Context, workspaceID, rootPath string) (*IndexResult, error) {
@@ -147,13 +210,9 @@ func (ix *FTS5Indexer) Index(ctx context.Context, workspaceID, rootPath string) 
 	// Collect files to index in batches. workspace_files metadata is batched
 	// in a transaction for performance; FTS5 updates are applied individually
 	// after each batch commit (FTS5 DELETE+INSERT with the same rowid inside
-	// a transaction can cause stale token issues).
-	type pendingFTS struct {
-		id       int64
-		filename string
-		body     string
-	}
-	var ftsBatch []pendingFTS
+	// a transaction can cause stale token issues). fileIndexOp is defined at
+	// package level so processFileTx / IndexFile can share the same struct.
+	var ftsBatch []fileIndexOp
 	var tx *sql.Tx
 	pending := 0
 
@@ -209,35 +268,13 @@ func (ix *FTS5Indexer) Index(ctx context.Context, workspaceID, rootPath string) 
 			return nil
 		}
 
-		// Compute relative path.
-		relPath, relErr := filepath.Rel(rootPath, path)
-		if relErr != nil {
-			result.Errors++
-			return nil
-		}
-
-		// Get file info.
 		fi, fiErr := d.Info()
 		if fiErr != nil {
 			result.Errors++
 			return nil
 		}
 
-		ext := filepath.Ext(name)
 		absPath, _ := filepath.Abs(path)
-
-		// Determine content eligibility.
-		hasContent := false
-		var body string
-		if fi.Size() <= maxIndexFileSize && !isBinary(path) {
-			data, readErr := readBounded(path, maxIndexFileSize)
-			if readErr == nil {
-				hasContent = true
-				body = string(data)
-			} else {
-				result.Errors++
-			}
-		}
 
 		// Start a new transaction chunk if needed.
 		if tx == nil {
@@ -248,25 +285,17 @@ func (ix *FTS5Indexer) Index(ctx context.Context, workspaceID, rootPath string) 
 			}
 		}
 
-		wf := &store.WorkspaceFile{
-			WorkspaceID: workspaceID,
-			AbsPath:     absPath,
-			RelPath:     relPath,
-			Filename:    name,
-			Extension:   ext,
-			Size:        fi.Size(),
-			ModifiedAt:  fi.ModTime().UTC().Format(time.RFC3339),
-			HasContent:  hasContent,
-		}
-
-		id, upsertErr := ix.store.UpsertWorkspaceFileTx(tx, wf)
-		if upsertErr != nil {
+		op, readErr, pErr := ix.processFileTx(tx, workspaceID, rootPath, absPath, fi)
+		if readErr != nil {
 			result.Errors++
-			slog.Debug("index: upsert file failed", "path", relPath, "error", upsertErr)
+		}
+		if pErr != nil {
+			result.Errors++
+			slog.Debug("index: process file failed", "path", absPath, "error", pErr)
 			return nil
 		}
 
-		ftsBatch = append(ftsBatch, pendingFTS{id: id, filename: name, body: body})
+		ftsBatch = append(ftsBatch, op)
 		result.Indexed++
 		pending++
 
@@ -310,6 +339,75 @@ func (ix *FTS5Indexer) Index(ctx context.Context, workspaceID, rootPath string) 
 // Remove deletes all index data for a workspace.
 func (ix *FTS5Indexer) Remove(workspaceID string) error {
 	return ix.store.DeleteWorkspaceIndex(workspaceID)
+}
+
+// IndexFile indexes a single file at absPath into the workspace index.
+// Used by the live indexer on fsnotify Create/Write events. Safe to call
+// repeatedly — upsert semantics mirror Index().
+func (ix *FTS5Indexer) IndexFile(ctx context.Context, workspaceID, rootPath, absPath string) error {
+	if excludedFiles[filepath.Base(absPath)] {
+		return nil
+	}
+
+	// Defense in depth: reject symlinks before following them. A tenant can
+	// plant a symlink inside its workspace pointing at /etc/passwd or another
+	// tenant's BaseDir; os.Stat would follow and leak external content into
+	// FTS. Lstat + mode check blocks the escape without resolving the target.
+	li, err := os.Lstat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("lstat: %w", err)
+	}
+	if li.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat: %w", err)
+	}
+	if info.IsDir() {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	tx, err := ix.store.BeginTx()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+
+	op, _, pErr := ix.processFileTx(tx, workspaceID, rootPath, absPath, info)
+	if pErr != nil {
+		tx.Rollback()
+		return pErr
+	}
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	// FTS upsert runs post-commit (same reason as bulk Index path).
+	if err := ix.store.UpsertWorkspaceFTS(op.id, op.filename, op.body); err != nil {
+		return fmt.Errorf("fts upsert: %w", err)
+	}
+	return nil
+}
+
+// RemoveFile deletes a single file's row from workspace_files and its FTS
+// entry. Used by the live indexer on fsnotify Remove/Rename-from events.
+// No-op if the file isn't in the index.
+func (ix *FTS5Indexer) RemoveFile(workspaceID, absPath string) error {
+	return ix.store.DeleteWorkspaceFileByAbsPath(workspaceID, absPath)
 }
 
 // Close is a no-op for FTS5Indexer (the store owns the DB connection).

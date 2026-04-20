@@ -82,11 +82,20 @@ func (s *Server) handleWorkspacesCreate(w http.ResponseWriter, r *http.Request) 
 		slog.Error("workspace create: cache refresh failed", "error", err)
 	}
 
-	// Trigger async background indexing.
+	// Trigger async background indexing. After the bulk walk completes,
+	// wire the new workspace into the live indexer so subsequent file
+	// changes are reflected without an explicit File.reindex.
 	if s.session.Indexer != nil {
+		live := s.liveIndexer
 		go func() {
 			if _, err := s.session.Indexer.Index(context.Background(), id, canonical); err != nil {
 				slog.Warn("workspace create: indexing failed", "id", id, "error", err)
+			}
+			if live != nil {
+				if err := live.AddWorkspace(id, canonical); err != nil {
+					slog.Warn("workspace create: live indexer add failed",
+						"id", id, "error", err)
+				}
 			}
 		}()
 	}
@@ -105,6 +114,12 @@ func (s *Server) handleWorkspacesDelete(w http.ResponseWriter, r *http.Request) 
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "workspace id is required")
 		return
+	}
+
+	// Stop live watching before wiping the index so no stray event lands
+	// in workspace_files after DeleteWorkspace truncates them.
+	if s.liveIndexer != nil {
+		s.liveIndexer.RemoveWorkspace(id)
 	}
 
 	// Remove index before deleting workspace.

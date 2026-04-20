@@ -90,6 +90,7 @@ type Config struct {
 	SkillInstall     SkillInstallConfig  `toml:"skill_install"`
 	Permissions      PermissionPolicy    `toml:"permissions"`
 	Web              WebConfig           `toml:"web"`
+	Workspace        WorkspaceConfig     `toml:"workspace"`
 	User             UserConfig          `toml:"user"`
 
 	// IsFamily marks a tenant as the shared/coordinator account. Family
@@ -125,6 +126,17 @@ type UserConfig struct {
 	City      string  `toml:"city"`      // e.g. "Seoul"
 	Latitude  float64 `toml:"latitude"`  // e.g. 37.57
 	Longitude float64 `toml:"longitude"` // e.g. 126.98
+}
+
+// WorkspaceConfig controls workspace indexing behavior.
+//
+// LiveIndex toggles the fsnotify-backed live indexer. When true (default),
+// workspace file changes are reflected in the FTS index within one debounce
+// window without requiring explicit File.reindex calls. When false, the
+// daemon falls back to v1 behavior: index at startup and on explicit
+// Reindex only.
+type WorkspaceConfig struct {
+	LiveIndex bool `toml:"live_index"`
 }
 
 // WebConfig controls web tool behavior (search backend, etc.).
@@ -360,6 +372,9 @@ func DefaultConfig() Config {
 		},
 		Registry: RegistryConfig{
 			URL: DefaultRegistryURL,
+		},
+		Workspace: WorkspaceConfig{
+			LiveIndex: true,
 		},
 	}
 }
