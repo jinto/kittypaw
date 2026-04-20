@@ -85,7 +85,7 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 
 	// Register each mock under alice's tenant ID keyed by its Name() (which
 	// must match the resolved EventType string). TrySpawn's running map key
-	// is `spawnerKey{TenantID, ChannelType: ch.Name()}`.
+	// is `spawnerKey{TenantID: "alice", ChannelType: ch.Name()}`.
 	for evType, m := range mocks {
 		if m.name == "" {
 			m.name = string(evType)
