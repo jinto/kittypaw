@@ -118,10 +118,10 @@ func TestTenantIsolation_ChannelSpawner_SameTypeTwoTenants(t *testing.T) {
 		t.Fatalf("bob TrySpawn: %v", err)
 	}
 
-	if ch, ok := sp.GetChannel("alice", core.EventTelegram, ""); !ok || ch != alice {
+	if ch, ok := sp.GetChannel("alice", core.EventTelegram); !ok || ch != alice {
 		t.Errorf("alice GetChannel mismatch: got %v", ch)
 	}
-	if ch, ok := sp.GetChannel("bob", core.EventTelegram, ""); !ok || ch != bob {
+	if ch, ok := sp.GetChannel("bob", core.EventTelegram); !ok || ch != bob {
 		t.Errorf("bob GetChannel mismatch: got %v", ch)
 	}
 
