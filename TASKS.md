@@ -423,14 +423,29 @@ Spec: `.ina/specs/20260414-2330-think-thin-client.md`
 - [ ] File.summary(path) — LLM 기반 파일 요약 + 캐시
 - [ ] Permission Checker — 에이전트 파일 접근 규칙 엔진 — 스코프 미확정
 
-## Backlog: CLI 온보딩 + 채팅 모드 🔴 높음 / 작업량 중
+## Plan 26: Setup → Chat Auto-Entry (G1+G2) ✅
 
-온보딩은 브라우저(Web UI)와 CLI 양쪽 모두 가능해야 한다.
-CLI 온보딩 완료 후 곧바로 대화형 채팅 상태(REPL)로 진입해야 한다.
+Plan: `.claude/plans/cli-onboarding-chat.md`
+Spec: `.ina/specs/20260420-0500-think-cli-onboarding-chat.md`
 
-- [ ] CLI 온보딩 플로우 — `kittypaw init` 또는 `kittypaw setup`에서 LLM/채널/워크스페이스 설정
-- [ ] 온보딩 완료 후 채팅 REPL 자동 진입 — `kittypaw chat` 상태로 전환
-- [ ] 브라우저 온보딩과 동일한 설정 결과 보장 (config.toml + DB 상태 일치)
+Goal: `kittypaw setup` 완료 후 TTY 환경에서 바로 `kittypaw chat` REPL 로 자동 진입 + 실행 중 데몬이 있으면 `POST /api/v1/reload` 로 새 config/채널 reconcile.
+Scope: Thin slice — G1 (auto-entry) + G2 (daemon reload) 만. G3 (`onboarding_completed` DB 쓰기) 드롭 — 기존 `isOnboardingCompleted` 의 `LLM.APIKey != ""` 폴백이 load-bearing 임을 AC-DB 테스트로 고정. G4 (Web `EnsureDefaultProfile`), AC-7 (Web↔CLI equivalence matrix) 는 후속 PR.
+
+- [x] T1. `cli/cmd_setup.go` 신설 + `autoChatEligible(flags, stdinTTY, stdoutTTY) bool` + `setupFlags.noChat` 필드 + truth-table 테스트 (AC-1)
+- [x] T2. Korean string constants (`setupPromptAutoChat`, `setupMsgReloaded`, `setupMsgDaemonOff`, `setupMsgReloadFailedFmt`) + golden-string 테스트 (AC-STRINGS)
+- [x] T3. `daemonSession` interface + `maybeReloadDaemon(dial, stdout, stderr)` + 3개 단위 테스트 (off/happy/error) (AC-4, AC-5, AC-6)
+- [x] T4. `server/api_reload_sync_test.go:TestHandleReload_WaitsForReconcile` — blocking spawner barrier 로 handleReload→Reconcile 동기성 계약 고정 + `handleReload` load-bearing 주석 (AC-RELOAD-SYNC)
+- [x] T5. `runSetup` 말미 배선 — EnsureDefaultProfile 뒤에 `maybeReloadDaemon` 호출, 힌트 박스 뒤에 `autoChatEligible` 분기 + `promptYesNo(default=Y)` + `runChat`; `--no-chat` flag 등록 + 회귀 테스트 2개 (AC-2, AC-3)
+- [x] T6. `TestIsOnboardingCompleted_FallbackToLLMKey` — `user_context.onboarding_completed` 미설정 + `cfg.LLM.APIKey=sk-test` 일 때 `isOnboardingCompleted() == true` 단언 (AC-DB)
+- [x] T7. `server/api_reload_race_test.go:TestAutoEntryNoRace` — in-process httptest server + reloadReconcile 훅 + `-race -count 50` 으로 POST /reload → 카운터 읽기 happens-before 고정 (AC-RACE) — 파일 위치를 `cli/` → `server/` 로 조정(훅이 server 패키지 내부 필드)
+- [x] T8. `cli/cmd_setup_e2e_test.go` (`//go:build e2e`) — pty 기반 `TestAutoEntry_RestoresCookedMode` + `TestAutoEntry_CtrlC_ExitsWith130`. 기본 CI 에서는 빠진 상태, 로컬 opt-in (AC-TTY-RESTORE, AC-SIGINT). `github.com/creack/pty` 디펜던시 추가 — e2e 태그 전용.
+- [x] T9. 품질 게이트: `make test` + `make lint` + `go test -race ./cli/... ./server/...` + `go test -race -count 50 -run TestAutoEntryNoRace ./server/` 그린 → CLAUDE.md "Onboarding → Chat Auto-Entry" 문단 추가 → 자체 리뷰 → 커밋. (race test 경로를 `./cli/` → `./server/` 로 조정 — 훅이 server 패키지 내부 필드이므로 해당 디렉토리에 소속)
+
+### Commit Map
+- T1~T9 → `feat(cli): setup → chat auto-entry with daemon hot-reload`
+
+### Follow-up (out of this thin slice)
+- [ ] `handleReload` 에 `core.ValidateTenantChannels` / `core.ValidateFamilyTenants` 검증 추가 — `StartChannels` / `AddTenant` 와 대칭화. 검증 실패 시 config swap 롤백 + 409 반환. (adversarial review A-2: 0.82)
 
 ## Backlog: 사용자 프로필 시스템 (kittypaw.yml) 🔴 높음 / 작업량 중
 
