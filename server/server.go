@@ -42,6 +42,7 @@ type Server struct {
 	version        string
 	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
 	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
+	liveIndexer    *engine.LiveIndexer  // default-tenant live indexer (nil if lazy mode)
 
 	// reloadReconcile, if non-nil, replaces s.spawner.Reconcile inside
 	// handleReload. Test-only hook that lets AC-RELOAD-SYNC inject a barrier
@@ -125,6 +126,7 @@ func New(tenants []*TenantDeps, version string) *Server {
 		version:        version,
 		pkgManager:     defaultDeps.PkgMgr,
 		secrets:        defaultDeps.Secrets,
+		liveIndexer:    defaultDeps.LiveIndexer,
 	}
 	s.router = s.setupRoutes()
 	return s

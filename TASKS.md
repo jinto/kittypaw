@@ -1,3 +1,33 @@
+## Plan 27: Workspace Indexer v2 — Live Filesystem Watching ✅
+
+Plan: `.claude/plans/workspace-indexer-v2.md`
+Spec: `.ina/specs/20260420-0600-think-workspace-indexer-v2.md`
+
+Goal: workspace 파일 변경을 fsnotify 로 실시간 감지 → FTS5 인덱스 자동 갱신. 수동 `File.reindex()` 제거.
+Scope: fsnotify 단독 (Q1) / debounce 500ms (Q2) / inotify 한계 초과 시 lazy mode (Q3) / 기본 on (Q4) / tenant 당 워처 1개 (Q5) / 메트릭·HTTP 상태·periodic 폴백 모두 out-of-scope (Q6).
+
+- [x] T1. Spec + Plan + TASKS.md 작성 — `.ina/specs/20260420-0600-think-workspace-indexer-v2.md`, `.claude/plans/workspace-indexer-v2.md`
+- [x] T2. Indexer partial update API — `processFileTx` 헬퍼 추출, `IndexFile`/`RemoveFile` 추가, `store.DeleteWorkspaceFileByAbsPath`. 테스트: 기존 회귀 + CreateModifyCycle + RemoveFile.
+- [x] T3. Debouncer + Clock 추상 — `engine/debouncer.go`, 500ms coalesce + 2s cap, fake clock 결정론 테스트 7개.
+- [x] T4. Watcher (fsnotify 래퍼) — `engine/watcher.go`, 재귀 Add + excludedDirs + 임시 파일 필터, 실제 fsnotify 테스트 8개.
+- [x] T5. LiveIndexer — `engine/live_indexer.go`, Watcher→Debouncer→Indexer 파이프, workspace lookup (longest-prefix).
+- [x] T6. Session + TenantDeps 배선 — `TenantDeps.LiveIndexer`, `buildTenantSession`/`Close` 에 Watcher+LiveIndexer, `WorkspaceConfig.LiveIndex` 기본 true.
+- [x] T7. Server startup + API 배선 — `server.New` LiveIndexer 초기화, `handleWorkspacesCreate/Delete` 트리거, lazy mode 로그 경고.
+- [x] T8. Config OFF path + Shutdown 청결 — `live_index=false` v1 폴백, goroutine leak 테스트.
+- [x] T9. Integration 테스트 + 품질 게이트 + CLAUDE.md + 커밋 — `//go:build integration` 2 케이스, `make test`/`make lint` 올 그린, CLAUDE.md 문단, `feat(engine): live workspace indexing via fsnotify`.
+
+### Commit Map
+- T1 → 문서 커밋 또는 T9 squash
+- T2~T9 → `feat(engine): live workspace indexing via fsnotify`
+
+### Known Limitations (spec)
+- macOS kqueue 재귀 X (excludedDirs 방어)
+- Linux inotify limit 8192 → lazy mode
+- Network mount 이벤트 유실 가능
+- Debounce gap: 최대 500ms 반영 지연
+
+---
+
 ## Tenant Remove (α) ✅
 
 Plan: `.claude/plans/tenant-remove.md`
