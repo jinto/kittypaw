@@ -239,6 +239,89 @@ func TestLiveIndexer_CloseDropsPending(t *testing.T) {
 	}
 }
 
+func TestLiveIndexer_PartialFailures_DelegatesToWatcher(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based unreachable-dir trick is ineffective as root")
+	}
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "no_access")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.Chmod(sub, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+
+	mi := newMockIndexer()
+	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+	if err != nil {
+		t.Skipf("live indexer unavailable: %v", err)
+	}
+
+	if err := li.AddWorkspace("ws", dir); err != nil {
+		t.Fatalf("AddWorkspace: %v", err)
+	}
+
+	if got := li.PartialFailures(); got < 1 {
+		t.Errorf("PartialFailures via delegate: got %d, want >= 1", got)
+	}
+
+	// After Close, PartialFailures must still be callable without panic.
+	if err := li.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	_ = li.PartialFailures()
+}
+
+// TestLiveIndexer_DirRemove_CascadesToIndexer verifies the wiring so a
+// fsnotify-emitted dir Remove reaches indexer.RemoveFile with the dir's
+// path — the store-level cascade is covered by store tests. This is the
+// canary for the "prefix delete" feature in live-indexer form.
+func TestLiveIndexer_DirRemove_CascadesToIndexer(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval: %v", err)
+	}
+	sub := filepath.Join(dir, "vanishing")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	mi := newMockIndexer()
+	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)
+	if err != nil {
+		t.Skipf("live indexer unavailable: %v", err)
+	}
+	defer li.Close()
+	if err := li.AddWorkspace("ws", dir); err != nil {
+		t.Fatalf("AddWorkspace: %v", err)
+	}
+	li.Start()
+	_ = os.WriteFile(filepath.Join(sub, "b.txt"), []byte("y"), 0o644)
+
+	// Settle pre-existing events.
+	time.Sleep(300 * time.Millisecond)
+
+	if err := os.RemoveAll(sub); err != nil {
+		t.Fatalf("remove dir: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if mi.removeCount(sub) >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if c := mi.removeCount(sub); c < 1 {
+		t.Fatalf("expected RemoveFile called with dir path %s, got %d", sub, c)
+	}
+}
+
 func TestLiveIndexer_AddWorkspaceAfterClose_Errors(t *testing.T) {
 	mi := newMockIndexer()
 	li, err := NewLiveIndexer(mi, 50*time.Millisecond, 200*time.Millisecond)

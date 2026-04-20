@@ -1845,6 +1845,61 @@ func (s *Store) DeleteWorkspaceFileByAbsPath(workspaceID, absPath string) error 
 	return tx.Commit()
 }
 
+// DeleteWorkspaceFilesByPrefix removes the workspace_files row at the exact
+// path plus every row under it as a directory prefix, and the corresponding
+// workspace_fts entries, atomically. Designed for fsnotify Remove events
+// where the caller cannot tell whether the vanished path was a file or a
+// directory: exact match covers the file case, the range clause covers the
+// directory subtree.
+//
+// The range uses BINARY collation on abs_path. For a normalized prefix p,
+// any descendant path begins with p+"/", so `abs_path >= p+"/" AND abs_path
+// < p+"0"` matches exactly the subtree (since ASCII '/' == 0x2F and '0' ==
+// 0x30, and no valid path fragment lies in [0x30, 0xFF] on the third byte
+// while starting with p+"/"). Using bound parameters sidesteps LIKE escape
+// issues when the caller's path contains %, _, or \ — nothing is
+// interpreted as a pattern.
+//
+// Trailing slashes on the prefix are stripped so "/ws/dir/" and "/ws/dir"
+// behave the same; fsnotify normally emits paths without them but this is
+// defensive against future callers.
+func (s *Store) DeleteWorkspaceFilesByPrefix(workspaceID, path string) error {
+	normalized := strings.TrimRight(path, "/")
+	if normalized == "" {
+		// Refuse to scrub an entire workspace via an empty prefix — callers
+		// that truly want that should use DeleteWorkspaceIndex.
+		return nil
+	}
+	rangeStart := normalized + "/"
+	rangeEnd := normalized + "0"
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		DELETE FROM workspace_fts
+		WHERE rowid IN (
+			SELECT id FROM workspace_files
+			WHERE workspace_id = ?
+			  AND (abs_path = ?
+			       OR (abs_path >= ? AND abs_path < ?))
+		)`, workspaceID, normalized, rangeStart, rangeEnd); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM workspace_files
+		WHERE workspace_id = ?
+		  AND (abs_path = ?
+		       OR (abs_path >= ? AND abs_path < ?))`,
+		workspaceID, normalized, rangeStart, rangeEnd); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DeleteStaleWorkspaceFiles removes workspace_files entries (and their FTS5
 // counterparts) whose indexed_at is older than the given cutoff string
 // (format: "2006-01-02 15:04:05"). Runs atomically in a single transaction.

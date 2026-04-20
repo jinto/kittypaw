@@ -403,11 +403,11 @@ func (ix *FTS5Indexer) IndexFile(ctx context.Context, workspaceID, rootPath, abs
 	return nil
 }
 
-// RemoveFile deletes a single file's row from workspace_files and its FTS
-// entry. Used by the live indexer on fsnotify Remove/Rename-from events.
-// No-op if the file isn't in the index.
+// RemoveFile handles fsnotify Remove events. The caller cannot stat the
+// vanished path to tell file vs directory, so this delegates to the store's
+// prefix delete which covers both cases.
 func (ix *FTS5Indexer) RemoveFile(workspaceID, absPath string) error {
-	return ix.store.DeleteWorkspaceFileByAbsPath(workspaceID, absPath)
+	return ix.store.DeleteWorkspaceFilesByPrefix(workspaceID, absPath)
 }
 
 // Close is a no-op for FTS5Indexer (the store owns the DB connection).

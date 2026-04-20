@@ -257,6 +257,45 @@ func TestRemoveFile_RemovesSingleFile(t *testing.T) {
 	}
 }
 
+func TestRemoveFile_DirectoryCascades(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+
+	if _, err := ix.Index(context.Background(), "ws-dir", dir); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	// Sanity: src/handler.go is searchable via body match.
+	results, _, _ := st.SearchWorkspaceFTS("HandleRequest", "", "", 20, 0)
+	if len(results) == 0 {
+		t.Fatal("HandleRequest should match before dir remove")
+	}
+
+	// fsnotify emits a single Remove event for the directory; caller cannot
+	// stat it anymore. RemoveFile must cascade and purge the subtree.
+	srcAbs, _ := filepath.Abs(filepath.Join(dir, "src"))
+	if err := ix.RemoveFile("ws-dir", srcAbs); err != nil {
+		t.Fatalf("RemoveFile(dir): %v", err)
+	}
+
+	results, _, _ = st.SearchWorkspaceFTS("HandleRequest", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("after dir remove, HandleRequest still matches: %d", len(results))
+	}
+
+	// Unrelated files (top-level main.go) must survive.
+	results, _, _ = st.SearchWorkspaceFTS("handleSearch", "", "", 20, 0)
+	if len(results) == 0 {
+		t.Error("main.go should still match after removing src/")
+	}
+
+	// Idempotent second call.
+	if err := ix.RemoveFile("ws-dir", srcAbs); err != nil {
+		t.Fatalf("RemoveFile(dir) idempotent: %v", err)
+	}
+}
+
 func TestRemoveFile_UnknownPathNoError(t *testing.T) {
 	st := openTestStore(t)
 	ix := NewFTS5Indexer(st)
