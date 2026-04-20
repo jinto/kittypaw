@@ -72,6 +72,36 @@ Hop-by-hop headers (`Host`, `Connection`, `Transfer-Encoding`, `Upgrade`, `TE`, 
 
 SSRF validation (`validateHTTPTarget`): explicit `allowed_hosts` in `package.toml` takes priority over private IP blocking — packages can declare `allowed_hosts = ["localhost"]` to reach local API servers. The package resolver validates URLs against the package's AllowedHosts and stores the validated hostname in context; `executeHTTP` verifies the actual request hostname matches.
 
+## MoA (Mixture of Agents)
+
+`Moa.query(prompt, options?)` JS skill runs parallel fan-out to multiple named models from config `[[models]]`, then synthesizes the responses via the Default model. Implemented in `engine/moa.go`. Public core: `QueryMoA(ctx, MoARequest, ProviderResolver, *SharedTokenBudget)`; the JS adapter `executeMoA` in the same file fills `MoARequest.Models` from `s.Config.Models` and `SynthesizerModel` from the `Default=true` entry when the caller omits them.
+
+**Design decisions (load-bearing)**:
+- **Partial failure tolerant** — uses `sync.WaitGroup` + indexed slots (NOT `errgroup`, whose fail-fast cancel-siblings-on-first-error semantics are wrong for MoA). A single flaky/slow model lands as `candidates[i].Error` without failing the run.
+- **Per-model timeout** — each candidate gets `context.WithTimeout` (default `moaDefaultTimeout=30s`, override via `options.per_model_timeout_ms`). Independent of the outer ctx so one slow model can't stall the rest.
+- **Hard guardrails** — `len(models) > moaMaxModels (5)` → error (prevents accidental cost explosion from `[[models]]` table growth); `len(models) == 0` → error; `len(models) == 1` at the JS adapter → skip fan-out, degrade to a plain `Llm.generate`-style call + `slog.Info("moa: single-model config, degrading")`.
+- **Synthesis skip** — ≤1 successful candidate means synthesis would just paraphrase; `QueryMoA` returns the sole candidate with `synthesized=false` and `model=<candidate model>`. Saves an LLM call and preserves original phrasing.
+- **Synthesizer context protection** — per-candidate text is truncated to `moaCandidateCharLimit (8000 chars ≈ 2000 tokens)` before being fed to the synthesizer, bounded by `moaTruncate`. Even 5 candidates stay within 10K chars of synthesizer input.
+- **Budget accounting** — `SharedTokenBudget.TrySpendFromUsage` is called for each successful candidate AND the synthesizer response. On exhaustion mid-flight, the in-flight goroutine calls `cancelAll()` to kill pending siblings; already-returned responses are kept (the API cost was paid) to maximize the value of completed work. Synthesizer overshoot is logged warn but not rejected (advisory post-hoc).
+- **Synthesizer fallback chain** — if `resolver(SynthesizerModel)` returns nil, fall back to the first successful candidate's model. If that is also unresolvable, return `firstSuccess` with `synthesized=false`. MoA never errors purely due to a misconfigured synthesizer when real candidate data exists.
+- **slog key hygiene** — MoA-level log fields use `moa_model` (not `model`) to avoid collision with provider-level slog context.
+
+**JS API** (registered in `core/skillmeta.go` under `Moa`):
+```js
+Moa.query(prompt, {
+  models: ["sonnet", "gpt-4"],    // optional, defaults to all [[models]] names
+  synthesizer: "sonnet",            // optional, defaults to Default=true model
+  per_model_timeout_ms: 30000       // optional, 30s default
+}) → {
+  text, model,                       // synthesizer output (or sole candidate when synthesized=false)
+  usage: {input_tokens, output_tokens},
+  candidates: [{model, text, usage, error?, latency_ms}],
+  synthesized: boolean               // false when ≤1 candidate or synthesizer fallback hit
+}
+```
+
+**Out of scope** (intentionally, to keep scope bounded): streaming synthesis, debate/critique mode, response caching, weighted voting. Each is a separate future plan.
+
 ## Permission System
 
 Destructive operations (Shell.exec, Git.push, etc.) require user approval in `supervised` autonomy mode.
