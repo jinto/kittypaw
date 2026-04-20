@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type LiveIndexer struct {
 	mu         sync.RWMutex
 	workspaces map[string]string // id -> absolute root
 	closed     bool
+
+	overflow      *overflowHandler
+	recoveryCount atomic.Int64
 }
 
 // DefaultLiveInterval and DefaultLiveCap are the production debounce window
@@ -32,6 +36,13 @@ type LiveIndexer struct {
 const (
 	DefaultLiveInterval = 500 * time.Millisecond
 	DefaultLiveCap      = 2 * time.Second
+
+	// DefaultOverflowDebounce coalesces a burst of overflow signals into one
+	// recovery cycle.
+	DefaultOverflowDebounce = 500 * time.Millisecond
+	// DefaultOverflowBackoff enforces a minimum gap between recovery cycles
+	// so a persistently-overflowing kernel queue can't drive a reindex loop.
+	DefaultOverflowBackoff = 30 * time.Second
 )
 
 // NewLiveIndexer creates a LiveIndexer. Returns an error if the underlying
@@ -52,6 +63,8 @@ func NewLiveIndexer(indexer Indexer, interval, cap time.Duration) (*LiveIndexer,
 		workspaces: make(map[string]string),
 	}
 	l.debouncer = NewDebouncer(RealClock{}, interval, cap, l.flush)
+	l.overflow = newOverflowHandler(RealClock{}, DefaultOverflowDebounce, DefaultOverflowBackoff, l.runRecovery)
+	watcher.SetOverflowHandler(l.overflow.Signal)
 	return l, nil
 }
 
@@ -87,6 +100,12 @@ func (l *LiveIndexer) AddWorkspace(workspaceID, rootPath string) error {
 // safe before Start and after Close.
 func (l *LiveIndexer) PartialFailures() int64 {
 	return l.watcher.PartialAddFailures()
+}
+
+// RecoveryCount returns how many overflow-triggered full-reindex cycles have
+// completed since process start. Atomic — safe before Start and after Close.
+func (l *LiveIndexer) RecoveryCount() int64 {
+	return l.recoveryCount.Load()
 }
 
 // RemoveWorkspace stops watching a workspace and drops its routing entry.
@@ -167,12 +186,50 @@ func (l *LiveIndexer) workspaceFor(path string) (string, string) {
 	return bestID, bestRoot
 }
 
+// runRecovery is the overflowHandler callback. fsnotify's kernel queue has
+// overflowed (Linux IN_Q_OVERFLOW, Windows buffer overrun) and we don't know
+// which watch was affected — the only safe option is a full Reindex of every
+// workspace managed by this LiveIndexer. Reindex reuses the walk + upsert +
+// stale cleanup path, which both re-adds any files that appeared during the
+// blackout and removes entries for files deleted during it.
+func (l *LiveIndexer) runRecovery() {
+	l.mu.RLock()
+	if l.closed {
+		l.mu.RUnlock()
+		return
+	}
+	snapshot := make(map[string]string, len(l.workspaces))
+	for id, root := range l.workspaces {
+		snapshot[id] = root
+	}
+	l.mu.RUnlock()
+
+	slog.Warn("live indexer: overflow recovery started", "workspaces", len(snapshot))
+	for id, root := range snapshot {
+		select {
+		case <-l.ctx.Done():
+			return
+		default:
+		}
+		if _, err := l.indexer.Reindex(l.ctx, id, root); err != nil {
+			if l.ctx.Err() == nil {
+				slog.Warn("live indexer: overflow recovery reindex failed",
+					"workspace_id", id, "error", err)
+			}
+			continue
+		}
+		slog.Info("live indexer: overflow recovery reindexed workspace",
+			"workspace_id", id, "root", root)
+	}
+	l.recoveryCount.Add(1)
+}
+
 // Close tears down the pipeline in an order that guarantees no in-flight
-// IndexFile call outlives Close: cancel ctx first so any active flush
-// callback that already entered IndexFile aborts its tx ASAP, then stop
-// accepting events, drain consume, and wait on pending debounce timers
-// (debouncer.Close now waits for in-flight flush callbacks). Returning
-// only after this sequence lets TenantDeps.Close safely close the store.
+// IndexFile or recovery call outlives Close. Cancel ctx first so any active
+// flush / Reindex aborts ASAP, then stop accepting fsnotify events, drain
+// consume, wait on pending debounce timers, and finally wait on pending
+// overflow recoveries. Returning only after this sequence lets TenantDeps
+// safely close the underlying store.
 func (l *LiveIndexer) Close() error {
 	l.mu.Lock()
 	if l.closed {
@@ -186,5 +243,6 @@ func (l *LiveIndexer) Close() error {
 	err := l.watcher.Close()
 	l.wg.Wait()
 	l.debouncer.Close()
+	l.overflow.Close()
 	return err
 }

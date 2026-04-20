@@ -98,7 +98,7 @@ Opt-out via `[workspace] live_index = false` — `DefaultConfig` has `LiveIndex:
 
 **Subtree-unwatched visibility**: `Watcher.partialAdds` (atomic int64) counts non-root `fs.Add` / walk failures across `initial_walk` / `initial_subdir` / `runtime_create` phases; each increment emits `slog.Warn` with a `phase` key, and the count is exposed via `Watcher.PartialAddFailures()` + `LiveIndexer.PartialFailures()` (both safe before `Start` / after `Close`). Root Add failures remain terminal errors returned to the caller so the workspace can still enter lazy mode. The counter is cumulative (no reset) and detail-free — detailed path/error forensics stay in the Warn logs.
 
-**Known limitations** (deferred): `fsnotify` backend queue overflow (`IN_Q_OVERFLOW` on Linux) is logged via the Errors channel drain but triggers no automatic reindex — Linux-only, tracked separately.
+**Overflow auto-recovery**: `fsnotify.ErrEventOverflow` (Linux `IN_Q_OVERFLOW`, Windows 버퍼 오버런) 감지 시 — 커널 큐가 넘쳐 어떤 watch가 영향 받았는지 알 수 없으므로 — 해당 `Watcher` 가 소유한 모든 workspace 를 `500ms` debounce + `30s` backoff 로 자동 `Reindex`. 전체 walk + upsert + `DeleteStaleWorkspaceFiles` 로 blackout 동안의 create/delete 양방향이 수렴된다. 급격한 오버플로 버스트는 debounce 로 1회에 coalesce 되고, 지속적으로 오버플로하는 커널은 backoff 로 reindex 루프에 빠지지 않는다. `Watcher.OverflowCount()` / `LiveIndexer.RecoveryCount()` atomic API 로 관측 (둘 다 프로세스 시작 이후 누적, `Start` 전·`Close` 후 안전). `LiveIndexer.Close` 는 `ctx.cancel → watcher.Close → consume.Wait → debouncer.Close → overflow.Close` 순서로 진행해 in-flight `Reindex` 가 Close 보다 오래 살지 않는다. `TestLiveIndexer_Close_DuringRecovery_CtxCancelled` / `TestLiveIndexer_Close_NoGoroutineLeak_WithOverflow` 로 고정.
 
 ## Onboarding → Chat Auto-Entry
 
