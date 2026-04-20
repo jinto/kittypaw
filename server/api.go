@@ -807,6 +807,19 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // chat REPL connects to a server that already sees the new channel set. Do
 // NOT convert Reconcile to a goroutine without first updating the CLI
 // wiring AND TestHandleReload_WaitsForReconcile.
+//
+// Validation contract (symmetric with StartChannels and AddTenant): the
+// proposed config is checked against live tenants BEFORE any state swap.
+// A duplicate Telegram bot_token or a family tenant with channels is
+// rejected with 409 Conflict, leaving s.config and the spawner untouched.
+// Pinned by TestHandleReload_DuplicateTelegramToken_Rejects and
+// TestHandleReload_FamilyWithChannels_Rejects.
+//
+// Serialization contract: the entire validate→swap→reconcile sequence
+// runs under tenantMu. Releasing the lock between snapshot and reconcile
+// would open a TOCTOU window where a concurrent AddTenant validates
+// against the stale default-tenant channel list, passes, and spawns a
+// duplicate bot that this reload was about to introduce.
 func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	cfgPath, err := core.ConfigPath()
 	if err != nil {
@@ -819,25 +832,65 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	// Swap the live config under lock. The session shares the pointer so it
-	// sees the new values on the next Run() call.
+	s.tenantMu.Lock()
+	defer s.tenantMu.Unlock()
+
+	// Build the would-be-final snapshot (default tenant substituted with
+	// the proposed cfg, all other tenants as-is) and run the same two
+	// validators StartChannels / AddTenant do.
+	snapshot := make(map[string][]core.ChannelConfig, len(s.tenantList)+1)
+	tenants := make([]*core.Tenant, 0, len(s.tenantList)+1)
+	defaultSeen := false
+	for _, peer := range s.tenantList {
+		if peer == nil || peer.Config == nil {
+			continue
+		}
+		if peer.ID == DefaultTenantID {
+			// Substitute a proposed copy so validators see the would-be-final
+			// state without mutating the live pointer (rejection must leave
+			// the current default tenant config intact).
+			proposedTenant := *peer
+			proposedCfg := *cfg
+			proposedTenant.Config = &proposedCfg
+			tenants = append(tenants, &proposedTenant)
+			snapshot[peer.ID] = cfg.Channels
+			defaultSeen = true
+		} else {
+			tenants = append(tenants, peer)
+			snapshot[peer.ID] = peer.Config.Channels
+		}
+	}
+	if !defaultSeen {
+		// A single-tenant install booted with a non-"default" tenant ID
+		// (server.New falls back to tenants[0] as the default-deps anchor).
+		// Validate the proposed cfg against the live peer so a collision
+		// with its channels is still caught.
+		tenants = append(tenants, &core.Tenant{ID: DefaultTenantID, Config: cfg})
+		snapshot[DefaultTenantID] = cfg.Channels
+	}
+
+	if err := core.ValidateTenantChannels(snapshot); err != nil {
+		slog.Error("reload rejected", "reason", "channel_duplicate", "error", err)
+		writeError(w, http.StatusConflict, "channel validation: "+err.Error())
+		return
+	}
+	if err := core.ValidateFamilyTenants(tenants); err != nil {
+		slog.Error("reload rejected", "reason", "family_with_channels", "error", err)
+		writeError(w, http.StatusConflict, "family validation: "+err.Error())
+		return
+	}
+
+	// Swap the live config under configMu so HTTP handlers reading via
+	// getConfig() see a consistent snapshot. The session shares this
+	// pointer and picks up new values on the next Run().
 	s.configMu.Lock()
 	*s.config = *cfg
 	s.configMu.Unlock()
 	slog.Info("config reloaded")
 
-	// Reconcile channels with the new config. Serialize against AddTenant —
-	// otherwise an admin-driven hot-add could spawn a channel whose token
-	// was just freed by this reload, with neither side seeing the other's
-	// snapshot. Spawner's own reconcileMu is not enough: the race window is
-	// between AddTenant's ValidateTenantChannels snapshot and its Reconcile
-	// call, which this lock brackets entirely.
 	result := map[string]any{"success": true}
 	if reconcile := s.reconcileFunc(); reconcile != nil {
-		s.tenantMu.Lock()
-		err := reconcile(DefaultTenantID, cfg.Channels)
-		s.tenantMu.Unlock()
-		if err != nil {
+		if err := reconcile(DefaultTenantID, cfg.Channels); err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
 		}

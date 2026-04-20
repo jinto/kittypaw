@@ -445,7 +445,7 @@ Scope: Thin slice — G1 (auto-entry) + G2 (daemon reload) 만. G3 (`onboarding_
 - T1~T9 → `feat(cli): setup → chat auto-entry with daemon hot-reload`
 
 ### Follow-up (out of this thin slice)
-- [ ] `handleReload` 에 `core.ValidateTenantChannels` / `core.ValidateFamilyTenants` 검증 추가 — `StartChannels` / `AddTenant` 와 대칭화. 검증 실패 시 config swap 롤백 + 409 반환. (adversarial review A-2: 0.82)
+- [x] `handleReload` 에 `core.ValidateTenantChannels` / `core.ValidateFamilyTenants` 검증 추가 — `StartChannels` / `AddTenant` 와 대칭화. 검증 실패 시 config swap 롤백 + 409 반환. (adversarial review A-2: 0.82) ✅ — pre-commit validation (snapshot of live tenantList + proposed default cfg) 으로 구현. `TestHandleReload_DuplicateTelegramToken_Rejects` + `TestHandleReload_FamilyWithChannels_Rejects` + `TestHandleReload_ValidConfig_SwapsAndReconciles` + 기존 `TestHandleReload_WaitsForReconcile`/`TestAutoEntryNoRace` 회귀 무. `slog.Error(reason=...)` 로 observability 상향.
 
 ## Backlog: 사용자 프로필 시스템 (kittypaw.yml) 🔴 높음 / 작업량 중
 
