@@ -49,3 +49,6 @@ target/
 
 # Personal workspace (think/spec notes, not shared)
 .ina/
+
+# Autopilot pipeline state (ephemeral, per-session)
+.state/

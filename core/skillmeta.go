@@ -69,6 +69,9 @@ var SkillRegistry = []SkillMeta{
 	{Name: "Llm", Methods: []SkillMethodMeta{
 		{Name: "generate", Signature: "Llm.generate(prompt) — returns {text, model, usage}"},
 	}},
+	{Name: "Moa", Methods: []SkillMethodMeta{
+		{Name: "query", Signature: "Moa.query(prompt, options?) — parallel multi-model query + synthesis. options: {models, synthesizer, per_model_timeout_ms}. Returns {text, model, usage, candidates, synthesized}"},
+	}},
 	{Name: "Memory", Methods: []SkillMethodMeta{
 		{Name: "search", Signature: "Memory.search(query)"},
 		{Name: "set", Signature: "Memory.set(key, value)"},

@@ -117,6 +117,8 @@ func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, perm
 		return executeGit(ctx, call, s)
 	case "Llm":
 		return executeLLM(ctx, call, s)
+	case "Moa":
+		return executeMoA(ctx, call, s)
 	case "Memory":
 		return executeMemory(ctx, call, s)
 	case "Todo":
