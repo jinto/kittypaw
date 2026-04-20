@@ -1,18 +1,18 @@
-## Tenant Remove (α) ← 현재
+## Tenant Remove (α) ✅
 
 Plan: `.claude/plans/tenant-remove.md`
 Spec: `.ina/specs/20260420-0455-auto-tenant-remove.md`
 
 Goal: `kittypaw tenant remove <name>` — 한 명령으로 tenant 안전 해제 (daemon 비활성화 → family config 정리 → `.trash/` 이동 → BotFather 경고). LIFO 순서로 실패 시 tenant 는 그대로 실행 가능 상태 유지.
 
-- [ ] TR1. `server/server.go` 에 `tenantDeps map[string]*TenantDeps` 필드 추가 + `AddTenant` 성공 경로에서 `s.tenantDeps[t.ID] = td` 저장. 테스트: `TestServer_AddTenant_StoresDeps`.
-- [ ] TR2. `server/admin.go:RemoveTenant(id string) error` — `tenantMu.Lock` (addTenantMu rename) → `Reconcile(id, nil)` drain → `tenants.Remove` → tenantList pop → `tenantRegistry.Unregister` → `td.Close` + delete map. 테스트: `TestServer_RemoveTenant_HappyPath` (AC-RM1 core).
-- [ ] TR3. `RemoveTenant` unknown ID 처리 + Reconcile 실패 시 state 불변 검증. 테스트: `TestServer_RemoveTenant_NotActive_Returns404Semantic` + `TestServer_RemoveTenant_ReconcileFailureNoChange` (AC-RM3 + AC-RM5).
-- [ ] TR4. `handleAdminTenantRemove` — `POST /api/v1/admin/tenants/{id}/delete` 핸들러 + route 등록 + `Client.TenantRemove` + localhost gate 재사용. 테스트: `TestHandleAdminTenantRemove_Deactivates`.
-- [ ] TR5. `cli/cmd_tenant.go` `newTenantRemoveCmd` + `runTenantRemove` — daemon probe, admin RPC (daemon up일 때), `tenants/<name>` 존재 검증. 테스트: `TestRunTenantRemove_DaemonDown_OfflinePath` (AC-RM2) + `TestRunTenantRemove_TenantNotFound` (AC-RM3).
-- [ ] TR6. 가족 config 정리 — `DiscoverTenants` → family 찾기 → `LoadConfig` → `delete(cfg.Share, name)` → `WriteConfigAtomic`. 테스트: `TestRunTenantRemove_FamilyConfigScrub` (AC-RM1 d) + `TestRunTenantRemove_NoFamily_NoOp` (AC-RM4).
-- [ ] TR7. 디렉토리 → `.trash/<name>-<ts>/` 이동 + 충돌 시 `-2`, `-3` suffix + BotFather 경고 stderr + family self-remove extra warning. 테스트: `TestRunTenantRemove_TrashCollision` (AC-RM8) + `TestRunTenantRemove_FamilySelf_ExtraWarning` (AC-RM7).
-- [ ] TR8. `make test` + `make lint` + CLAUDE.md 갱신 (tenant remove 절차 요약) + 자체 리뷰 → 커밋.
+- [x] TR1. `server/server.go` 에 `tenantDeps map[string]*TenantDeps` 필드 추가 + `AddTenant` 성공 경로에서 `s.tenantDeps[t.ID] = td` 저장. 테스트: `TestServer_AddTenant_StoresDeps`.
+- [x] TR2. `server/admin.go:RemoveTenant(id string) error` — `tenantMu.Lock` (addTenantMu rename) → `Reconcile(id, nil)` drain → `tenants.Remove` → tenantList pop → `tenantRegistry.Unregister` → `td.Close` + delete map. 테스트: `TestServer_RemoveTenant_HappyPath` (AC-RM1 core).
+- [x] TR3. `RemoveTenant` unknown ID 처리 + Reconcile 실패 시 state 불변 검증. 테스트: `TestServer_RemoveTenant_NotActive_Returns404Semantic` + `TestRemoveTenant_InvalidIDRejectedStateUnchanged` (AC-RM3 + AC-RM5).
+- [x] TR4. `handleAdminTenantRemove` — `POST /api/v1/admin/tenants/{id}/delete` 핸들러 + route 등록 + `Client.TenantRemove` + localhost gate 재사용. 테스트: `TestHandleAdminTenantRemove_Success` + 404/400/non-localhost.
+- [x] TR5. `cli/cmd_tenant.go` `newTenantRemoveCmd` + `runTenantRemove` — daemon probe, admin RPC (daemon up일 때), `tenants/<name>` 존재 검증. 테스트: `TestRunTenantRemove_DaemonDown_OfflinePath` (AC-RM2) + `TestRunTenantRemove_TenantNotFound` (AC-RM3).
+- [x] TR6. 가족 config 정리 — `DiscoverTenants` → family 찾기 → `LoadConfig` → `delete(cfg.Share, name)` → `WriteConfigAtomic`. 테스트: `TestRunTenantRemove_FamilyConfigScrub` (AC-RM1 d) + `TestRunTenantRemove_NoFamily_NoOp` (AC-RM4).
+- [x] TR7. 디렉토리 → `.trash/<name>-<ts>/` 이동 + 충돌 시 `-2`, `-3` suffix + BotFather 경고 stderr + family self-remove extra warning. 테스트: `TestRunTenantRemove_TrashCollision` (AC-RM8) + `TestRunTenantRemove_FamilySelf_ExtraWarning` (AC-RM7).
+- [x] TR8. `make test` + `make lint` + CLAUDE.md 갱신 (tenant remove 절차 요약) + 자체 리뷰 → 커밋 (4ee9c95).
 
 ### Commit Map
 - TR1~8 → `feat(cli): kittypaw tenant remove — safe household decommission`
