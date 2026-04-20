@@ -81,6 +81,14 @@ func (l *LiveIndexer) AddWorkspace(workspaceID, rootPath string) error {
 	return nil
 }
 
+// PartialFailures returns the number of subtree add failures observed by the
+// underlying watcher since process start. Surfaces the "healthy-looking but
+// partially broken" state that fsnotify.Add errors otherwise hide. Atomic —
+// safe before Start and after Close.
+func (l *LiveIndexer) PartialFailures() int64 {
+	return l.watcher.PartialAddFailures()
+}
+
 // RemoveWorkspace stops watching a workspace and drops its routing entry.
 // Pending debounced events for files under this root will flush but find no
 // workspace at flush time, becoming no-ops.

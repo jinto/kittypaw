@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -34,6 +35,10 @@ type Watcher struct {
 	mu         sync.Mutex
 	workspaces map[string]string // workspace_id -> absolute rootPath
 	closed     bool
+
+	// partialAdds: root Add failures are returned as terminal errors; this
+	// counts the subtree failures that would otherwise be silent.
+	partialAdds atomic.Int64
 }
 
 // NewWatcher creates a Watcher backed by fsnotify. Returns an error if the
@@ -78,7 +83,9 @@ func (w *Watcher) AddWorkspace(workspaceID, rootPath string) error {
 
 	return filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, werr error) error {
 		if werr != nil {
-			slog.Debug("watcher: walk error", "path", path, "error", werr)
+			w.partialAdds.Add(1)
+			slog.Warn("watcher: walk error; subtree will not be watched",
+				"path", path, "error", werr, "phase", "initial_walk")
 			return nil
 		}
 		if !d.IsDir() {
@@ -91,10 +98,19 @@ func (w *Watcher) AddWorkspace(workspaceID, rootPath string) error {
 			if path == absRoot {
 				return addErr // propagate — root add failure is terminal
 			}
-			slog.Debug("watcher: add subdir failed", "path", path, "error", addErr)
+			w.partialAdds.Add(1)
+			slog.Warn("watcher: subdir add failed; subtree will not be watched",
+				"path", path, "error", addErr, "phase", "initial_subdir")
 		}
 		return nil
 	})
+}
+
+// PartialAddFailures returns the cumulative count of non-root fs.Add / walk
+// errors that left subtrees unwatched. Exposed for operator visibility; the
+// counter is atomic and safe to read before Start or after Close.
+func (w *Watcher) PartialAddFailures() int64 {
+	return w.partialAdds.Load()
 }
 
 // RemoveWorkspace unregisters a workspace. Best-effort Remove on each dir;
@@ -181,8 +197,8 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 	// Remove/Rename first — a Create|Write combined op on an overwritten file
 	// still wants Index semantics, but a pure Remove/Rename does not.
 	if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
-		// Don't stat — file is gone. Send Remove; if it was a dir, RemoveFile
-		// is a no-op at the file table level. For a new path after rename,
+		// Don't stat — file is gone. If ev.Name was a directory, RemoveFile
+		// cascades via the prefix delete. For a new path after rename,
 		// fsnotify emits a separate Create event.
 		w.send(wsID, rootPath, ev.Name, DebounceRemove)
 		return
@@ -200,7 +216,9 @@ func (w *Watcher) handleEvent(ev fsnotify.Event) {
 			// Newly-created dir: add to watcher and re-walk to catch any
 			// files that landed before we wired up the watch.
 			if addErr := w.fs.Add(ev.Name); addErr != nil {
-				slog.Debug("watcher: add runtime dir failed", "path", ev.Name, "error", addErr)
+				w.partialAdds.Add(1)
+				slog.Warn("watcher: runtime dir add failed; subtree will not be watched",
+					"path", ev.Name, "error", addErr, "phase", "runtime_create")
 				return
 			}
 			w.walkAndIndex(wsID, rootPath, ev.Name)

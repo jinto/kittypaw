@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1346,6 +1347,192 @@ func TestWorkspaceFTS_DeleteStale(t *testing.T) {
 	results, _, _ = st.SearchWorkspaceFTS("newFunc", "", "", 20, 0)
 	if len(results) != 1 {
 		t.Errorf("fresh FTS result: got %d, want 1", len(results))
+	}
+}
+
+func TestDeleteWorkspaceFilesByPrefix_RemovesChildrenOnly(t *testing.T) {
+	st := openTestStore(t)
+
+	seeds := []struct {
+		absPath string
+		body    string
+	}{
+		{"/ws/a/x.go", "func alphaX() {}"},
+		{"/ws/a/y.go", "func alphaY() {}"},
+		{"/ws/a/sub/nested.go", "func alphaNested() {}"},
+		{"/ws/b/z.go", "func beta() {}"},
+	}
+	for _, s := range seeds {
+		id, err := st.UpsertWorkspaceFile(&WorkspaceFile{
+			WorkspaceID: "ws-prefix", AbsPath: s.absPath,
+			RelPath: filepath.Base(s.absPath), Filename: filepath.Base(s.absPath),
+			Extension: ".go", Size: 50,
+			ModifiedAt: "2026-04-20T22:00:00Z", HasContent: true,
+		})
+		if err != nil {
+			t.Fatalf("upsert %s: %v", s.absPath, err)
+		}
+		if err := st.UpsertWorkspaceFTS(id, filepath.Base(s.absPath), s.body); err != nil {
+			t.Fatalf("upsert fts %s: %v", s.absPath, err)
+		}
+	}
+
+	// Delete everything under /ws/a — including nested subdir.
+	if err := st.DeleteWorkspaceFilesByPrefix("ws-prefix", "/ws/a"); err != nil {
+		t.Fatalf("DeleteWorkspaceFilesByPrefix: %v", err)
+	}
+
+	// Metadata: only /ws/b/z.go should remain.
+	var count int
+	if err := st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = ?", "ws-prefix").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("metadata count: got %d, want 1", count)
+	}
+
+	// FTS: alpha* entries gone, beta still findable.
+	results, _, _ := st.SearchWorkspaceFTS("alphaX", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("alphaX fts: got %d, want 0", len(results))
+	}
+	results, _, _ = st.SearchWorkspaceFTS("alphaNested", "", "", 20, 0)
+	if len(results) != 0 {
+		t.Errorf("alphaNested fts: got %d, want 0", len(results))
+	}
+	results, _, _ = st.SearchWorkspaceFTS("beta", "", "", 20, 0)
+	if len(results) != 1 {
+		t.Errorf("beta fts: got %d, want 1", len(results))
+	}
+
+	// Idempotent: second call is a no-op.
+	if err := st.DeleteWorkspaceFilesByPrefix("ws-prefix", "/ws/a"); err != nil {
+		t.Fatalf("second DeleteWorkspaceFilesByPrefix: %v", err)
+	}
+}
+
+func TestDeleteWorkspaceFilesByPrefix_LikeMetaSafe(t *testing.T) {
+	st := openTestStore(t)
+
+	// Paths containing LIKE meta-characters should not bleed into neighbors.
+	// If the implementation used LIKE without escape, "dir%x/..." prefix would
+	// match "dir_x/..." and "dir/..." too — the range query must prevent that.
+	seeds := []string{
+		"/ws/dir%x/a.go",
+		"/ws/dir_x/b.go",
+		"/ws/dir/c.go",
+	}
+	for i, p := range seeds {
+		id, err := st.UpsertWorkspaceFile(&WorkspaceFile{
+			WorkspaceID: "ws-meta", AbsPath: p,
+			RelPath: filepath.Base(p), Filename: filepath.Base(p),
+			Extension: ".go", Size: 10,
+			ModifiedAt: "2026-04-20T22:00:00Z", HasContent: true,
+		})
+		if err != nil {
+			t.Fatalf("upsert %d: %v", i, err)
+		}
+		if err := st.UpsertWorkspaceFTS(id, filepath.Base(p), ""); err != nil {
+			t.Fatalf("upsert fts %d: %v", i, err)
+		}
+	}
+
+	if err := st.DeleteWorkspaceFilesByPrefix("ws-meta", "/ws/dir%x"); err != nil {
+		t.Fatalf("DeleteWorkspaceFilesByPrefix: %v", err)
+	}
+
+	var count int
+	_ = st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = ?", "ws-meta").Scan(&count)
+	if count != 2 {
+		t.Errorf("after delete count: got %d, want 2 (dir_x/b.go + dir/c.go survive)", count)
+	}
+
+	// Verify the survivors are the right ones.
+	rows, err := st.db.Query("SELECT abs_path FROM workspace_files WHERE workspace_id = ? ORDER BY abs_path", "ws-meta")
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	defer rows.Close()
+	got := []string{}
+	for rows.Next() {
+		var p string
+		_ = rows.Scan(&p)
+		got = append(got, p)
+	}
+	want := []string{"/ws/dir/c.go", "/ws/dir_x/b.go"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("survivors: got %v, want %v", got, want)
+	}
+}
+
+func TestDeleteWorkspaceFilesByPrefix_ExactFilePath(t *testing.T) {
+	st := openTestStore(t)
+
+	id1, err := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-exact", AbsPath: "/ws/foo.go", RelPath: "foo.go",
+		Filename: "foo.go", Extension: ".go", Size: 10,
+		ModifiedAt: "2026-04-20T22:00:00Z", HasContent: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert foo.go: %v", err)
+	}
+	if err := st.UpsertWorkspaceFTS(id1, "foo.go", "func foo() {}"); err != nil {
+		t.Fatalf("upsert fts foo.go: %v", err)
+	}
+
+	id2, err := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-exact", AbsPath: "/ws/foo.go.bak", RelPath: "foo.go.bak",
+		Filename: "foo.go.bak", Extension: ".bak", Size: 10,
+		ModifiedAt: "2026-04-20T22:00:00Z", HasContent: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert foo.go.bak: %v", err)
+	}
+	if err := st.UpsertWorkspaceFTS(id2, "foo.go.bak", ""); err != nil {
+		t.Fatalf("upsert fts foo.go.bak: %v", err)
+	}
+
+	// Caller passes a file path (not a directory). Only exact match should go.
+	if err := st.DeleteWorkspaceFilesByPrefix("ws-exact", "/ws/foo.go"); err != nil {
+		t.Fatalf("DeleteWorkspaceFilesByPrefix: %v", err)
+	}
+
+	var count int
+	_ = st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = ?", "ws-exact").Scan(&count)
+	if count != 1 {
+		t.Errorf("after exact delete: got %d, want 1 (foo.go.bak should survive)", count)
+	}
+
+	var survivor string
+	_ = st.db.QueryRow("SELECT abs_path FROM workspace_files WHERE workspace_id = ?", "ws-exact").Scan(&survivor)
+	if survivor != "/ws/foo.go.bak" {
+		t.Errorf("survivor: got %s, want /ws/foo.go.bak", survivor)
+	}
+}
+
+func TestDeleteWorkspaceFilesByPrefix_TrailingSlashNormalized(t *testing.T) {
+	st := openTestStore(t)
+
+	id, err := st.UpsertWorkspaceFile(&WorkspaceFile{
+		WorkspaceID: "ws-trail", AbsPath: "/ws/dir/x.go", RelPath: "x.go",
+		Filename: "x.go", Extension: ".go", Size: 10,
+		ModifiedAt: "2026-04-20T22:00:00Z", HasContent: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert x.go: %v", err)
+	}
+	if err := st.UpsertWorkspaceFTS(id, "x.go", "func gamma() {}"); err != nil {
+		t.Fatalf("upsert fts x.go: %v", err)
+	}
+
+	// Defensive: trailing slash from caller should not break matching.
+	if err := st.DeleteWorkspaceFilesByPrefix("ws-trail", "/ws/dir/"); err != nil {
+		t.Fatalf("DeleteWorkspaceFilesByPrefix: %v", err)
+	}
+	var count int
+	_ = st.db.QueryRow("SELECT COUNT(*) FROM workspace_files WHERE workspace_id = ?", "ws-trail").Scan(&count)
+	if count != 0 {
+		t.Errorf("after trailing-slash delete: got %d, want 0", count)
 	}
 }
 

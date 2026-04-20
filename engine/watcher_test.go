@@ -282,6 +282,51 @@ func TestWatcher_CloseNoGoroutineLeak(t *testing.T) {
 	}
 }
 
+func TestWatcher_PartialAddFailures_CountsSubdirErrors(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod-based unreachable-dir trick is ineffective as root")
+	}
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "no_access")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	// Stripping all permissions forces walkDir / fs.Add to fail on this
+	// subtree. Restore at test end so t.TempDir cleanup succeeds.
+	if err := os.Chmod(sub, 0); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Skipf("fsnotify unavailable: %v", err)
+	}
+	defer w.Close()
+
+	// Root Add should succeed despite the unreachable subdir.
+	if err := w.AddWorkspace("ws", dir); err != nil {
+		t.Fatalf("AddWorkspace should not fail on root when only a subdir is unreachable: %v", err)
+	}
+
+	if got := w.PartialAddFailures(); got < 1 {
+		t.Errorf("PartialAddFailures: got %d, want >= 1", got)
+	}
+}
+
+func TestWatcher_PartialAddFailures_SafeAfterClose(t *testing.T) {
+	w, err := NewWatcher()
+	if err != nil {
+		t.Skipf("fsnotify unavailable: %v", err)
+	}
+	_ = w.AddWorkspace("ws", t.TempDir())
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// Must not panic post-Close (atomic field, not guarded state).
+	_ = w.PartialAddFailures()
+}
+
 func TestIsEditorTempFile(t *testing.T) {
 	cases := []struct {
 		name string
