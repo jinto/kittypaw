@@ -102,6 +102,39 @@ Moa.query(prompt, {
 
 **Out of scope** (intentionally, to keep scope bounded): streaming synthesis, debate/critique mode, response caching, weighted voting. Each is a separate future plan.
 
+## File.summary + llm_cache
+
+`File.summary(path, options?)` JS skill returns an LLM-generated summary of a workspace file, cached in a generic `llm_cache` SQLite table so repeat calls on unchanged content are free. `options.force_refresh=true` bypasses the lookup and UPSERTs the fresh result (`ON CONFLICT DO UPDATE` under the compound UNIQUE), so a stale or poisoned summary can actually be replaced; `options.model` overrides `[llm].model`. Implemented in `engine/summary.go` (public core `QuerySummary`) + `engine/executor.go:executeFileSummary` + `store/migrations/019_llm_cache.sql`.
+
+**Design decisions (load-bearing)**:
+- **Generic `llm_cache` table, not `file_summaries`** — the `kind` column (`"file.summary"` for this feature) lets future LLM-caching features (e.g. diff-summary, commit-summary) share the same table + GC machinery. Compound UNIQUE `(kind, key_hash, input_hash, model, prompt_hash)` makes collision impossible across kinds.
+- **key_hash = first16Hex(workspace_id || \x00 || abs_path)** — a NUL separator avoids `ws/a` + `/b` == `ws/a/b` collision. `first16Hex` = lowercase hex of `sha256(b)[:8]` (64 bits, enough inside a compound UNIQUE).
+- **prompt_hash auto-invalidation** — `currentPromptHash = first16Hex(summarySystemPrompt + summaryUserTemplate)` is computed at `init()`. Editing either constant yields a new hash, so every existing row becomes a miss on next lookup. This replaces an error-prone manually-bumped `prompt_version int`.
+- **Path security mirrors File.read** — `filepath.Abs` + `resolveForValidation` (EvalSymlinks) + `isPathAllowedResolved` in `executeFileSummary`, before the file is even opened. Prevents symlink escape into another tenant's BaseDir or outside AllowedPaths.
+- **Singleflight dedup** — `Session.SummaryFlight *singleflight.Group` collapses concurrent misses for the same `(kind, key_hash, input_hash, model, prompt_hash)` into one provider call. Wired in `server.buildTenantSession` (per-tenant, nil-safe at callsite). `force_refresh` is deliberately NOT in the flight key: a force arriving during a normal miss's flight is happy with the same response.
+- **Budget charge-after-response** (MoA pattern) — `SharedTokenBudget.TrySpendFromUsage(resp.Usage)` is called AFTER `provider.Generate` returns. On exhaustion the row is NOT persisted and the caller gets an error (retry must re-invoke the provider). Nil-safe via `engine.usageInput/usageOutput`.
+- **Insert failure graceful degradation (AC-18)** — a DB write failure does NOT mask the computed summary. `slog.Warn("summary: cache insert failed", ...)` and return the result anyway. Tests inject failure via the package-level `summaryInsertOverride` hook.
+- **Guard-rails before DB/provider traffic** — `!utf8.Valid(content)` → `"binary content not supported for summary"`; `EstimateTokens > 150_000` → `"file too large for summary: ~N tokens (max M); use File.read with offset/limit instead"`. Both errors are returned with zero I/O so a malicious tenant cannot burn budget by submitting binary/huge files.
+- **Prompt-injection defense in 3 layers** — (1) system prompt tells the model to ignore instructions inside the file content and output only a factual summary; (2) the user template wraps the file payload in explicit `--- FILE CONTENT --- … --- END FILE CONTENT ---` fenced markers so the model can tell prompt from payload even when the file itself tries to impersonate one; (3) the agent loop treats the returned `tool_result` as untrusted input (existing contract, unchanged by this feature).
+- **GC on file removal (load-bearing)** — `FTS5Indexer.RemoveFile(workspaceID, absPath)` calls `store.DeleteLLMCacheByKeyHash("file.summary", key_hash)` *after* `DeleteWorkspaceFilesByPrefix` succeeds. The GC is best-effort (log-warn on error, don't fail the primary delete) because the FTS index is the load-bearing contract; stale summary rows are harmless and self-correct on re-index with a different `input_hash`. For directory removes the (kind, key_hash) lookup only purges the row for the directory path itself — rows for files *under* the removed directory stay until those files are re-removed individually (acceptable: the paths no longer exist on disk, so no future lookup hits them). Pinned by `TestRemoveFile_PurgesSummaryCache` (engine/indexer_test.go).
+- **Cross-tenant isolation** — `key_hash` folds in `workspace_id`, so two tenants with the same abs_path land in different rows. A GC triggered on one tenant cannot touch the other's cache. Pinned by the cross-workspace assertion inside `TestRemoveFile_PurgesSummaryCache`.
+- **:memory: SQLite requires SetMaxOpenConns(1)** — an in-memory connection pool gives each connection a fresh un-migrated DB, so tests that touch `llm_cache` from concurrent goroutines would fail with `no such table: llm_cache`. `store.Open` pins pool size to 1 when `path == ":memory:"`; production always opens a file path and is unaffected.
+
+**JS API** (registered in `core/skillmeta.go` under `File`):
+```js
+File.summary("src/main.go", {
+  model: "sonnet",          // optional, defaults to [llm].model
+  force_refresh: false      // optional, bypass cache lookup
+}) → {
+  summary, model,
+  cached: boolean,          // true when served from llm_cache
+  usage: {input_tokens, output_tokens, model},
+  content_hash              // hex short-hash of the source content
+}
+```
+
+**Out of scope** (deferred to future plans): streaming summaries, incremental / chunked summaries for > 150k-token files, cross-workspace summary sharing (`Share.read` does the file, the consumer runs their own `File.summary`), summary eviction by age (only the prompt-hash and file-change paths invalidate today).
+
 ## Permission System
 
 Destructive operations (Shell.exec, Git.push, etc.) require user approval in `supervised` autonomy mode.

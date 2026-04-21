@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 	mcpreg "github.com/jinto/kittypaw/mcp"
@@ -39,13 +41,15 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
-	BaseDir          string                   // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
-	McpRegistry      *mcpreg.Registry         // nil when no MCP servers configured
-	Budget           *SharedTokenBudget       // shared across auto-fix, delegation, reflection
-	Indexer          Indexer                  // nil when workspace indexer is not initialized
-	PackageManager   *core.PackageManager     // nil when packages are not configured
-	APITokenMgr      *core.APITokenManager    // nil when API token management is not configured
-	allowedPaths     atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
+	BaseDir          string             // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
+	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
+	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
+	// SummaryFlight dedups concurrent File.summary misses; nil → per-call group.
+	SummaryFlight  *singleflight.Group
+	Indexer        Indexer                  // nil when workspace indexer is not initialized
+	PackageManager *core.PackageManager     // nil when packages are not configured
+	APITokenMgr    *core.APITokenManager    // nil when API token management is not configured
+	allowedPaths   atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 
 	// TenantID is the tenant this Session belongs to. Empty only for
 	// legacy single-tenant callers that haven't migrated to the tenant
