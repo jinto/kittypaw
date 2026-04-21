@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
 	"github.com/jinto/kittypaw/llm"
@@ -175,6 +177,7 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 		TenantID:         td.Tenant.ID,
 		TenantRegistry:   registry,
 		Health:           core.NewHealthState(),
+		SummaryFlight:    &singleflight.Group{},
 	}
 	if td.Tenant.Config.IsFamily {
 		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Tenant.ID)

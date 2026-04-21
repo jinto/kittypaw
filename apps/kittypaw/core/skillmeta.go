@@ -36,6 +36,7 @@ var SkillRegistry = []SkillMeta{
 		{Name: "search", Signature: "File.search(query, options?) — search workspace files by keyword. options: {path, ext, limit, offset}"},
 		{Name: "stats", Signature: "File.stats(path?) — workspace file statistics"},
 		{Name: "reindex", Signature: "File.reindex(path?) — rebuild workspace file index"},
+		{Name: "summary", Signature: "File.summary(path, options?) — LLM-generated file summary with cache. options: {model, force_refresh}. Returns {summary, model, cached, usage, content_hash}"},
 	}},
 	{Name: "Storage", Methods: []SkillMethodMeta{
 		{Name: "get", Signature: "Storage.get(key)"},

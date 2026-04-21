@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/jinto/kittypaw/core"
 )
 
@@ -366,6 +368,8 @@ func executeFile(ctx context.Context, call core.SkillCall, s *Session) (string, 
 		return executeFileStats(ctx, call, s)
 	case "reindex":
 		return executeFileReindex(ctx, call, s)
+	case "summary":
+		return executeFileSummary(ctx, call, s)
 	}
 
 	if len(call.Args) == 0 {
@@ -571,6 +575,112 @@ func executeFileReindex(ctx context.Context, call core.SkillCall, s *Session) (s
 	}
 
 	return jsonResult(totalResult)
+}
+
+// executeFileSummary is the File.summary(path, options?) dispatch.
+// Performs Phase A validation (same as File.read) — filepath.Abs →
+// resolveForValidation → isPathAllowedResolved → size cap — then loads
+// the file bytes and delegates to QuerySummary, which owns caching,
+// singleflight dedup, guard-rails, and provider calls.
+func executeFileSummary(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
+	if len(call.Args) == 0 {
+		return "", fmt.Errorf("path argument required")
+	}
+	var rawPath string
+	if err := json.Unmarshal(call.Args[0], &rawPath); err != nil {
+		return "", fmt.Errorf("invalid path argument")
+	}
+
+	absPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		return "", fmt.Errorf("path not allowed")
+	}
+	resolvedPath := resolveForValidation(absPath)
+	if !isPathAllowedResolved(resolvedPath, s.AllowedPaths()) {
+		return "", fmt.Errorf("path not allowed")
+	}
+
+	// Parse optional second arg {model, force_refresh}.
+	var opts struct {
+		Model        string `json:"model"`
+		ForceRefresh bool   `json:"force_refresh"`
+	}
+	if len(call.Args) >= 2 {
+		if err := json.Unmarshal(call.Args[1], &opts); err != nil {
+			return "", fmt.Errorf("invalid options argument")
+		}
+	}
+
+	// Open + stat on the same fd eliminates TOCTOU between size check and
+	// read. QuerySummary adds a token cap (150K) on top.
+	f, err := os.Open(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("file read: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("file read: %w", err)
+	}
+	if info.Size() > maxFileReadSize {
+		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxFileReadSize)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxFileReadSize+1))
+	if err != nil {
+		return "", fmt.Errorf("file read: %w", err)
+	}
+
+	// Resolve which workspace owns resolvedPath so the cache key stays
+	// consistent with RemoveFile's GC key (both hash workspace_id || path).
+	// AllowedPaths already passed, so a matching workspace is guaranteed
+	// under normal operation; a missing match signals a config/DB drift.
+	workspaceID, err := resolveWorkspaceID(s, resolvedPath)
+	if err != nil {
+		return "", err
+	}
+
+	flight := s.SummaryFlight
+	if flight == nil {
+		flight = &singleflight.Group{}
+	}
+	budget := s.Budget
+	if budget == nil {
+		budget = NewSharedBudget(0)
+	}
+	model := opts.Model
+	if model == "" {
+		model = s.Config.LLM.Model
+	}
+
+	req := SummaryRequest{
+		WorkspaceID: workspaceID,
+		AbsPath:     resolvedPath,
+		Content:     data,
+		Model:       model,
+		Force:       opts.ForceRefresh,
+	}
+	res, err := QuerySummary(ctx, req, s.Store, s.resolveProvider, budget, flight)
+	if err != nil {
+		return "", err
+	}
+	return jsonResult(res)
+}
+
+// resolveWorkspaceID finds the workspace whose root contains resolvedPath.
+// Workspace roots are stored symlink-resolved (see SeedWorkspacesFromConfig),
+// so a simple prefix match against the already-resolved input is sufficient.
+func resolveWorkspaceID(s *Session, resolvedPath string) (string, error) {
+	wss, err := s.Store.ListWorkspaces()
+	if err != nil {
+		return "", fmt.Errorf("list workspaces: %w", err)
+	}
+	sep := string(filepath.Separator)
+	for _, ws := range wss {
+		if resolvedPath == ws.RootPath || strings.HasPrefix(resolvedPath, ws.RootPath+sep) {
+			return ws.ID, nil
+		}
+	}
+	return "", fmt.Errorf("workspace not found for path")
 }
 
 // --- Storage ---

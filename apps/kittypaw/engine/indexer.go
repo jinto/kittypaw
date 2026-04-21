@@ -403,11 +403,23 @@ func (ix *FTS5Indexer) IndexFile(ctx context.Context, workspaceID, rootPath, abs
 	return nil
 }
 
-// RemoveFile handles fsnotify Remove events. The caller cannot stat the
-// vanished path to tell file vs directory, so this delegates to the store's
-// prefix delete which covers both cases.
+// RemoveFile deletes the workspace_files row for absPath (or the subtree
+// when absPath is a vanished directory) and best-effort purges any
+// File.summary cache row for the exact path. Cache GC failures are logged
+// but must not fail the primary FTS delete.
 func (ix *FTS5Indexer) RemoveFile(workspaceID, absPath string) error {
-	return ix.store.DeleteWorkspaceFilesByPrefix(workspaceID, absPath)
+	if err := ix.store.DeleteWorkspaceFilesByPrefix(workspaceID, absPath); err != nil {
+		return err
+	}
+	keys := computeSummaryKeys(workspaceID, absPath, nil)
+	if err := ix.store.DeleteLLMCacheByKeyHash(summaryCacheKind, keys.keyHash); err != nil {
+		slog.Warn("summary cache gc failed",
+			"workspace_id", workspaceID,
+			"abs_path", absPath,
+			"err", err,
+		)
+	}
+	return nil
 }
 
 // Close is a no-op for FTS5Indexer (the store owns the DB connection).

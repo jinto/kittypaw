@@ -118,4 +118,3 @@ func waitForFTS(t *testing.T, st *store.Store, query string, timeout time.Durati
 	results, _, _ := st.SearchWorkspaceFTS(query, "", "", 20, 0)
 	t.Fatalf("FTS wait timeout: query=%q got %d results, want %d", query, len(results), wantCount)
 }
-

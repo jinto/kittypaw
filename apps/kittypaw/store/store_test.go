@@ -29,8 +29,100 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 18 {
-		t.Fatalf("expected 18 migrations, got %d", count)
+	if count != 19 {
+		t.Fatalf("expected 19 migrations, got %d", count)
+	}
+}
+
+func TestLLMCache_InsertLookupDelete(t *testing.T) {
+	st := openTestStore(t)
+
+	row := &LLMCacheRow{
+		Kind:        "file.summary",
+		KeyHash:     "key1111111111111",
+		InputHash:   "input11111111111",
+		Model:       "claude-sonnet-4-6",
+		PromptHash:  "prompt1111111111",
+		Result:      "A sample summary.",
+		Metadata:    `{"workspace_id":"ws","abs_path":"/ws/a.md"}`,
+		UsageInput:  1234,
+		UsageOutput: 56,
+	}
+
+	// Insert.
+	if err := st.InsertLLMCache(row); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// Lookup hit.
+	got, err := st.LookupLLMCache(row.Kind, row.KeyHash, row.InputHash, row.Model, row.PromptHash)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got == nil {
+		t.Fatal("lookup after insert returned nil row")
+	}
+	if got.Result != row.Result {
+		t.Errorf("result: got %q, want %q", got.Result, row.Result)
+	}
+	if got.UsageInput != 1234 || got.UsageOutput != 56 {
+		t.Errorf("usage: got (%d,%d), want (1234,56)", got.UsageInput, got.UsageOutput)
+	}
+	if got.Metadata != row.Metadata {
+		t.Errorf("metadata: got %q, want %q", got.Metadata, row.Metadata)
+	}
+	if got.CreatedAt == "" {
+		t.Error("created_at should be populated by default")
+	}
+
+	// Lookup miss (different input_hash).
+	miss, err := st.LookupLLMCache(row.Kind, row.KeyHash, "different11111111", row.Model, row.PromptHash)
+	if err != nil {
+		t.Fatalf("miss lookup: %v", err)
+	}
+	if miss != nil {
+		t.Error("expected nil row for cache miss, got non-nil")
+	}
+
+	// Re-insert with identical identity = OR IGNORE silent no-op (AC-5).
+	if err := st.InsertLLMCache(row); err != nil {
+		t.Fatalf("re-insert: %v", err)
+	}
+	var count int
+	if err := st.db.QueryRow(
+		"SELECT COUNT(*) FROM llm_cache WHERE kind = ? AND key_hash = ?",
+		row.Kind, row.KeyHash,
+	).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 row after duplicate insert, got %d", count)
+	}
+
+	// Insert a second row under same key_hash but different model.
+	row2 := *row
+	row2.Model = "gpt-4"
+	if err := st.InsertLLMCache(&row2); err != nil {
+		t.Fatalf("insert row2: %v", err)
+	}
+
+	// Delete by (kind, key_hash) removes both rows.
+	if err := st.DeleteLLMCacheByKeyHash(row.Kind, row.KeyHash); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := st.db.QueryRow(
+		"SELECT COUNT(*) FROM llm_cache WHERE kind = ? AND key_hash = ?",
+		row.Kind, row.KeyHash,
+	).Scan(&count); err != nil {
+		t.Fatalf("count after delete: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 rows after delete, got %d", count)
+	}
+
+	// Unknown (kind, key_hash) delete = no-op, no error.
+	if err := st.DeleteLLMCacheByKeyHash("file.summary", "nonexistent12345"); err != nil {
+		t.Errorf("delete of unknown key: %v", err)
 	}
 }
 
