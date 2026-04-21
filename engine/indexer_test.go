@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/jinto/kittypaw/store"
 )
 
 // setupTestWorkspace creates a temp directory with test files and returns
@@ -302,6 +304,88 @@ func TestRemoveFile_UnknownPathNoError(t *testing.T) {
 
 	if err := ix.RemoveFile("ws-unknown", "/does/not/exist/file.go"); err != nil {
 		t.Fatalf("RemoveFile on unknown path: %v", err)
+	}
+}
+
+// TestRemoveFile_PurgesSummaryCache pins T5 GC: when a file is removed from
+// the workspace index, its File.summary cache row (keyed by (workspace_id,
+// abs_path)) must also be purged so a later re-creation with different
+// content cannot accidentally hit the stale summary via keyHash match.
+func TestRemoveFile_PurgesSummaryCache(t *testing.T) {
+	st := openTestStore(t)
+	ix := NewFTS5Indexer(st)
+	dir := setupTestWorkspace(t)
+
+	if _, err := ix.Index(context.Background(), "ws-gc", dir); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	utilAbs, _ := filepath.Abs(filepath.Join(dir, "util.go"))
+	keys := computeSummaryKeys("ws-gc", utilAbs, nil)
+
+	// Seed an llm_cache row as if File.summary had run against util.go.
+	seed := &store.LLMCacheRow{
+		Kind:        summaryCacheKind,
+		KeyHash:     keys.keyHash,
+		InputHash:   "00000000deadbeef",
+		Model:       "test-model",
+		PromptHash:  currentPromptHash,
+		Result:      "stale summary",
+		Metadata:    "{}",
+		UsageInput:  10,
+		UsageOutput: 20,
+	}
+	if err := st.InsertLLMCache(seed); err != nil {
+		t.Fatalf("seed InsertLLMCache: %v", err)
+	}
+	// Sanity: seeded row is reachable.
+	row, err := st.LookupLLMCache(summaryCacheKind, keys.keyHash, seed.InputHash, seed.Model, seed.PromptHash)
+	if err != nil {
+		t.Fatalf("pre-lookup: %v", err)
+	}
+	if row == nil {
+		t.Fatal("seeded row not found before RemoveFile")
+	}
+
+	if err := ix.RemoveFile("ws-gc", utilAbs); err != nil {
+		t.Fatalf("RemoveFile: %v", err)
+	}
+
+	// After the file removal the summary row for (ws-gc, util.go) must be gone.
+	row, err = st.LookupLLMCache(summaryCacheKind, keys.keyHash, seed.InputHash, seed.Model, seed.PromptHash)
+	if err != nil {
+		t.Fatalf("post-lookup: %v", err)
+	}
+	if row != nil {
+		t.Errorf("summary cache row still present after RemoveFile: %+v", row)
+	}
+
+	// Unrelated workspace's row with the same abs_path must survive: GC is
+	// scoped by (kind, key_hash), and key_hash folds in workspace_id.
+	otherKeys := computeSummaryKeys("ws-other", utilAbs, nil)
+	otherSeed := &store.LLMCacheRow{
+		Kind:        summaryCacheKind,
+		KeyHash:     otherKeys.keyHash,
+		InputHash:   "ffffffffcafef00d",
+		Model:       "test-model",
+		PromptHash:  currentPromptHash,
+		Result:      "other-tenant summary",
+		Metadata:    "{}",
+		UsageInput:  1,
+		UsageOutput: 2,
+	}
+	if err := st.InsertLLMCache(otherSeed); err != nil {
+		t.Fatalf("seed other: %v", err)
+	}
+	if err := ix.RemoveFile("ws-gc", utilAbs); err != nil {
+		t.Fatalf("RemoveFile second: %v", err)
+	}
+	row, err = st.LookupLLMCache(summaryCacheKind, otherKeys.keyHash, otherSeed.InputHash, otherSeed.Model, otherSeed.PromptHash)
+	if err != nil {
+		t.Fatalf("other lookup: %v", err)
+	}
+	if row == nil {
+		t.Error("cross-workspace row was wrongly purged")
 	}
 }
 

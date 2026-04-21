@@ -185,6 +185,15 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store open: %w", err)
 	}
 
+	// In-memory SQLite gives every new connection a fresh, empty
+	// database — the sql.DB pool's concurrent connections would each
+	// see a different un-migrated DB. Pinning to one connection serializes
+	// goroutines through the single migrated instance. Production always
+	// opens a file path, so this branch only affects tests.
+	if path == ":memory:" {
+		db.SetMaxOpenConns(1)
+	}
+
 	// Pragmas: WAL for concurrency, foreign keys for integrity.
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
@@ -2142,4 +2151,91 @@ func escapeLIKE(s string) string {
 	s = strings.ReplaceAll(s, `%`, `\%`)
 	s = strings.ReplaceAll(s, `_`, `\_`)
 	return s
+}
+
+// ---------------------------------------------------------------------------
+// llm_cache (generic LLM response cache; Phase 1 consumer: File.summary)
+// ---------------------------------------------------------------------------
+
+// LLMCacheRow is one row in the llm_cache table. Identity is the compound
+// UNIQUE tuple (Kind, KeyHash, InputHash, Model, PromptHash); the remaining
+// fields are the cached payload + provenance.
+type LLMCacheRow struct {
+	ID          int64
+	Kind        string
+	KeyHash     string
+	InputHash   string
+	Model       string
+	PromptHash  string
+	Result      string
+	Metadata    string // JSON blob
+	UsageInput  int64
+	UsageOutput int64
+	CreatedAt   string
+}
+
+// LookupLLMCache returns the cached row for the given identity tuple, or
+// (nil, nil) on cache miss. DB errors propagate. This is the single
+// read path for QuerySummary; the 5-column identity lookup matches the
+// UNIQUE index exactly.
+func (s *Store) LookupLLMCache(kind, keyHash, inputHash, model, promptHash string) (*LLMCacheRow, error) {
+	row := &LLMCacheRow{}
+	err := s.db.QueryRow(`
+		SELECT id, kind, key_hash, input_hash, model, prompt_hash,
+		       result, metadata, usage_input, usage_output, created_at
+		FROM llm_cache
+		WHERE kind = ? AND key_hash = ? AND input_hash = ? AND model = ? AND prompt_hash = ?`,
+		kind, keyHash, inputHash, model, promptHash,
+	).Scan(
+		&row.ID, &row.Kind, &row.KeyHash, &row.InputHash, &row.Model, &row.PromptHash,
+		&row.Result, &row.Metadata, &row.UsageInput, &row.UsageOutput, &row.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return row, nil
+}
+
+// InsertLLMCache upserts a row. ON CONFLICT lets force_refresh actually
+// replace a stale or poisoned result — INSERT OR IGNORE would have kept
+// the first value forever. Metadata defaults to "{}" when empty.
+func (s *Store) InsertLLMCache(row *LLMCacheRow) error {
+	if row == nil {
+		return fmt.Errorf("InsertLLMCache: nil row")
+	}
+	metadata := row.Metadata
+	if metadata == "" {
+		metadata = "{}"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO llm_cache
+			(kind, key_hash, input_hash, model, prompt_hash,
+			 result, metadata, usage_input, usage_output, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+		ON CONFLICT (kind, key_hash, input_hash, model, prompt_hash)
+		DO UPDATE SET
+			result = excluded.result,
+			metadata = excluded.metadata,
+			usage_input = excluded.usage_input,
+			usage_output = excluded.usage_output,
+			created_at = excluded.created_at`,
+		row.Kind, row.KeyHash, row.InputHash, row.Model, row.PromptHash,
+		row.Result, metadata, row.UsageInput, row.UsageOutput,
+	)
+	return err
+}
+
+// DeleteLLMCacheByKeyHash removes every row for a given (kind, key_hash).
+// Called from the live indexer's RemoveFile path so stale summaries do
+// not accumulate after a file is deleted. Uses the idx_llm_cache_key
+// index. An unknown tuple is a no-op.
+func (s *Store) DeleteLLMCacheByKeyHash(kind, keyHash string) error {
+	_, err := s.db.Exec(
+		`DELETE FROM llm_cache WHERE kind = ? AND key_hash = ?`,
+		kind, keyHash,
+	)
+	return err
 }
