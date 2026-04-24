@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -155,6 +156,126 @@ func TestConnect_AlreadyRunning(t *testing.T) {
 	// Verify client works.
 	if err := cl.Health(); err != nil {
 		t.Errorf("client.Health() error: %v", err)
+	}
+}
+
+// writeFile is a tiny helper for the fallback-chain tests below.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// The five tests below cover every combination of fallback tiers that
+// resolveDaemonEndpoint() has to handle. They drive KITTYPAW_CONFIG_DIR to
+// an isolated tempdir via t.Setenv so they never touch the real ~/.kittypaw.
+
+func TestNewDaemonConn_ServerToml_Wins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\n")
+
+	// Also plant a tenant config with DIFFERENT values — tier 1 must win.
+	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
+		"[server]\nbind = \":9999\"\napi_key = \"tenant-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:3456" {
+		t.Errorf("BaseURL = %q, want http://127.0.0.1:3456", d.BaseURL)
+	}
+	if d.APIKey != "server-key" {
+		t.Errorf("APIKey = %q, want server-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_ServerTomlPartial_FallsBack(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	// server.toml with Bind but no MasterAPIKey → must fall through.
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"bind = \"127.0.0.1:3456\"\n")
+
+	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"tenant-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:4567" {
+		t.Errorf("partial server.toml should fall through; BaseURL = %q", d.BaseURL)
+	}
+	if d.APIKey != "tenant-key" {
+		t.Errorf("APIKey = %q, want tenant-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_TenantsDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	// Post-migration layout: only tenants/default/config.toml exists.
+	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"tenant-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:4567" {
+		t.Errorf("BaseURL = %q, want http://127.0.0.1:4567", d.BaseURL)
+	}
+	if d.APIKey != "tenant-key" {
+		t.Errorf("APIKey = %q, want tenant-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_LegacyTopLevel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	// Fresh post-setup, pre-serve state: only the legacy top-level file.
+	writeFile(t, filepath.Join(dir, "config.toml"),
+		"[server]\nbind = \"127.0.0.1:5678\"\napi_key = \"legacy-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:5678" {
+		t.Errorf("BaseURL = %q, want http://127.0.0.1:5678", d.BaseURL)
+	}
+	if d.APIKey != "legacy-key" {
+		t.Errorf("APIKey = %q, want legacy-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_NothingExists(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	_, err := NewDaemonConn("")
+	if err == nil {
+		t.Fatal("expected error when no config exists, got nil")
+	}
+	// Error should guide the user toward `kittypaw setup` and list every
+	// path that was tried so they can verify the probe landed where they
+	// expected.
+	msg := err.Error()
+	for _, want := range []string{"kittypaw setup", "server.toml", "tenants", "config.toml"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q: %s", want, msg)
+		}
 	}
 }
 
