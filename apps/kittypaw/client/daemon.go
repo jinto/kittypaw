@@ -19,31 +19,76 @@ type DaemonConn struct {
 	bindAddr string
 }
 
-// NewDaemonConn creates a DaemonConn. If remoteURL is non-empty, connects directly
-// to that URL. Otherwise reads config.toml for server.bind and server.api_key.
+// NewDaemonConn creates a DaemonConn. If remoteURL is non-empty, connects
+// directly to that URL. Otherwise resolves the daemon's bind address and
+// API key from disk using a three-tier fallback — see resolveDaemonEndpoint
+// for why three tiers are needed.
 func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
 	if remoteURL != "" {
 		return &DaemonConn{BaseURL: remoteURL}, nil
 	}
 
-	cfgPath, err := core.ConfigPath()
+	bind, apiKey, err := resolveDaemonEndpoint()
 	if err != nil {
-		return nil, fmt.Errorf("config path: %w", err)
+		return nil, err
 	}
-	cfg, err := core.LoadConfig(cfgPath)
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-
-	bind := cfg.Server.BindOrDefault()
 	host, port := parseBindAddr(bind)
-	baseURL := fmt.Sprintf("http://%s:%s", host, port)
-
 	return &DaemonConn{
-		BaseURL:  baseURL,
-		APIKey:   cfg.Server.APIKey,
+		BaseURL:  fmt.Sprintf("http://%s:%s", host, port),
+		APIKey:   apiKey,
 		bindAddr: bind,
 	}, nil
+}
+
+// resolveDaemonEndpoint finds daemon Bind + API key across the three
+// layouts kittypaw can be in at any moment:
+//
+//  1. ~/.kittypaw/server.toml       — the designed-for-server-wide path
+//     (CLAUDE.md). No production writer yet, so this tier only lights up
+//     when both Bind AND MasterAPIKey are populated — a partial file is
+//     treated as absent to avoid picking up a half-initialized config.
+//  2. ~/.kittypaw/tenants/default/config.toml — the post-migration layout.
+//     MigrateLegacyLayout moves the legacy top-level config.toml here the
+//     first time a daemon boots; this is the steady state for existing
+//     users and the state the bug report hit.
+//  3. ~/.kittypaw/config.toml       — the legacy / pre-migration path.
+//     Fresh installs land here after `kittypaw setup` until the first
+//     `serve` triggers migration.
+//
+// This mirrors the read-side of the designed multi-tenant contract while
+// leaving the write-side unchanged: whoever ends up implementing
+// WriteServerConfigAtomic later flips tier 1 on with zero client edits.
+func resolveDaemonEndpoint() (bind, apiKey string, err error) {
+	var tried []string
+
+	if scPath, perr := core.ServerConfigPath(); perr == nil {
+		tried = append(tried, scPath)
+		if sc, lerr := core.LoadServerConfig(scPath); lerr == nil &&
+			sc.Bind != "" && sc.MasterAPIKey != "" {
+			return sc.Bind, sc.MasterAPIKey, nil
+		}
+	}
+
+	dir, derr := core.ConfigDir()
+	if derr != nil {
+		return "", "", fmt.Errorf("config dir: %w", derr)
+	}
+
+	tenantCfg := filepath.Join(dir, "tenants", "default", "config.toml")
+	tried = append(tried, tenantCfg)
+	if cfg, lerr := core.LoadConfig(tenantCfg); lerr == nil {
+		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, nil
+	}
+
+	legacyPath := filepath.Join(dir, "config.toml")
+	tried = append(tried, legacyPath)
+	if cfg, lerr := core.LoadConfig(legacyPath); lerr == nil {
+		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, nil
+	}
+
+	return "", "", fmt.Errorf(
+		"no daemon config found — run `kittypaw setup` first (checked: %s)",
+		strings.Join(tried, ", "))
 }
 
 // Connect returns a Client connected to a running daemon.
