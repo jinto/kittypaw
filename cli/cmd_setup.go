@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"runtime"
 
 	"github.com/jinto/kittypaw/client"
 )
@@ -13,12 +15,58 @@ import (
 // deliberate test update, not a silent drift.
 const (
 	// Base prompt (no hint) — promptYesNo appends " (Y/n): " itself.
-	setupPromptAutoChat     = "> 지금 바로 대화를 시작할까요?"
-	setupMsgReloaded        = "✓ 데몬 설정 재적용"
-	setupMsgDaemonOff       = "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
-	setupMsgReloadFailedFmt = "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."
-	setupMsgAutoChatBlocked = "자동 채팅 진입을 건너뜁니다 — 현재 데몬이 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
+	setupPromptAutoChat        = "> 지금 바로 대화를 시작할까요?"
+	setupPromptInstallService  = "> 로그인 시 kittypaw 데몬을 자동으로 기동하도록 등록할까요?"
+	setupMsgReloaded           = "✓ 데몬 설정 재적용"
+	setupMsgDaemonOff          = "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
+	setupMsgReloadFailedFmt    = "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."
+	setupMsgAutoChatBlocked    = "자동 채팅 진입을 건너뜁니다 — 현재 데몬이 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
+	setupMsgServiceInstalled   = "✓ 서비스 등록 완료 — 'kittypaw service status' 로 상태 확인"
+	setupMsgServiceSkipped     = "서비스 등록을 건너뜁니다. 나중에 'kittypaw service install' 로 등록할 수 있습니다."
+	setupMsgServiceUnsupported = "현재 플랫폼에서는 자동 서비스 등록을 지원하지 않습니다 — docs/deployment.md 참고."
+	setupMsgServiceFailedFmt   = "서비스 등록 실패: %v"
 )
+
+// serviceInstallEligible decides whether runSetup should offer the inline
+// service-install prompt. Mirrors autoChatEligible's truth table: requires
+// interactive TTY on both sides, --provider not set (CI path), and the
+// user not explicitly opting out with --no-service.
+func serviceInstallEligible(f setupFlags, stdinIsTTY, stdoutIsTTY bool) bool {
+	if f.provider != "" || f.noService {
+		return false
+	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return false
+	}
+	return stdinIsTTY && stdoutIsTTY
+}
+
+// maybeInstallService asks the user whether to register the daemon with the
+// platform init system. Returns true on successful install so callers can
+// adjust downstream messaging. A failure — including a port conflict — is
+// surfaced on stderr but is non-fatal: the chat auto-entry should still
+// proceed because setup itself succeeded.
+func maybeInstallService(scanner *bufio.Scanner, stdout, stderr io.Writer) bool {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		_, _ = fmt.Fprintln(stderr, setupMsgServiceUnsupported)
+		return false
+	}
+	if !promptYesNo(scanner, setupPromptInstallService, true) {
+		_, _ = fmt.Fprintln(stdout, setupMsgServiceSkipped)
+		return false
+	}
+	sf := &serviceFlags{bindHost: "127.0.0.1", bindPort: 3000}
+	if err := preflightPort(sf.bindHost, sf.bindPort); err != nil {
+		_, _ = fmt.Fprintln(stderr, err)
+		return false
+	}
+	if err := serviceInstall(stdout, stderr, sf); err != nil {
+		_, _ = fmt.Fprintf(stderr, setupMsgServiceFailedFmt+"\n", err)
+		return false
+	}
+	_, _ = fmt.Fprintln(stdout, setupMsgServiceInstalled)
+	return true
+}
 
 // autoChatEligible decides whether `kittypaw setup` should offer the inline
 // prompt that enters `kittypaw chat` directly. All four conditions must hold

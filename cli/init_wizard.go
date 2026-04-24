@@ -32,6 +32,8 @@ type setupFlags struct {
 	httpAccess     bool
 	force          bool
 	noChat         bool
+	noService      bool
+	web            bool
 }
 
 // runWizard drives the 6-step interactive wizard or applies flags.
