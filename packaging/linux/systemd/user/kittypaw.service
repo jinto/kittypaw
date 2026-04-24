@@ -1,0 +1,40 @@
+[Unit]
+Description=KittyPaw AI agent daemon (user)
+Documentation=https://github.com/jinto/kittypaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kittypaw serve --bind 127.0.0.1:3000
+Restart=on-failure
+RestartSec=2s
+
+# Per-user data directory. systemd expands %h to $HOME at start time.
+Environment=KITTYPAW_CONFIG_DIR=%h/.kittypaw
+
+# --- Resource ceilings (for post-mortem observability, not true isolation) ---
+# These prevent a runaway skill from consuming the host; they do NOT isolate
+# skills from each other inside a single kittypaw daemon. cgroup v2 delegation
+# must be enabled (see dist/linux/install.sh) or these directives are silently
+# ignored in user scope.
+MemoryMax=2G
+MemoryHigh=1536M
+TasksMax=512
+CPUQuota=200%
+IOWeight=100
+
+# --- Lightweight hardening (user scope supported) ---
+NoNewPrivileges=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+PrivateTmp=true
+PrivateIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Logs go to journald automatically (no StandardOutput/Error needed).
+
+[Install]
+WantedBy=default.target
