@@ -88,21 +88,40 @@ service under their own UID.
 ### First user (User A)
 
 ```bash
-kittypaw setup            # LLM keys, channels, personas (existing wizard)
-kittypaw service install  # register + start under User A's UID
+# Interactive wizard. Offers service install at the end (unless --no-service).
+kittypaw setup
+
+# Non-interactive / CI equivalent:
+kittypaw setup --no-service --provider anthropic --api-key $KEY
+kittypaw service install
 ```
+
+When `kittypaw setup` runs with TTY stdin/stdout it prompts for service
+install right after the completion box, so a typical first-time user never
+has to learn the `service` subcommand explicitly. `--no-service` skips the
+prompt; the `service install` command stays available as an explicit path.
 
 `service install` auto-detects the running binary via `os.Executable()` and
 substitutes its absolute path into the unit/plist, so a user-local install
 under `~/.local/bin` also works without hand editing.
 
+**Web onboarding.** Once a daemon is listening, `kittypaw setup --web` opens
+the wizard UI in a browser (served by the daemon itself at `http://127.0.0.1:3000/`).
+If no daemon is up the command prints recovery steps instead of silently
+spawning a foreground server — use `kittypaw service install` or
+`kittypaw serve` first.
+
 ### Second user (User B, same host)
 
 ```bash
 # Log in as User B.
-kittypaw setup                                # own config under /home/B/.kittypaw
+kittypaw setup --no-service                   # wizard alone; skip the install prompt
 kittypaw service install --bind-port 3001     # :3000 is taken by User A
 ```
+
+User B passes `--no-service` because the default port probe in the prompt
+would fail against User A's live daemon. Installing with an explicit
+`--bind-port` surfaces the port choice clearly.
 
 The CLI probes the target port before rewriting any files — if User A is
 still on :3000, the install aborts early with the hint above. Pick a free
