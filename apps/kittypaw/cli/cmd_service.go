@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -16,6 +18,7 @@ type serviceFlags struct {
 	bindPort int
 	binPath  string
 	follow   bool
+	force    bool
 }
 
 func newServiceCmd() *cobra.Command {
@@ -45,10 +48,19 @@ func newServiceInstallCmd() *cobra.Command {
 		Long: `Install the per-user service and start it. Subsequent runs reinstall
 cleanly — the daemon is stopped before the unit/plist is rewritten.
 
+Refuses to install if no tenant has been provisioned yet (run 'kittypaw
+setup' first) — a fresh daemon with zero tenants crash-loops under
+launchd/systemd KeepAlive. Pass --force to install anyway.
+
 If another process already holds the bind port (common when a second user
 is onboarding on a shared host), installation fails with a hint to pick a
 different --bind-port.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !f.force {
+				if err := preflightTenantReady(); err != nil {
+					return err
+				}
+			}
 			if err := preflightPort(f.bindHost, f.bindPort); err != nil {
 				return err
 			}
@@ -58,6 +70,7 @@ different --bind-port.`,
 	cmd.Flags().StringVar(&f.bindHost, "bind-host", "127.0.0.1", "Host kittypaw daemon will listen on")
 	cmd.Flags().IntVar(&f.bindPort, "bind-port", 3000, "Port kittypaw daemon will listen on")
 	cmd.Flags().StringVar(&f.binPath, "binary", "", "Absolute path to kittypaw binary (auto-detected when empty)")
+	cmd.Flags().BoolVar(&f.force, "force", false, "Install even when no tenant is provisioned (daemon will crash-loop)")
 	return cmd
 }
 
@@ -94,6 +107,39 @@ func newServiceLogsCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&f.follow, "follow", "f", false, "Follow log output (-f)")
 	return cmd
+}
+
+// configDirForCheck resolves the data directory without the side effect of
+// creating it (unlike core.ConfigDir, which MkdirAll+Chmod). Used by
+// preflight checks that MUST stay read-only — creating the directory here
+// would silently defeat the "did you run setup?" question we are asking.
+func configDirForCheck() string {
+	if dir := os.Getenv("KITTYPAW_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".kittypaw")
+}
+
+// preflightTenantReady refuses to install the service when no tenant has
+// been provisioned. The daemon's serve loop fails fast on an empty tenant
+// registry, and under launchd/systemd KeepAlive that becomes a crash-loop
+// that spams stderr.log until an operator intervenes. Catching it here
+// means the user sees a single actionable message.
+func preflightTenantReady() error {
+	tenantsDir := filepath.Join(configDirForCheck(), "tenants")
+	entries, err := os.ReadDir(tenantsDir)
+	if err == nil && len(entries) > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"no tenant has been provisioned yet — %s is missing or empty.\n\n"+
+			"  Run 'kittypaw setup' first to configure an LLM provider and\n"+
+			"  create a tenant; the wizard offers to install the service at\n"+
+			"  the end so you rarely need to call `service install` directly.\n\n"+
+			"  Pass --force to install anyway — the daemon will crash-loop\n"+
+			"  under launchd/systemd KeepAlive until setup runs",
+		tenantsDir)
 }
 
 // preflightPort probes host:port and returns an error if something is
