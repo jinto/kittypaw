@@ -383,7 +383,17 @@ func LoadConfig(path string) (*Config, error) {
 
 // ConfigDir returns the user's .kittypaw config directory, creating it if needed.
 // On first run after rename, migrates ~/.gopaw → ~/.kittypaw automatically.
+// The directory is owned-by-user only (mode 0700) so other OS users on the same
+// host cannot read tenant data, skill sources, or secrets. KITTYPAW_CONFIG_DIR
+// overrides the default location — set by init-system units (systemd/launchd).
 func ConfigDir() (string, error) {
+	if dir := os.Getenv("KITTYPAW_CONFIG_DIR"); dir != "" {
+		if err := ensureConfigDirMode(dir); err != nil {
+			return "", err
+		}
+		return dir, nil
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -404,10 +414,19 @@ func ConfigDir() (string, error) {
 		}
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensureConfigDirMode(dir); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// ensureConfigDirMode creates dir if missing and enforces mode 0700 even on
+// pre-existing directories left over from earlier versions that used 0755.
+func ensureConfigDirMode(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
 }
 
 // ResolveBaseDir returns baseDir if non-empty, otherwise falls back to ConfigDir.

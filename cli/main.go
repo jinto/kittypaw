@@ -106,6 +106,7 @@ func newRootCmd() *cobra.Command {
 		newLoginCmd(),
 		newTenantCmd(),
 		newFamilyCmd(),
+		newServiceCmd(),
 	)
 
 	return cmd
@@ -195,7 +196,7 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 
 	kittypawDir := filepath.Join(home, ".kittypaw")
 	for _, dir := range []string{kittypawDir, filepath.Join(kittypawDir, "data"), filepath.Join(kittypawDir, "skills")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
