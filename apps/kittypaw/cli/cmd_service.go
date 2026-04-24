@@ -1,0 +1,117 @@
+package main
+
+import (
+	"fmt"
+	"net"
+	"strconv"
+	"time"
+
+	"github.com/spf13/cobra"
+)
+
+// serviceFlags captures CLI flags shared by `service install`. Kept as a
+// module-level struct so subcommand closures can read/write it.
+type serviceFlags struct {
+	bindHost string
+	bindPort int
+	binPath  string
+	follow   bool
+}
+
+func newServiceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "service",
+		Short: "Register kittypaw as a per-user background service",
+		Long: `Register (or remove) the kittypaw daemon with the platform init system —
+systemd user units on Linux, launchd LaunchAgents on macOS — so it starts
+at login and restarts on failure.
+
+Data still lives under $HOME/.kittypaw/ (or $KITTYPAW_CONFIG_DIR). Each OS
+user installs their own service; two users on the same host must pick
+different --bind ports.`,
+	}
+	cmd.AddCommand(newServiceInstallCmd())
+	cmd.AddCommand(newServiceUninstallCmd())
+	cmd.AddCommand(newServiceStatusCmd())
+	cmd.AddCommand(newServiceLogsCmd())
+	return cmd
+}
+
+func newServiceInstallCmd() *cobra.Command {
+	f := &serviceFlags{}
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Write the unit/plist and start the daemon",
+		Long: `Install the per-user service and start it. Subsequent runs reinstall
+cleanly — the daemon is stopped before the unit/plist is rewritten.
+
+If another process already holds the bind port (common when a second user
+is onboarding on a shared host), installation fails with a hint to pick a
+different --bind-port.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := preflightPort(f.bindHost, f.bindPort); err != nil {
+				return err
+			}
+			return serviceInstall(cmd.OutOrStdout(), cmd.ErrOrStderr(), f)
+		},
+	}
+	cmd.Flags().StringVar(&f.bindHost, "bind-host", "127.0.0.1", "Host kittypaw daemon will listen on")
+	cmd.Flags().IntVar(&f.bindPort, "bind-port", 3000, "Port kittypaw daemon will listen on")
+	cmd.Flags().StringVar(&f.binPath, "binary", "", "Absolute path to kittypaw binary (auto-detected when empty)")
+	return cmd
+}
+
+func newServiceUninstallCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "uninstall",
+		Short: "Stop the daemon and remove the unit/plist",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return serviceUninstall(cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}
+
+func newServiceStatusCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether the daemon is active and where it binds",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return serviceStatus(cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}
+
+func newServiceLogsCmd() *cobra.Command {
+	f := &serviceFlags{}
+	cmd := &cobra.Command{
+		Use:   "logs",
+		Short: "Tail the daemon log (journald on Linux, plist logs on macOS)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return serviceLogs(cmd.OutOrStdout(), cmd.ErrOrStderr(), f.follow)
+		},
+	}
+	cmd.Flags().BoolVarP(&f.follow, "follow", "f", false, "Follow log output (-f)")
+	return cmd
+}
+
+// preflightPort probes host:port and returns an error if something is
+// already listening. The probe uses a short DialTimeout — a successful dial
+// means the port is taken, ECONNREFUSED means it's free.
+func preflightPort(host string, port int) error {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+	if err != nil {
+		return nil // free
+	}
+	_ = conn.Close()
+	return fmt.Errorf(
+		"port %s is already in use.\n\n"+
+			"  Another process — likely another OS user's kittypaw daemon — is\n"+
+			"  bound to this port. Pick a free port and retry:\n\n"+
+			"    kittypaw service install --bind-port 3001\n\n"+
+			"  Then point your client at the same port:\n"+
+			"    kittypaw chat --server http://%s",
+		addr, net.JoinHostPort(host, "3001"))
+}
