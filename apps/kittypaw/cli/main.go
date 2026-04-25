@@ -611,8 +611,7 @@ func newSkillListCmd() *cobra.Command {
 
 			var packages []core.SkillPackage
 			if filterType == "" || filterType == "package" {
-				if secrets, err := core.LoadSecrets(); err == nil {
-					pm := core.NewPackageManager(secrets)
+				if pm, err := localPackageManager(); err == nil {
 					packages, _ = pm.ListInstalled()
 				}
 			}
@@ -740,7 +739,10 @@ func newSkillInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pm := core.NewPackageManager(secrets)
+			pm, err := localPackageManager()
+			if err != nil {
+				return err
+			}
 			rc, err := registryClient()
 			if err != nil {
 				return err
@@ -839,9 +841,7 @@ func newSkillUninstallCmd() *cobra.Command {
 			name := args[0]
 
 			// Try package first (local, fast).
-			secrets, err := core.LoadSecrets()
-			if err == nil {
-				pm := core.NewPackageManager(secrets)
+			if pm, err := localPackageManager(); err == nil {
 				if err := pm.Uninstall(name); err == nil {
 					fmt.Printf("Package %q uninstalled.\n", name)
 					return nil
@@ -873,9 +873,7 @@ func newSkillInfoCmd() *cobra.Command {
 			name := args[0]
 
 			// Try package first.
-			secrets, err := core.LoadSecrets()
-			if err == nil {
-				pm := core.NewPackageManager(secrets)
+			if pm, err := localPackageManager(); err == nil {
 				if pkg, _, loadErr := pm.LoadPackage(name); loadErr == nil {
 					printPackageInfo(pm, pkg)
 					return nil
@@ -1032,11 +1030,10 @@ func newSkillConfigCmd() *cobra.Command {
 		Short: "Get or set skill configuration",
 		Args:  cobra.RangeArgs(1, 3),
 		RunE: func(_ *cobra.Command, args []string) error {
-			secrets, err := core.LoadSecrets()
+			pm, err := localPackageManager()
 			if err != nil {
 				return err
 			}
-			pm := core.NewPackageManager(secrets)
 			id := args[0]
 
 			if len(args) == 1 {
@@ -2020,6 +2017,30 @@ func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error 
 	}
 	fmt.Println("  Configuration saved.")
 	return nil
+}
+
+// localPackageManager returns a PackageManager bound to the default tenant's
+// BaseDir (~/.kittypaw/tenants/default/) when multi-tenant layout is in
+// place; falls back to the legacy single-tenant location for fresh installs
+// before MigrateLegacyLayout has run. CLI commands that touch packages
+// (list/info/config/install/uninstall) MUST go through this helper so they
+// see the same files the daemon does — the bare `core.NewPackageManager`
+// is baseDir-empty and only finds packages at the legacy path, which has
+// been wrong since the multi-tenant migration.
+func localPackageManager() (*core.PackageManager, error) {
+	secrets, err := core.LoadSecrets()
+	if err != nil {
+		return nil, err
+	}
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	tenantBase := filepath.Join(cfgDir, "tenants", "default")
+	if info, statErr := os.Stat(tenantBase); statErr == nil && info.IsDir() {
+		return core.NewPackageManagerFrom(tenantBase, secrets), nil
+	}
+	return core.NewPackageManager(secrets), nil
 }
 
 // registryClient creates a RegistryClient from config, falling back to DefaultRegistryURL.
