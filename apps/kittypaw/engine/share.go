@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/jinto/kittypaw/core"
 )
@@ -74,8 +72,9 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 
 	// O_NOFOLLOW closes the TOCTOU window between EvalSymlinks validation and
 	// the actual open — if realPath's last component is swapped to a symlink
-	// after validation, the open fails rather than following it.
-	f, err := os.OpenFile(realPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// after validation, the open fails rather than following it. Windows
+	// degrades to a plain O_RDONLY (see openNoFollow_windows.go).
+	f, err := openNoFollow(realPath)
 	if err != nil {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("read: %v", err)})
 	}
