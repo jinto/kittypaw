@@ -274,16 +274,17 @@ type ChannelConfig struct {
 }
 
 // InjectKakaoWSURL populates KakaoWSURL on kakao_talk channel configs from
-// secrets. Called by ChannelSpawner.Reconcile so hot-reload and initial spawn
-// share the same path. No-op if secrets or relay URL are missing.
+// the named tenant's secrets. Called by ChannelSpawner.Reconcile so
+// hot-reload and initial spawn share the same path. No-op if the tenant's
+// secrets, api_url, or relay URL are missing.
 //
-// api_url is written by the setup paths (runSetup / generateConfig) under the
-// bare "kittypaw-api" namespace. When absent — e.g. the user only completed
-// the KakaoTalk step and skipped API server login — fall back to
-// DefaultAPIServerURL so the host-scoped secret saved by wizardKakao
-// still resolves.
-func InjectKakaoWSURL(channels []ChannelConfig) {
-	secrets, err := LoadSecrets()
+// api_url is written by the setup paths under the bare "kittypaw-api"
+// namespace of the tenant's per-tenant secrets store. When absent — e.g.
+// the user only completed the KakaoTalk step and skipped API server
+// login — fall back to DefaultAPIServerURL so the host-scoped secret
+// saved by wizardKakao still resolves.
+func InjectKakaoWSURL(tenantID string, channels []ChannelConfig) {
+	secrets, err := LoadTenantSecrets(tenantID)
 	if err != nil {
 		return
 	}
@@ -441,13 +442,19 @@ func ResolveBaseDir(baseDir string) (string, error) {
 	return ConfigDir()
 }
 
-// ConfigPath returns the default config file path.
+// ConfigPath returns the default tenant's config file path
+// (~/.kittypaw/tenants/<DefaultTenantID>/config.toml). All CLI commands
+// that need to read or write the active config (config check, registry
+// resolution, etc.) target this location so daemon-side DiscoverTenants
+// and the CLI see the same file. The legacy global path
+// (~/.kittypaw/config.toml) is only consulted by MigrateLegacyLayout for
+// upgrade paths and is otherwise unused.
 func ConfigPath() (string, error) {
 	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "config.toml"), nil
+	return filepath.Join(dir, "tenants", DefaultTenantID, "config.toml"), nil
 }
 
 // FindAgent returns the agent config matching the given ID, or nil.

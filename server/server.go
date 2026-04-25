@@ -41,7 +41,6 @@ type Server struct {
 	tenantDeps     map[string]*TenantDeps // retained close-targets (Store+MCP) for RemoveTenant; populated on successful AddTenant
 	version        string
 	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
-	secrets        *core.SecretsStore   // default-tenant secrets store for API handlers
 	liveIndexer    *engine.LiveIndexer  // default-tenant live indexer (nil if lazy mode)
 
 	// reloadReconcile, if non-nil, replaces s.spawner.Reconcile inside
@@ -125,7 +124,6 @@ func New(tenants []*TenantDeps, version string) *Server {
 		tenantDeps:     depsByID,
 		version:        version,
 		pkgManager:     defaultDeps.PkgMgr,
-		secrets:        defaultDeps.Secrets,
 		liveIndexer:    defaultDeps.LiveIndexer,
 	}
 	s.router = s.setupRoutes()

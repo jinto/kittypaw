@@ -169,3 +169,138 @@ func TestSecretsStore_MixedFormat(t *testing.T) {
 		t.Errorf("after reload: telegram/bot_token = %q", v)
 	}
 }
+
+func TestLoadTenantSecrets_CreatesParentDir(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	s, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatalf("LoadTenantSecrets: %v", err)
+	}
+
+	// Parent dir must exist after Load even before any Set.
+	tenantDir := filepath.Join(root, "tenants", "default")
+	info, err := os.Stat(tenantDir)
+	if err != nil {
+		t.Fatalf("tenant dir not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("tenant path is not a directory")
+	}
+
+	// First Set after a fresh wipe must succeed (no ENOENT).
+	if err := s.Set("kittypaw-api/test", "access_token", "AT"); err != nil {
+		t.Fatalf("Set on fresh tenant store: %v", err)
+	}
+
+	// File landed at the per-tenant path (not global).
+	tenantSecretsPath := filepath.Join(tenantDir, "secrets.json")
+	if _, err := os.Stat(tenantSecretsPath); err != nil {
+		t.Fatalf("per-tenant secrets file missing: %v", err)
+	}
+	globalSecretsPath := filepath.Join(root, "secrets.json")
+	if _, err := os.Stat(globalSecretsPath); err == nil {
+		t.Fatal("global secrets.json must not exist — write should be per-tenant")
+	}
+}
+
+// TestSecretsStore_FreshLoadAfterPeerWrite pins the realistic timeline a
+// long-lived in-memory cache would otherwise break: process A writes a
+// key on disk; process B (which had already loaded the file before A
+// wrote) writes a different key. If B holds a stale in-memory map and
+// persists it, A's key disappears.
+//
+// The fix is "open fresh on every Set in long-lived contexts" — see the
+// commentary on server/api_setup.go's setup-complete path. This test
+// guards that the per-tenant store, when re-loaded between writes,
+// composes correctly even though the underlying *SecretsStore objects
+// are different instances.
+func TestSecretsStore_FreshLoadAfterPeerWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	// Step 1 — peer (e.g. /kakao/register) opens fresh and writes one key.
+	peerA, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := peerA.Set("kittypaw-api/localhost", "kakao_relay_ws_url", "wss://r/abc"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 2 — second caller opens fresh and writes a different key.
+	// (This mirrors the post-fix server/api_setup.go pattern: every
+	// daemon-side Set goes through a freshly loaded store.)
+	peerB, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := peerB.Set("kittypaw-api", "api_url", "http://localhost:8080"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both keys must survive on disk. A long-lived stale-cache writer
+	// (the bug fixed by removing server.Server.secrets) would have
+	// erased peerA's write here.
+	final, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := final.Get("kittypaw-api/localhost", "kakao_relay_ws_url"); !ok || v != "wss://r/abc" {
+		t.Errorf("kakao_relay_ws_url lost after peer write: got %q (ok=%v)", v, ok)
+	}
+	if v, ok := final.Get("kittypaw-api", "api_url"); !ok || v != "http://localhost:8080" {
+		t.Errorf("api_url missing: got %q (ok=%v)", v, ok)
+	}
+}
+
+func TestLoadTenantSecrets_RejectsInvalidTenantID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	bad := []string{"../escape", "../../etc", "/abs", "with spaces", ""}
+	for _, id := range bad {
+		if _, err := LoadTenantSecrets(id); err == nil {
+			t.Errorf("LoadTenantSecrets(%q) accepted hostile id", id)
+		}
+	}
+}
+
+func TestSecretsStore_MultiNamespace_Coexist(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	s, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-existing per-tenant key (e.g. telegram bot token written by tenant setup).
+	if err := s.Set("telegram", "bot_token", "tg-123"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Login flow writes API token + Kakao URL to the same tenant store.
+	if err := s.Set("kittypaw-api/localhost:8080", "access_token", "AT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set("kittypaw-api", "api_url", "http://localhost:8080"); err != nil {
+		t.Fatal(err)
+	}
+
+	// All three keys must coexist after the writes.
+	s2, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := s2.Get("telegram", "bot_token"); !ok || v != "tg-123" {
+		t.Errorf("telegram bot_token clobbered: got %q (ok=%v)", v, ok)
+	}
+	if v, ok := s2.Get("kittypaw-api/localhost:8080", "access_token"); !ok || v != "AT" {
+		t.Errorf("api access_token missing: got %q (ok=%v)", v, ok)
+	}
+	if v, ok := s2.Get("kittypaw-api", "api_url"); !ok || v != "http://localhost:8080" {
+		t.Errorf("bare api_url missing: got %q (ok=%v)", v, ok)
+	}
+}

@@ -226,7 +226,7 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
 
-	secrets, err := core.LoadSecrets()
+	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load secrets: "+err.Error())
 		return
@@ -533,8 +533,14 @@ func (s *Server) generateConfig() error {
 	}
 
 	// Save API server URL to secrets for package source bindings.
-	if w.APIServerURL != "" && s.secrets != nil {
-		_ = s.secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
+	// Open the per-tenant store fresh on every call: a long-lived
+	// reference would carry stale in-memory state between web setup
+	// steps (e.g. /kakao/register followed by /complete) and the
+	// second Set's persist would overwrite the first step's writes.
+	if w.APIServerURL != "" {
+		if secrets, err := core.LoadTenantSecrets(core.DefaultTenantID); err == nil {
+			_ = secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
+		}
 	}
 
 	return nil
