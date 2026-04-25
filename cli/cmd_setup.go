@@ -16,7 +16,7 @@ import (
 const (
 	// Base prompt (no hint) — promptYesNo appends " (Y/n): " itself.
 	setupPromptAutoChat        = "> 지금 바로 대화를 시작할까요?"
-	setupPromptInstallService  = "> 로그인 시 kittypaw 데몬을 자동으로 기동하도록 등록할까요?"
+	setupPromptInstallService  = "> 서버가 자동으로 실행되게 할까요?"
 	setupMsgReloaded           = "✓ 데몬 설정 재적용"
 	setupMsgDaemonOff          = "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
 	setupMsgReloadFailedFmt    = "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."
