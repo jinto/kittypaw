@@ -252,7 +252,7 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	// install still lands somewhere `MigrateLegacyLayout` will pick up.
 	profileBase, err := defaultTenantBase()
 	if err != nil {
-		profileBase = kittypawDir
+		return fmt.Errorf("resolve tenant base: %w", err)
 	}
 	if err := core.EnsureDefaultProfile(profileBase); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
@@ -788,7 +788,7 @@ func newSkillInstallCmd() *cobra.Command {
 					case "A":
 						skillBase, baseErr := defaultTenantBase()
 						if baseErr != nil {
-							skillBase = cfgDir
+							return fmt.Errorf("resolve tenant base: %w", baseErr)
 						}
 						if delErr := core.DeleteSkillFrom(skillBase, entry.ID); delErr != nil {
 							return fmt.Errorf("사용자 스킬 삭제 실패: %w", delErr)
