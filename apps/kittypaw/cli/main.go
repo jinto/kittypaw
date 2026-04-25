@@ -247,8 +247,14 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		}
 	}
 
-	// Ensure default profile.
-	if err := core.EnsureDefaultProfile(kittypawDir); err != nil {
+	// Ensure default profile under the multi-tenant default-tenant base when
+	// migration has already run; otherwise the top-level path so a fresh
+	// install still lands somewhere `MigrateLegacyLayout` will pick up.
+	profileBase, err := defaultTenantBase()
+	if err != nil {
+		profileBase = kittypawDir
+	}
+	if err := core.EnsureDefaultProfile(profileBase); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
@@ -401,10 +407,13 @@ func runChat(_ *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Readline with history.
+	// Readline with history. Per-tenant so a household using multiple
+	// tenants (one human user per tenant per CLAUDE.md) does not leak chat
+	// fragments from one person's REPL into another's. Falls back to the
+	// top-level path before migration.
 	historyFile := ""
-	if cfgDir, err := core.ConfigDir(); err == nil {
-		historyFile = filepath.Join(cfgDir, "chat_history")
+	if base, err := defaultTenantBase(); err == nil {
+		historyFile = filepath.Join(base, "chat_history")
 	}
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:      "you> ",
@@ -777,7 +786,11 @@ func newSkillInstallCmd() *cobra.Command {
 
 					switch choice {
 					case "A":
-						if delErr := core.DeleteSkillFrom(cfgDir, entry.ID); delErr != nil {
+						skillBase, baseErr := defaultTenantBase()
+						if baseErr != nil {
+							skillBase = cfgDir
+						}
+						if delErr := core.DeleteSkillFrom(skillBase, entry.ID); delErr != nil {
 							return fmt.Errorf("사용자 스킬 삭제 실패: %w", delErr)
 						}
 						fmt.Printf("  사용자 스킬 %q 삭제 완료.\n", entry.ID)
@@ -2019,28 +2032,56 @@ func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error 
 	return nil
 }
 
-// localPackageManager returns a PackageManager bound to the default tenant's
-// BaseDir (~/.kittypaw/tenants/default/) when multi-tenant layout is in
-// place; falls back to the legacy single-tenant location for fresh installs
-// before MigrateLegacyLayout has run. CLI commands that touch packages
-// (list/info/config/install/uninstall) MUST go through this helper so they
-// see the same files the daemon does — the bare `core.NewPackageManager`
-// is baseDir-empty and only finds packages at the legacy path, which has
-// been wrong since the multi-tenant migration.
-func localPackageManager() (*core.PackageManager, error) {
-	secrets, err := core.LoadSecrets()
-	if err != nil {
-		return nil, err
-	}
+// defaultTenantBase returns the base directory CLI commands should treat as
+// the default tenant: ~/.kittypaw/tenants/default/ when the multi-tenant
+// layout exists, falling back to ~/.kittypaw/ for fresh installs that have
+// not yet been migrated. Centralizing this probe keeps CLI helpers and the
+// daemon session looking at the same files — the daemon side has always
+// used Session.BaseDir, but multiple CLI helpers were hardcoded to the
+// legacy top-level path before this consolidation.
+func defaultTenantBase() (string, error) {
 	cfgDir, err := core.ConfigDir()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	tenantBase := filepath.Join(cfgDir, "tenants", "default")
 	if info, statErr := os.Stat(tenantBase); statErr == nil && info.IsDir() {
-		return core.NewPackageManagerFrom(tenantBase, secrets), nil
+		return tenantBase, nil
 	}
-	return core.NewPackageManager(secrets), nil
+	return cfgDir, nil
+}
+
+// localSecrets loads the secrets store the default tenant sees. The daemon
+// already does this on its session via core.LoadSecretsFrom(t.SecretsPath());
+// this helper makes CLI commands consistent with that view. Callers that
+// need GLOBAL secrets — login tokens managed by APITokenManager, which are
+// intentionally cross-tenant for OAuth-once-per-host UX — should keep using
+// core.LoadSecrets() directly. See the localPackageManager docstring for
+// background on the migration leftover this addresses.
+func localSecrets() (*core.SecretsStore, error) {
+	base, err := defaultTenantBase()
+	if err != nil {
+		return nil, err
+	}
+	return core.LoadSecretsFrom(filepath.Join(base, "secrets.json"))
+}
+
+// localPackageManager returns a PackageManager bound to the default tenant's
+// BaseDir so CLI commands see the same packages the daemon does. CLI
+// commands that touch packages (list/info/config/install/uninstall) MUST go
+// through this helper — the bare `core.NewPackageManager` is baseDir-empty
+// and only finds packages at the legacy path, which has been wrong since
+// the multi-tenant migration.
+func localPackageManager() (*core.PackageManager, error) {
+	secrets, err := localSecrets()
+	if err != nil {
+		return nil, err
+	}
+	base, err := defaultTenantBase()
+	if err != nil {
+		return nil, err
+	}
+	return core.NewPackageManagerFrom(base, secrets), nil
 }
 
 // registryClient creates a RegistryClient from config, falling back to DefaultRegistryURL.
