@@ -159,8 +159,12 @@ type PermissionPolicy struct {
 }
 
 // DefaultRequireApproval is used when RequireApproval is nil (not configured).
+// Skill.installFromRegistry is gated by default — installing a third-party
+// skill on the fly is the most common supply-chain attack surface for an
+// auto-discovering agent, so the user must always approve the first install.
 var DefaultRequireApproval = []string{
 	"Shell.exec", "Git.add", "Git.commit", "Git.push", "Git.pull", "File.delete",
+	"Skill.installFromRegistry",
 }
 
 // LLMConfig holds the primary LLM provider settings.
