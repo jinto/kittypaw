@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // Cross-tenant read errors. These are sentinels so the sandbox (and
@@ -96,10 +95,8 @@ func ValidateSharedReadPath(ownerCfg *Config, ownerBaseDir, readerTenantID, reqP
 	if err != nil {
 		return "", fmt.Errorf("lstat %s: %w", realFile, err)
 	}
-	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
-		if stat.Nlink > 1 {
-			return "", ErrCrossTenantHardlink
-		}
+	if isMultiHardlink(info.Sys()) {
+		return "", ErrCrossTenantHardlink
 	}
 
 	return realFile, nil
