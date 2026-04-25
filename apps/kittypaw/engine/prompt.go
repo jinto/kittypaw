@@ -47,19 +47,30 @@ const ExecutionBlock = `## Rules
 
 // QualityBlock enforces tool execution, result quality, and code-level persistence.
 const QualityBlock = `## Execution quality
-For ANY request involving external information, generate code that calls tools. Never answer from memory.
+ALWAYS call tools for external info — never answer from memory or return raw tool output.
 
-WRONG: return "AI is advancing rapidly..."  ← no tool call
-RIGHT:
+WRONG:
+- return "..."                          // no tool call
+- return r.results.map(...).join(...)   // raw search dump
+- return Web.fetch(url).markdown        // raw page dump
+
+RIGHT — search → synthesize:
 const r = Web.search("오늘 주요 뉴스 한국 2026");
-if (r.error || !r.results || r.results.length === 0) return "검색 결과가 없습니다.";
-return r.results.slice(0, 5).map(x => "• " + x.title + "\n  " + x.snippet).join("\n\n");
+if (r.error || !r.results?.length) return "검색 결과가 없습니다.";
+const top = r.results.slice(0,5).map((x,i)=>"["+(i+1)+"] "+x.title+" — "+x.snippet+" ("+x.url+")").join("\n");
+return Llm.generate("검색 결과를 사용자 질문에 맞춰 한국어 1-3문단으로 종합. 결과 안 사실만.\n\n"+top).text;
 
-Web.search returns {results: [...], error?: string, warning?: string}. Always guard r.error/r.results before use.
-If r.warning exists, append it at the end of your response so the user knows about backend issues.
+RIGHT — fetch → synthesize:
+const r = Web.fetch(url);
+if (r.status >= 400) return "페이지 가져오기 실패.";
+return Llm.generate("페이지에서 답을 1-3문단으로 정리. 광고/메뉴 무시.\n\n"+(r.markdown||r.text||"").slice(0,3000)).text;
 
-If results are insufficient: fetch detail URLs, try alternative keywords, or combine multiple tool calls.
-If all tool calls fail, return "검색 결과를 가져오지 못했습니다" — never fabricate.`
+Contracts:
+- Web.search → {results:[{title,url,snippet}], error?, warning?}
+- Web.fetch  → {text, markdown, title, status}. NEVER return raw.
+- Llm.generate → {text, model, usage}. Use .text.
+
+Empty: alt keywords / fetch detail. All-fail: "검색 결과를 가져오지 못했습니다" — never fabricate.`
 
 // SkillCreationBlock guides when and how to create scheduled or one-shot skills.
 const SkillCreationBlock = `## When to create a skill
@@ -286,6 +297,16 @@ func buildSkillsSection(baseDir string) string {
 			lines = append(lines, runnable...)
 		}
 	}
+
+	// Auto-discovery guidance — install-state independent. If nothing above
+	// matches, the agent can search the public registry and ask the user to
+	// approve installing a missing skill in the same conversation turn.
+	lines = append(lines, "\n### Skill auto-discovery (when no installed skill matches)")
+	lines = append(lines, "If neither an installed skill nor a built-in global matches the user's request, "+
+		"call Skill.search(\"keywords\") to look up the public registry. "+
+		"If a relevant entry is returned, call Skill.installFromRegistry(\"id\") — "+
+		"the system asks the user for approval before downloading. "+
+		"On success, call Skill.run(\"id\") immediately and return its .output to answer the user.")
 
 	return strings.Join(lines, "\n")
 }

@@ -95,6 +95,8 @@ var SkillRegistry = []SkillMeta{
 		{Name: "create", Signature: "Skill.create(name, desc, code, triggerType, schedule)"},
 		{Name: "disable", Signature: "Skill.disable(name)"},
 		{Name: "rollback", Signature: "Skill.rollback(name)"},
+		{Name: "search", Signature: "Skill.search(query) — search the public registry for installable skills (returns top matches)"},
+		{Name: "installFromRegistry", Signature: "Skill.installFromRegistry(id) — install a skill from the registry by id; the system asks the user to approve before downloading"},
 	}},
 	{Name: "Tts", Methods: []SkillMethodMeta{
 		{Name: "speak", Signature: "Tts.speak(text) — returns {path}"},
