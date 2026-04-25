@@ -1149,9 +1149,93 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 		}
 		return jsonResult(map[string]any{"success": true})
 
+	case "search":
+		if len(call.Args) == 0 {
+			return jsonResult(map[string]any{"error": "query required"})
+		}
+		var query string
+		_ = json.Unmarshal(call.Args[0], &query)
+		return executeSkillSearch(query, s)
+
+	case "installFromRegistry":
+		if len(call.Args) == 0 {
+			return jsonResult(map[string]any{"error": "id required"})
+		}
+		var id string
+		_ = json.Unmarshal(call.Args[0], &id)
+		return executeSkillInstallRegistry(ctx, id, s)
+
 	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Skill method: %s", call.Method)})
 	}
+}
+
+// executeSkillSearch wraps RegistryClient.SearchEntries; returns top 5
+// matches in a stable shape the LLM can scan and pick from.
+func executeSkillSearch(query string, s *Session) (string, error) {
+	rc, err := newRegistryClient(s.Config)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("registry: %v", err)})
+	}
+	entries, err := rc.SearchEntries(query)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("search: %v", err)})
+	}
+	if len(entries) > 5 {
+		entries = entries[:5]
+	}
+	results := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		results = append(results, map[string]any{
+			"id":          e.ID,
+			"name":        e.Name,
+			"version":     e.Version,
+			"description": e.Description,
+			"author":      e.Author,
+		})
+	}
+	return jsonResult(map[string]any{"results": results})
+}
+
+// executeSkillInstallRegistry installs a skill from the registry. Permission
+// gating happens earlier in resolveSkillCall — DefaultRequireApproval lists
+// "Skill.installFromRegistry", so the user is asked before this runs.
+func executeSkillInstallRegistry(_ context.Context, id string, s *Session) (string, error) {
+	if s.PackageManager == nil {
+		return jsonResult(map[string]any{"error": "package manager not configured"})
+	}
+	rc, err := newRegistryClient(s.Config)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("registry: %v", err)})
+	}
+	entry, err := rc.FindEntry(id)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("find: %v", err)})
+	}
+	if entry == nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("skill %q not found in registry", id)})
+	}
+	pkg, err := s.PackageManager.InstallFromRegistry(rc, *entry)
+	if err != nil {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("install: %v", err)})
+	}
+	return jsonResult(map[string]any{
+		"success":     true,
+		"id":          pkg.Meta.ID,
+		"name":        pkg.Meta.Name,
+		"version":     pkg.Meta.Version,
+		"description": pkg.Meta.Description,
+	})
+}
+
+// newRegistryClient constructs a RegistryClient from the session config,
+// falling back to DefaultRegistryURL when no override is set.
+func newRegistryClient(cfg *core.Config) (*core.RegistryClient, error) {
+	url := core.DefaultRegistryURL
+	if cfg != nil && cfg.Registry.URL != "" {
+		url = cfg.Registry.URL
+	}
+	return core.NewRegistryClient(url)
 }
 
 // runSkillOrPackage executes a user-created skill or installed package by name.
