@@ -202,14 +202,21 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	}
 
 	kittypawDir := filepath.Join(home, ".kittypaw")
-	for _, dir := range []string{kittypawDir, filepath.Join(kittypawDir, "data"), filepath.Join(kittypawDir, "skills")} {
+	cfgPath, err := core.ConfigPath()
+	if err != nil {
+		return err
+	}
+	tenantDir := filepath.Dir(cfgPath)
+	for _, dir := range []string{
+		kittypawDir,
+		filepath.Join(kittypawDir, "data"),
+		filepath.Join(kittypawDir, "skills"),
+		tenantDir,
+	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
-
-	// Load existing config (each wizard step decides keep/reconfigure independently).
-	cfgPath := filepath.Join(kittypawDir, "config.toml")
 	var existing *core.Config
 	if cfg, err := core.LoadConfig(cfgPath); err == nil {
 		existing = cfg
@@ -239,10 +246,9 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		}
 	}
 
-	// Save API server URL to secrets for package source bindings.
+	// Save API server URL to per-tenant secrets for package source bindings.
 	if result.APIServerURL != "" {
-		secretsPath := filepath.Join(kittypawDir, "secrets.json")
-		if secrets, err := core.LoadSecretsFrom(secretsPath); err == nil {
+		if secrets, err := core.LoadTenantSecrets(core.DefaultTenantID); err == nil {
 			_ = secrets.Set("kittypaw-api", "api_url", result.APIServerURL)
 		}
 	}
@@ -744,7 +750,7 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			// Otherwise treat as a registry package ID.
-			secrets, err := core.LoadSecrets()
+			secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
 			if err != nil {
 				return err
 			}
@@ -2051,21 +2057,6 @@ func defaultTenantBase() (string, error) {
 	return cfgDir, nil
 }
 
-// localSecrets loads the secrets store the default tenant sees. The daemon
-// already does this on its session via core.LoadSecretsFrom(t.SecretsPath());
-// this helper makes CLI commands consistent with that view. Callers that
-// need GLOBAL secrets — login tokens managed by APITokenManager, which are
-// intentionally cross-tenant for OAuth-once-per-host UX — should keep using
-// core.LoadSecrets() directly. See the localPackageManager docstring for
-// background on the migration leftover this addresses.
-func localSecrets() (*core.SecretsStore, error) {
-	base, err := defaultTenantBase()
-	if err != nil {
-		return nil, err
-	}
-	return core.LoadSecretsFrom(filepath.Join(base, "secrets.json"))
-}
-
 // localPackageManager returns a PackageManager bound to the default tenant's
 // BaseDir so CLI commands see the same packages the daemon does. CLI
 // commands that touch packages (list/info/config/install/uninstall) MUST go
@@ -2073,7 +2064,7 @@ func localSecrets() (*core.SecretsStore, error) {
 // and only finds packages at the legacy path, which has been wrong since
 // the multi-tenant migration.
 func localPackageManager() (*core.PackageManager, error) {
-	secrets, err := localSecrets()
+	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
 	if err != nil {
 		return nil, err
 	}

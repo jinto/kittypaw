@@ -31,14 +31,15 @@ func TestAutoEntryNoRace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	kpDir := filepath.Join(home, ".kittypaw")
-	if err := os.MkdirAll(kpDir, 0o755); err != nil {
+	tenantCfgDir := filepath.Join(kpDir, "tenants", core.DefaultTenantID)
+	if err := os.MkdirAll(tenantCfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	cfg := core.DefaultConfig()
 	cfg.LLM.Provider = "anthropic"
 	cfg.LLM.APIKey = "test"
 	cfg.LLM.Model = "claude-test"
-	if err := core.WriteConfigAtomic(&cfg, filepath.Join(kpDir, "config.toml")); err != nil {
+	if err := core.WriteConfigAtomic(&cfg, filepath.Join(tenantCfgDir, "config.toml")); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

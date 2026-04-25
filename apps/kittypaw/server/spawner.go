@@ -176,8 +176,8 @@ func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
 
-	// Inject Kakao relay WS URL from secrets into channel configs.
-	core.InjectKakaoWSURL(configs)
+	// Inject Kakao relay WS URL from the tenant's per-tenant secrets into channel configs.
+	core.InjectKakaoWSURL(tenantID, configs)
 
 	// Build desired map keyed by channel type, filtering out WebSocket
 	// channels.

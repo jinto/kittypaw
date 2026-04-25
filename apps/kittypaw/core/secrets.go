@@ -19,14 +19,45 @@ type SecretsStore struct {
 	data map[string]map[string]string // package_id → key → value
 }
 
-// LoadSecrets reads the secrets file from the default path.
-// Returns an empty store if the file does not exist.
+// DefaultTenantID is the tenant ID used by single-user CLI flows
+// (kittypaw login, kittypaw setup, Kakao wizard). Plan 2's --user flag
+// will replace literal references at call sites.
+const DefaultTenantID = "default"
+
+// LoadSecrets reads the global secrets file. Retained for migration
+// tooling; production code paths now use LoadTenantSecrets so that
+// CLI writes and daemon reads target the same per-tenant store.
+//
+// Deprecated: use LoadTenantSecrets. The old "OAuth-once-per-host"
+// global model was retired so each tenant on a shared host can have
+// its own credentials.
 func LoadSecrets() (*SecretsStore, error) {
 	dir, err := ConfigDir()
 	if err != nil {
 		return nil, err
 	}
 	return LoadSecretsFrom(filepath.Join(dir, "secrets.json"))
+}
+
+// LoadTenantSecrets returns the SecretsStore for the named tenant
+// (~/.kittypaw/tenants/<tenantID>/secrets.json). Creates the parent
+// directory (mode 0o700) so the first Set() after a fresh wipe doesn't
+// fail with ENOENT. Validates tenantID to refuse path traversal even
+// though every current caller passes a hardcoded literal — Plan 2 will
+// wire this to a `--user` flag and the helper must be self-defending.
+func LoadTenantSecrets(tenantID string) (*SecretsStore, error) {
+	if err := ValidateTenantID(tenantID); err != nil {
+		return nil, fmt.Errorf("tenant id: %w", err)
+	}
+	dir, err := ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	tenantDir := filepath.Join(dir, "tenants", tenantID)
+	if err := os.MkdirAll(tenantDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create tenant secrets dir: %w", err)
+	}
+	return LoadSecretsFrom(filepath.Join(tenantDir, "secrets.json"))
 }
 
 // LoadSecretsFrom reads secrets from a specific path.

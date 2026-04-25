@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -243,5 +245,50 @@ func TestAPITokenManager_ClearTokens(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("expected empty after clear, got %q", got)
+	}
+}
+
+// TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip pins the contract
+// that a login flow's write (per-tenant secrets) is visible to a
+// separately constructed APITokenManager reading from the same
+// per-tenant store — the inverse of the bug where login wrote globally
+// and the daemon read per-tenant. The asymmetry guard asserts no global
+// secrets file is produced.
+func TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	apiURL := "http://localhost:8080"
+	validToken := makeJWT(time.Now().Add(10 * time.Minute).Unix())
+
+	// Login simulation — writer side.
+	writerSecrets, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatalf("login-side LoadTenantSecrets: %v", err)
+	}
+	writerMgr := NewAPITokenManager("", writerSecrets)
+	if err := writerMgr.SaveTokens(apiURL, validToken, "REFRESH"); err != nil {
+		t.Fatalf("SaveTokens: %v", err)
+	}
+
+	// Daemon simulation — independently open the same per-tenant store.
+	readerSecrets, err := LoadTenantSecrets("default")
+	if err != nil {
+		t.Fatalf("daemon-side LoadTenantSecrets: %v", err)
+	}
+	readerMgr := NewAPITokenManager("", readerSecrets)
+
+	got, err := readerMgr.LoadAccessToken(apiURL)
+	if err != nil {
+		t.Fatalf("LoadAccessToken: %v", err)
+	}
+	if got != validToken {
+		t.Errorf("daemon-side token = %q, want %q", got, validToken)
+	}
+
+	// Asymmetry guard: a global secrets.json must NOT have been created.
+	globalPath := filepath.Join(root, "secrets.json")
+	if _, err := os.Stat(globalPath); err == nil {
+		t.Fatal("global secrets.json must not exist — write should be per-tenant only")
 	}
 }
