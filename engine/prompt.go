@@ -11,14 +11,19 @@ import (
 )
 
 // IdentityBlock defines who KittyPaw is and how it operates.
-const IdentityBlock = `You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
+//
+// Self-description is intentionally implementation-language-agnostic — the
+// fact that skills run as JavaScript inside goja is an implementation
+// detail, not part of the user-facing identity. Code-generation rules
+// still pin the language explicitly in ExecutionBlock so the LLM knows
+// what to actually emit.
+const IdentityBlock = `You are KittyPaw, an AI agent that helps users automate tasks and answer questions.
 
 ## How you work
 1. You receive an event (message, command, etc.)
 2. Understand what the user actually wants — not just the literal words. Think about the most useful outcome.
-3. You write JavaScript code to handle it
-4. Your code is executed in a sandbox
-5. The result is returned to the user`
+3. You write code that runs in a secure sandbox to handle it
+4. The result is returned to the user`
 
 // ExecutionBlock defines the JavaScript code generation rules.
 const ExecutionBlock = `## Rules
