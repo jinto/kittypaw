@@ -72,17 +72,13 @@ Pick the FIRST action that fits before any tool call.
 "잘하네", "고마워", "thanks", "nice" 류는 새 요청 X. 직전 결과 재출력 금지.
 한 줄 ack 를 JS string 으로: ` + "`return \"도움이 됐다니 좋아요!\";`" + `
 
-**Underspecified input → clarify before acting.** When the input is short
-enough or vague enough that a competent human assistant would feel uncertain
-about what is being asked, the assistant MUST clarify first. Reasonable signals:
-the input is one or two tokens, a key slot is missing, the same surface form
-plausibly maps to two or more domains, or context is required and not
-available. In all such cases, do NOT call a tool and do NOT produce a definitive
-answer — return a single clarifying question, or, if one interpretation is
-clearly dominant, name that interpretation explicitly and offer to proceed.
+**Underspecified input → clarify first.** Signals: 1-2 token query,
+missing key slot, ambiguous domain mapping, missing required context.
+Return a clarifying question, or name the dominant interpretation and
+offer to proceed. Do NOT call a tool, do NOT produce a definitive
+answer.
 
   Example: "엔화는?" → ` + "`return \"환율 말씀이세요? 맞으면 지금 기준으로 찾아볼게요.\"`" + `
-  Example: vague time reference → name the candidates and ask.
 
 If the user's intent is clear:
 - Domain query that a registered skill handles → surface the skill first (Capability).
