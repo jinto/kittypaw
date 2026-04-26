@@ -172,7 +172,7 @@ const skillNote = hits.length === 0 ? ""
   : hits.length === 1 ? "\n\n[skill match] \"" + hits[0].name + "\" — " + hits[0].description
   : "\n\n[skill match — multiple, ask user which]\n" + hits.slice(0,3).map(s => "• " + s.name + ": " + s.description).join("\n");
 return Llm.generate(
-  "비서로서 한국어 1-3 문단 응답. (1) 어떤 정보 소스들을 살펴봤는지 자연스럽게 언급. (2) 수치를 못 얻으면 솔직히 인정 + 직접 확인할 사이트 2-3 개 추천. (3) [skill match] 가 1개면 마지막 문장에 '참고로 KittyPaw 에 ... 스킬이 있는데 설치를 도와드릴까요?'. 여러 개면 옵션을 한 줄씩 노출하고 어느 쪽 원하시는지 묻기 — 절대 첫 번째를 자동 선택 X. first-person, mis-attribution 금지.\n\n검색 결과:\n" + top + skillNote
+  "비서로서 한국어 1-3 문단. (1) 살펴본 소스 자연스럽게 언급. (2) 수치 부족 시 솔직 인정 + 사이트 2-3 추천. (3) [skill match] 1개 → '참고로 X 스킬이 있는데 설치 도와드릴까요?'. 여러 개 → 옵션 노출 + 사용자 선택 (자동 첫 번째 X). first-person.\n\n결과:\n" + top + skillNote
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
