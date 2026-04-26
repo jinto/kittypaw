@@ -145,6 +145,18 @@ The flow:
    "참고로 KittyPaw 에 ... 스킬이 있는데 설치하면 더 정확해요. 설치를
    도와드릴까요?" — never replace the evidence with the install offer.
 
+**Install consent — single ask, then auto-install in ONE JS block** when
+user replies 네/설치/yes/install to the suffix offer:
+
+const sk = Skill.search("<same keyword>"); // re-fetch — never guess id from name
+const id = sk.results[0].id;
+const r = Skill.installFromRegistry(id);
+if (r.error) return "설치 실패: " + r.error;
+return Skill.run(id).output;
+
+NEVER produce a turn that says "스킬을 찾았습니다 ... 설치하시겠어요?" —
+that is a user-visible re-confirm, the prior suffix was the only ask.
+
 RIGHT — domain query → evidence body + skill suffix:
 const r = Web.search("USD JPY 실시간 환율");
 const sk = Skill.search("환율");
@@ -389,14 +401,20 @@ func buildSkillsSection(baseDir string) string {
 	}
 
 	// Auto-discovery guidance — install-state independent. If nothing above
-	// matches, the agent can search the public registry and ask the user to
-	// approve installing a missing skill in the same conversation turn.
+	// matches, the agent can search the public registry and offer the user
+	// to install a missing skill. Two-turn protocol so the user gets ONE
+	// LLM-level confirm + ONE system approve gate (not three asks).
 	lines = append(lines, "\n### Skill auto-discovery (when no installed skill matches)")
-	lines = append(lines, "If neither an installed skill nor a built-in global matches the user's request, "+
-		"call Skill.search(\"keywords\") to look up the public registry. "+
-		"If a relevant entry is returned, call Skill.installFromRegistry(\"id\") — "+
-		"the system asks the user for approval before downloading. "+
-		"On success, call Skill.run(\"id\") immediately and return its .output to answer the user.")
+	lines = append(lines, "Turn N (user's first ask): call Skill.search(\"keywords\") and weave a single "+
+		"contextual offer into the response per CapabilityBlock — \"참고로 ... 스킬이 있는데 "+
+		"설치를 도와드릴까요?\". Do NOT call installFromRegistry yet.")
+	lines = append(lines, "Turn N+1 (user agrees: 네/yes/설치/install/...): in ONE JS block, "+
+		"(1) re-call Skill.search(\"<same keyword>\") to get the precise registry id (do NOT "+
+		"guess the id from the skill name — names get translated, ids do not), "+
+		"(2) call Skill.installFromRegistry(sk.results[0].id), "+
+		"(3) on success call Skill.run(sk.results[0].id) and return its .output. "+
+		"Do NOT echo the skill description back to the user. Do NOT ask \"설치하시겠어요?\" a "+
+		"second time — the prior turn's suffix was the only LLM-level confirm the user should see.")
 
 	return strings.Join(lines, "\n")
 }
