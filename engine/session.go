@@ -340,7 +340,8 @@ observeLoop:
 					lastError = err.Error()
 					continue
 				}
-				return "", fmt.Errorf("LLM error after %d retries: %w", maxRetries, err)
+				slog.Error("LLM call failed after retries", "agent_id", agentID, "retries", maxRetries, "raw_error", err.Error())
+				return "", fmt.Errorf("지금 답변을 만들지 못했어요. 잠시 후 다시 한 번 말씀해 주시겠어요?")
 			}
 
 			code := resp.Content
@@ -455,7 +456,11 @@ observeLoop:
 	if errMsg == "" {
 		errMsg = "unknown error"
 	}
-	slog.Info("retries exhausted", "phase", core.PhaseFinish, "agent_id", agentID)
+	slog.Info("retries exhausted",
+		"phase", core.PhaseFinish,
+		"agent_id", agentID,
+		"raw_error", errMsg,
+	)
 
 	assistantTurn := core.ConversationTurn{
 		Role:      core.RoleAssistant,
@@ -472,7 +477,11 @@ observeLoop:
 
 	s.recordExecution(agentID, eventText, errMsg, nil, loopStart, maxRetries, false)
 
-	return "", fmt.Errorf("code execution failed after %d retries: %s", maxRetries, errMsg)
+	// User-facing fallback: the raw error (SyntaxError, undefined ident,
+	// etc.) is internal noise that doesn't help the user act. Log captures
+	// the technical detail; the chat surface stays in the assistant's
+	// voice.
+	return "", fmt.Errorf("지금 답변을 만들지 못했어요. 잠시 후 다시 한 번 말씀해 주시겠어요?")
 }
 
 func (s *Session) recordExecution(agentID, input, output string, resp *llm.Response, start time.Time, retries int, success bool) {
