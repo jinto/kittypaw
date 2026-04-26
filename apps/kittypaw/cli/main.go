@@ -504,7 +504,7 @@ func runChat(_ *cobra.Command, args []string) error {
 				},
 				OnError: func(msg string) {
 					spin.Stop()
-					fmt.Fprintf(os.Stderr, "error: %s\n\n", msg)
+					fmt.Fprintf(os.Stderr, "paw> %s\n\n", msg)
 				},
 			}
 			sendErr = cs.Send(text, opts)
