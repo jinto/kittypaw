@@ -1360,12 +1360,25 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 	}
 
 	// Try installed package.
+	notFoundResult := func(detail string) (string, error) {
+		errStr := fmt.Sprintf("skill or package %q not found", name)
+		if detail != "" {
+			errStr = fmt.Sprintf("%s: %s", errStr, detail)
+		}
+		return jsonResult(map[string]any{
+			"error": errStr,
+			// LLM-generated JS often does `Skill.run(id).output` without
+			// checking .error, so the .output field has to carry the
+			// actionable message on its own.
+			"output": fmt.Sprintf("'%s' 스킬은 아직 설치되어 있지 않아요. 먼저 Skill.installFromRegistry(\"%s\") 로 설치한 뒤 사용해 주세요.", name, name),
+		})
+	}
 	if s.PackageManager == nil {
-		return jsonResult(map[string]any{"error": fmt.Sprintf("skill or package %q not found", name)})
+		return notFoundResult("")
 	}
 	pkg, code, err := s.PackageManager.LoadPackage(name)
 	if err != nil {
-		return jsonResult(map[string]any{"error": fmt.Sprintf("skill or package %q not found: %v", name, err)})
+		return notFoundResult(err.Error())
 	}
 
 	// Resolve config (secrets, defaults, source bindings).
