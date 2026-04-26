@@ -176,10 +176,7 @@ return Llm.generate(
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
-Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.
-
-**Browse intent — empty query.** "어떤 스킬", "추천", "browse" → ` + "`Skill.search(\"\")`" + `
-returns up to 30 entries. Do NOT pass "all"/"list" — those are substrings.`
+Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.`
 
 // SkillCreationBlock guides when and how to create scheduled or one-shot skills.
 const SkillCreationBlock = `## When to create a skill
