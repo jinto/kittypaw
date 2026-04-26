@@ -488,34 +488,40 @@ func runChat(_ *cobra.Command, args []string) error {
 			continue
 		}
 
+		// sendOnce drives one Send attempt against the current ChatSession.
+		sendOnce := func() (gotResult bool, sendErr error) {
+			opts := client.ChatOptions{
+				OnToken: func(_ string) {},
+				OnDone: func(result string, _ *int64) {
+					gotResult = true
+					fmt.Printf("paw> %s\n\n", result)
+				},
+				OnError: func(msg string) {
+					fmt.Fprintf(os.Stderr, "error: %s\n\n", msg)
+				},
+			}
+			sendErr = cs.Send(text, opts)
+			return
+		}
+
 		spin := newSpinner("paw> ")
 		spin.Start()
-		var gotResult bool
-		sendErr := cs.Send(text, client.ChatOptions{
-			OnToken: func(_ string) {},
-			OnDone: func(result string, _ *int64) {
+		gotResult, sendErr := sendOnce()
+		// Silent reconnect on EOF: server may have rotated the conn between
+		// turns. We swallow the disconnect, redial, and replay the same input
+		// once. Only surface noise to the user if the retry also fails.
+		if sendErr != nil && !gotResult && strings.Contains(sendErr.Error(), "EOF") {
+			cs.Close()
+			cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
+			if err != nil {
 				spin.Stop()
-				gotResult = true
-				fmt.Printf("paw> %s\n\n", result)
-			},
-			OnError: func(msg string) {
-				spin.Stop()
-				fmt.Fprintf(os.Stderr, "error: %s\n\n", msg)
-			},
-		})
+				return fmt.Errorf("재연결 실패: %w", err)
+			}
+			gotResult, sendErr = sendOnce()
+		}
 		spin.Stop()
 		if sendErr != nil && !gotResult {
-			if strings.Contains(sendErr.Error(), "EOF") {
-				fmt.Fprintf(os.Stderr, "서버 연결이 끊어졌습니다. 재연결 중...\n")
-				cs.Close()
-				cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
-				if err != nil {
-					return fmt.Errorf("재연결 실패: %w", err)
-				}
-				fmt.Fprintf(os.Stderr, "재연결 완료. 메시지가 전송되지 않았을 수 있습니다. 다시 입력해주세요.\n\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
-			}
+			fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
 		}
 	}
 
