@@ -16,6 +16,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EVAL_DIR="$ROOT_DIR/eval/secretary_smoke"
 FIX_DIR="$EVAL_DIR/fixtures"
 OUT_DIR="$EVAL_DIR/results"
+
+# Single-instance lock (prevents the multi-runner race we hit during the
+# first eval pass — multiple bash run.sh writing to results/ simultaneously
+# corrupted the per-category jsonl and the summary).
+#
+# `mkdir` is atomic across POSIX, macOS-friendly (flock is Linux-only).
+LOCK_DIR="$EVAL_DIR/.runner.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "Another runner already holds $LOCK_DIR; aborting." >&2
+  exit 2
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 KITTY_BIN="${KITTY_BIN:-$ROOT_DIR/bin/kittypaw}"
 JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
 
@@ -30,34 +42,12 @@ if [[ -z "$ANTHROPIC_API_KEY" ]]; then
   exit 1
 fi
 
-# Strip ANSI + spinner glyphs + REPL prompts from kittypaw chat 1-shot output.
-# kittypaw chat <text> prints: header, then a series of "paw> <spinner>" updates,
-# then the final response on a new line. We grab the last meaningful body.
+# Strip ANSI + spinner glyphs + REPL prompts from `kittypaw chat <text>`
+# output, leaving only the model's reply. The script is in a sibling file
+# because heredoc-as-stdin and pipe-as-stdin collide for `python3 - <<EOF`.
+CLEAN_CHAT_PY="$EVAL_DIR/clean_chat.py"
 strip_chat_output() {
-  python3 - <<'PY'
-import re, sys
-raw = sys.stdin.read()
-# Drop ANSI escape sequences.
-raw = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', raw)
-# Drop carriage-return overwrites.
-raw = raw.replace('\r', '\n')
-lines = [l.strip() for l in raw.split('\n') if l.strip()]
-# Skip the header line (starts with "KittyPaw chat").
-filtered = []
-for l in lines:
-    if l.startswith('KittyPaw chat'):
-        continue
-    if l == 'you>' or l.startswith('you>'):
-        continue
-    # Strip leading spinner glyphs and "paw>" prefix.
-    l = re.sub(r'^(paw>\s*)?[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+', '', l)
-    l = re.sub(r'^paw>\s*', '', l)
-    if l:
-        filtered.append(l)
-# Drop the final ⚠ warning line that the CLI sometimes emits.
-filtered = [l for l in filtered if not l.startswith('⚠')]
-print('\n'.join(filtered))
-PY
+  python3 "$CLEAN_CHAT_PY"
 }
 
 # Substring antipattern check. Returns 0 if any antipattern matched.
