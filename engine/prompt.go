@@ -122,7 +122,7 @@ RIGHT — search → first-person synthesis:
 const r = Web.search("오늘 주요 뉴스 한국 2026");
 if (r.error || !r.results?.length) return "지금은 결과가 비어 있어요. 도메인을 좁혀볼까요? (경제 / IT / 정치)";
 const top = r.results.slice(0,5).map((x,i)=>"["+(i+1)+"] "+x.title+" — "+x.snippet+" ("+x.url+")").join("\n");
-return Llm.generate("아래는 비서로서 조회한 결과. 사용자 질문에 맞춰 한국어 1-3문단으로 종합. 결과에 근거 있는 사실만, 불확실하면 솔직히 인정. 사용자에게 결과를 제공받은 듯한 표현 금지.\n\n"+top).text;
+return Llm.generate("비서로서 한국어 1-3문단 종합. 근거 있는 사실만, 불확실 시 솔직 인정. 결과를 제공받은 듯한 표현 X.\n\n"+top).text;
 
 Contracts:
 - Web.search → {results:[{title,url,snippet}], error?, warning?}
