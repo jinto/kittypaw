@@ -305,7 +305,7 @@ func TestContentBlockMarshal(t *testing.T) {
 			}
 			got := string(raw)
 			if !strings.Contains(got, `"input":{}`) {
-				t.Errorf("tool_use with empty/nil input must serialise input as {}, got: %s", got)
+				t.Errorf("tool_use with empty/nil input must serialize input as {}, got: %s", got)
 			}
 		}
 	})

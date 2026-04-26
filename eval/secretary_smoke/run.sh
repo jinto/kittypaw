@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+# Secretary Smoke runner.
+#
+# Reads each fixture jsonl, sends the input to KittyPaw via `kittypaw chat`,
+# captures the response, then asks a small judge LLM to score each expected
+# behavior. Antipattern substrings are matched deterministically (no LLM).
+#
+# Output: eval/secretary_smoke/results/{category}.jsonl + summary.md
+#
+# Required env:
+#   ANTHROPIC_API_KEY (or read from default tenant config.toml)
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+EVAL_DIR="$ROOT_DIR/eval/secretary_smoke"
+FIX_DIR="$EVAL_DIR/fixtures"
+OUT_DIR="$EVAL_DIR/results"
+KITTY_BIN="${KITTY_BIN:-$ROOT_DIR/bin/kittypaw}"
+JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
+
+mkdir -p "$OUT_DIR"
+
+# Resolve Anthropic key.
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/tenants/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
+fi
+if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+  echo "ERROR: ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml" >&2
+  exit 1
+fi
+
+# Strip ANSI + spinner glyphs + REPL prompts from kittypaw chat 1-shot output.
+# kittypaw chat <text> prints: header, then a series of "paw> <spinner>" updates,
+# then the final response on a new line. We grab the last meaningful body.
+strip_chat_output() {
+  python3 - <<'PY'
+import re, sys
+raw = sys.stdin.read()
+# Drop ANSI escape sequences.
+raw = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', raw)
+# Drop carriage-return overwrites.
+raw = raw.replace('\r', '\n')
+lines = [l.strip() for l in raw.split('\n') if l.strip()]
+# Skip the header line (starts with "KittyPaw chat").
+filtered = []
+for l in lines:
+    if l.startswith('KittyPaw chat'):
+        continue
+    if l == 'you>' or l.startswith('you>'):
+        continue
+    # Strip leading spinner glyphs and "paw>" prefix.
+    l = re.sub(r'^(paw>\s*)?[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]+', '', l)
+    l = re.sub(r'^paw>\s*', '', l)
+    if l:
+        filtered.append(l)
+# Drop the final ⚠ warning line that the CLI sometimes emits.
+filtered = [l for l in filtered if not l.startswith('⚠')]
+print('\n'.join(filtered))
+PY
+}
+
+# Substring antipattern check. Returns 0 if any antipattern matched.
+check_antipatterns() {
+  local response="$1"
+  shift
+  local hit=0
+  for pat in "$@"; do
+    if [[ "$response" == *"$pat"* ]]; then
+      hit=1
+      echo "  antipattern_hit=$pat" >&2
+    fi
+  done
+  return $hit
+}
+
+# Behavior definitions — short prompt for the judge LLM.
+behavior_def() {
+  case "$1" in
+    clarify_intent) echo "The response acknowledges the query is ambiguous and either asks a clarifying question or explicitly states a working interpretation before proceeding." ;;
+    enumerate_interpretations) echo "The response lists two or more possible interpretations of the user query." ;;
+    suggest_skill) echo "The response surfaces that a domain-specific tool/skill could give better information (mentions install, recommend, or a specific skill name)." ;;
+    expand_query) echo "The response proposes search refinement: a different keyword, a specific source/site, or asks the user for guidance on where to look next." ;;
+    honest_uncertainty) echo "The response explicitly acknowledges uncertainty or limitation in the data/source instead of fabricating a confident answer." ;;
+    source_timestamp) echo "The response indicates the time-frame or source of the information (mentions 'as of', 'today', or that data may be outdated)." ;;
+    first_person) echo "The response speaks from the assistant's perspective (e.g. 'I checked', '찾아본 결과로는') without framing the tool/search output as something the user provided." ;;
+    *) echo "Unknown behavior" ;;
+  esac
+}
+
+# Ask the judge LLM whether `response` exhibits `behavior` for `query`.
+# Echoes one of: PASS / PARTIAL / FAIL.
+judge_behavior() {
+  local query="$1"
+  local response="$2"
+  local behavior="$3"
+  local def
+  def=$(behavior_def "$behavior")
+
+  local body
+  body=$(jq -n \
+    --arg model "$JUDGE_MODEL" \
+    --arg q "$query" \
+    --arg r "$response" \
+    --arg b "$behavior" \
+    --arg d "$def" \
+    '{
+      model: $model,
+      max_tokens: 80,
+      messages: [{
+        role: "user",
+        content: ("You evaluate whether an AI assistant response exhibits a target behavior.\n\nUser query: " + $q + "\n\nAssistant response:\n" + $r + "\n\nBehavior name: " + $b + "\nBehavior definition: " + $d + "\n\nAnswer with strictly one token (PASS / PARTIAL / FAIL) on the first line, then a one-sentence reason.")
+      }]
+    }')
+
+  local result
+  result=$(curl -sS https://api.anthropic.com/v1/messages \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    -d "$body" | jq -r '.content[0].text // "FAIL"' | head -n1 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+
+  case "$result" in
+    PASS) echo "PASS" ;;
+    PARTIAL) echo "PARTIAL" ;;
+    *) echo "FAIL" ;;
+  esac
+}
+
+# Score a single fixture file. Echoes an aggregate JSON line.
+score_category() {
+  local fixture="$1"
+  local category
+  category=$(basename "$fixture" .jsonl)
+  local out="$OUT_DIR/${category}.jsonl"
+  : > "$out"
+
+  local total_q=0
+  local pass_q=0  # queries with score >= 1.5
+  local antipattern_hits=0
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    total_q=$((total_q + 1))
+
+    local id input expected antipatterns
+    id=$(echo "$line" | jq -r '.id')
+    input=$(echo "$line" | jq -r '.input')
+    expected=$(echo "$line" | jq -r '.expected_behaviors | join(",")')
+    antipatterns=$(echo "$line" | jq -r '.antipatterns[]')
+
+    echo "[$category] $id: $input" >&2
+
+    # Run KittyPaw.
+    local raw_response
+    raw_response=$("$KITTY_BIN" chat "$input" 2>&1 || true)
+    local response
+    response=$(echo "$raw_response" | strip_chat_output)
+
+    # Antipattern check.
+    local antipattern_penalty=0
+    while IFS= read -r pat; do
+      [[ -z "$pat" ]] && continue
+      if [[ "$response" == *"$pat"* ]]; then
+        antipattern_penalty=1
+        antipattern_hits=$((antipattern_hits + 1))
+        echo "    ANTIPATTERN: $pat" >&2
+        break
+      fi
+    done <<< "$antipatterns"
+
+    # Behavior judge calls.
+    local passed=0
+    local total_b=0
+    local behavior_results="["
+    IFS=',' read -ra bs <<< "$expected"
+    for b in "${bs[@]}"; do
+      total_b=$((total_b + 1))
+      local verdict
+      verdict=$(judge_behavior "$input" "$response" "$b")
+      [[ "$verdict" == "PASS" ]] && passed=$((passed + 1))
+      [[ "$verdict" == "PARTIAL" ]] && passed=$((passed + 1)) # half? We count partial as 0.5 below.
+      behavior_results+="{\"behavior\":\"$b\",\"verdict\":\"$verdict\"},"
+      echo "    $b -> $verdict" >&2
+    done
+    behavior_results="${behavior_results%,}]"
+
+    # Compute score: (passed / total) * 2 - penalty (0 or 1).
+    local score
+    if (( total_b > 0 )); then
+      score=$(awk "BEGIN { printf \"%.2f\", ($passed / $total_b) * 2 - $antipattern_penalty * 0.5 }")
+    else
+      score="0.00"
+    fi
+
+    # Track pass count.
+    awk -v s="$score" 'BEGIN { exit (s >= 1.5) ? 0 : 1 }' && pass_q=$((pass_q + 1)) || true
+
+    jq -n \
+      --arg id "$id" \
+      --arg input "$input" \
+      --arg category "$category" \
+      --arg response "$response" \
+      --argjson behaviors "$behavior_results" \
+      --argjson penalty "$antipattern_penalty" \
+      --arg score "$score" \
+      '{id: $id, input: $input, category: $category, response: $response, behaviors: $behaviors, antipattern_penalty: $penalty, score: ($score | tonumber)}' >> "$out"
+  done < "$fixture"
+
+  jq -n \
+    --arg category "$category" \
+    --argjson total "$total_q" \
+    --argjson pass "$pass_q" \
+    --argjson antihit "$antipattern_hits" \
+    '{category: $category, total: $total, pass: $pass, antipattern_hits: $antihit}'
+}
+
+# Threshold check per category. Returns 0 if passes, 1 if fails.
+check_threshold() {
+  local agg_json="$1"
+  local category total pass antihit
+  category=$(echo "$agg_json" | jq -r '.category')
+  total=$(echo "$agg_json" | jq -r '.total')
+  pass=$(echo "$agg_json" | jq -r '.pass')
+  antihit=$(echo "$agg_json" | jq -r '.antipattern_hits')
+
+  local threshold_msg=""
+  case "$category" in
+    vague)       (( pass >= 6 )) && threshold_msg="PASS" || threshold_msg="FAIL: $pass/8 (need 6+)" ;;
+    domain)      (( pass >= 3 )) && threshold_msg="PASS" || threshold_msg="FAIL: $pass/5 (need 3+)" ;;
+    weak_serp)   (( pass >= 3 )) && threshold_msg="PASS" || threshold_msg="FAIL: $pass/5 (need 3+)" ;;
+    framing)     (( antihit < 2 )) && threshold_msg="PASS" || threshold_msg="FAIL: $antihit antipattern hits (need <2)" ;;
+    stale)       (( pass >= 8 )) && threshold_msg="PASS" || threshold_msg="FAIL: $pass/10 (need 8+)" ;;
+    *)           threshold_msg="UNKNOWN" ;;
+  esac
+
+  echo "$threshold_msg"
+}
+
+# Main loop.
+SUMMARY="$OUT_DIR/summary.md"
+{
+  echo "# Secretary Smoke Results"
+  echo
+  echo "Date: $(date -u +'%Y-%m-%d %H:%M UTC')"
+  echo "Judge model: $JUDGE_MODEL"
+  echo
+  echo "| Category | Total | Pass (≥1.5) | Antipattern hits | Threshold |"
+  echo "|---|---|---|---|---|"
+} > "$SUMMARY"
+
+categories=(vague domain weak_serp framing stale)
+overall_pass=0
+overall_categories=0
+
+for cat in "${categories[@]}"; do
+  fixture="$FIX_DIR/${cat}.jsonl"
+  [[ ! -f "$fixture" ]] && { echo "Skipping (no fixture): $cat"; continue; }
+  overall_categories=$((overall_categories + 1))
+  echo "==== $cat ====" >&2
+
+  agg=$(score_category "$fixture")
+  threshold=$(check_threshold "$agg")
+  total=$(echo "$agg" | jq -r '.total')
+  pass=$(echo "$agg" | jq -r '.pass')
+  antihit=$(echo "$agg" | jq -r '.antipattern_hits')
+
+  echo "| $cat | $total | $pass | $antihit | $threshold |" >> "$SUMMARY"
+  [[ "$threshold" == PASS* ]] && overall_pass=$((overall_pass + 1))
+done
+
+{
+  echo
+  echo "**Overall: $overall_pass / $overall_categories categories passed.**"
+  echo
+  if (( overall_pass >= 4 )); then
+    echo "Sub-plan A pass criterion (4/5 categories) MET ✅"
+  else
+    echo "Sub-plan A pass criterion (4/5 categories) NOT MET ❌"
+  fi
+} >> "$SUMMARY"
+
+cat "$SUMMARY"

@@ -893,8 +893,17 @@ func TestExecuteLLM_ToolResultProtocol(t *testing.T) {
 	if toolResult.ToolUseID != toolUse.ID {
 		t.Errorf("tool_result.tool_use_id = %q, want %q (must match preceding tool_use.id)", toolResult.ToolUseID, toolUse.ID)
 	}
-	if toolResult.Content != promptPayload {
-		t.Errorf("tool_result.Content mismatch:\n got: %q\nwant: %q", toolResult.Content, promptPayload)
+	// Phase B reframe: the tool_result content is XML-wrapped for an extra
+	// structural signal. The original payload must still be inside; the
+	// wrapper must surround it; nothing else may leak through.
+	if !strings.Contains(toolResult.Content, promptPayload) {
+		t.Errorf("tool_result.Content lost the original payload\n got: %q\nwant contains: %q", toolResult.Content, promptPayload)
+	}
+	if !strings.Contains(toolResult.Content, "<tool_result") {
+		t.Errorf("tool_result.Content missing opening XML role tag: %q", toolResult.Content)
+	}
+	if !strings.Contains(toolResult.Content, "</tool_result>") {
+		t.Errorf("tool_result.Content missing closing XML role tag: %q", toolResult.Content)
 	}
 	if msgs[2].Content != "" {
 		t.Errorf("msg[2] should carry the payload via ContentBlocks only, got Content=%q", msgs[2].Content)
@@ -907,6 +916,54 @@ func TestExecuteLLM_ToolResultProtocol(t *testing.T) {
 		if strings.Contains(m.Content, promptPayload) {
 			t.Errorf("msg[%d].Content (string) leaks the prompt payload — defeats the tool_result wrap", i)
 		}
+	}
+}
+
+// TestSubLLMPriming_AssistantContract pins the sub-LLM priming user message
+// against the assistant behavior contract — the message must teach the model,
+// in general principle (not specific phrase enumeration), that the upcoming
+// tool_result is the assistant's own observation, not user input. This is
+// the Phase B reframe of the priming after Phase A's protocol fix proved
+// insufficient against Korean honorific priors.
+func TestSubLLMPriming_AssistantContract(t *testing.T) {
+	msgs := buildSubLLMMessages("any prompt")
+	if len(msgs) == 0 || msgs[0].Role != core.RoleUser {
+		t.Fatalf("expected first message to be user-role priming, got: %+v", msgs)
+	}
+	priming := msgs[0].Content
+
+	// General-principle markers (no specific Korean phrase enumeration —
+	// that path collides with priors per R-MVP).
+	requiredMarkers := []string{
+		"비서",           // assistant identity
+		"first person", // first-person framing in English
+		"도구 결과",        // tool result, not user-provided
+		"솔직히",          // honest uncertainty
+	}
+	for _, m := range requiredMarkers {
+		if !strings.Contains(priming, m) {
+			t.Errorf("priming missing required principle marker %q\nfull priming:\n%s", m, priming)
+		}
+	}
+}
+
+// TestSubLLMRoleTagging pins the XML role-tag wrap as a defense-in-depth
+// signal beyond the Anthropic content-block protocol. If the wrap regresses
+// the priors-resistant layer is gone and mis-attribution can re-emerge in
+// languages with strong honorific defaults.
+func TestSubLLMRoleTagging(t *testing.T) {
+	out := wrapSubLLMToolResult("payload-XYZ")
+	if !strings.HasPrefix(out, "<tool_result") {
+		t.Errorf("wrap missing opening tag, got: %q", out)
+	}
+	if !strings.Contains(out, "source=\"framework_context\"") {
+		t.Errorf("wrap missing source attribute, got: %q", out)
+	}
+	if !strings.HasSuffix(out, "</tool_result>") {
+		t.Errorf("wrap missing closing tag, got: %q", out)
+	}
+	if !strings.Contains(out, "payload-XYZ") {
+		t.Errorf("wrap dropped the payload, got: %q", out)
 	}
 }
 
