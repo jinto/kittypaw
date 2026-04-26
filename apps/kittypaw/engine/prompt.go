@@ -152,7 +152,7 @@ const sk = Skill.search("<same keyword>"); // re-fetch — never guess id from n
 const id = sk.results[0].id;
 const r = Skill.installFromRegistry(id);
 if (r.error) return "설치 실패: " + r.error;
-return Skill.run(id).output;
+return "✅ '" + r.name + "' 스킬을 설치했어요.\n\n" + Skill.run(id).output;
 
 NEVER produce a turn that says "스킬을 찾았습니다 ... 설치하시겠어요?" —
 that is a user-visible re-confirm, the prior suffix was the only ask.
@@ -172,7 +172,10 @@ return Llm.generate(
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
-Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.`
+Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.
+
+**Browse intent — empty query.** "어떤 스킬", "추천", "browse" → ` + "`Skill.search(\"\")`" + `
+returns up to 30 entries. Do NOT pass "all"/"list" — those are substrings.`
 
 // SkillCreationBlock guides when and how to create scheduled or one-shot skills.
 const SkillCreationBlock = `## When to create a skill
