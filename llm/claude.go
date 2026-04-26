@@ -115,7 +115,7 @@ func splitSystemMessages(messages []core.LlmMessage) (string, []core.LlmMessage)
 
 	for _, m := range messages {
 		if m.Role == core.RoleSystem {
-			systemParts = append(systemParts, m.Content)
+			systemParts = append(systemParts, systemTextFrom(m))
 		} else {
 			conversation = append(conversation, m)
 		}
@@ -123,16 +123,43 @@ func splitSystemMessages(messages []core.LlmMessage) (string, []core.LlmMessage)
 	return strings.Join(systemParts, "\n\n"), conversation
 }
 
+// systemTextFrom flattens a system message into a plain string. Callers that
+// used the new ContentBlocks shape for a system message (text blocks only) get
+// their text concatenated — anything else is dropped, since system role does
+// not accept tool_use / tool_result on the wire.
+func systemTextFrom(m core.LlmMessage) string {
+	if m.Content != "" {
+		return m.Content
+	}
+	var parts []string
+	for _, b := range m.ContentBlocks {
+		if b.Type == core.BlockTypeText && b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 // claudeMessage is the wire format for a single message in the API request.
+//
+// Content is typed `any` because Anthropic accepts either a string or a
+// content-block array. buildRequestBody picks the shape per LlmMessage.
 type claudeMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage, stream bool) map[string]any {
 	apiMsgs := make([]claudeMessage, len(msgs))
 	for i, m := range msgs {
-		apiMsgs[i] = claudeMessage{Role: string(m.Role), Content: m.Content}
+		// ContentBlocks wins when present so callers that set both (e.g. a
+		// stale Content="" placeholder) still get the structured shape on the
+		// wire. This is the only path for tool_use / tool_result blocks.
+		if len(m.ContentBlocks) > 0 {
+			apiMsgs[i] = claudeMessage{Role: string(m.Role), Content: m.ContentBlocks}
+		} else {
+			apiMsgs[i] = claudeMessage{Role: string(m.Role), Content: m.Content}
+		}
 	}
 
 	body := map[string]any{

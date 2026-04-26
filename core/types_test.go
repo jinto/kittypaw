@@ -241,6 +241,150 @@ func TestChannelTypeToEventType(t *testing.T) {
 	}
 }
 
+// TestContentBlockMarshal verifies each variant of ContentBlock serializes to
+// the Anthropic content-array shape and that "omitempty" hides fields belonging
+// to the other variants. These wire shapes are the contract llm/claude.go
+// relays straight to the API, so any change here must be intentional.
+func TestContentBlockMarshal(t *testing.T) {
+	t.Run("text", func(t *testing.T) {
+		raw, err := json.Marshal(ContentBlock{Type: BlockTypeText, Text: "hi"})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		got := string(raw)
+		if got != `{"type":"text","text":"hi"}` {
+			t.Errorf("text shape mismatch: %s", got)
+		}
+	})
+
+	t.Run("tool_use", func(t *testing.T) {
+		raw, err := json.Marshal(ContentBlock{
+			Type:  BlockTypeToolUse,
+			ID:    "toolu_abc",
+			Name:  "search",
+			Input: map[string]any{"q": "weather"},
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		got := string(raw)
+		// Field order in encoding/json follows struct definition order.
+		// Cross-check critical fields without locking on whitespace.
+		for _, want := range []string{
+			`"type":"tool_use"`,
+			`"id":"toolu_abc"`,
+			`"name":"search"`,
+			`"input":{"q":"weather"}`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("tool_use missing %q in %s", want, got)
+			}
+		}
+		// Tool-result-only field must NOT leak.
+		if strings.Contains(got, "tool_use_id") {
+			t.Errorf("tool_use leaked tool_use_id field: %s", got)
+		}
+	})
+
+	// Pinned by Anthropic 400 "input: Field required" — even when a tool_use
+	// carries no arguments, the wire MUST include "input": {}. The default
+	// json struct-tag "omitempty" drops empty maps, so MarshalJSON has to
+	// force the field. Skipping this regression silently breaks Llm.generate.
+	t.Run("tool_use_empty_input_still_emits", func(t *testing.T) {
+		// nil input: the Phase A executeLLM path constructs blocks with
+		// map[string]any{} but a nil input must serialize the same way.
+		for _, in := range []map[string]any{nil, {}} {
+			raw, err := json.Marshal(ContentBlock{
+				Type:  BlockTypeToolUse,
+				ID:    "toolu_z",
+				Name:  "framework_context",
+				Input: in,
+			})
+			if err != nil {
+				t.Fatalf("marshal (input=%v): %v", in, err)
+			}
+			got := string(raw)
+			if !strings.Contains(got, `"input":{}`) {
+				t.Errorf("tool_use with empty/nil input must serialise input as {}, got: %s", got)
+			}
+		}
+	})
+
+	t.Run("tool_result", func(t *testing.T) {
+		raw, err := json.Marshal(ContentBlock{
+			Type:      BlockTypeToolResult,
+			ToolUseID: "toolu_abc",
+			Content:   "search payload here",
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		got := string(raw)
+		for _, want := range []string{
+			`"type":"tool_result"`,
+			`"tool_use_id":"toolu_abc"`,
+			`"content":"search payload here"`,
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("tool_result missing %q in %s", want, got)
+			}
+		}
+		// Tool-use-only fields must NOT leak.
+		for _, leak := range []string{`"id":`, `"name":`, `"input":`} {
+			if strings.Contains(got, leak) {
+				t.Errorf("tool_result leaked %s field: %s", leak, got)
+			}
+		}
+	})
+}
+
+// TestLlmMessageContentBlocksRoundtrip ensures the new ContentBlocks field
+// round-trips through JSON without losing block data and without mutating the
+// existing string-Content wire format used by 30+ legacy callsites.
+func TestLlmMessageContentBlocksRoundtrip(t *testing.T) {
+	t.Run("string_content_unchanged", func(t *testing.T) {
+		msg := LlmMessage{Role: RoleUser, Content: "hi"}
+		raw, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		got := string(raw)
+		if got != `{"role":"user","content":"hi"}` {
+			t.Errorf("backward-compat wire format changed: %s", got)
+		}
+		if strings.Contains(got, "content_blocks") {
+			t.Errorf("empty ContentBlocks should be omitted: %s", got)
+		}
+	})
+
+	t.Run("blocks_present", func(t *testing.T) {
+		msg := LlmMessage{
+			Role: RoleAssistant,
+			ContentBlocks: []ContentBlock{
+				{Type: BlockTypeToolUse, ID: "id-1", Name: "search", Input: map[string]any{"q": "x"}},
+			},
+		}
+		raw, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back LlmMessage
+		if err := json.Unmarshal(raw, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(back.ContentBlocks) != 1 {
+			t.Fatalf("blocks lost in roundtrip: %+v", back)
+		}
+		b := back.ContentBlocks[0]
+		if b.Type != BlockTypeToolUse || b.ID != "id-1" || b.Name != "search" {
+			t.Errorf("block fields wrong: %+v", b)
+		}
+		if got, want := b.Input["q"], "x"; got != want {
+			t.Errorf("input map roundtrip: got %v want %v", got, want)
+		}
+	})
+}
+
 func TestSkillRegistryCompleteness(t *testing.T) {
 	if len(SkillRegistry) == 0 {
 		t.Fatal("SkillRegistry is empty")

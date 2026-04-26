@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -814,6 +816,61 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, e
 
 // --- LLM ---
 
+// subLLMToolName is the synthetic tool identifier exposed to the model in the
+// fake tool_use block. The literal "framework_context" reads as an obviously
+// internal source so the model treats the paired tool_result as observation
+// data rather than user-provided text.
+const subLLMToolName = "framework_context"
+
+// subLLMPrimingUser is the leading user message that satisfies Anthropic's
+// "first message must use the user role" requirement when we open with a
+// synthetic assistant tool_use. Phrased as procedural framing only — the
+// actual instruction lives inside the prompt that lands in the tool_result.
+const subLLMPrimingUser = "다음 도구 결과를 활용하여 사용자에게 직접 응답해주세요. (Use the tool result below to respond directly to the end user.)"
+
+// buildSubLLMMessages wraps a single sub-LLM prompt in a synthetic
+// tool_use + tool_result pair so the model sees the embedded content as
+// framework-provided observation rather than user input. This is the Phase A
+// fix for the "제공해주신 검색 결과는…" mis-attribution that prompt-level
+// fences could not stop.
+func buildSubLLMMessages(prompt string) []core.LlmMessage {
+	toolUseID := newSubLLMToolUseID()
+	return []core.LlmMessage{
+		{Role: core.RoleUser, Content: subLLMPrimingUser},
+		{
+			Role: core.RoleAssistant,
+			ContentBlocks: []core.ContentBlock{
+				{
+					Type:  core.BlockTypeToolUse,
+					ID:    toolUseID,
+					Name:  subLLMToolName,
+					Input: map[string]any{},
+				},
+			},
+		},
+		{
+			Role: core.RoleUser,
+			ContentBlocks: []core.ContentBlock{
+				{
+					Type:      core.BlockTypeToolResult,
+					ToolUseID: toolUseID,
+					Content:   prompt,
+				},
+			},
+		},
+	}
+}
+
+// newSubLLMToolUseID returns an Anthropic-style tool_use_id (toolu_<hex>).
+// Length and prefix mirror what the API itself emits so logs and any future
+// LLM-side debugging stay readable. Uniqueness across concurrent skill calls
+// avoids a stale tool_result from one call being attributed to another.
+func newSubLLMToolUseID() string {
+	var b [12]byte
+	_, _ = cryptorand.Read(b[:])
+	return "toolu_" + hex.EncodeToString(b[:])
+}
+
 func executeLLM(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	if call.Method != "generate" {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Llm method: %s", call.Method)})
@@ -824,9 +881,7 @@ func executeLLM(ctx context.Context, call core.SkillCall, s *Session) (string, e
 	var prompt string
 	_ = json.Unmarshal(call.Args[0], &prompt)
 
-	messages := []core.LlmMessage{
-		{Role: core.RoleUser, Content: prompt},
-	}
+	messages := buildSubLLMMessages(prompt)
 	resp, err := s.Provider.Generate(ctx, messages)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
