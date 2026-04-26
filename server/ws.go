@@ -20,7 +20,11 @@ const (
 	wsIdleTimeout    = 5 * time.Minute
 	wsMaxLifetime    = 30 * time.Minute
 	wsMaxMessageSize = 64 * 1024
-	wsWriteTimeout   = 10 * time.Second
+	// wsWriteTimeout was 10s; LLM streaming with retry can pause >10s
+	// between chunks (Anthropic SSE retry, MoA fan-out, slow tool calls).
+	// 30s gives those legitimate gaps headroom without holding a dead
+	// conn for too long.
+	wsWriteTimeout = 30 * time.Second
 )
 
 // handleWebSocket upgrades to WebSocket and runs a multi-turn streaming chat session.
@@ -78,7 +82,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_, msgBytes, err := conn.Read(readCtx)
 		readCancel()
 		if err != nil {
-			if ctx.Err() != nil {
+			lifetimeExpired := ctx.Err() != nil
+			slog.Info("ws session ended",
+				"session_id", sessionID,
+				"error", err.Error(),
+				"lifetime_expired", lifetimeExpired,
+			)
+			if lifetimeExpired {
 				sendWsMsg(ctx, conn, core.NewErrorMsg("session expired"))
 			}
 			return
@@ -156,5 +166,7 @@ func sendWsMsg(ctx context.Context, conn *websocket.Conn, msg core.WsServerMsg) 
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, wsWriteTimeout)
 	defer cancel()
-	_ = conn.Write(writeCtx, websocket.MessageText, data)
+	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+		slog.Warn("ws write failed", "type", msg.Type, "error", err.Error())
+	}
 }
