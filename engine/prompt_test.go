@@ -404,10 +404,12 @@ func TestBuildPrompt_EmptyObservations(t *testing.T) {
 func TestBuildPrompt_TokenBudget(t *testing.T) {
 	// Authored static text only (skills section is dynamic). Budget catches
 	// accidental drift; intentional growth tied to a documented UX fix is
-	// expected — see git log for each bump's rationale.
+	// expected — see git log for each bump's rationale. The repeated bumps
+	// (2400 → 2800 → 2900 → 3000) are themselves a signal that the prompt
+	// needs a structural refactor; that is its own plan.
 	staticText := IdentityBlock + "\n\n" + ExecutionBlock + "\n\n" + QualityBlock + "\n\n" + SkillCreationBlock + "\n\n" + MemoryBlock
 	tokens := EstimateTokens(staticText)
-	const maxTokens = 2900
+	const maxTokens = 3000
 	if tokens > maxTokens {
 		t.Errorf("static text blocks %d tokens exceeds budget %d", tokens, maxTokens)
 	}

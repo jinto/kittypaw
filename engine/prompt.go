@@ -68,6 +68,10 @@ const ExecutionBlock = `## Rules
 const QualityBlock = `## Decision — clarify, enumerate, tool, or direct?
 Pick the FIRST action that fits before any tool call.
 
+**Chitchat → ` + "`return \"…\";`" + ` ack only, never repeat the prior result.**
+"잘하네", "고마워", "thanks", "nice" 류는 새 요청 X. 직전 결과 재출력 금지.
+한 줄 ack 를 JS string 으로: ` + "`return \"도움이 됐다니 좋아요!\";`" + `
+
 **Underspecified input → clarify before acting.** When the input is short
 enough or vague enough that a competent human assistant would feel uncertain
 about what is being asked, the assistant MUST clarify first. Reasonable signals:
@@ -141,9 +145,9 @@ The flow:
 1. Web.search → evidence body: name 2-3 sources you actually saw, honestly
    admit if no live numbers came back, recommend 2-3 sites the user can
    check directly.
-2. Skill.search → contextual suffix: if a registry hit exists, close with
-   "참고로 KittyPaw 에 ... 스킬이 있는데 설치하면 더 정확해요. 설치를
-   도와드릴까요?" — never replace the evidence with the install offer.
+2. Skill.search → suffix. 1 hit → "참고로 ... 스킬이 있는데 설치를
+   도와드릴까요?". ≥2 hits → list with descriptions and ask which —
+   never auto-install the first match (different skills, user picks).
 
 **Install consent — single ask, then auto-install in ONE JS block** when
 user replies 네/설치/yes/install to the suffix offer:
@@ -163,12 +167,12 @@ const sk = Skill.search("환율");
 const top = (r.results || []).slice(0,5)
   .map((x,i)=>"["+(i+1)+"] "+x.title+" — "+x.snippet+" ("+x.url+")")
   .join("\n");
-const skillName = (sk.results && sk.results.length > 0) ? sk.results[0].name : null;
-const skillNote = skillName
-  ? "\n\n[skill match] KittyPaw 에 \"" + skillName + "\" 스킬이 있다. 설치하면 실시간 정확도가 올라간다."
-  : "";
+const hits = sk.results || [];
+const skillNote = hits.length === 0 ? ""
+  : hits.length === 1 ? "\n\n[skill match] \"" + hits[0].name + "\" — " + hits[0].description
+  : "\n\n[skill match — multiple, ask user which]\n" + hits.slice(0,3).map(s => "• " + s.name + ": " + s.description).join("\n");
 return Llm.generate(
-  "비서로서 한국어 1-3 문단 응답. (1) 어떤 정보 소스들을 살펴봤는지 자연스럽게 언급. (2) 정확한 수치를 못 얻으면 솔직히 인정 + 사용자가 직접 확인할 사이트 2-3 개 추천. (3) 아래 [skill match] 노트가 있으면 응답 마지막 문장에 contextual 하게 '참고로 KittyPaw 에 ... 스킬이 있는데 설치를 도와드릴까요?' 형태로 안내. first-person, mis-attribution 금지.\n\n검색 결과:\n" + top + skillNote
+  "비서로서 한국어 1-3 문단 응답. (1) 어떤 정보 소스들을 살펴봤는지 자연스럽게 언급. (2) 수치를 못 얻으면 솔직히 인정 + 직접 확인할 사이트 2-3 개 추천. (3) [skill match] 가 1개면 마지막 문장에 '참고로 KittyPaw 에 ... 스킬이 있는데 설치를 도와드릴까요?'. 여러 개면 옵션을 한 줄씩 노출하고 어느 쪽 원하시는지 묻기 — 절대 첫 번째를 자동 선택 X. first-person, mis-attribution 금지.\n\n검색 결과:\n" + top + skillNote
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —

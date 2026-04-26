@@ -488,15 +488,22 @@ func runChat(_ *cobra.Command, args []string) error {
 			continue
 		}
 
-		// sendOnce drives one Send attempt against the current ChatSession.
+		// sendOnce drives one Send attempt with its own spinner. Stopping
+		// the spinner inside the callbacks (before any Printf) is what
+		// keeps "paw> ⠧paw> ..." double-prefix garbage from leaking out.
 		sendOnce := func() (gotResult bool, sendErr error) {
+			spin := newSpinner("paw> ")
+			spin.Start()
+			defer spin.Stop()
 			opts := client.ChatOptions{
 				OnToken: func(_ string) {},
 				OnDone: func(result string, _ *int64) {
+					spin.Stop()
 					gotResult = true
 					fmt.Printf("paw> %s\n\n", result)
 				},
 				OnError: func(msg string) {
+					spin.Stop()
 					fmt.Fprintf(os.Stderr, "error: %s\n\n", msg)
 				},
 			}
@@ -504,8 +511,6 @@ func runChat(_ *cobra.Command, args []string) error {
 			return
 		}
 
-		spin := newSpinner("paw> ")
-		spin.Start()
 		gotResult, sendErr := sendOnce()
 		// Silent reconnect on EOF: server may have rotated the conn between
 		// turns. We swallow the disconnect, redial, and replay the same input
@@ -514,12 +519,10 @@ func runChat(_ *cobra.Command, args []string) error {
 			cs.Close()
 			cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
 			if err != nil {
-				spin.Stop()
 				return fmt.Errorf("재연결 실패: %w", err)
 			}
 			gotResult, sendErr = sendOnce()
 		}
-		spin.Stop()
 		if sendErr != nil && !gotResult {
 			fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
 		}

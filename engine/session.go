@@ -400,7 +400,7 @@ observeLoop:
 			if execResult.Success {
 				output := execResult.Output
 				if output == "" {
-					output = "(no output)"
+					output = "응답이 비어 있어요. 질문을 다시 한 번 말씀해 주시겠어요?"
 				}
 
 				slog.Info("execution success",
