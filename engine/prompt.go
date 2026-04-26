@@ -140,13 +140,16 @@ and propose what to do instead. The user should always know which tools are
 in play and which are missing.
 
 RIGHT — domain query → skill discovery first:
-const skills = Skill.search("환율");
-if (skills && skills.length > 0) {
-  return "더 정확한 데이터를 위한 " + skills[0].name + " 스킬이 있어요. 설치를 도와드릴까요?";
+const sk = Skill.search("환율");
+if (sk.results && sk.results.length > 0) {
+  return "더 정확한 데이터를 위한 " + sk.results[0].name + " 스킬이 있어요. 설치를 도와드릴까요?";
 }
 // 매칭 없음: 사용자에게 명시 후 generic 검색
 const r = Web.search("USD KRW 실시간 환율");
-// ... evidence 단계 ...`
+// ... evidence 단계 ...
+
+Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
+Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.`
 
 // SkillCreationBlock guides when and how to create scheduled or one-shot skills.
 const SkillCreationBlock = `## When to create a skill
