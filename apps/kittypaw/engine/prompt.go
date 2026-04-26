@@ -128,25 +128,36 @@ Contracts:
 Empty / weak result → alt keywords, specific source fetch, or suggest a skill.
 All-fail → "지금은 정확한 정보를 찾지 못했어요. 어떤 키워드/사이트로 다시 시도할까요?" — never fabricate.
 
-## Capability — domain skills before generic search
+## Capability — domain skills as a contextual install offer
 
-**For domain-specific questions, look for a domain skill first.** When the
-user asks about a recognizable domain that domain-specific tools usually serve
-better than generic web search (weather, exchange rates, stock prices, sports
-scores, translations, time, etc.), call ` + "`Skill.search(keyword)`" + ` against the
-external registry before falling back to Web.search. If a matching skill
-exists, surface it and ask whether to install or run; if not, say so plainly
-and propose what to do instead. The user should always know which tools are
-in play and which are missing.
+**For recognizable domains (weather / 환율 / 주식 / 미세먼지 / news …) run
+Web.search AND Skill.search together.** Web.search supplies the evidence
+(what the user gets right now); Skill.search supplies an optional install
+offer placed at the END of the response — never as the entire response.
+A bare "스킬 있어요. 설치할까요?" with no surrounding context feels like
+cold-pitching the user.
 
-RIGHT — domain query → skill discovery first:
+The flow:
+1. Web.search → evidence body: name 2-3 sources you actually saw, honestly
+   admit if no live numbers came back, recommend 2-3 sites the user can
+   check directly.
+2. Skill.search → contextual suffix: if a registry hit exists, close with
+   "참고로 KittyPaw 에 ... 스킬이 있는데 설치하면 더 정확해요. 설치를
+   도와드릴까요?" — never replace the evidence with the install offer.
+
+RIGHT — domain query → evidence body + skill suffix:
+const r = Web.search("USD JPY 실시간 환율");
 const sk = Skill.search("환율");
-if (sk.results && sk.results.length > 0) {
-  return "더 정확한 데이터를 위한 " + sk.results[0].name + " 스킬이 있어요. 설치를 도와드릴까요?";
-}
-// 매칭 없음: 사용자에게 명시 후 generic 검색
-const r = Web.search("USD KRW 실시간 환율");
-// ... evidence 단계 ...
+const top = (r.results || []).slice(0,5)
+  .map((x,i)=>"["+(i+1)+"] "+x.title+" — "+x.snippet+" ("+x.url+")")
+  .join("\n");
+const skillName = (sk.results && sk.results.length > 0) ? sk.results[0].name : null;
+const skillNote = skillName
+  ? "\n\n[skill match] KittyPaw 에 \"" + skillName + "\" 스킬이 있다. 설치하면 실시간 정확도가 올라간다."
+  : "";
+return Llm.generate(
+  "비서로서 한국어 1-3 문단 응답. (1) 어떤 정보 소스들을 살펴봤는지 자연스럽게 언급. (2) 정확한 수치를 못 얻으면 솔직히 인정 + 사용자가 직접 확인할 사이트 2-3 개 추천. (3) 아래 [skill match] 노트가 있으면 응답 마지막 문장에 contextual 하게 '참고로 KittyPaw 에 ... 스킬이 있는데 설치를 도와드릴까요?' 형태로 안내. first-person, mis-attribution 금지.\n\n검색 결과:\n" + top + skillNote
+).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
 Web.search 와 동일한 contract. 항상 ` + "`.results`" + ` 로 array 접근.`
