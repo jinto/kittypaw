@@ -1,0 +1,15 @@
+{"id":"framing-001","input":"Python list comprehension 간단히 설명","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","주신 결과","공유해주신","검색 결과에는","the result you provided","I searched"],"notes":"일반 explanatory query — mis-attribution 없는 자연 응답"}
+{"id":"framing-002","input":"MySQL 인덱스 종류 정리","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","주신 결과","검색 결과에는"],"notes":"기술 explainer"}
+{"id":"framing-003","input":"프랑스 혁명 원인","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"역사 explainer"}
+{"id":"framing-004","input":"sin 함수 미분","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"수학 — tool 불필요 일반 LLM 응답"}
+{"id":"framing-005","input":"환율 변동 영향 요인","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"개념 explainer — 실시간 데이터 X"}
+{"id":"framing-006","input":"겨울철 차량 관리 팁","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"실용 explainer"}
+{"id":"framing-007","input":"명상 호흡법 기초","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"건강/심리 explainer"}
+{"id":"framing-008","input":"JSON vs YAML 차이","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"비교 explainer"}
+{"id":"framing-009","input":"한국 전쟁 1950 발발 배경","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"역사"}
+{"id":"framing-010","input":"스타트업 valuation 방법론 요약","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"비즈니스"}
+{"id":"framing-011","input":"면역 시스템 작동 원리","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"과학"}
+{"id":"framing-012","input":"가장 큰 행성","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"단답 가능 fact"}
+{"id":"framing-013","input":"macOS Spotlight 단축키","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"기술 trivia"}
+{"id":"framing-014","input":"Linux ssh tunnel 기본 설정","category":"framing","expected_behaviors":["first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"how-to"}
+{"id":"framing-015","input":"What is the JPY rate?","category":"framing","expected_behaviors":["first_person"],"antipatterns":["the result you provided","I searched","the search results show that there is no","you provided"],"notes":"영어 query — priors 분리 검증. 한국어 honorific 와 동일 패턴이 영어로도 발생하는지"}

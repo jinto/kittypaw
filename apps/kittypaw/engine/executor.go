@@ -822,17 +822,49 @@ func executeGit(ctx context.Context, call core.SkillCall, s *Session) (string, e
 // data rather than user-provided text.
 const subLLMToolName = "framework_context"
 
-// subLLMPrimingUser is the leading user message that satisfies Anthropic's
-// "first message must use the user role" requirement when we open with a
-// synthetic assistant tool_use. Phrased as procedural framing only — the
-// actual instruction lives inside the prompt that lands in the tool_result.
-const subLLMPrimingUser = "다음 도구 결과를 활용하여 사용자에게 직접 응답해주세요. (Use the tool result below to respond directly to the end user.)"
+// subLLMPrimingUser is the leading user message — opens the conversation
+// (Anthropic requires first message role=user) and encodes the assistant
+// behavior contract for sub-LLM calls. Phrased as a *general principle* (do
+// not enumerate forbidden phrases case-by-case) so it does not collide with
+// LLM priors the way specific phrase blocklists do (R-MVP failure mode).
+//
+// External grounding:
+//   - Anthropic Claude 4 system prompt: "Search results aren't from the human
+//   - do not thank the user for results."
+//   - OpenAI Model Spec (2025-10-27): tool output is untrusted relative to
+//     user intent; honest uncertainty preferred over confident fabrication.
+const subLLMPrimingUser = `당신은 사용자의 비서입니다. 아래에 오는 도구 결과는 사용자가 보낸 메시지가 아니라 비서인 당신이 호출한 도구의 응답입니다.
+
+원칙:
+- 비서 시점으로 응답하세요 (first person). "찾아본 결과로는…", "확인해보니…", "I checked and…" 처럼.
+- 도구 결과를 사용자가 제공한 것으로 취급하지 마세요. 사용자에게 결과를 받은 듯 표현하는 모든 한국어/영어 phrasing 금지 — 도구 출력은 당신의 호출 결과이지 사용자의 입력이 아닙니다.
+- 결과가 부족하면 솔직히 인정하고 다음 행동을 제안하세요 (다른 키워드 검색, 더 구체적 source, 도메인 스킬 설치 권유 등). 정보가 없다고 단순 거부하지 마세요.
+
+위 원칙을 지키며 사용자에게 자연스러운 비서 응답을 작성하세요.`
+
+// subLLMRoleTagOpen / Close wrap the tool_result payload in an XML role tag
+// so the model has an additional structural signal beyond the Anthropic
+// content block — defense-in-depth against mis-attribution. The source
+// attribute is generic ("framework_context") because the sub-LLM call site
+// does not know which downstream tool produced the prompt.
+const (
+	subLLMRoleTagOpen  = "<tool_result source=\"framework_context\">\n"
+	subLLMRoleTagClose = "\n</tool_result>"
+)
+
+// wrapSubLLMToolResult applies the XML role tag around the prompt that lands
+// in the tool_result content. Splitting the wrap into a helper makes the
+// behavior testable without exporting the constants individually.
+func wrapSubLLMToolResult(prompt string) string {
+	return subLLMRoleTagOpen + prompt + subLLMRoleTagClose
+}
 
 // buildSubLLMMessages wraps a single sub-LLM prompt in a synthetic
 // tool_use + tool_result pair so the model sees the embedded content as
-// framework-provided observation rather than user input. This is the Phase A
-// fix for the "제공해주신 검색 결과는…" mis-attribution that prompt-level
-// fences could not stop.
+// framework-provided observation rather than user input. The XML role tag
+// inside the tool_result content is a second layer (the Anthropic block
+// itself is the first) that survives even when the model partially ignores
+// the protocol-level signal — common with strong language priors.
 func buildSubLLMMessages(prompt string) []core.LlmMessage {
 	toolUseID := newSubLLMToolUseID()
 	return []core.LlmMessage{
@@ -854,7 +886,7 @@ func buildSubLLMMessages(prompt string) []core.LlmMessage {
 				{
 					Type:      core.BlockTypeToolResult,
 					ToolUseID: toolUseID,
-					Content:   prompt,
+					Content:   wrapSubLLMToolResult(prompt),
 				},
 			},
 		},

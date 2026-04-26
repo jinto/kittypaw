@@ -1,0 +1,10 @@
+{"id":"stale-001","input":"오늘 USD/KRW 환율","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","first_person"],"antipatterns":["제공해주신","2024년 12월 31일 기준","2024년 기준"],"notes":"검색 결과 시점 명시 필수. stale 데이터를 '오늘' 으로 hallucinate X"}
+{"id":"stale-002","input":"오늘 서울 날씨","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","suggest_skill","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"weather skill 추천 또는 출처 시점 명시"}
+{"id":"stale-003","input":"방금 발표된 Anthropic Claude 신모델","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"매우 최근 — knowledge cutoff 문제. 솔직히 인정 + 공식 사이트 제안"}
+{"id":"stale-004","input":"현재 비트코인 가격","category":"stale","expected_behaviors":["honest_uncertainty","suggest_skill","first_person"],"antipatterns":["제공해주신","2024년 기준"],"notes":"real-time price skill 추천. 검색만으로 stale 위험"}
+{"id":"stale-005","input":"올해 K-pop 차트 1위","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"시점 명시 + 출처"}
+{"id":"stale-006","input":"오늘 KBO 야구 결과","category":"stale","expected_behaviors":["honest_uncertainty","suggest_skill","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"real-time — skill 부재 가시화"}
+{"id":"stale-007","input":"이번 주 박스오피스 1위","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"시점 + 출처"}
+{"id":"stale-008","input":"지금 LA 시간","category":"stale","expected_behaviors":["suggest_skill","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"time skill 또는 timezone 계산 — 검색 부적절"}
+{"id":"stale-009","input":"최근 1 주일 IT 주요 뉴스","category":"stale","expected_behaviors":["honest_uncertainty","expand_query","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"확장 query 또는 도메인 source 제안"}
+{"id":"stale-010","input":"현재 우크라이나 상황","category":"stale","expected_behaviors":["honest_uncertainty","source_timestamp","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"매우 시간 민감 + 신뢰 source 명시 필수"}

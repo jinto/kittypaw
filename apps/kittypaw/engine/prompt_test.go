@@ -190,8 +190,14 @@ func TestBlockConstants_KeyPhrases(t *testing.T) {
 		{IdentityBlock, "IdentityBlock", "How you work"},
 		{ExecutionBlock, "ExecutionBlock", "## Rules"},
 		{ExecutionBlock, "ExecutionBlock", "Web.search query quality"},
-		{QualityBlock, "QualityBlock", "Execution quality"},
+		{QualityBlock, "QualityBlock", "## Decision"},
+		{QualityBlock, "QualityBlock", "## Evidence"},
+		{QualityBlock, "QualityBlock", "## Capability"},
 		{QualityBlock, "QualityBlock", "never fabricate"},
+		// General-principle markers — Codex push: positive framing over
+		// specific phrase enumeration (which collides with LLM priors).
+		{QualityBlock, "QualityBlock", "first-person"},
+		{QualityBlock, "QualityBlock", "mis-attribution"},
 		{SkillCreationBlock, "SkillCreationBlock", "When to create a skill"},
 		{SkillCreationBlock, "SkillCreationBlock", "schedule"},
 		{SkillCreationBlock, "SkillCreationBlock", "once"},
@@ -324,7 +330,7 @@ func TestBuildPrompt_BlockPresence(t *testing.T) {
 	}{
 		{"IdentityBlock", "You are KittyPaw"},
 		{"ExecutionBlock", "## Rules"},
-		{"QualityBlock", "## Execution quality"},
+		{"QualityBlock", "## Decision"},
 		{"SkillsBlock", "## Available skill globals"},
 		{"SkillCreationBlock", "## When to create a skill"},
 		{"MemoryBlock", "## Memory & Learning"},
@@ -396,11 +402,20 @@ func TestBuildPrompt_EmptyObservations(t *testing.T) {
 }
 
 func TestBuildPrompt_TokenBudget(t *testing.T) {
-	// Static text blocks (excluding dynamic skills section from registry) should stay under 1200 tokens.
-	// The skills section is dynamic and was part of the old prompt too — budget applies to authored text only.
+	// Static text blocks (excluding dynamic skills section from registry) should
+	// stay under the budget. The skills section is dynamic and was part of the
+	// old prompt too — budget applies to authored text only.
+	//
+	// Budget bumped from 1200 → 2400 when QualityBlock was reframed into
+	// Decision + Evidence + Capability sub-sections. The richer behavior
+	// contract (clarification trigger, four-dimension adequacy gate,
+	// skill-first decision tree) is the cost the assistant-quality plan
+	// explicitly accepts. Tightening the budget would require trimming
+	// concrete examples — those examples are the load-bearing teaching
+	// signal for the Decision/Evidence behaviors.
 	staticText := IdentityBlock + "\n\n" + ExecutionBlock + "\n\n" + QualityBlock + "\n\n" + SkillCreationBlock + "\n\n" + MemoryBlock
 	tokens := EstimateTokens(staticText)
-	const maxTokens = 1200
+	const maxTokens = 2400
 	if tokens > maxTokens {
 		t.Errorf("static text blocks %d tokens exceeds budget %d", tokens, maxTokens)
 	}
