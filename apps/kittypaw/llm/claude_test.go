@@ -426,3 +426,127 @@ func TestClaudeContextWindow(t *testing.T) {
 		t.Errorf("ContextWindow() = %d, want %d", p2.ContextWindow(), claudeFallbackWindow)
 	}
 }
+
+// TestClaudeContentBlocksWire captures the outbound request body and asserts
+// that messages carrying ContentBlocks land on the wire as Anthropic's native
+// content array (tool_use + tool_result), not as a stringified placeholder.
+// This is the wire-level contract the Phase A fix relies on to stop the model
+// from attributing tool output to the user.
+func TestClaudeContentBlocksWire(t *testing.T) {
+	type capturedRequest struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+		System []struct {
+			Text string `json:"text"`
+		} `json:"system"`
+	}
+
+	var captured capturedRequest
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1},"model":"claude-3-opus-20240229"}`)
+	})
+	defer srv.Close()
+
+	_, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleSystem, Content: "you are a helper"},
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolUse, ID: "toolu_1", Name: "search", Input: map[string]any{"q": "weather"}},
+		}},
+		{Role: core.RoleUser, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolResult, ToolUseID: "toolu_1", Content: "Seoul 12C cloudy"},
+		}},
+		{Role: core.RoleUser, Content: "summarize the result"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if len(captured.Messages) != 3 {
+		t.Fatalf("expected 3 conversation messages (system hoisted), got %d", len(captured.Messages))
+	}
+	if len(captured.System) != 1 || captured.System[0].Text != "you are a helper" {
+		t.Errorf("system not hoisted to top-level: %+v", captured.System)
+	}
+
+	// First conversation message: assistant tool_use as content array.
+	first := captured.Messages[0]
+	if first.Role != "assistant" {
+		t.Errorf("msg[0].role = %q, want assistant", first.Role)
+	}
+	firstStr := string(first.Content)
+	for _, want := range []string{`"type":"tool_use"`, `"id":"toolu_1"`, `"name":"search"`, `"input":{"q":"weather"}`} {
+		if !strings.Contains(firstStr, want) {
+			t.Errorf("msg[0].content missing %q in %s", want, firstStr)
+		}
+	}
+	if !strings.HasPrefix(strings.TrimSpace(firstStr), "[") {
+		t.Errorf("msg[0].content should be JSON array, got %s", firstStr)
+	}
+
+	// Second conversation message: user tool_result.
+	second := captured.Messages[1]
+	if second.Role != "user" {
+		t.Errorf("msg[1].role = %q, want user", second.Role)
+	}
+	secondStr := string(second.Content)
+	for _, want := range []string{`"type":"tool_result"`, `"tool_use_id":"toolu_1"`, `"content":"Seoul 12C cloudy"`} {
+		if !strings.Contains(secondStr, want) {
+			t.Errorf("msg[1].content missing %q in %s", want, secondStr)
+		}
+	}
+
+	// Third conversation message: plain user instruction as string content.
+	third := captured.Messages[2]
+	if third.Role != "user" {
+		t.Errorf("msg[2].role = %q, want user", third.Role)
+	}
+	if got := strings.TrimSpace(string(third.Content)); got != `"summarize the result"` {
+		t.Errorf("msg[2].content should be JSON string, got %s", got)
+	}
+
+	// Critical: the raw tool_result payload must NOT appear inside any
+	// string-form user message. If it does, the model has been re-fed the
+	// payload as if the user typed it, which is the mis-attribution bug.
+	if strings.Contains(string(third.Content), "Seoul 12C cloudy") {
+		t.Error("tool_result payload leaked into a string-form user message")
+	}
+}
+
+// TestClaudeBackwardCompatStringContent verifies that legacy callers passing
+// only a string Content land on the wire as the original {"role":..., "content":"..."}
+// shape — no structural drift for the 30+ callsites that haven't migrated.
+func TestClaudeBackwardCompatStringContent(t *testing.T) {
+	var raw []byte
+	srv, p := newClaudeTestServer(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1},"model":"claude-3-opus-20240229"}`)
+	})
+	defer srv.Close()
+
+	_, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	got := string(raw)
+	if !strings.Contains(got, `"role":"user"`) {
+		t.Errorf("missing user role in: %s", got)
+	}
+	if !strings.Contains(got, `"content":"Hi"`) {
+		t.Errorf("string content not preserved: %s", got)
+	}
+	if strings.Contains(got, `"content":[`) {
+		t.Errorf("unexpected content-array shape for string-only message: %s", got)
+	}
+}

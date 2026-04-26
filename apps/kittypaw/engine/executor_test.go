@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 	"github.com/jinto/kittypaw/store"
 )
 
@@ -788,4 +789,144 @@ func TestInjectLocaleInstruction(t *testing.T) {
 			t.Error("should not add args")
 		}
 	})
+}
+
+// recordingProvider captures the messages handed to Generate so tests can
+// assert on the wire-shape that downstream LLMs would actually see.
+type recordingProvider struct {
+	captured [][]core.LlmMessage
+	resp     *llm.Response
+}
+
+func (r *recordingProvider) Generate(_ context.Context, msgs []core.LlmMessage) (*llm.Response, error) {
+	clone := make([]core.LlmMessage, len(msgs))
+	copy(clone, msgs)
+	r.captured = append(r.captured, clone)
+	if r.resp == nil {
+		return &llm.Response{Content: "ok", Usage: &llm.TokenUsage{Model: "mock"}}, nil
+	}
+	return r.resp, nil
+}
+
+func (r *recordingProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
+	return r.Generate(ctx, msgs)
+}
+
+func (r *recordingProvider) ContextWindow() int { return 128_000 }
+func (r *recordingProvider) MaxTokens() int     { return 4096 }
+
+// TestExecuteLLM_ToolResultProtocol pins the Phase A native tool_result
+// protocol. The mis-attribution bug ("제공해주신 검색 결과는…") is structural,
+// not a wording problem — the model only stops attributing tool data to the
+// user when the data arrives in a tool_result content block instead of the
+// raw user-message string. This test fails the moment that wrapping breaks,
+// regardless of what the model actually says.
+func TestExecuteLLM_ToolResultProtocol(t *testing.T) {
+	prov := &recordingProvider{}
+	sess := &Session{Provider: prov}
+
+	const promptPayload = "다음 검색 결과를 정리해주세요.\n[search dump: Seoul 12C cloudy]"
+	args, err := json.Marshal(promptPayload)
+	if err != nil {
+		t.Fatalf("marshal prompt: %v", err)
+	}
+	call := core.SkillCall{
+		SkillName: "Llm",
+		Method:    "generate",
+		Args:      []json.RawMessage{args},
+	}
+
+	if _, err := executeLLM(context.Background(), call, sess); err != nil {
+		t.Fatalf("executeLLM: %v", err)
+	}
+	if len(prov.captured) != 1 {
+		t.Fatalf("expected exactly 1 Generate call, got %d", len(prov.captured))
+	}
+	msgs := prov.captured[0]
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages (priming user + assistant tool_use + user tool_result), got %d: %+v", len(msgs), msgs)
+	}
+
+	// msg[0]: priming user message in plain string Content.
+	if msgs[0].Role != core.RoleUser {
+		t.Errorf("msg[0].Role = %q, want user", msgs[0].Role)
+	}
+	if msgs[0].Content == "" || len(msgs[0].ContentBlocks) != 0 {
+		t.Errorf("msg[0] should be plain-string priming, got Content=%q ContentBlocks=%+v", msgs[0].Content, msgs[0].ContentBlocks)
+	}
+	if strings.Contains(msgs[0].Content, promptPayload) {
+		t.Error("msg[0] (priming) leaked the prompt payload — must stay procedural")
+	}
+
+	// msg[1]: assistant with one tool_use block. Capture the synthetic id.
+	if msgs[1].Role != core.RoleAssistant {
+		t.Errorf("msg[1].Role = %q, want assistant", msgs[1].Role)
+	}
+	if len(msgs[1].ContentBlocks) != 1 {
+		t.Fatalf("msg[1] should have exactly 1 content block, got %+v", msgs[1].ContentBlocks)
+	}
+	toolUse := msgs[1].ContentBlocks[0]
+	if toolUse.Type != core.BlockTypeToolUse {
+		t.Errorf("msg[1] block type = %q, want tool_use", toolUse.Type)
+	}
+	if !strings.HasPrefix(toolUse.ID, "toolu_") {
+		t.Errorf("tool_use ID = %q, want toolu_<hex> prefix", toolUse.ID)
+	}
+	if toolUse.Name == "" {
+		t.Error("tool_use Name is empty — model can't tell what produced the result")
+	}
+	if msgs[1].Content != "" {
+		t.Errorf("msg[1] should rely on ContentBlocks only, got Content=%q", msgs[1].Content)
+	}
+
+	// msg[2]: user with one tool_result block carrying the prompt payload.
+	if msgs[2].Role != core.RoleUser {
+		t.Errorf("msg[2].Role = %q, want user", msgs[2].Role)
+	}
+	if len(msgs[2].ContentBlocks) != 1 {
+		t.Fatalf("msg[2] should have exactly 1 content block, got %+v", msgs[2].ContentBlocks)
+	}
+	toolResult := msgs[2].ContentBlocks[0]
+	if toolResult.Type != core.BlockTypeToolResult {
+		t.Errorf("msg[2] block type = %q, want tool_result", toolResult.Type)
+	}
+	if toolResult.ToolUseID != toolUse.ID {
+		t.Errorf("tool_result.tool_use_id = %q, want %q (must match preceding tool_use.id)", toolResult.ToolUseID, toolUse.ID)
+	}
+	if toolResult.Content != promptPayload {
+		t.Errorf("tool_result.Content mismatch:\n got: %q\nwant: %q", toolResult.Content, promptPayload)
+	}
+	if msgs[2].Content != "" {
+		t.Errorf("msg[2] should carry the payload via ContentBlocks only, got Content=%q", msgs[2].Content)
+	}
+
+	// Hard contract: the prompt payload must NOT appear in the string Content
+	// of any message. If it does, the model would re-read it as user input
+	// and the mis-attribution returns.
+	for i, m := range msgs {
+		if strings.Contains(m.Content, promptPayload) {
+			t.Errorf("msg[%d].Content (string) leaks the prompt payload — defeats the tool_result wrap", i)
+		}
+	}
+}
+
+// TestExecuteLLM_ToolUseIDsAreUnique guards against a regression where two
+// concurrent skill calls share the same synthetic tool_use_id, which would
+// let the model conflate their tool_result payloads.
+func TestExecuteLLM_ToolUseIDsAreUnique(t *testing.T) {
+	const calls = 20
+	seen := make(map[string]struct{}, calls)
+	for i := 0; i < calls; i++ {
+		id := newSubLLMToolUseID()
+		if !strings.HasPrefix(id, "toolu_") {
+			t.Fatalf("id %q missing toolu_ prefix", id)
+		}
+		if len(id) <= len("toolu_") {
+			t.Fatalf("id %q has no random body", id)
+		}
+		if _, dup := seen[id]; dup {
+			t.Fatalf("duplicate tool_use id after %d calls: %q", i, id)
+		}
+		seen[id] = struct{}{}
+	}
 }

@@ -89,9 +89,91 @@ type ChatPayload struct {
 }
 
 // LlmMessage is a single message sent to/from an LLM.
+//
+// Two content shapes are supported, populated mutually exclusively at the
+// callsite; the chosen LLM provider picks whichever is non-empty:
+//   - Content (plain string): the historical default. Goes onto the wire as
+//     Anthropic's string-form content.
+//   - ContentBlocks ([]ContentBlock): native Anthropic content array. Required
+//     when the message carries a tool_use or tool_result block; using it is
+//     how we keep the LLM from mis-attributing tool output to the user.
 type LlmMessage struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role          Role           `json:"role"`
+	Content       string         `json:"content"`
+	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"`
+}
+
+// Block type discriminators for ContentBlock.Type.
+const (
+	BlockTypeText       = "text"
+	BlockTypeToolUse    = "tool_use"
+	BlockTypeToolResult = "tool_result"
+)
+
+// ContentBlock is one element of an Anthropic-native message content array.
+//
+// A single struct (rather than an interface with concrete types) is used
+// because the variant set is closed and small. A custom MarshalJSON
+// dispatches per Type so each variant emits exactly the fields the API
+// requires — Anthropic returns 400 if a required field is missing (e.g.
+// tool_use.input must always be present, even when the input is empty).
+//
+// Variants and their required fields:
+//
+//   - BlockTypeText:       Text
+//   - BlockTypeToolUse:    ID, Name, Input (input is required even when {})
+//   - BlockTypeToolResult: ToolUseID, Content
+type ContentBlock struct {
+	Type string `json:"type"`
+
+	// Text variant.
+	Text string `json:"text,omitempty"`
+
+	// ToolUse variant.
+	ID    string         `json:"id,omitempty"`
+	Name  string         `json:"name,omitempty"`
+	Input map[string]any `json:"input,omitempty"`
+
+	// ToolResult variant.
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+}
+
+// MarshalJSON emits only the fields meaningful for the block's Type, with
+// no "omitempty" on required fields. Without this, Go's default encoder
+// drops empty maps via the struct tag's omitempty — Anthropic then 400s on
+// tool_use because input is a required field even when the call takes no
+// arguments. See `messages.<n>.content.<n>.tool_use.input: Field required`.
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	switch b.Type {
+	case BlockTypeText:
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}{b.Type, b.Text})
+
+	case BlockTypeToolUse:
+		input := b.Input
+		if input == nil {
+			input = map[string]any{}
+		}
+		return json.Marshal(struct {
+			Type  string         `json:"type"`
+			ID    string         `json:"id"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}{b.Type, b.ID, b.Name, input})
+
+	case BlockTypeToolResult:
+		return json.Marshal(struct {
+			Type      string `json:"type"`
+			ToolUseID string `json:"tool_use_id"`
+			Content   string `json:"content"`
+		}{b.Type, b.ToolUseID, b.Content})
+
+	default:
+		return nil, fmt.Errorf("ContentBlock: unknown type %q", b.Type)
+	}
 }
 
 // SkillCall represents a skill invocation captured from sandbox execution.
