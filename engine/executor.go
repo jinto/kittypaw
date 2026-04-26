@@ -1257,9 +1257,13 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 	}
 }
 
-// executeSkillSearch wraps RegistryClient.SearchEntries; returns top 5
-// matches in a stable shape the LLM can scan and pick from.
+// executeSkillSearch wraps RegistryClient.SearchEntries; empty query browses
+// the full index, keyword query narrows for the suffix-offer flow.
 func executeSkillSearch(query string, s *Session) (string, error) {
+	const (
+		maxSuffixEntries = 5
+		maxBrowseEntries = 30
+	)
 	rc, err := newRegistryClient(s.Config)
 	if err != nil {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("registry: %v", err)})
@@ -1268,8 +1272,12 @@ func executeSkillSearch(query string, s *Session) (string, error) {
 	if err != nil {
 		return jsonResult(map[string]any{"error": fmt.Sprintf("search: %v", err)})
 	}
-	if len(entries) > 5 {
-		entries = entries[:5]
+	limit := maxSuffixEntries
+	if query == "" {
+		limit = maxBrowseEntries
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
 	}
 	results := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
