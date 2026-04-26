@@ -1284,9 +1284,12 @@ func executeSkillSearch(query string, s *Session) (string, error) {
 	return jsonResult(map[string]any{"results": results})
 }
 
-// executeSkillInstallRegistry installs a skill from the registry. Permission
-// gating happens earlier in resolveSkillCall — DefaultRequireApproval lists
-// "Skill.installFromRegistry", so the user is asked before this runs.
+// executeSkillInstallRegistry installs a skill from the registry. First-touch
+// consent is owned by the LLM-level confirm flow (CapabilityBlock suffix +
+// auto-discovery). System-level gating is opt-in via config.toml — callers
+// who want a hard gate must list "Skill.installFromRegistry" under
+// [permissions] require_approval and use a channel that implements
+// channel.Confirmer (currently Telegram).
 func executeSkillInstallRegistry(_ context.Context, id string, s *Session) (string, error) {
 	if s.PackageManager == nil {
 		return jsonResult(map[string]any{"error": "package manager not configured"})

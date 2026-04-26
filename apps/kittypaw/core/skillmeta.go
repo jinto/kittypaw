@@ -96,7 +96,7 @@ var SkillRegistry = []SkillMeta{
 		{Name: "disable", Signature: "Skill.disable(name)"},
 		{Name: "rollback", Signature: "Skill.rollback(name)"},
 		{Name: "search", Signature: "Skill.search(query) — search the public registry. Returns {results: [{id, name, version, description, author}], error?}. Access matches via .results."},
-		{Name: "installFromRegistry", Signature: "Skill.installFromRegistry(id) — install a skill from the registry by id; the system asks the user to approve before downloading"},
+		{Name: "installFromRegistry", Signature: "Skill.installFromRegistry(id) — install a skill from the registry by id. CALL ONLY AFTER the user has explicitly agreed in chat (e.g. answered 네/yes/설치 to your suffix offer). Do NOT call this without prior consent."},
 	}},
 	{Name: "Tts", Methods: []SkillMethodMeta{
 		{Name: "speak", Signature: "Tts.speak(text) — returns {path}"},

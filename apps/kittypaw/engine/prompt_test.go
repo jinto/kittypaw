@@ -406,16 +406,17 @@ func TestBuildPrompt_TokenBudget(t *testing.T) {
 	// stay under the budget. The skills section is dynamic and was part of the
 	// old prompt too — budget applies to authored text only.
 	//
-	// Budget bumped from 1200 → 2400 when QualityBlock was reframed into
-	// Decision + Evidence + Capability sub-sections. The richer behavior
-	// contract (clarification trigger, four-dimension adequacy gate,
-	// skill-first decision tree) is the cost the assistant-quality plan
-	// explicitly accepts. Tightening the budget would require trimming
-	// concrete examples — those examples are the load-bearing teaching
-	// signal for the Decision/Evidence behaviors.
+	// Budget bumped 1200 → 2400 (Decision/Evidence/Capability reframe) and
+	// 2400 → 2800 (install-consent flow added to Capability after live UX
+	// regression: user saw 2-3 redundant "설치하시겠어요?" asks because the
+	// LLM re-searched and re-confirmed on every consent turn). The richer
+	// behavior contract is a deliberate cost — trimming the install-consent
+	// JS example would let the LLM hallucinate the registry id from the
+	// skill name and break the install flow. The test exists to catch
+	// accidental drift, not to forbid intentional growth tied to a UX bug.
 	staticText := IdentityBlock + "\n\n" + ExecutionBlock + "\n\n" + QualityBlock + "\n\n" + SkillCreationBlock + "\n\n" + MemoryBlock
 	tokens := EstimateTokens(staticText)
-	const maxTokens = 2400
+	const maxTokens = 2800
 	if tokens > maxTokens {
 		t.Errorf("static text blocks %d tokens exceeds budget %d", tokens, maxTokens)
 	}
