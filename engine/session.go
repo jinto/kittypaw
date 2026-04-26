@@ -308,11 +308,19 @@ observeLoop:
 				continue
 			}
 
-			// Append error feedback if retrying
+			// Spell out the wrap pattern when the parser thinks the model
+			// emitted prose: Korean prose lands as SyntaxError, English
+			// prose's first word lands as ReferenceError. TypeError is a
+			// real code bug, not a wrap candidate, so it's intentionally
+			// excluded.
 			if lastError != "" {
+				hint := fmt.Sprintf("Your previous code had an error:\n%s\n\nPlease fix the code and try again.", lastError)
+				if strings.Contains(lastError, "SyntaxError") || strings.Contains(lastError, "ReferenceError") {
+					hint += "\n\nIMPORTANT: If your intended reply is plain prose (e.g. clarification, ack, chitchat), wrap it as a JS string return: `return \"문장\";` / `return \"text\";`. The sandbox parses your output as JavaScript, so a bare Korean/English sentence will always fail to parse."
+				}
 				messages = append(messages, core.LlmMessage{
 					Role:    core.RoleUser,
-					Content: fmt.Sprintf("Your previous code had an error:\n%s\n\nPlease fix the code and try again.", lastError),
+					Content: hint,
 				})
 			}
 
