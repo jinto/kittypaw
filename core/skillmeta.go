@@ -73,6 +73,9 @@ var SkillRegistry = []SkillMeta{
 	{Name: "Moa", Methods: []SkillMethodMeta{
 		{Name: "query", Signature: "Moa.query(prompt, options?) — parallel multi-model query + synthesis. options: {models, synthesizer, per_model_timeout_ms}. Returns {text, model, usage, candidates, synthesized}"},
 	}},
+	{Name: "Code", Methods: []SkillMethodMeta{
+		{Name: "exec", Signature: "Code.exec(jsCode) — Run JS in an isolated pure-compute sandbox (no Http/Storage/Skill/Llm access, 1s timeout). Returns {result, logs} on success or {error, logs} on failure. Use for ad-hoc unit conversion, base reframe, scope filter, or any numeric transform you do not want to paraphrase from memory"},
+	}},
 	{Name: "Memory", Methods: []SkillMethodMeta{
 		{Name: "search", Signature: "Memory.search(query)"},
 		{Name: "set", Signature: "Memory.set(key, value)"},

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dop251/goja"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/jinto/kittypaw/core"
@@ -153,9 +154,112 @@ func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, perm
 		return executeShare(ctx, call, s)
 	case "Fanout":
 		return executeFanout(ctx, call, s)
+	case "Code":
+		return executeCode(ctx, call, s)
 	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown skill: %s", call.SkillName)})
 	}
+}
+
+// codeExecTimeout caps a single Code.exec call so a runaway loop in
+// LLM-generated arithmetic cannot stall the agent loop. 1s is far more
+// than any honest unit-conversion / scope-filter / fmt task needs.
+const codeExecTimeout = 1 * time.Second
+
+// codeExecMaxOutputBytes truncates Code.exec result + logs so a large
+// computed payload (huge array, deeply nested object) cannot bloat the
+// next-turn prompt. The cap matches moaCandidateCharLimit conceptually
+// — the result is fed back into an LLM context which already has limits.
+const codeExecMaxOutputBytes = 8000
+
+// executeCode runs LLM-supplied JavaScript inside an isolated
+// pure-compute sandbox: a fresh goja runtime with no Http/Storage/
+// Skill/Llm/etc. globals registered. The intent is to give the LLM an
+// explicit affordance for ad-hoc numeric / shape transforms — unit
+// conversion, base reframe, scope filter, JSON re-arrangement — that
+// are too one-off to live in a permanent JS skill but too error-prone
+// to entrust to LLM paraphrase.
+//
+// Functionally close to the main agent loop's JS-as-response contract
+// (every LLM reply already runs in goja). The marginal value is the
+// affordance signal — a named tool tells the model "you can self-trigger
+// computation when uncertain about a number" — and the lockdown: no IO
+// surface, so a Code.exec call is guaranteed side-effect-free even if
+// the model writes adversarial code by mistake.
+func executeCode(_ context.Context, call core.SkillCall, _ *Session) (string, error) {
+	if call.Method != "exec" {
+		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Code method: %s", call.Method)})
+	}
+	if len(call.Args) == 0 {
+		return jsonResult(map[string]any{"error": "code required"})
+	}
+	var code string
+	_ = json.Unmarshal(call.Args[0], &code)
+	if strings.TrimSpace(code) == "" {
+		return jsonResult(map[string]any{"error": "empty code"})
+	}
+
+	vm := goja.New()
+
+	// console.log capture — useful for the LLM to debug its own snippets
+	// (the captured logs come back in the result envelope).
+	var logs []string
+	console := vm.NewObject()
+	_ = console.Set("log", func(fc goja.FunctionCall) goja.Value {
+		parts := make([]string, len(fc.Arguments))
+		for i, a := range fc.Arguments {
+			parts[i] = a.String()
+		}
+		logs = append(logs, strings.Join(parts, " "))
+		if len(logs) > 100 {
+			logs = logs[len(logs)-100:]
+		}
+		return goja.Undefined()
+	})
+	_ = vm.Set("console", console)
+
+	timer := time.AfterFunc(codeExecTimeout, func() {
+		vm.Interrupt("code.exec timed out")
+	})
+	defer timer.Stop()
+
+	val, err := vm.RunString(code)
+	if err != nil {
+		return jsonResult(map[string]any{
+			"error": err.Error(),
+			"logs":  truncateLogs(logs),
+		})
+	}
+
+	var result any
+	if val != nil && !goja.IsUndefined(val) && !goja.IsNull(val) {
+		result = val.Export()
+	}
+	out := map[string]any{
+		"result": result,
+		"logs":   truncateLogs(logs),
+	}
+	// Soft-cap the marshaled envelope.
+	encoded, _ := json.Marshal(out)
+	if len(encoded) > codeExecMaxOutputBytes {
+		out["result"] = fmt.Sprintf("%v", result)
+		if len(out["result"].(string)) > codeExecMaxOutputBytes {
+			out["result"] = out["result"].(string)[:codeExecMaxOutputBytes] + "…(truncated)"
+		}
+	}
+	return jsonResult(out)
+}
+
+func truncateLogs(logs []string) []string {
+	if len(logs) <= 20 {
+		return logs
+	}
+	// Keep first 5 + last 15 so both setup and final state are visible.
+	out := make([]string, 0, 21)
+	out = append(out, logs[:5]...)
+	out = append(out, "…(truncated)")
+	out = append(out, logs[len(logs)-15:]...)
+	return out
 }
 
 // --- HTTP / Web ---
