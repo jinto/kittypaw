@@ -308,15 +308,24 @@ observeLoop:
 				continue
 			}
 
-			// Spell out the wrap pattern when the parser thinks the model
-			// emitted prose: Korean prose lands as SyntaxError, English
-			// prose's first word lands as ReferenceError. TypeError is a
-			// real code bug, not a wrap candidate, so it's intentionally
-			// excluded.
+			// Error-class-specific retry guidance. Only inject on retry, so
+			// the static prompt stays lean. Each branch targets a failure
+			// pattern observed in production logs.
 			if lastError != "" {
 				hint := fmt.Sprintf("Your previous code had an error:\n%s\n\nPlease fix the code and try again.", lastError)
-				if strings.Contains(lastError, "SyntaxError") || strings.Contains(lastError, "ReferenceError") {
+				switch {
+				case strings.Contains(lastError, "SyntaxError"),
+					strings.Contains(lastError, "ReferenceError"):
+					// Korean prose → SyntaxError, English first-word → ReferenceError.
 					hint += "\n\nIMPORTANT: If your intended reply is plain prose (e.g. clarification, ack, chitchat), wrap it as a JS string return: `return \"문장\";` / `return \"text\";`. The sandbox parses your output as JavaScript, so a bare Korean/English sentence will always fail to parse."
+				case strings.Contains(lastError, "TypeError"):
+					// Undefined-property access — usually `sk.results[0].id`
+					// when results is empty, or `r.output` when r is the
+					// error shape from a missing skill.
+					hint += "\n\nIMPORTANT: TypeError usually means you accessed a property on undefined. Guard tool results before drilling in: `if (!sk.results?.length) return \"...\"; const id = sk.results[0].id;`. For `Skill.run(id)`, check `.error` before `.output` — the result on a missing skill carries `.error` plus a user-facing `.output` message you can return as-is."
+				case strings.Contains(lastError, "not found in registry"):
+					// Wrong-id install attempt — model truncated the name.
+					hint += "\n\nIMPORTANT: `Skill.installFromRegistry(id)` requires the *exact* id from the previous `Skill.search` result — never truncate or translate the skill name. The id is distinct from the name (e.g. \"currency-exchange-rates\" vs \"환율 조회\"). Recall the id from the immediate prior tool call, or re-call `Skill.search` with the same keyword to fetch it."
 				}
 				messages = append(messages, core.LlmMessage{
 					Role:    core.RoleUser,
