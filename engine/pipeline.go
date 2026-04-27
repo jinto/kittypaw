@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/jinto/kittypaw/core"
@@ -15,6 +16,7 @@ type IntentKind string
 
 const (
 	IntentChitchat       IntentKind = "chitchat"
+	IntentBrowse         IntentKind = "browse"
 	IntentLegacyFallback IntentKind = "legacy_fallback"
 )
 
@@ -47,7 +49,35 @@ func classifyIntent(text string) Intent {
 	if isChitchat(t) {
 		return Intent{Kind: IntentChitchat, Confidence: 1.0}
 	}
+	if isBrowse(t) {
+		return Intent{Kind: IntentBrowse, Confidence: 1.0}
+	}
 	return Intent{Kind: IntentLegacyFallback}
+}
+
+// isBrowse detects "show me what's available" queries — the user wants
+// a registry overview, not a specific install. Phrasing is varied
+// enough that a substring list beats a regex; the length cap blocks
+// long prose that *contains* "스킬" but isn't actually browsing.
+func isBrowse(text string) bool {
+	const browseMaxRunes = 30
+	if runeCount(text) > browseMaxRunes {
+		return false
+	}
+	lowered := strings.ToLower(text)
+	patterns := []string{
+		"어떤 스킬", "어떤 기능", "무슨 스킬",
+		"스킬 목록", "스킬 뭐", "스킬은 뭐", "스킬들",
+		"스킬 추천", "추천 스킬", "어떤 거", "뭐 있",
+		"what skills", "available skills", "list skills",
+		"browse", "list of", "추천해",
+	}
+	for _, p := range patterns {
+		if strings.Contains(lowered, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isChitchat detects short reactive utterances that don't carry a new
@@ -109,6 +139,8 @@ func getBranch(kind IntentKind) Branch {
 	switch kind {
 	case IntentChitchat:
 		return &ChitchatBranch{}
+	case IntentBrowse:
+		return &BrowseBranch{}
 	}
 	return nil
 }
@@ -122,3 +154,98 @@ type ChitchatBranch struct{}
 func (b *ChitchatBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
 	return "도움이 됐다니 좋아요! 또 필요하면 말씀해 주세요.", nil
 }
+
+// BrowseBranch lists registry skills grouped by domain. No LLM call —
+// the previous LLM-driven implementation produced the same shape via
+// emergent grouping; this branch reproduces it deterministically.
+//
+// Reproduces user-vision pattern (2) "도구 부족 가시화": when the user
+// asks "어떤 스킬?", they get the full registry surface, not a
+// guess-and-suggest from one search keyword.
+type BrowseBranch struct{}
+
+func (b *BrowseBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	rc, err := newRegistryClient(sess.Config)
+	if err != nil {
+		return "지금 스킬 레지스트리에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.", nil
+	}
+	entries, err := rc.SearchEntries("")
+	if err != nil {
+		return "지금 스킬 목록을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.", nil
+	}
+	if len(entries) == 0 {
+		return "현재 등록된 스킬이 없어요.", nil
+	}
+	return formatBrowseResponse(entries), nil
+}
+
+// formatBrowseResponse groups entries into a small number of named
+// categories using keyword inference on name + description. Hard-coded
+// category mapping is a known antipattern (Phase 6 will revisit) but
+// keeps Phase 2 within the "no LLM, no new state" boundary. New skills
+// land under "기타" until the mapping is updated.
+func formatBrowseResponse(entries []core.RegistryEntry) string {
+	type bucket struct {
+		name  string
+		items []core.RegistryEntry
+	}
+	buckets := []*bucket{
+		{name: "금융"}, {name: "날씨"}, {name: "뉴스"},
+		{name: "환경"}, {name: "할일"}, {name: "기타"},
+	}
+	idx := map[string]*bucket{}
+	for _, b := range buckets {
+		idx[b.name] = b
+	}
+	for _, e := range entries {
+		idx[categorize(e.Name, e.Description)].items = append(idx[categorize(e.Name, e.Description)].items, e)
+	}
+	var sb strings.Builder
+	sb.WriteString("## 사용 가능한 스킬들 (")
+	sb.WriteString(strconv.Itoa(len(entries)))
+	sb.WriteString("개)\n")
+	for _, b := range buckets {
+		if len(b.items) == 0 {
+			continue
+		}
+		sb.WriteString("\n### ")
+		sb.WriteString(b.name)
+		sb.WriteString("\n")
+		for _, e := range b.items {
+			sb.WriteString("• **")
+			sb.WriteString(e.Name)
+			sb.WriteString("** — ")
+			sb.WriteString(e.Description)
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("\n관심 있는 스킬이 있으면 말씀해 주세요. 설치를 도와드릴게요.")
+	return sb.String()
+}
+
+func categorize(name, desc string) string {
+	t := strings.ToLower(name + " " + desc)
+	switch {
+	case containsAny(t, "환율", "주가", "주식", "exchange", "stock"):
+		return "금융"
+	case containsAny(t, "날씨", "weather"):
+		return "날씨"
+	case containsAny(t, "뉴스", "rss", "news"):
+		return "뉴스"
+	case containsAny(t, "미세먼지", "air", "환경"):
+		return "환경"
+	case containsAny(t, "리마인더", "remind", "todo", "할일"):
+		return "할일"
+	}
+	return "기타"
+}
+
+func containsAny(haystack string, needles ...string) bool {
+	for _, n := range needles {
+		if strings.Contains(haystack, n) {
+			return true
+		}
+	}
+	return false
+}
+
