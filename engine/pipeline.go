@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -472,7 +473,118 @@ func (b *RunInstalledSkillBranch) Execute(ctx context.Context, sess *Session, ev
 		// the legacy LLM may have a meaningful reformulation.
 		return "", errBranchFallback
 	}
-	return output, nil
+	userText := ""
+	if p, err := event.ParsePayload(); err == nil {
+		userText = p.Text
+	}
+	return mediateSkillOutput(ctx, sess, skillID, userText, output), nil
+}
+
+// mediateSkillRawOutputCap caps how much skill output is fed to the
+// reframing LLM. Mirrors moaCandidateCharLimit so a verbose skill
+// (e.g. large JSON fetch) cannot blow up input tokens. Above the cap we
+// truncate with a marker; truncation is rare (exchange-rate / weather /
+// news outputs all sit under 2 kB) and safer than uncapped spend.
+const mediateSkillRawOutputCap = 8000
+
+// mediateSkillOutput reframes a skill's raw output through a small LLM
+// call so the user query's modifier (단위/언어/scope/verbosity) lands in
+// the response. The contract is reformat-only: raw numbers stay
+// verbatim, no new web search, no fabrication. On any failure (nil
+// provider, LLM error, empty response) returns rawOutput unchanged so
+// the user never loses the underlying data.
+//
+// Cost trade-off: Phase 4 RunInstalledSkillBranch was 0 LLM calls per
+// dispatch (verbatim output). This adds one small call per dispatch to
+// align the response with query intent. The verbatim path was correct
+// on shape but lost user-vision quality whenever the query carried a
+// modifier the skill JS didn't parse — fixing that in skill JS would
+// be case-by-case (env feedback_no_hardcoding.md). LLM mediation
+// generalizes the fix to every installed skill at a measured 1-call
+// cost. Cache deferred (query-dependent key gives low hit rate).
+func mediateSkillOutput(ctx context.Context, sess *Session, skillID, userText, rawOutput string) string {
+	if sess == nil || sess.Provider == nil || rawOutput == "" || userText == "" {
+		return rawOutput
+	}
+	truncated := rawOutput
+	if len(truncated) > mediateSkillRawOutputCap {
+		truncated = truncated[:mediateSkillRawOutputCap] + "\n…(truncated)"
+	}
+	messages := buildSubLLMMessages(buildMediatePrompt(skillID, userText, truncated))
+	resp, err := sess.Provider.Generate(ctx, messages)
+	if err != nil || resp == nil {
+		return rawOutput
+	}
+	out := strings.TrimSpace(resp.Content)
+	if out == "" {
+		return rawOutput
+	}
+	if !mediationPreservesFacts(rawOutput, out) {
+		// LLM ignored the raw and fabricated a response from priors.
+		// Observed in 2026-04-27: T3 "환율" with raw "1 USD = 1477.04
+		// KRW…" yielded a hallucinated "정확한 수치는 가져오지 못했습니다"
+		// + spurious install offer. Numeric-overlap zero is the strongest
+		// signal that the LLM didn't read the raw — fall back rather than
+		// ship the fabrication.
+		return rawOutput
+	}
+	return out
+}
+
+// mediationNumberRe captures numeric tokens (with optional decimal) so
+// we can verify the LLM response shares at least one number with the
+// raw output. Currency symbols, units, and locale-specific separators
+// are intentionally not parsed — over-strict matching would false-flag
+// legit reformatting (e.g. "1,477원" vs "1477"). The check is a
+// fabrication floor, not a unit converter validator.
+var mediationNumberRe = regexp.MustCompile(`\d+(?:\.\d+)?`)
+
+// mediationPreservesFacts returns true when the mediated response
+// shares at least one numeric token with the raw output (or when the
+// raw has no numbers, in which case this guard can't speak). Zero
+// overlap means the LLM authored the response from priors instead of
+// the raw — a fabrication signature we never want to ship.
+func mediationPreservesFacts(raw, mediated string) bool {
+	rawNums := mediationNumberRe.FindAllString(raw, -1)
+	if len(rawNums) == 0 {
+		return true
+	}
+	medNums := mediationNumberRe.FindAllString(mediated, -1)
+	if len(medNums) == 0 {
+		return false
+	}
+	medSet := make(map[string]struct{}, len(medNums))
+	for _, n := range medNums {
+		medSet[n] = struct{}{}
+	}
+	for _, n := range rawNums {
+		if _, ok := medSet[n]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// buildMediatePrompt is the reformat-only contract sent to the
+// reframing LLM. Phrased as general rules (no per-skill enumeration)
+// so the same prompt works for every installed skill the user might
+// dispatch through RunInstalledSkillBranch.
+func buildMediatePrompt(skillID, userText, rawOutput string) string {
+	var b strings.Builder
+	b.WriteString("사용자 query: \"")
+	b.WriteString(userText)
+	b.WriteString("\"\n\n설치된 스킬 \"")
+	b.WriteString(skillID)
+	b.WriteString("\" 의 raw 출력:\n---\n")
+	b.WriteString(rawOutput)
+	b.WriteString("\n---\n\n위 raw 출력을 사용자 query 의 의도에 맞게 정리해 답하세요. 규칙:\n")
+	b.WriteString("- raw 의 수치/사실은 변경 X. 그대로 쓰거나 환산 가능한 단위만 환산.\n")
+	b.WriteString("- 새 정보 추가 X. 추가 검색/추론 fabrication 금지.\n")
+	b.WriteString("- query 의 modifier (단위/언어/scope/verbosity) 를 응답 형식에 반영.\n")
+	b.WriteString("- 응답은 reformatted raw 만. 메타 안내 (추가 도움 권유, 스킬 설치 제안, 후속 질문) 금지.\n")
+	b.WriteString("- raw 가 query 충족에 *부족할 때만* 정직히 인정 + 다음 행동 제안.\n")
+	b.WriteString("- 짧고 자연스러운 비서 톤.")
+	return b.String()
 }
 
 // extractOutputField pulls the user-facing string out of runSkillOrPackage's
@@ -497,4 +609,3 @@ func extractOutputField(jsonStr string) string {
 	}
 	return ""
 }
-
