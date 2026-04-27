@@ -102,6 +102,36 @@ flow_install_chitchat() {
   assert_contains "chitchat-ack" "도움이 됐다니" "$out"
 }
 
+flow_installed_dispatch() {
+  echo "[installed_dispatch] 환율 알려줘 → 네 → 환율 (직접 dispatch, no re-install offer)"
+  # Reproduces the 2026-04-27 transcript turn 5 regression: with the
+  # exchange-rate skill already installed, the legacy LLM was emitting
+  # another "설치해드릴까요?" suffix on a follow-up "환율" query, ignoring
+  # the prompt's PRIORITY rule. The Phase 4 RunInstalledSkillBranch
+  # short-circuits to Skill.run before the LLM is consulted.
+  local out
+  out=$(run_flow installed_dispatch $'환율 알려줘\n네\n환율\n')
+  assert_contains "install-ack" "✅" "$out"
+  assert_contains "live-rates" "1477.04 KRW" "$out"
+  # T3 follow-up should be the rates again, not another install offer.
+  # Count the install-acks: exactly one (T2). Two means T3 re-installed.
+  local ack_count
+  ack_count=$(printf '%s' "$out" | grep -c "스킬을 설치했어요" || true)
+  if [[ "$ack_count" -ne 1 ]]; then
+    echo "  FAIL installed-dispatch-no-reinstall → '스킬을 설치했어요' count=$ack_count (want 1, got $ack_count)" >&2
+    return 1
+  fi
+  echo "  OK   installed-dispatch-no-reinstall → '스킬을 설치했어요' count=1"
+  # No new install offer on T3.
+  local offer_count
+  offer_count=$(printf '%s' "$out" | grep -c "설치해드릴까요\|설치를 도와드릴까요" || true)
+  if [[ "$offer_count" -gt 1 ]]; then
+    echo "  FAIL installed-dispatch-no-suffix-loop → install offer count=$offer_count (want ≤1)" >&2
+    return 1
+  fi
+  echo "  OK   installed-dispatch-no-suffix-loop → install offer count=$offer_count"
+}
+
 flow_install_explicit_request() {
   echo "[install_explicit_request] 엔화는? → 네 → 설치해줘요."
   # Reproduces the user transcript where "설치해줘요." (a complete
@@ -153,6 +183,7 @@ declare -A FLOWS=(
   [clarify]=flow_clarify
   [install_chitchat]=flow_install_chitchat
   [install_explicit_request]=flow_install_explicit_request
+  [installed_dispatch]=flow_installed_dispatch
   [browse]=flow_browse
   [multimatch]=flow_multimatch
   [missing_skill]=flow_missing_skill_grace
@@ -174,7 +205,7 @@ main() {
     return
   fi
   local fail=0
-  for name in clarify install_chitchat install_explicit_request browse multimatch missing_skill; do
+  for name in clarify install_chitchat install_explicit_request installed_dispatch browse multimatch missing_skill; do
     "${FLOWS[$name]}" || fail=$((fail+1))
     echo
   done

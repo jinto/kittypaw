@@ -19,6 +19,7 @@ const (
 	IntentChitchat            IntentKind = "chitchat"
 	IntentBrowse              IntentKind = "browse"
 	IntentInstallConsentReply IntentKind = "install_consent_reply"
+	IntentRunInstalledSkill   IntentKind = "run_installed_skill"
 	IntentLegacyFallback      IntentKind = "legacy_fallback"
 )
 
@@ -49,7 +50,7 @@ type Branch interface {
 // the legacy LLM path just made an offer) AND (b) the reply looks like
 // consent. This keeps a bare "네" off the consent branch when there's
 // no offer to consent to.
-func classifyIntent(text string, state *PipelineState) Intent {
+func classifyIntent(text string, state *PipelineState, sess *Session) Intent {
 	t := strings.TrimSpace(text)
 	if t == "" {
 		return Intent{Kind: IntentLegacyFallback}
@@ -63,7 +64,102 @@ func classifyIntent(text string, state *PipelineState) Intent {
 	if state != nil && len(state.RecentSkillSearch()) > 0 && isInstallConsent(t) {
 		return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
 	}
+	// Installed-skill dispatch: when the query keyword appears in an
+	// already-installed package's name, run that skill directly. This
+	// closes the regression where the LLM, despite the
+	// "PRIORITY: installed → Skill.run" prompt rule, still went out
+	// to Web.search + suggested re-installing an already-present
+	// skill (turn 5 of the 2026-04-27 transcript).
+	if pkg := matchInstalledSkill(t, sess); pkg != nil {
+		return Intent{
+			Kind: IntentRunInstalledSkill,
+			Params: map[string]any{
+				"skill_id":   pkg.Meta.ID,
+				"skill_name": pkg.Meta.Name,
+			},
+			Confidence: 1.0,
+		}
+	}
 	return Intent{Kind: IntentLegacyFallback}
+}
+
+// matchInstalledSkill returns an installed package whose name keywords
+// appear in the user query. Single-word match (e.g. "환율 조회" -> "환율")
+// is the common case; multi-skill ambiguity ("주식" matches both
+// "주식 알림" and "주가 조회") falls through to legacy LLM since picking
+// without context is the wrong call.
+func matchInstalledSkill(text string, sess *Session) *core.SkillPackage {
+	// 1-char query is too noisy for substring matching against installed
+	// package metadata — let the legacy LLM clarify it instead.
+	if runeCount(text) < 2 {
+		return nil
+	}
+	if sess == nil || sess.PackageManager == nil {
+		return nil
+	}
+	packages, err := sess.PackageManager.ListInstalled()
+	if err != nil || len(packages) == 0 {
+		return nil
+	}
+	lowered := strings.ToLower(text)
+	var matches []core.SkillPackage
+	for _, pkg := range packages {
+		if pkgKeywordMatches(lowered, pkg) {
+			matches = append(matches, pkg)
+		}
+	}
+	if len(matches) != 1 {
+		// 0 → no match, ≥2 → ambiguous (let legacy LLM resolve).
+		return nil
+	}
+	return &matches[0]
+}
+
+// pkgKeywordMatches checks whether a query keyword appears in the
+// package's name or description. Description is the Korean source
+// since installed package names are often ASCII slugs (e.g.
+// "exchange-rate") while descriptions carry "환율" / "주가" / "날씨"
+// as natural keywords.
+//
+// A small stop-word list filters generic description tokens that
+// would otherwise match every domain query (e.g. "조회", "확인").
+func pkgKeywordMatches(loweredQuery string, pkg core.SkillPackage) bool {
+	candidates := strings.ToLower(pkg.Meta.Name) + " " + strings.ToLower(pkg.Meta.Description)
+	for _, raw := range strings.Fields(candidates) {
+		word := strings.Trim(raw, ".,()[]{}:;!?-_/\"'")
+		if runeCount(word) < 2 {
+			continue
+		}
+		if pkgKeywordStopWord(word) {
+			continue
+		}
+		// Bidirectional match — Korean attaches particles ("환율" + "을"
+		// → "환율을") so the description token is often longer than the
+		// query keyword. Both directions catch this without
+		// overgenerating: query "환율" matches description token
+		// "환율을", query "오늘 환율 어때" matches token "환율".
+		if strings.Contains(loweredQuery, word) || strings.Contains(word, loweredQuery) {
+			return true
+		}
+	}
+	return false
+}
+
+// pkgKeywordStopWord skips description tokens that are too generic to
+// signal an installed-skill match. The list intentionally stays short;
+// extending it is cheap but each addition narrows the dispatch.
+func pkgKeywordStopWord(w string) bool {
+	switch w {
+	case "조회", "확인", "알림", "정보", "데이터", "api", "free", "skill",
+		"실시간", "현재", "오늘", "기준", "별개의", "별개",
+		"및", "을", "를", "의", "에", "이", "가", "로", "과",
+		"주요", "전용", "제공", "사용", "키", "불필요",
+		"the", "and", "for", "with", "from", "into",
+		"into.", "텔레그램으로", "발송합니다", "알려줍니다",
+		"보내줍니다", "확인하고", "조회합니다", "관리합니다":
+		return true
+	}
+	return false
 }
 
 // isInstallConsent matches the user's reply to a suffix offer. Two
@@ -163,7 +259,7 @@ func runeCount(s string) int {
 // Returning a bool instead of a sentinel error keeps the legacy path
 // untouched — callers can wire this in with a single if-statement.
 func dispatchPipeline(ctx context.Context, sess *Session, event core.Event, eventText string) (string, bool) {
-	intent := classifyIntent(eventText, sess.Pipeline)
+	intent := classifyIntent(eventText, sess.Pipeline, sess)
 	branch := getBranch(intent.Kind)
 	if branch == nil {
 		return "", false
@@ -185,6 +281,8 @@ func getBranch(kind IntentKind) Branch {
 		return &BrowseBranch{}
 	case IntentInstallConsentReply:
 		return &InstallConsentBranch{}
+	case IntentRunInstalledSkill:
+		return &RunInstalledSkillBranch{}
 	}
 	return nil
 }
@@ -351,6 +449,31 @@ var errBranchFallback = errBranchFallbackType{}
 type errBranchFallbackType struct{}
 
 func (errBranchFallbackType) Error() string { return "branch fallback to legacy" }
+
+// RunInstalledSkillBranch dispatches an installed skill directly when
+// the user's query keyword matches the skill name. Replaces the legacy
+// LLM path's "PRIORITY: installed → Skill.run" rule, which the model
+// occasionally ignored — most visibly in the 2026-04-27 transcript
+// where "환율" right after installing "환율 조회" still triggered
+// Web.search + a duplicate install offer. The deterministic branch
+// removes that drift.
+type RunInstalledSkillBranch struct{}
+
+func (b *RunInstalledSkillBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	skillID, _ := intent.Params["skill_id"].(string)
+	if skillID == "" {
+		return "", errBranchFallback
+	}
+	rawJSON, _ := runSkillOrPackage(ctx, skillID, sess)
+	output := extractOutputField(rawJSON)
+	if output == "" {
+		// Empty output is the legacy "(no output)" path — fall back rather
+		// than echo a confusing "응답이 비어 있어요" template here, since
+		// the legacy LLM may have a meaningful reformulation.
+		return "", errBranchFallback
+	}
+	return output, nil
+}
 
 // extractOutputField pulls the user-facing string out of runSkillOrPackage's
 // JSON envelope. The shape is {"success":true,"output":"..."} on the happy
