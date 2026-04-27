@@ -23,6 +23,21 @@ type PipelineState struct {
 	mu                     sync.Mutex
 	lastSkillSearchResults []core.RegistryEntry
 	lastSearchAt           time.Time
+
+	// pendingClarification reserves a slot for the future ClarifyBranch
+	// (level3 plan Phase 4). When the legacy LLM emits a clarifying
+	// question, the branch will record the dimension + candidate slots
+	// here so the next-turn user reply can deterministically map to the
+	// resolved query. Currently nil — the legacy LLM clarify path
+	// handles both turns. Wired on the type so adding the branch later
+	// doesn't reshape the struct.
+	pendingClarification *pendingClarification
+}
+
+type pendingClarification struct {
+	Dimension  string
+	Candidates []string
+	IssuedAt   time.Time
 }
 
 // skillSearchResultsTTL is how long an unused search result hangs

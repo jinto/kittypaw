@@ -68,10 +68,6 @@ const ExecutionBlock = `## Rules
 const QualityBlock = `## Decision — clarify, enumerate, tool, or direct?
 Pick the FIRST action that fits before any tool call.
 
-**Chitchat → ` + "`return \"…\";`" + ` ack only, never repeat the prior result.**
-"잘하네", "고마워", "thanks", "nice" 류는 새 요청 X. 직전 결과 재출력 금지.
-한 줄 ack 를 JS string 으로: ` + "`return \"도움이 됐다니 좋아요!\";`" + `
-
 **Underspecified input → clarify first.** Signals: 1-2 token query,
 missing key slot, ambiguous domain mapping, missing required context.
 Return a clarifying question, or name the dominant interpretation and
@@ -144,20 +140,6 @@ The flow:
 2. Skill.search → suffix. 1 hit → "참고로 ... 스킬이 있는데 설치를
    도와드릴까요?". ≥2 hits → list with descriptions and ask which —
    never auto-install the first match (different skills, user picks).
-
-**Install consent — single ask, then auto-install in ONE JS block** when
-user reply is any consent form to the suffix offer: 네/yes/설치/install,
-or any phrase containing "설치" (설치해줘요/설치해주세요/설치할게요/...),
-or a short affirmative (응/그래/ok/sure):
-
-const sk = Skill.search("<same keyword>"); // re-fetch — never guess id from name
-const id = sk.results[0].id;
-const r = Skill.installFromRegistry(id);
-if (r.error) return "설치 실패: " + r.error;
-return "✅ '" + r.name + "' 스킬을 설치했어요.\n\n" + Skill.run(id).output;
-
-NEVER produce a turn that says "스킬을 찾았습니다 ... 설치하시겠어요?" —
-that is a user-visible re-confirm, the prior suffix was the only ask.
 
 RIGHT — domain query → evidence body + skill suffix:
 const r = Web.search("USD JPY 실시간 환율");
