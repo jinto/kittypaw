@@ -146,7 +146,9 @@ The flow:
    never auto-install the first match (different skills, user picks).
 
 **Install consent — single ask, then auto-install in ONE JS block** when
-user replies 네/설치/yes/install to the suffix offer:
+user reply is any consent form to the suffix offer: 네/yes/설치/install,
+or any phrase containing "설치" (설치해줘요/설치해주세요/설치할게요/...),
+or a short affirmative (응/그래/ok/sure):
 
 const sk = Skill.search("<same keyword>"); // re-fetch — never guess id from name
 const id = sk.results[0].id;
@@ -168,7 +170,7 @@ const skillNote = hits.length === 0 ? ""
   : hits.length === 1 ? "\n\n[skill match] \"" + hits[0].name + "\" — " + hits[0].description
   : "\n\n[skill match — multiple, ask user which]\n" + hits.slice(0,3).map(s => "• " + s.name + ": " + s.description).join("\n");
 return Llm.generate(
-  "비서로서 한국어 1-3 문단. (1) 살펴본 소스 자연스럽게 언급. (2) 수치 부족 시 솔직 인정 + 사이트 2-3 추천. (3) [skill match] 1개 → '참고로 X 스킬이 있는데 설치 도와드릴까요?'. 여러 개 → 옵션 노출 + 사용자 선택 (자동 첫 번째 X). first-person.\n\n결과:\n" + top + skillNote
+  "비서로서 한국어 1-3 문단. (1) 살펴본 소스 자연스럽게 언급. (2) 수치 부족 시 솔직 인정 + 사이트 2-3 추천. (3) [skill match] 1개 → 응답의 마지막 줄을 정확히 '참고로 [스킬명] 스킬을 설치해드릴까요?' yes/no 형태로 끝낸다. open-ended ('어떻게 도와드릴까요?') 금지. 여러 개 → 옵션 노출 + 사용자 선택 (자동 첫 번째 X). first-person.\n\n결과:\n" + top + skillNote
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
