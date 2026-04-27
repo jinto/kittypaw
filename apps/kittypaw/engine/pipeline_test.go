@@ -260,6 +260,89 @@ func TestRecordPipelineTurn_StripsAckBeforeStoring(t *testing.T) {
 	}
 }
 
+func TestRecordSkillOutput_RoundTrip(t *testing.T) {
+	ps := NewPipelineState()
+	if got := ps.RecentSkillOutput(); got != "" {
+		t.Fatalf("fresh state must return empty, got %q", got)
+	}
+	ps.RecordSkillOutput("1 USD = 1477.04 KRW")
+	if got := ps.RecentSkillOutput(); got != "1 USD = 1477.04 KRW" {
+		t.Errorf("got %q, want roundtrip", got)
+	}
+}
+
+func TestRecordSkillOutput_EmptyIgnored(t *testing.T) {
+	ps := NewPipelineState()
+	ps.RecordSkillOutput("first")
+	ps.RecordSkillOutput("") // must not overwrite with empty
+	if got := ps.RecentSkillOutput(); got != "first" {
+		t.Errorf("empty record should be no-op, got %q", got)
+	}
+}
+
+func TestRecordSkillOutput_NilSafe(t *testing.T) {
+	var ps *PipelineState
+	ps.RecordSkillOutput("x") // must not panic
+	if got := ps.RecentSkillOutput(); got != "" {
+		t.Errorf("nil ps must return empty, got %q", got)
+	}
+}
+
+func TestAugmentSystemPromptWithRecentSkillOutput_AppendsBlock(t *testing.T) {
+	ps := NewPipelineState()
+	ps.RecordSkillOutput("1 USD = 1477.04 KRW")
+
+	messages := []core.LlmMessage{
+		{Role: core.RoleSystem, Content: "base prompt"},
+		{Role: core.RoleUser, Content: "원화로 환율"},
+	}
+	augmentSystemPromptWithRecentSkillOutput(messages, "원화로 환율", ps)
+
+	got := messages[0].Content
+	if !strings.Contains(got, "Cross-turn context") {
+		t.Errorf("system message must carry cross-turn block, got %q", got)
+	}
+	if !strings.Contains(got, "1 USD = 1477.04 KRW") {
+		t.Errorf("system message must carry the cached skill output, got %q", got)
+	}
+	if !strings.HasPrefix(got, "base prompt") {
+		t.Errorf("base prompt must be preserved as prefix, got %q", got)
+	}
+}
+
+func TestAugmentSystemPromptWithRecentSkillOutput_NoOpWhenLong(t *testing.T) {
+	ps := NewPipelineState()
+	ps.RecordSkillOutput("data")
+
+	long := strings.Repeat("긴 질문 ", 10) // > 30 runes
+	messages := []core.LlmMessage{
+		{Role: core.RoleSystem, Content: "base"},
+	}
+	augmentSystemPromptWithRecentSkillOutput(messages, long, ps)
+	if messages[0].Content != "base" {
+		t.Errorf("long query must not augment, got %q", messages[0].Content)
+	}
+}
+
+func TestAugmentSystemPromptWithRecentSkillOutput_NoOpWhenNoCache(t *testing.T) {
+	ps := NewPipelineState()
+	messages := []core.LlmMessage{
+		{Role: core.RoleSystem, Content: "base"},
+	}
+	augmentSystemPromptWithRecentSkillOutput(messages, "원화로 환율", ps)
+	if messages[0].Content != "base" {
+		t.Errorf("empty cache must not augment, got %q", messages[0].Content)
+	}
+}
+
+func TestAugmentSystemPromptWithRecentSkillOutput_NoOpWhenEmptyMessages(t *testing.T) {
+	ps := NewPipelineState()
+	ps.RecordSkillOutput("data")
+	var messages []core.LlmMessage
+	augmentSystemPromptWithRecentSkillOutput(messages, "원화로", ps)
+	// Just must not panic.
+}
+
 func TestRecordPipelineTurn_NextLoadSeesPriorTurns(t *testing.T) {
 	// Two consecutive branch dispatches under the same agentID must
 	// accumulate in history — this is what gives the 3rd turn (legacy

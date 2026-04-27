@@ -439,6 +439,10 @@ func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event
 	if runOutput == "" {
 		runOutput = "방금 설치된 스킬을 한 번 실행해 보세요. 결과가 비어 있어요."
 	}
+	// Cache the raw skill output (without the install ack) so a
+	// follow-up turn can augment its system prompt with it. See
+	// runAgentLoop's cross-turn augmentation block.
+	sess.Pipeline.RecordSkillOutput(runOutput)
 	return "✅ '" + pkg.Meta.Name + "' 스킬을 설치했어요.\n\n" + runOutput, nil
 }
 
@@ -477,6 +481,11 @@ func (b *RunInstalledSkillBranch) Execute(ctx context.Context, sess *Session, ev
 	if p, err := event.ParsePayload(); err == nil {
 		userText = p.Text
 	}
+	// Cache the raw skill output (pre-mediation) so a follow-up turn
+	// can augment its system prompt with the source of truth, not the
+	// LLM's reframed paraphrase. mediation may guard-fall-back to raw
+	// anyway, but caching pre-mediation keeps the augmentation honest.
+	sess.Pipeline.RecordSkillOutput(output)
 	return mediateSkillOutput(ctx, sess, skillID, userText, output), nil
 }
 

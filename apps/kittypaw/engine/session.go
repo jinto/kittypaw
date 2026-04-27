@@ -163,6 +163,56 @@ func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (
 	return s.runAgentLoop(ctx, event, eventText, opts)
 }
 
+// followupQueryRuneCap caps the rune length of a "short follow-up" —
+// queries longer than this are treated as fresh requests, not implicit
+// references. 30 runes covers "원화로 환율 알려줘 자세히" / "그건 어떻게
+// 계산해야 하는지" — anything longer reads as a self-contained query.
+const followupQueryRuneCap = 30
+
+// augmentSystemPromptWithRecentSkillOutput appends a cross-turn
+// context block to the first system message when (a) the current
+// user turn is short enough to plausibly be a follow-up, and (b)
+// PipelineState has a fresh skill output cached. Mutates messages in
+// place; no-op when either condition fails or messages is empty / has
+// no leading system message.
+//
+// The conversation transcript also carries the same data via Phase 8
+// history append, but the LLM's "ignore history → re-search" prior
+// is observably stronger than its "use history → transform" prior
+// (Phase 10 prompt-only attempt: ROI 0). System-prompt augmentation
+// re-surfaces the data inside a message the model treats as
+// authoritative, which routes around the history-ignoring prior.
+func augmentSystemPromptWithRecentSkillOutput(messages []core.LlmMessage, userText string, ps *PipelineState) {
+	if len(messages) == 0 || messages[0].Role != core.RoleSystem {
+		return
+	}
+	if runeCount(userText) > followupQueryRuneCap {
+		return
+	}
+	if ps == nil {
+		return
+	}
+	recent := ps.RecentSkillOutput()
+	if recent == "" {
+		return
+	}
+	const augmentTemplate = `
+
+## Cross-turn context — recent skill output (load-bearing)
+The user's previous turn produced this raw output from a deterministic skill:
+
+---
+%s
+---
+
+The current user turn is short (≤30 chars) and may reference this data implicitly.
+- If it shapes like a transform / modifier ("원화로", "엔으로", "간단히", "다시", "계산해", "그것"), apply JS arithmetic on the prior numbers (use ` + "`Code.exec(jsCode)`" + ` if uncertain). Do NOT call Web.search or Skill.search for the same domain — the data is right above.
+- Do NOT reverse-clarify ("무엇을?") when a plausible interpretation exists.
+- Do NOT offer to install a skill that already produced this output.`
+
+	messages[0].Content += fmt.Sprintf(augmentTemplate, recent)
+}
+
 // stripBranchControlMarker removes engine-emitted control prefixes
 // (currently just the InstallConsentBranch ack) from a branch response
 // before it lands in conversation history. The user-visible reply
@@ -394,6 +444,14 @@ observeLoop:
 
 			// Build prompt (observations are volatile — replaced each observe round)
 			messages := BuildPrompt(state, eventText, compaction, s.Config, channelName, profile, memoryContext, mcpToolsSection, observations, s.BaseDir)
+
+			// Cross-turn augmentation — short follow-up + recent skill output.
+			// The conversation transcript already carries the prior assistant
+			// output, but the LLM's "ignore-history-and-re-search" prior is
+			// observably stronger than its "use-history" prior. Re-surface
+			// the data inside the system message itself so the prior cannot
+			// route around it.
+			augmentSystemPromptWithRecentSkillOutput(messages, eventText, s.Pipeline)
 
 			slog.Info("prompt built",
 				"phase", core.PhasePrompt,
