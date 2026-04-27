@@ -70,6 +70,12 @@ type Session struct {
 	// nil on bare-struct test fixtures; RecoverTenantPanic /
 	// MarkTenantReady are nil-safe, so callers don't need to guard.
 	Health *core.HealthState
+
+	// Pipeline carries multi-turn state for the deterministic-branch
+	// pipeline (most recent skill search results, etc). Lazily
+	// initialized on first dispatch; nil-safe via the methods on
+	// PipelineState.
+	Pipeline *PipelineState
 }
 
 // sandboxOptions returns the sandbox.Options that govern which tenant-scoped
@@ -135,6 +141,9 @@ func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (
 	// Pipeline dispatch — deterministic branches before the LLM agent
 	// loop. Legacy fallback when classifyIntent returns
 	// IntentLegacyFallback or a branch errors.
+	if s.Pipeline == nil {
+		s.Pipeline = NewPipelineState()
+	}
 	if response, handled := dispatchPipeline(ctx, s, event, eventText); handled {
 		return response, nil
 	}
