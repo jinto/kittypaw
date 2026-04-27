@@ -132,6 +132,13 @@ func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (
 		return response, nil
 	}
 
+	// Pipeline dispatch — deterministic branches before the LLM agent
+	// loop. Legacy fallback when classifyIntent returns
+	// IntentLegacyFallback or a branch errors.
+	if response, handled := dispatchPipeline(ctx, s, event, eventText); handled {
+		return response, nil
+	}
+
 	return s.runAgentLoop(ctx, event, eventText, opts)
 }
 
