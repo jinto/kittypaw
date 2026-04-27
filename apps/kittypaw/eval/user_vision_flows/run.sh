@@ -102,6 +102,23 @@ flow_install_chitchat() {
   assert_contains "chitchat-ack" "도움이 됐다니" "$out"
 }
 
+flow_install_explicit_request() {
+  echo "[install_explicit_request] 엔화는? → 네 → 설치해줘요."
+  # Reproduces the user transcript where "설치해줘요." (a complete
+  # Korean sentence containing "설치", not the bare "네") used to be
+  # mis-routed to a generic "어떤 스킬?" clarification. The Round-4
+  # consent-trigger expansion + suffix-strict-wording should drive
+  # the LLM straight from clarify → suffix offer → install in 3 turns.
+  local out
+  out=$(run_flow install_explicit_request $'엔화는?\n네\n설치해줘요.\n')
+  assert_contains "clarify" "환율 말씀이세요" "$out"
+  assert_contains "suffix-skill-name" "환율 조회" "$out"
+  # 'paw>' style direct ack, not "어떤 스킬을 설치할지 알려주세요" loop
+  assert_not_contains "no-clarify-loop" "어떤 스킬을 설치할지" "$out"
+  assert_contains "install-ack" "✅" "$out"
+  assert_contains "live-rates" "1477.04 KRW" "$out"
+}
+
 flow_browse() {
   echo "[browse] 어떤 스킬들이 있어요?"
   local out
@@ -135,6 +152,7 @@ flow_missing_skill_grace() {
 declare -A FLOWS=(
   [clarify]=flow_clarify
   [install_chitchat]=flow_install_chitchat
+  [install_explicit_request]=flow_install_explicit_request
   [browse]=flow_browse
   [multimatch]=flow_multimatch
   [missing_skill]=flow_missing_skill_grace
@@ -156,7 +174,7 @@ main() {
     return
   fi
   local fail=0
-  for name in clarify install_chitchat browse multimatch missing_skill; do
+  for name in clarify install_chitchat install_explicit_request browse multimatch missing_skill; do
     "${FLOWS[$name]}" || fail=$((fail+1))
     echo
   done
