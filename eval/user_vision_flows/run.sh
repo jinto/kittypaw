@@ -45,6 +45,11 @@ fi
 
 reset_daemon() {
   "$KITTY_BIN" stop >/dev/null 2>&1 || true
+  # Force-kill any stale serve processes — `stop` only targets the
+  # pid in daemon.pid, but earlier sessions may have left orphans
+  # whose in-memory PipelineState cache would leak into the next
+  # flow's first turn (Phase 10 cross-turn augmentation regression).
+  pkill -9 -f "kittypaw serve" 2>/dev/null || true
   rm -rf "$HOME/.kittypaw/tenants/default/packages/"* \
          "$HOME/.kittypaw/tenants/default/skills/"* 2>/dev/null || true
   sleep 1
@@ -98,7 +103,7 @@ flow_install_chitchat() {
   out=$(run_flow install_chitchat $'환율 알려줘\n네\n오 잘하네!\n')
   assert_contains "evidence" "환율" "$out"
   assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "1477.04 KRW" "$out"
+  assert_contains "live-rates" "Frankfurter" "$out"
   assert_contains "chitchat-ack" "도움이 됐다니" "$out"
 }
 
@@ -112,7 +117,7 @@ flow_installed_dispatch() {
   local out
   out=$(run_flow installed_dispatch $'환율 알려줘\n네\n환율\n')
   assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "1477.04 KRW" "$out"
+  assert_contains "live-rates" "Frankfurter" "$out"
   # T3 follow-up should be the rates again, not another install offer.
   # Count install-acks: usually exactly one (T2). Up to two is tolerated
   # because the legacy LLM at T1 occasionally generates an ack-shaped
@@ -182,7 +187,7 @@ flow_install_explicit_request() {
   # 'paw>' style direct ack, not "어떤 스킬을 설치할지 알려주세요" loop
   assert_not_contains "no-clarify-loop" "어떤 스킬을 설치할지" "$out"
   assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "1477.04 KRW" "$out"
+  assert_contains "live-rates" "Frankfurter" "$out"
 }
 
 flow_browse() {

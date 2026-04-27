@@ -23,6 +23,16 @@ type PipelineState struct {
 	mu                     sync.Mutex
 	lastSkillSearchResults []core.RegistryEntry
 	lastSearchAt           time.Time
+
+	// lastSkillOutput is the raw user-facing output from the most recent
+	// deterministic skill execution (InstallConsentBranch +
+	// RunInstalledSkillBranch). Used by runAgentLoop to augment the
+	// system prompt when a short follow-up arrives — the LLM's "ignore
+	// history" prior is observably stronger than its "use history"
+	// prior, so we re-surface the data inside the system message
+	// instead of relying on the conversation transcript alone.
+	lastSkillOutput   string
+	lastSkillOutputAt time.Time
 }
 
 // skillSearchResultsTTL is how long an unused search result hangs
@@ -30,6 +40,12 @@ type PipelineState struct {
 // 5 minutes covers a normal think-then-reply pause; longer windows
 // risk pairing a stale offer with an unrelated later "네".
 const skillSearchResultsTTL = 5 * time.Minute
+
+// skillOutputTTL is how long a skill's raw output stays available for
+// cross-turn augmentation. Same 5 min budget as skillSearchResultsTTL
+// — a longer window risks pairing a stale rate table with an unrelated
+// later "계산해줘".
+const skillOutputTTL = 5 * time.Minute
 
 // NewPipelineState returns an empty pipeline state.
 func NewPipelineState() *PipelineState {
@@ -76,4 +92,34 @@ func (ps *PipelineState) ClearSkillSearch() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.lastSkillSearchResults = nil
+}
+
+// RecordSkillOutput stores the raw user-facing output from a
+// deterministic skill execution. Called by InstallConsentBranch and
+// RunInstalledSkillBranch right before they return, so the next
+// short follow-up turn can augment its system prompt with the data
+// the user is most likely referencing.
+func (ps *PipelineState) RecordSkillOutput(output string) {
+	if ps == nil || output == "" {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.lastSkillOutput = output
+	ps.lastSkillOutputAt = time.Now()
+}
+
+// RecentSkillOutput returns the cached skill output if recorded
+// within skillOutputTTL, or "" otherwise. Cheap to call on every
+// turn — caller decides whether to augment.
+func (ps *PipelineState) RecentSkillOutput() string {
+	if ps == nil {
+		return ""
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if time.Since(ps.lastSkillOutputAt) > skillOutputTTL {
+		return ""
+	}
+	return ps.lastSkillOutput
 }
