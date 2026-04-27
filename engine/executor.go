@@ -1279,6 +1279,11 @@ func executeSkillSearch(query string, s *Session) (string, error) {
 	if len(entries) > limit {
 		entries = entries[:limit]
 	}
+	// Capture for the deterministic InstallConsentBranch — when the user
+	// replies "네"/"설치해줘요"/etc. on the next turn, the classifier
+	// reads this slice to drive a deterministic install instead of
+	// asking the LLM to recall the id (which truncates names).
+	s.Pipeline.RecordSkillSearch(entries)
 	results := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
 		results = append(results, map[string]any{

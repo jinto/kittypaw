@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -15,9 +16,10 @@ import (
 type IntentKind string
 
 const (
-	IntentChitchat       IntentKind = "chitchat"
-	IntentBrowse         IntentKind = "browse"
-	IntentLegacyFallback IntentKind = "legacy_fallback"
+	IntentChitchat            IntentKind = "chitchat"
+	IntentBrowse              IntentKind = "browse"
+	IntentInstallConsentReply IntentKind = "install_consent_reply"
+	IntentLegacyFallback      IntentKind = "legacy_fallback"
 )
 
 // Intent is the classifier's output. Params carry branch-specific state
@@ -37,11 +39,17 @@ type Branch interface {
 	Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error)
 }
 
-// classifyIntent runs the rule-first classifier. Phase 1 only routes
-// chitchat; everything else falls back to the legacy LLM agent loop.
-// Future phases extend the rule list (browse, install_consent_reply,
-// clarify) and add an LLM-fallback for ambiguous cases.
-func classifyIntent(text string) Intent {
+// classifyIntent runs the rule-first classifier. Phase 1-3 cover
+// chitchat / browse / install-consent-reply. Everything else falls
+// back to the legacy LLM agent loop. Phase 4 will add LLM-fallback
+// classification for ambiguous queries (clarify trigger).
+//
+// install-consent-reply is the only state-aware rule today: it fires
+// only when (a) a recent Skill.search exists in PipelineState (i.e.
+// the legacy LLM path just made an offer) AND (b) the reply looks like
+// consent. This keeps a bare "네" off the consent branch when there's
+// no offer to consent to.
+func classifyIntent(text string, state *PipelineState) Intent {
 	t := strings.TrimSpace(text)
 	if t == "" {
 		return Intent{Kind: IntentLegacyFallback}
@@ -52,7 +60,41 @@ func classifyIntent(text string) Intent {
 	if isBrowse(t) {
 		return Intent{Kind: IntentBrowse, Confidence: 1.0}
 	}
+	if state != nil && len(state.RecentSkillSearch()) > 0 && isInstallConsent(t) {
+		return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
+	}
 	return Intent{Kind: IntentLegacyFallback}
+}
+
+// isInstallConsent matches the user's reply to a suffix offer. Two
+// shapes:
+//
+//  1. Any phrase containing "설치" (설치해줘요/설치해주세요/설치할게요/...)
+//     — strong signal regardless of length.
+//  2. A short bare affirmative (네/응/그래/yes/ok/...) — only fires on
+//     short replies because longer messages with the same prefix
+//     ("네, 그런데 다른 거 알려줘") aren't consent.
+func isInstallConsent(text string) bool {
+	if strings.Contains(text, "설치") {
+		return true
+	}
+	if runeCount(text) > 8 {
+		return false
+	}
+	lowered := strings.ToLower(text)
+	// Strip a trailing punctuation set used in casual Korean replies.
+	trimmed := strings.TrimRight(lowered, ".,!?~ ")
+	bareAffirmatives := []string{
+		"네", "넵", "응", "어", "그래", "그래요",
+		"ㅇ", "ㅇㅇ", "ㅇㅋ", "오케이", "예",
+		"yes", "y", "ok", "okay", "sure", "yep", "yeah",
+	}
+	for _, a := range bareAffirmatives {
+		if trimmed == a {
+			return true
+		}
+	}
+	return false
 }
 
 // isBrowse detects "show me what's available" queries — the user wants
@@ -121,7 +163,7 @@ func runeCount(s string) int {
 // Returning a bool instead of a sentinel error keeps the legacy path
 // untouched — callers can wire this in with a single if-statement.
 func dispatchPipeline(ctx context.Context, sess *Session, event core.Event, eventText string) (string, bool) {
-	intent := classifyIntent(eventText)
+	intent := classifyIntent(eventText, sess.Pipeline)
 	branch := getBranch(intent.Kind)
 	if branch == nil {
 		return "", false
@@ -141,6 +183,8 @@ func getBranch(kind IntentKind) Branch {
 		return &ChitchatBranch{}
 	case IntentBrowse:
 		return &BrowseBranch{}
+	case IntentInstallConsentReply:
+		return &InstallConsentBranch{}
 	}
 	return nil
 }
@@ -247,5 +291,87 @@ func containsAny(haystack string, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+// InstallConsentBranch handles the user's "네" / "설치해줘요" / etc.
+// reply to a previous turn's install offer. The skill id comes from
+// PipelineState.RecentSkillSearch — recorded by the legacy path's
+// `Skill.search` call. No LLM hallucination of the id (truncation
+// regression in commit a4dc8a4 / 26d25c2).
+//
+// Reproduces user-vision pattern (2) "도구 부족 가시화" plus the
+// friendly persona — the user agrees, and the system installs and
+// runs without asking again.
+type InstallConsentBranch struct{}
+
+func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	results := sess.Pipeline.RecentSkillSearch()
+	if len(results) == 0 {
+		// Should not happen — classifier gates on this — but be defensive.
+		return "", errBranchFallback
+	}
+	target := results[0]
+
+	// Guard: PackageManager must be wired (not in some bare test fixtures).
+	if sess.PackageManager == nil {
+		return "지금 스킬을 설치하기 위한 환경이 준비되지 않았어요. 잠시 후 다시 시도해 주세요.", nil
+	}
+
+	rc, err := newRegistryClient(sess.Config)
+	if err != nil {
+		return "지금 스킬 레지스트리에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.", nil
+	}
+	entry, err := rc.FindEntry(target.ID)
+	if err != nil || entry == nil {
+		return "스킬 레지스트리에서 '" + target.Name + "' 항목을 다시 찾지 못했어요. 잠시 후 다시 시도해 주세요.", nil
+	}
+
+	pkg, err := sess.PackageManager.InstallFromRegistry(rc, *entry)
+	if err != nil {
+		return "'" + target.Name + "' 설치 중 문제가 발생했어요: " + err.Error(), nil
+	}
+
+	// Clear so a later unrelated "네" doesn't re-install the same skill.
+	sess.Pipeline.ClearSkillSearch()
+
+	// Run immediately — match the user vision of "agree → see result".
+	output, _ := runSkillOrPackage(ctx, pkg.Meta.ID, sess)
+	runOutput := extractOutputField(output)
+	if runOutput == "" {
+		runOutput = "방금 설치된 스킬을 한 번 실행해 보세요. 결과가 비어 있어요."
+	}
+	return "✅ '" + pkg.Meta.Name + "' 스킬을 설치했어요.\n\n" + runOutput, nil
+}
+
+// errBranchFallback signals "this branch declined; let the legacy path
+// handle it". dispatchPipeline already turns any branch error into a
+// fallback, but this sentinel makes the intent explicit at the call site.
+var errBranchFallback = errBranchFallbackType{}
+
+type errBranchFallbackType struct{}
+
+func (errBranchFallbackType) Error() string { return "branch fallback to legacy" }
+
+// extractOutputField pulls the user-facing string out of runSkillOrPackage's
+// JSON envelope. The shape is {"success":true,"output":"..."} on the happy
+// path and {"error":"...","output":"..."} on the not-found path (the latter
+// also carries an actionable user-facing message). Falls back to the raw
+// JSON if the envelope can't be decoded — better than silently dropping.
+func extractOutputField(jsonStr string) string {
+	type runResult struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	var r runResult
+	if err := json.Unmarshal([]byte(jsonStr), &r); err != nil {
+		return jsonStr
+	}
+	if r.Output != "" {
+		return r.Output
+	}
+	if r.Error != "" {
+		return r.Error
+	}
+	return ""
 }
 
