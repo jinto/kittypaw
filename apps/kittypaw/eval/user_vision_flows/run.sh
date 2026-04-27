@@ -132,6 +132,38 @@ flow_installed_dispatch() {
   echo "  OK   installed-dispatch-no-suffix-loop → install offer count=$offer_count"
 }
 
+flow_intent_aligned_format() {
+  echo "[intent_aligned] 환율 알려줘 → 네 → 원화로 환율 (KRW reframe via mediateSkillOutput)"
+  # Reproduces the 2026-04-27 transcript turn 3 regression: with the
+  # exchange-rate skill installed, "원화로 환율" was returning USD-base
+  # raw output verbatim because RunInstalledSkillBranch dispatched the
+  # skill but never reframed the response. mediateSkillOutput (Phase 7)
+  # passes the raw output + user query through a small LLM call so the
+  # query modifier ("원화로") lands in the response without any change
+  # to the skill JS itself.
+  local out
+  out=$(run_flow intent_aligned $'환율 알려줘\n네\n원화로 환율\n')
+  assert_contains "install-ack" "✅" "$out"
+  # T3 응답: KRW base reframe — "원" 또는 "KRW" 단위 표기 등장.
+  # Stochastic by nature of LLM rephrasing — assertion is presence of
+  # *either* token, not a specific phrase. Strong numeric assertion is
+  # avoided (Round 4 placebo class re-emergence risk).
+  if [[ "$out" == *"원"* ]] || [[ "$out" == *"KRW"* ]]; then
+    echo "  OK   intent-aligned-krw-reframe → '원' or 'KRW' present"
+  else
+    echo "  FAIL intent-aligned-krw-reframe → neither '원' nor 'KRW' in response" >&2
+    echo "  --- response (truncated 1200ch) ---" >&2
+    printf '%s\n' "${out:0:1200}" >&2
+    echo "  ----------------------------------" >&2
+    return 1
+  fi
+  # Fabrication guard: vague hedge phrases like "약 1480원" suggest the
+  # LLM invented a rate rather than reformatting the raw output. Only
+  # the literal pattern is checked — too narrow to flake on legit
+  # phrasings, too specific to silently approve fabrication.
+  assert_not_contains "intent-aligned-no-vague-hedge" "약 14" "$out"
+}
+
 flow_install_explicit_request() {
   echo "[install_explicit_request] 엔화는? → 네 → 설치해줘요."
   # Reproduces the user transcript where "설치해줘요." (a complete
@@ -184,6 +216,7 @@ declare -A FLOWS=(
   [install_chitchat]=flow_install_chitchat
   [install_explicit_request]=flow_install_explicit_request
   [installed_dispatch]=flow_installed_dispatch
+  [intent_aligned]=flow_intent_aligned_format
   [browse]=flow_browse
   [multimatch]=flow_multimatch
   [missing_skill]=flow_missing_skill_grace
@@ -205,7 +238,7 @@ main() {
     return
   fi
   local fail=0
-  for name in clarify install_chitchat install_explicit_request installed_dispatch browse multimatch missing_skill; do
+  for name in clarify install_chitchat install_explicit_request installed_dispatch intent_aligned browse multimatch missing_skill; do
     "${FLOWS[$name]}" || fail=$((fail+1))
     echo
   done
