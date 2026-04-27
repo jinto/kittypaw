@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -176,5 +177,113 @@ func TestMediationPreservesFacts_ZeroOverlap(t *testing.T) {
 func TestMediationPreservesFacts_AnyOverlap(t *testing.T) {
 	if !mediationPreservesFacts("1 2 3", "9 8 3") {
 		t.Fatal("any shared number must pass (return true)")
+	}
+}
+
+// TestRecordPipelineTurn_AppendsBothTurns guards the cross-turn fix
+// from the 2026-04-27 transcript: a follow-up legacy-LLM turn must
+// see the prior branch dispatch in conversation history.
+func TestRecordPipelineTurn_AppendsBothTurns(t *testing.T) {
+	st := openTestStore(t)
+	sess := &Session{Store: st}
+
+	payload, _ := json.Marshal(core.ChatPayload{
+		ChatID:    "test-chat",
+		Text:      "환율 알려줘",
+		SessionID: "test-session",
+	})
+	event := core.Event{Type: core.EventWebChat, Payload: payload}
+
+	if err := sess.recordPipelineTurn(event, "환율 알려줘", "1 USD = 1477.04 KRW"); err != nil {
+		t.Fatalf("recordPipelineTurn: %v", err)
+	}
+
+	// agentID derivation mirrors recordPipelineTurn's fallback path
+	// (no ResolveUser hit on a fresh store) — channel-name + session id.
+	state, err := st.LoadState("web-test-session")
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(state.Turns) != 2 {
+		t.Fatalf("expected 2 turns (user + assistant), got %d", len(state.Turns))
+	}
+	if state.Turns[0].Role != core.RoleUser || state.Turns[0].Content != "환율 알려줘" {
+		t.Errorf("turn 0 not user query: %+v", state.Turns[0])
+	}
+	if state.Turns[1].Role != core.RoleAssistant || state.Turns[1].Content != "1 USD = 1477.04 KRW" {
+		t.Errorf("turn 1 not branch response: %+v", state.Turns[1])
+	}
+}
+
+func TestStripBranchControlMarker_RemovesInstallAck(t *testing.T) {
+	in := "✅ '환율 조회' 스킬을 설치했어요.\n\n📈 환율\n1 USD = 1477 KRW"
+	want := "📈 환율\n1 USD = 1477 KRW"
+	got := stripBranchControlMarker(in)
+	if got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestStripBranchControlMarker_NoMarkerPassThrough(t *testing.T) {
+	in := "📈 환율\n1 USD = 1477 KRW"
+	if got := stripBranchControlMarker(in); got != in {
+		t.Errorf("untouched response should pass through, got %q", got)
+	}
+}
+
+func TestRecordPipelineTurn_StripsAckBeforeStoring(t *testing.T) {
+	// History append must not propagate the install-ack marker to the
+	// next turn's legacy-LLM context — otherwise the LLM sees the ack
+	// pattern and copies it back into its own response (2026-04-27
+	// regression: '스킬을 설치했어요' count=2 in flow_installed_dispatch).
+	st := openTestStore(t)
+	sess := &Session{Store: st}
+	payload, _ := json.Marshal(core.ChatPayload{
+		ChatID:    "test-chat",
+		Text:      "네",
+		SessionID: "test-session",
+	})
+	event := core.Event{Type: core.EventWebChat, Payload: payload}
+	if err := sess.recordPipelineTurn(event, "네", "✅ '환율 조회' 스킬을 설치했어요.\n\n📈 환율\n1 USD = 1477.04 KRW"); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := st.LoadState("web-test-session")
+	if len(state.Turns) != 2 {
+		t.Fatalf("expected 2 turns, got %d", len(state.Turns))
+	}
+	stored := state.Turns[1].Content
+	if strings.Contains(stored, "스킬을 설치했어요") {
+		t.Errorf("ack marker leaked into history: %q", stored)
+	}
+	if !strings.Contains(stored, "1477.04") {
+		t.Errorf("data part dropped from history: %q", stored)
+	}
+}
+
+func TestRecordPipelineTurn_NextLoadSeesPriorTurns(t *testing.T) {
+	// Two consecutive branch dispatches under the same agentID must
+	// accumulate in history — this is what gives the 3rd turn (legacy
+	// LLM) a 2-turn context.
+	st := openTestStore(t)
+	sess := &Session{Store: st}
+	mkEvent := func(text string) core.Event {
+		payload, _ := json.Marshal(core.ChatPayload{
+			ChatID:    "test-chat",
+			Text:      text,
+			SessionID: "test-session",
+		})
+		return core.Event{Type: core.EventWebChat, Payload: payload}
+	}
+
+	if err := sess.recordPipelineTurn(mkEvent("환율"), "환율", "1 USD = 1477.04 KRW"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.recordPipelineTurn(mkEvent("원화로"), "원화로", "1 USD = 1477.04 KRW (raw)"); err != nil {
+		t.Fatal(err)
+	}
+
+	state, _ := st.LoadState("web-test-session")
+	if len(state.Turns) != 4 {
+		t.Fatalf("expected 4 turns (2 user + 2 assistant), got %d", len(state.Turns))
 	}
 }
