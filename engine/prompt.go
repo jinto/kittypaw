@@ -31,6 +31,8 @@ const ExecutionBlock = `## Rules
 - ALWAYS use ` + "`return`" + ` to produce output. Without return, nothing is sent back.
   - Simple answer: ` + "`return \"4\"`" + `
   - Computed answer: ` + "`return new Date().toLocaleDateString('ko-KR')`" + `
+  - Numeric transform: ` + "`const r = 1477.04 / 0.85383; return `1 EUR = ${r.toFixed(2)} 원`;`" + `
+    Use JS arithmetic for unit conversion / base reframe / scope filter — never paraphrase numbers from memory.
 - Use the available skill globals to interact with the outside world.
 - Skill methods are synchronous — you can call them directly.
 - Keep your code minimal and focused on the task.

@@ -145,10 +145,102 @@ func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (
 		s.Pipeline = NewPipelineState()
 	}
 	if response, handled := dispatchPipeline(ctx, s, event, eventText); handled {
+		// Branch dispatch bypasses runAgentLoop — and therefore would
+		// also bypass conversation-history persistence unless we record
+		// the turn here. Without this, a follow-up turn that *does* hit
+		// the legacy LLM (e.g. "지금 계산결과를 원화 기준으로 다시")
+		// finds no record of the prior branch response and reports
+		// "맥락이 없어서…" — the 2026-04-27 transcript turn 4
+		// regression. Errors are logged but do not fail the response;
+		// the user-visible reply already exists and history loss is
+		// graceful.
+		if err := s.recordPipelineTurn(event, eventText, response); err != nil {
+			slog.Warn("pipeline turn record failed", "error", err)
+		}
 		return response, nil
 	}
 
 	return s.runAgentLoop(ctx, event, eventText, opts)
+}
+
+// stripBranchControlMarker removes engine-emitted control prefixes
+// (currently just the InstallConsentBranch ack) from a branch response
+// before it lands in conversation history. The user-visible reply
+// keeps the marker — the strip is only so a follow-up turn dispatched
+// to the legacy LLM does not see the ack pattern in history and copy
+// it back into its own response. This caused the 2026-04-27
+// regression where a third-turn "환율" routed to the legacy LLM and
+// re-emitted "✅ '환율 조회' 스킬을 설치했어요." verbatim from history.
+//
+// The strip is line-prefix only (we do not parse the response body),
+// so it is safe to extend with new markers without rewriting callers.
+func stripBranchControlMarker(response string) string {
+	const ackTail = "스킬을 설치했어요.\n\n"
+	if i := strings.Index(response, ackTail); i >= 0 {
+		// Find the line start of the ack — usually "✅ '...' " before
+		// "스킬을 설치했어요." Drop the entire ack line plus the blank
+		// separator after it, keep whatever the branch appended below.
+		lineStart := strings.LastIndex(response[:i], "\n")
+		if lineStart < 0 {
+			lineStart = 0
+		} else {
+			lineStart++ // skip the newline itself
+		}
+		return response[:lineStart] + response[i+len(ackTail):]
+	}
+	return response
+}
+
+// recordPipelineTurn persists the user query + branch response onto the
+// agent's conversation history so subsequent turns (whether dispatched
+// by another branch or by the legacy LLM) see the cross-turn context.
+// Mirrors the user-turn / assistant-turn pair that runAgentLoop emits
+// at lines 215-246; the duplication is small and the alternative —
+// extracting a shared helper — would entangle the legacy loop with the
+// branch path more than is worth the saved lines.
+func (s *Session) recordPipelineTurn(event core.Event, eventText, response string) error {
+	channelName := event.Type.ChannelName()
+	channelUserID := sessionIDFromEvent(&event)
+	agentID := channelName + "-" + channelUserID
+	if globalID, ok, err := s.Store.ResolveUser(channelName, channelUserID); err == nil && ok {
+		agentID = "user-" + globalID
+	}
+	state, err := s.Store.LoadState(agentID)
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	if state == nil {
+		// First-ever turn for this agent — runAgentLoop creates the row
+		// lazily on the same path. Mirror that here so a branch dispatch
+		// is allowed to be the agent's very first interaction.
+		state = &core.AgentState{
+			AgentID:      agentID,
+			SystemPrompt: SystemPrompt,
+		}
+		if err := s.Store.SaveState(state); err != nil {
+			return fmt.Errorf("save initial state: %w", err)
+		}
+	}
+	now := core.NowTimestamp()
+	userTurn := core.ConversationTurn{
+		Role:      core.RoleUser,
+		Content:   eventText,
+		Timestamp: now,
+	}
+	state.Turns = append(state.Turns, userTurn)
+	if err := s.Store.AddTurn(agentID, &userTurn); err != nil {
+		return fmt.Errorf("add user turn: %w", err)
+	}
+	assistantTurn := core.ConversationTurn{
+		Role:      core.RoleAssistant,
+		Content:   stripBranchControlMarker(response),
+		Timestamp: now,
+	}
+	state.Turns = append(state.Turns, assistantTurn)
+	if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
+		return fmt.Errorf("add assistant turn: %w", err)
+	}
+	return s.Store.SaveState(state)
 }
 
 func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventText string, opts *RunOptions) (string, error) {
