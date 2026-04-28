@@ -5,7 +5,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -384,10 +386,8 @@ func runChat(_ *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Check if daemon was already running before we connect.
-	wasRunning := conn.IsRunning()
-
-	// Ensure daemon is running (auto-starts if needed).
+	// Auto-start daemon if needed; it stays resident across chat
+	// sessions. Users free resources via `kittypaw stop`.
 	if _, err := conn.Connect(); err != nil {
 		return err
 	}
@@ -441,7 +441,7 @@ func runChat(_ *cobra.Command, args []string) error {
 	}
 	defer closeResources()
 
-	// Catch Ctrl-C to cleanup before exit.
+	// Catch Ctrl-C: restore terminal then exit. Daemon keeps running.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT)
 	go func() {
@@ -449,9 +449,6 @@ func runChat(_ *cobra.Command, args []string) error {
 		signal.Stop(sigCh)
 		fmt.Println()
 		closeResources()
-		if !wasRunning && flagRemote == "" {
-			stopDaemon()
-		}
 		os.Exit(0)
 	}()
 
@@ -512,10 +509,12 @@ func runChat(_ *cobra.Command, args []string) error {
 		}
 
 		gotResult, sendErr := sendOnce()
-		// Silent reconnect on EOF: server may have rotated the conn between
-		// turns. We swallow the disconnect, redial, and replay the same input
-		// once. Only surface noise to the user if the retry also fails.
-		if sendErr != nil && !gotResult && strings.Contains(sendErr.Error(), "EOF") {
+		// Silent reconnect on transport drop: redial once and replay
+		// the same input. Surface only if the retry also fails.
+		// Server-side application errors (ErrServerSide) are excluded —
+		// retrying them would double-charge the user without healing
+		// the underlying failure.
+		if sendErr != nil && !gotResult && isTransportDropErr(sendErr) {
 			cs.Close()
 			cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
 			if err != nil {
@@ -531,30 +530,35 @@ func runChat(_ *cobra.Command, args []string) error {
 	fmt.Println()
 	closeResources() // restore terminal before any post-chat output
 
-	// Auto-started daemon is owned by this chat session — clean up on exit.
-	if !wasRunning && flagRemote == "" {
-		stopDaemon()
-	}
-
 	return nil
 }
 
-func stopDaemon() {
-	pidPath, err := daemonPidPath()
-	if err != nil {
-		return
+// isTransportDropErr reports whether err is a transient WebSocket
+// teardown that the silent-reconnect path should swallow (EOF,
+// broken pipe, closed conn, reset). Errors carrying client.ErrServerSide
+// are application-layer failures and never qualify — replaying them
+// would double-charge the user.
+func isTransportDropErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	pid, ok := readPid(pidPath)
-	if !ok || !processRunning(pid) {
-		return
+	if errors.Is(err, client.ErrServerSide) {
+		return false
 	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, net.ErrClosed) {
+		return true
 	}
-	proc.Signal(syscall.SIGTERM)
-	os.Remove(pidPath)
-	fmt.Println("Daemon stopped.")
+	// Substring fallback for libraries that surface raw text errors
+	// without wrapping a typed sentinel.
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "connection reset by peer")
 }
 
 // ---------------------------------------------------------------------------

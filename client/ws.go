@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -11,6 +12,13 @@ import (
 
 	"github.com/jinto/kittypaw/core"
 )
+
+// ErrServerSide tags errors that originated from a server-emitted
+// WsMsgError frame, as opposed to a transport-level disconnect. The
+// CLI's silent-reconnect path uses errors.Is to reject these —
+// replaying the same prompt would not heal an application-layer
+// failure and could double-charge the user.
+var ErrServerSide = errors.New("server error")
 
 // ChatOptions configures callbacks for streaming chat.
 type ChatOptions struct {
@@ -92,7 +100,7 @@ func (cs *ChatSession) Send(text string, opts ChatOptions) error {
 			if opts.OnError != nil {
 				opts.OnError(errMsg)
 			}
-			return fmt.Errorf("server error: %s", errMsg)
+			return fmt.Errorf("%w: %s", ErrServerSide, errMsg)
 		case core.WsMsgPermission:
 			deny := false
 			permitMsg := core.WsClientMsg{Type: core.WsMsgPermit, OK: &deny}
