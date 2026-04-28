@@ -1731,3 +1731,62 @@ func TestQueryPermissionLogFiltersNonPermission(t *testing.T) {
 		t.Errorf("expected permission.approved, got %s", logs[0].EventType)
 	}
 }
+
+// TestRecentUserMessagesAll_HonoursWindow pins the SQL fix for the
+// reflection cycle's "no messages in 24h window" silent skip. The bug
+// was a type-mismatched compare: timestamp is stored by core.NowTimestamp
+// as a unix-epoch *string* ("1777394416"), and the query was filtering on
+// `timestamp >= datetime('now', ?)` which yields a SQL datetime string
+// ("2026-04-29 01:30:00"). Lexicographic compare made every row drop —
+// the reflection loop saw zero messages even when 100s existed in the
+// last hour.
+func TestRecentUserMessagesAll_HonoursWindow(t *testing.T) {
+	st := openTestStore(t)
+
+	if _, err := st.db.Exec(
+		`INSERT INTO agents (agent_id) VALUES (?)`, "test-agent",
+	); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := time.Now().Unix()
+	rows := []struct {
+		role    string
+		content string
+		ts      int64
+	}{
+		{"user", "hello", now - 60},        // 1 minute ago — in window
+		{"user", "earlier", now - 12*3600}, // 12h ago — in window
+		{"user", "ancient", now - 48*3600}, // 48h ago — out of window
+		{"assistant", "hi back", now - 30}, // role != user — excluded regardless
+	}
+	for _, r := range rows {
+		if _, err := st.db.Exec(
+			`INSERT INTO conversations (agent_id, role, content, timestamp)
+			 VALUES (?, ?, ?, ?)`,
+			"test-agent", r.role, r.content, fmt.Sprintf("%d", r.ts),
+		); err != nil {
+			t.Fatalf("insert conversation: %v", err)
+		}
+	}
+
+	got, err := st.RecentUserMessagesAll(24, 1024)
+	if err != nil {
+		t.Fatalf("RecentUserMessagesAll: %v", err)
+	}
+	want := map[string]bool{"hello": true, "earlier": true}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d rows in 24h window, got %d (%v)", len(want), len(got), got)
+	}
+	for _, c := range got {
+		switch c {
+		case "ancient":
+			t.Errorf("48h-old user row leaked through 24h window filter")
+		case "hi back":
+			t.Errorf("assistant role row leaked — role filter broken")
+		}
+		if !want[c] {
+			t.Errorf("unexpected content %q in window result", c)
+		}
+	}
+}
