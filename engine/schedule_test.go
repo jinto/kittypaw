@@ -41,7 +41,7 @@ func TestParseCronInterval(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSchedulerStopMultipleCalls(t *testing.T) {
-	sched := NewScheduler(&Session{}, nil, nil)
+	sched := NewScheduler(&Session{}, nil)
 	sched.Stop()
 	sched.Stop() // must not panic
 	sched.Stop()
@@ -65,7 +65,7 @@ func newTestScheduler(t *testing.T) (*Scheduler, *store.Store) {
 	t.Helper()
 	st := newTestStore(t)
 	session := &Session{Store: st, Config: &core.Config{}}
-	return NewScheduler(session, nil, nil), st
+	return NewScheduler(session, nil), st
 }
 
 func TestIsDue_ScheduleFirstRun(t *testing.T) {

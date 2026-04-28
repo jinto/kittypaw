@@ -116,7 +116,7 @@ func New(tenants []*TenantDeps, version string) *Server {
 		config:         cfg,
 		store:          defaultDeps.Store,
 		session:        defaultSession,
-		scheduler:      engine.NewScheduler(defaultSession, engine.NewSharedBudget(cfg.Features.DailyTokenLimit), defaultDeps.PkgMgr),
+		scheduler:      engine.NewScheduler(defaultSession, defaultDeps.PkgMgr),
 		tenants:        router,
 		tenantList:     tenantList,
 		tenantRegistry: registry,
@@ -194,10 +194,6 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/skills/{name}/enable", s.handleSkillEnable)
 		r.Post("/skills/{name}/disable", s.handleSkillDisable)
 		r.Post("/skills/{name}/explain", s.handleSkillExplain)
-		r.Get("/skills/{id}/fixes", s.handleSkillFixes)
-
-		// Fixes
-		r.Post("/fixes/{id}/approve", s.handleFixApprove)
 
 		// Suggestions
 		r.Get("/suggestions", s.handleSuggestionsList)

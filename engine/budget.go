@@ -6,9 +6,9 @@ import (
 	"github.com/jinto/kittypaw/llm"
 )
 
-// SharedTokenBudget tracks shared token consumption across auto-fix,
-// delegation, and reflection features. Thread-safe via atomic CAS.
-// A zero limit means unlimited spending.
+// SharedTokenBudget tracks shared token consumption across LLM-spending
+// features (orchestration delegation, MoA fan-out + synthesis,
+// File.summary). Thread-safe via atomic CAS. A zero limit means unlimited.
 //
 // The budget is advisory post-hoc: TrySpend is called after a provider
 // returns, so concurrent children may briefly overshoot the limit.

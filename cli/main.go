@@ -620,7 +620,6 @@ func newSkillCmd() *cobra.Command {
 		newSkillExplainCmd(),
 		newSkillConfigCmd(),
 		newSkillSuggestCmd(),
-		newSkillFixCmd(),
 	)
 	return cmd
 }
@@ -1155,66 +1154,6 @@ func newSkillSuggestCmd() *cobra.Command {
 					return err
 				}
 				fmt.Printf("Suggestion %q dismissed.\n", args[0])
-				return nil
-			},
-		},
-	)
-	return cmd
-}
-
-// --- skill fix ---
-
-func newSkillFixCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "fix",
-		Short: "Manage skill fixes",
-	}
-	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "list <skill>",
-			Short: "List fixes for a skill",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectDaemon()
-				if err != nil {
-					return err
-				}
-				res, err := cl.FixesList(args[0])
-				if err != nil {
-					return err
-				}
-				fixes := jsonSlice(res, "fixes")
-				if len(fixes) == 0 {
-					fmt.Println("No fixes found.")
-					return nil
-				}
-				fmt.Printf("%s %s %s %s\n", padW("ID", 6), padW("APPLIED", 8), padW("DATE", 20), "ERROR")
-				fmt.Println(strings.Repeat("-", 60))
-				for _, f := range fixes {
-					applied := "no"
-					if jsonBool(f, "applied") {
-						applied = "yes"
-					}
-					errMsg := truncW(jsonStr(f, "error_message"), 30)
-					fmt.Printf("%s %s %s %s\n",
-						padW(fmt.Sprintf("%d", jsonInt(f, "id")), 6), padW(applied, 8), padW(jsonStr(f, "created_at"), 20), errMsg)
-				}
-				return nil
-			},
-		},
-		&cobra.Command{
-			Use:   "approve <id>",
-			Short: "Approve a fix",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectDaemon()
-				if err != nil {
-					return err
-				}
-				if _, err := cl.FixesApprove(args[0]); err != nil {
-					return err
-				}
-				fmt.Printf("Fix %s approved.\n", args[0])
 				return nil
 			},
 		},

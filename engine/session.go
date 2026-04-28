@@ -66,7 +66,7 @@ type Session struct {
 	Config           *core.Config
 	BaseDir          string             // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
-	Budget           *SharedTokenBudget // shared across auto-fix, delegation, reflection
+	Budget           *SharedTokenBudget // shared across orchestration, MoA, File.summary
 	// SummaryFlight dedups concurrent File.summary misses; nil → per-call group.
 	SummaryFlight  *singleflight.Group
 	Indexer        Indexer                  // nil when workspace indexer is not initialized

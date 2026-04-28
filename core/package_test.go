@@ -183,25 +183,6 @@ context = ["locale", "location"]
 }
 
 // ---------------------------------------------------------------------------
-// CanDisable
-// ---------------------------------------------------------------------------
-
-func TestCanDisable_Default(t *testing.T) {
-	pkg := &SkillPackage{}
-	if pkg.CanDisable() {
-		t.Error("CanDisable() should default to false")
-	}
-}
-
-func TestCanDisable_Explicit(t *testing.T) {
-	yes := true
-	pkg := &SkillPackage{Permissions: PackagePermissions{CanDisable: &yes}}
-	if !pkg.CanDisable() {
-		t.Error("CanDisable() should return true when set")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Install / Uninstall / List (PackageManager)
 // ---------------------------------------------------------------------------
 

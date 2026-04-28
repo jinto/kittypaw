@@ -143,7 +143,7 @@ func TestSchedulerTickRecovers(t *testing.T) {
 		Health:   core.NewHealthState(),
 		Config:   &core.Config{},
 	}
-	s := NewScheduler(sess, nil, nil)
+	s := NewScheduler(sess, nil)
 
 	defer func() {
 		if r := recover(); r != nil {
