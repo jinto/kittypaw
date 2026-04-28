@@ -123,3 +123,19 @@ func (ps *PipelineState) RecentSkillOutput() string {
 	}
 	return ps.lastSkillOutput
 }
+
+// ClearSkillOutput drops the cached skill output. Called by
+// runAgentLoop after a successful legacy-LLM turn so the next short
+// follow-up does not get a stale augmentation block. Without this,
+// the cache could still carry a 3-turn-old USD-base raw rate while
+// history's most-recent assistant turn already shows the KRW-base
+// transform — the conflicting signals freeze the LLM (2026-04-28
+// transcript T5a "지금 답변을 만들지 못했어요" regression).
+func (ps *PipelineState) ClearSkillOutput() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.lastSkillOutput = ""
+}
