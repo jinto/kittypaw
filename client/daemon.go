@@ -195,7 +195,7 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 		return fmt.Errorf("daemon 시작 실패: %w", err)
 	}
 
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(proc.Process.Pid)), 0o600); err != nil {
+	if err := WritePidFile(pidPath, proc.Process.Pid); err != nil {
 		return fmt.Errorf("PID 파일 기록 실패: %w", err)
 	}
 	return nil
@@ -227,15 +227,87 @@ func daemonPidPath() (string, error) {
 }
 
 func readPid(path string) (int, bool) {
+	pid, _, ok := ReadPidFile(path)
+	return pid, ok
+}
+
+// WritePidFile writes pid + its start-time fingerprint in 2-line
+// text format ("<pid>\n<start_time>\n"). Phase 13.4: when daemons
+// became persistent across chat sessions (Phase 12), the PID-only
+// validation in `kittypaw stop` started carrying real PID-reuse
+// risk — a sleeping laptop could let the daemon's PID get recycled
+// before the user remembered to stop it. Recording the start time
+// alongside the PID lets stop refuse to signal a process that
+// happens to share the recorded PID but has a different start
+// time. start_time=0 is written when the platform doesn't surface
+// a start time (Windows) — the verification path treats 0 as
+// "skip" so legacy-platform behavior is preserved.
+func WritePidFile(path string, pid int) error {
+	startTime, _ := processStartTime(pid)
+	content := fmt.Sprintf("%d\n%d\n", pid, startTime)
+	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+// ReadPidFile parses pid + recorded start time from path. Returns
+// ok=false when the file is absent, the first line is not a valid
+// PID, or the file has 2+ lines but the second is not a valid
+// integer (a corrupt 2-line file must NOT silently downgrade to
+// legacy mode — that would bypass start-time verification).
+//
+// recordedStart=0 is reserved for the *legitimate* legacy single-
+// line format written before Phase 13.4. VerifyDaemonStartTime
+// treats 0 as "skip verification" so an in-place upgrade (old
+// daemon, new CLI) keeps working until the daemon restarts.
+func ReadPidFile(path string) (pid int, recordedStart int64, ok bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 {
+		return 0, 0, false
+	}
+	pid, err = strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	return pid, true
+	if len(lines) >= 2 {
+		recordedStart, err = strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
+		if err != nil {
+			return 0, 0, false
+		}
+	}
+	return pid, recordedStart, true
+}
+
+// VerifyDaemonStartTime returns true when the live process at pid
+// has the same start-time fingerprint that was recorded in the PID
+// file. Returns false on mismatch — the caller should treat the
+// PID as stale (PID reuse) and refuse to signal.
+//
+// Two distinct paths around the recorded value:
+//
+//   - recordedStart=0 is the legacy / unsupported-platform marker.
+//     Always returns true so a daemon written before Phase 13.4 (or
+//     on a platform whose start time we can't read, e.g. Windows)
+//     keeps working — there's nothing to verify against, and the
+//     pre-Phase-13.4 PID-only contract is the best we can do.
+//
+//   - recordedStart!=0 is a Phase 13.4 fingerprint. If the live
+//     start time can't be read (ps blocked, /proc hidden, exec
+//     failure), we **fail closed** — the whole point of recording
+//     the fingerprint was to refuse signals when verification is
+//     impossible, so a "trust on error" fallback would silently
+//     bypass the very protection this code adds.
+func VerifyDaemonStartTime(pid int, recordedStart int64) bool {
+	if recordedStart == 0 {
+		return true
+	}
+	actual, err := processStartTime(pid)
+	if err != nil {
+		return false
+	}
+	return actual == recordedStart
 }
 
 // isKittypawProcess checks if a PID belongs to a running kittypaw process.

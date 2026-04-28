@@ -1509,9 +1509,11 @@ func runDaemonStart(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Check if already running.
-	if pid, ok := readPid(pidPath); ok {
-		if processRunning(pid) {
+	// Check if already running. Verify start-time so a stale PID
+	// recycled by an unrelated process does not produce a false
+	// "already running" error.
+	if pid, recordedStart, ok := client.ReadPidFile(pidPath); ok {
+		if processRunning(pid) && client.VerifyDaemonStartTime(pid, recordedStart) {
 			return fmt.Errorf("daemon already running (pid %d)", pid)
 		}
 	}
@@ -1532,7 +1534,7 @@ func runDaemonStart(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(proc.Process.Pid)), 0o644); err != nil {
+	if err := client.WritePidFile(pidPath, proc.Process.Pid); err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
 
@@ -1554,9 +1556,16 @@ func runDaemonStop(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	pid, ok := readPid(pidPath)
+	pid, recordedStart, ok := client.ReadPidFile(pidPath)
 	if !ok {
 		fmt.Println("No daemon pid file found.")
+		return nil
+	}
+
+	// Phase 13.4 PID hardening: refuse to signal a recycled PID.
+	if !client.VerifyDaemonStartTime(pid, recordedStart) {
+		fmt.Printf("PID %d does not match the recorded daemon (PID was reused). Cleaning up stale pid file.\n", pid)
+		os.Remove(pidPath)
 		return nil
 	}
 
@@ -1589,18 +1598,23 @@ func runDaemonStatus(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	pid, ok := readPid(pidPath)
+	pid, recordedStart, ok := client.ReadPidFile(pidPath)
 	if !ok {
 		fmt.Println("Daemon is not running (no pid file).")
 		return nil
 	}
 
-	if processRunning(pid) {
-		fmt.Printf("Daemon is running (pid %d).\n", pid)
-	} else {
+	if !processRunning(pid) {
 		fmt.Printf("Daemon is not running (stale pid %d).\n", pid)
 		os.Remove(pidPath)
+		return nil
 	}
+	if !client.VerifyDaemonStartTime(pid, recordedStart) {
+		fmt.Printf("Daemon is not running (pid %d was reused by an unrelated process).\n", pid)
+		os.Remove(pidPath)
+		return nil
+	}
+	fmt.Printf("Daemon is running (pid %d).\n", pid)
 	return nil
 }
 
@@ -1661,7 +1675,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	pid, ok := readPid(pidPath)
+	pid, recordedStart, ok := client.ReadPidFile(pidPath)
 	if !ok || !processRunning(pid) {
 		lang := detectLang()
 		switch {
@@ -1675,6 +1689,15 @@ func runStop(_ *cobra.Command, _ []string) error {
 		if ok {
 			os.Remove(pidPath)
 		}
+		return nil
+	}
+
+	// Phase 13.4 PID hardening: recorded start time must match the
+	// live process's. If it doesn't, the PID was reused by an
+	// unrelated process and we must NOT signal it.
+	if !client.VerifyDaemonStartTime(pid, recordedStart) {
+		fmt.Printf("PID %d does not match the recorded daemon (PID was reused). Cleaning up stale pid file.\n", pid)
+		os.Remove(pidPath)
 		return nil
 	}
 
@@ -1747,7 +1770,7 @@ func writePidFile() {
 	if err != nil {
 		return
 	}
-	os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	_ = client.WritePidFile(pidPath, os.Getpid())
 }
 
 func removePidFile() {
@@ -1759,7 +1782,7 @@ func removePidFile() {
 		return
 	}
 	// Only remove if it's our PID (another instance may have overwritten it).
-	if pid, ok := readPid(pidPath); ok && pid == os.Getpid() {
+	if pid, _, ok := client.ReadPidFile(pidPath); ok && pid == os.Getpid() {
 		os.Remove(pidPath)
 	}
 }
@@ -2504,20 +2527,6 @@ func daemonPidPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "daemon.pid"), nil
-}
-
-// readPid reads a pid from a file. Returns (0, false) if the file doesn't exist
-// or cannot be parsed.
-func readPid(path string) (int, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, false
-	}
-	return pid, true
 }
 
 // processRunning checks whether a pid corresponds to a live process.
