@@ -65,15 +65,11 @@
           Terminal
         </div>
         <div class="mock-code-body">
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw install url-monitor</span></div>
-          <div class="t-out"><span class="t-highlight">✓</span> URL 모니터 설치 완료</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill install url-monitor</span></div>
+          <div class="t-out">Installed package "URL 모니터" (url-monitor) v1.0.0 from registry</div>
           <div style="height:8px"></div>
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw config</span></div>
-          <div class="t-out">? 감시할 URL: https://api.myservice.com/health</div>
-          <div class="t-out">? 체크 주기: 5분</div>
-          <div class="t-out">? 텔레그램 봇 토큰: ****</div>
-          <div class="t-out">? 채팅 ID: ****</div>
-          <div class="t-out"><span class="t-highlight">✓</span> 설정 완료! 5분마다 체크합니다.</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill config url-monitor target_url https://api.myservice.com/health</span></div>
+          <div class="t-out"><span class="t-out"># 텔레그램 봇은 kittypaw setup 으로 한 번에 등록 (대화형). 체크 주기는 cron `*/5 * * * *` 기본값.</span></div>
         </div>
       </div>
     </div>
@@ -135,16 +131,14 @@
       </div>
       <div class="mock-tg" style="margin-top:16px">
         <div class="mock-tg-header">
-          <div class="mock-tg-avatar">🚨</div>
+          <div class="mock-tg-avatar">🔴</div>
           URL 모니터
         </div>
         <div class="mock-tg-body">
           <div class="mock-tg-msg">
-            🚨 서비스 다운 감지!<br><br>
-            https://api.myservice.com/health<br>
-            상태: 503 Service Unavailable<br>
-            시각: 03:15 AM<br><br>
-            마지막 정상: 03:10 AM (5분 전)
+            🔴 <b>ALERT: https://api.myservice.com/health is DOWN</b><br><br>
+            🕐 Checked at: 2026-04-29T03:15:02Z<br>
+            📋 Detail: Was UP since last check. Error: 503 Service Unavailable
             <div class="mock-tg-time">오전 3:15</div>
           </div>
         </div>
@@ -157,7 +151,7 @@
     <div class="case-step-num">4</div>
     <div class="case-step-body">
       <h3>복구되면, 복구 알림도 보냅니다</h3>
-      <p>서비스가 다시 정상으로 돌아오면 복구 알림과 함께 다운타임을 알려줍니다.</p>
+      <p>서비스가 다시 정상으로 돌아오면 복구 알림과 함께 마지막 다운 시점을 알려줍니다.</p>
       <div class="mock-status-tl">
         <div class="mock-status-item">
           <span class="mock-status-time">03:25</span>
@@ -182,11 +176,9 @@
         </div>
         <div class="mock-tg-body">
           <div class="mock-tg-msg">
-            ✅ 서비스 복구 확인!<br><br>
-            https://api.myservice.com/health<br>
-            상태: 200 OK<br>
-            복구 시각: 03:35 AM<br>
-            다운타임: 약 20분
+            ✅ <b>RECOVERY: https://api.myservice.com/health is back UP</b><br><br>
+            🕐 Checked at: 2026-04-29T03:35:00Z<br>
+            📋 Detail: Was DOWN since last check (2026-04-29T03:15:02Z).
             <div class="mock-tg-time">오전 3:35</div>
           </div>
         </div>

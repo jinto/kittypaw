@@ -85,16 +85,16 @@
           lotto-check.js — generated
         </div>
         <div class="mock-code-body">
-          <div><span class="code-cm">// AI가 생성한 코드</span></div>
-          <div><span class="code-kw">const</span> res = <span class="code-kw">await</span> <span class="code-fn">Http.get</span>(<span class="code-str">"https://www.dhlottery.co.kr/..."</span>);</div>
+          <div><span class="code-cm">// AI가 생성한 코드 (goja sync 모드 — async/await 미지원)</span></div>
+          <div><span class="code-kw">const</span> res = <span class="code-fn">Http.get</span>(<span class="code-str">"https://www.dhlottery.co.kr/..."</span>);</div>
           <div><span class="code-kw">const</span> data = <span class="code-fn">JSON.parse</span>(res.body);</div>
           <div>&nbsp;</div>
           <div><span class="code-kw">const</span> numbers = data.drwtNo1 + <span class="code-str">", "</span> + data.drwtNo2 + <span class="code-str">"..."</span>;</div>
-          <div><span class="code-kw">const</span> summary = <span class="code-kw">await</span> <span class="code-fn">Llm.generate</span>(</div>
+          <div><span class="code-kw">const</span> summary = <span class="code-fn">Llm.generate</span>(</div>
           <div>  <span class="code-str">"로또 "</span> + data.drwNo + <span class="code-str">"회 당첨번호: "</span> + numbers</div>
           <div>);</div>
           <div>&nbsp;</div>
-          <div><span class="code-kw">await</span> <span class="code-fn">Telegram.sendMessage</span>(summary.text);</div>
+          <div><span class="code-kw">return</span> summary.text;</div>
         </div>
       </div>
       <div class="mock-code" style="margin-top:12px">
