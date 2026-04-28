@@ -25,7 +25,29 @@ const (
 	// 30s gives those legitimate gaps headroom without holding a dead
 	// conn for too long.
 	wsWriteTimeout = 30 * time.Second
+	// maxTurnIDLen caps the client-supplied turn_id at the WS layer.
+	// A standard UUIDv4 is 36 chars; the slack tolerates whitespace or
+	// future format extensions while bounding the cache key against a
+	// malicious client trying to allocate 64KB-keyed entries.
+	maxTurnIDLen = 64
 )
+
+// validateTurnID checks that a client-supplied turn_id is empty
+// (legacy fallback) or a UUID under maxTurnIDLen. Returns (errMsg,
+// true) when the id passes; (errMsg, false) when it fails — the
+// caller surfaces errMsg to the client and skips the chat handler.
+func validateTurnID(id string) (string, bool) {
+	if id == "" {
+		return "", true
+	}
+	if len(id) > maxTurnIDLen {
+		return "turn_id exceeds maximum length", false
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return "turn_id must be a valid UUID", false
+	}
+	return "", true
+}
 
 // handleWebSocket upgrades to WebSocket and runs a multi-turn streaming chat session.
 // Auth via ?token= query param or Authorization header.
@@ -106,6 +128,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			// Validate the client-supplied turn_id. UUID format +
+			// length cap together provide the only thing keeping
+			// the cache safe from oracle attacks (a victim's
+			// turn_id used as a key is impossible to guess under
+			// 122-bit entropy) and the only thing keeping a
+			// malicious client from allocating 64KB-keyed entries.
+			// Empty TurnID is allowed — it falls through to the
+			// legacy non-idempotent path.
+			if msg, ok := validateTurnID(clientMsg.TurnID); !ok {
+				sendWsMsg(ctx, conn, core.NewErrorMsg(msg))
+				continue
+			}
+
 			// Build event
 			payload, _ := json.Marshal(core.ChatPayload{
 				ChatID:    sessionID,
@@ -135,15 +170,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 
-			result, err := s.session.Run(ctx, event, runOpts)
+			// RunTurn dedupes retries that share clientMsg.TurnID via
+			// Session.turnCache. Empty TurnID falls through to plain
+			// Run (legacy client without idempotency).
+			result, err := s.session.RunTurn(ctx, clientMsg.TurnID, event, runOpts)
 
 			if err != nil {
-				sendWsMsg(ctx, conn, core.NewErrorMsg(err.Error()))
+				sendWsMsg(ctx, conn, core.NewErrorMsgForTurn(clientMsg.TurnID, err.Error()))
 				continue
 			}
 
 			// Send execution result as final message, replacing streamed tokens.
-			sendWsMsg(ctx, conn, core.NewDoneMsg(result, nil))
+			sendWsMsg(ctx, conn, core.NewDoneMsgForTurn(clientMsg.TurnID, result, nil))
 
 		case core.WsMsgPermit:
 			ok := clientMsg.OK != nil && *clientMsg.OK

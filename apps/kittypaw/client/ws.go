@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"nhooyr.io/websocket"
 
 	"github.com/jinto/kittypaw/core"
@@ -59,10 +60,21 @@ func DialChat(ctx context.Context, wsURL, apiKey string) (*ChatSession, error) {
 	return &ChatSession{conn: conn, ctx: ctx}, nil
 }
 
-// Send sends a chat message and streams the response via callbacks.
-// Blocks until the server sends a "done" or "error" message.
+// Send sends a chat message with an auto-generated turn_id. Suitable
+// for one-shot calls that won't retry. Retry-aware callers should
+// allocate a turn_id once per user input and call SendTurn so the
+// server-side idempotency cache (Session.RunTurn) deduplicates the
+// retry.
 func (cs *ChatSession) Send(text string, opts ChatOptions) error {
-	chatMsg := core.WsClientMsg{Type: core.WsMsgChat, Text: text}
+	return cs.SendTurn(text, uuid.NewString(), opts)
+}
+
+// SendTurn sends a chat message tagged with the supplied turn_id.
+// Retries that share a turn_id are deduped server-side: only the
+// first reaches the LLM, subsequent retries wait on its result. Empty
+// turnID is allowed for callers who explicitly opt out of idempotency.
+func (cs *ChatSession) SendTurn(text string, turnID string, opts ChatOptions) error {
+	chatMsg := core.WsClientMsg{Type: core.WsMsgChat, Text: text, TurnID: turnID}
 	data, err := json.Marshal(chatMsg)
 	if err != nil {
 		return fmt.Errorf("marshal chat msg: %w", err)
