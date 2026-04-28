@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/term"
 
 	"github.com/chzyer/readline"
@@ -485,6 +486,12 @@ func runChat(_ *cobra.Command, args []string) error {
 			continue
 		}
 
+		// turnID is allocated once per user input. The transport-drop
+		// retry path below replays sendOnce with the same turnID so
+		// the server's RunTurn dedupes — the LLM is invoked once, the
+		// retry waits for the in-flight result.
+		turnID := uuid.NewString()
+
 		// sendOnce drives one Send attempt with its own spinner. Stopping
 		// the spinner inside the callbacks (before any Printf) is what
 		// keeps "paw> ⠧paw> ..." double-prefix garbage from leaking out.
@@ -504,7 +511,7 @@ func runChat(_ *cobra.Command, args []string) error {
 					fmt.Fprintf(os.Stderr, "paw> %s\n\n", msg)
 				},
 			}
-			sendErr = cs.Send(text, opts)
+			sendErr = cs.SendTurn(text, turnID, opts)
 			return
 		}
 

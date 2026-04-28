@@ -6,6 +6,12 @@ type WsClientMsg struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"` // for "chat"
 	OK   *bool  `json:"ok,omitempty"`   // for "permit"
+	// TurnID is a client-allocated UUID identifying a single user input.
+	// A retry of the same input must reuse the same TurnID — the server
+	// then dedupes via Session.RunTurn so the LLM is not invoked twice
+	// and the user is not double-charged. Empty TurnID falls back to the
+	// legacy Run path (no idempotency).
+	TurnID string `json:"turn_id,omitempty"` // for "chat"
 }
 
 // WsServerMsg represents messages from the server to WebSocket clients.
@@ -19,6 +25,12 @@ type WsServerMsg struct {
 	Message     string `json:"message,omitempty"`     // for "error"
 	Description string `json:"description,omitempty"` // for "permission"
 	Resource    string `json:"resource,omitempty"`    // for "permission"
+	// TurnID echoes back the client's WsClientMsg.TurnID on "done" /
+	// "error" so a future parallel-turn protocol can route responses;
+	// today's serial WS path doesn't strictly need it but the field is
+	// load-bearing for retry visibility (the client can verify the
+	// response is for the turn it asked).
+	TurnID string `json:"turn_id,omitempty"` // for "done"/"error"
 }
 
 // WsServerMsg type constants
@@ -51,9 +63,20 @@ func NewDoneMsg(fullText string, tokensUsed *int64) WsServerMsg {
 	return WsServerMsg{Type: WsMsgDone, FullText: fullText, TokensUsed: tokensUsed}
 }
 
+// NewDoneMsgForTurn creates a completion message that echoes the
+// turn_id back to the client.
+func NewDoneMsgForTurn(turnID, fullText string, tokensUsed *int64) WsServerMsg {
+	return WsServerMsg{Type: WsMsgDone, FullText: fullText, TokensUsed: tokensUsed, TurnID: turnID}
+}
+
 // NewErrorMsg creates an error message.
 func NewErrorMsg(message string) WsServerMsg {
 	return WsServerMsg{Type: WsMsgError, Message: message}
+}
+
+// NewErrorMsgForTurn creates an error message tagged with the turn_id.
+func NewErrorMsgForTurn(turnID, message string) WsServerMsg {
+	return WsServerMsg{Type: WsMsgError, Message: message, TurnID: turnID}
 }
 
 // NewPermissionMsg creates a permission request message.

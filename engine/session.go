@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,29 @@ import (
 )
 
 const maxRetries = 3
+
+// turnCacheTTL is how long a completed turn's result is retained.
+// After this window a retry with the same turn_id re-executes — the
+// Phase 12 ErrServerSide guard remains the safety net for that cold
+// path.
+const turnCacheTTL = 10 * time.Minute
+
+// turnRunMaxTime caps owner execution. The owner runs on a context
+// detached from the caller's (so a transport drop doesn't abort the
+// in-flight LLM call — that's the dedup contract), so a separate
+// upper bound keeps abandoned turns from running forever.
+const turnRunMaxTime = 5 * time.Minute
+
+// turnState tracks an in-flight or completed turn keyed by client-
+// supplied turn_id. The done channel is closed when result/err are
+// filled; concurrent or sequential retries with the same turn_id wait
+// on done and read the cached values, so the server never executes
+// the same turn twice.
+type turnState struct {
+	done   chan struct{}
+	result string
+	err    error
+}
 
 // PermissionCallback is called when the agent needs user permission for an action.
 type PermissionCallback func(ctx context.Context, description, resource string) (bool, error)
@@ -76,6 +100,13 @@ type Session struct {
 	// initialized on first dispatch; nil-safe via the methods on
 	// PipelineState.
 	Pipeline *PipelineState
+
+	// turnCache deduplicates retries of the same turn_id across the
+	// transport-drop reconnect path (Phase 12). Keys are client-
+	// allocated UUIDs; values are *turnState. Zero-value sync.Map is
+	// usable as-is — no init needed. Entries are evicted by a
+	// time.AfterFunc set at completion (TTL = turnCacheTTL).
+	turnCache sync.Map
 }
 
 // sandboxOptions returns the sandbox.Options that govern which tenant-scoped
@@ -128,6 +159,79 @@ func (s *Session) RefreshAllowedPaths() error {
 	}
 	s.allowedPaths.Store(&resolved)
 	return nil
+}
+
+// RunTurn is an idempotent variant of Run keyed by a client-supplied
+// turn_id. Concurrent or sequential retries with the same turn_id are
+// deduped: the first caller executes Run, subsequent callers wait on
+// the shared done channel and read the cached result. Empty turnID
+// falls through to plain Run for legacy clients with no idempotency.
+//
+// Owner execution runs on a context detached from the caller's (so a
+// transport drop on the WS handler does not abort the in-flight LLM
+// call — *that* is the dedup contract; without detachment the very
+// retry case the cache exists for would observe a context-canceled
+// result), bounded by turnRunMaxTime so an abandoned turn cannot run
+// forever. Owner panics are recovered, surface as state.err for
+// waiters, evict the poisoned entry, and re-panic so upstream tenant
+// panic recovery records the failure.
+//
+// The cache entry is evicted after turnCacheTTL by a time.AfterFunc;
+// retries arriving later re-execute (Phase 12 client.ErrServerSide
+// guard catches the false-positive cases). Daemon restart wipes the
+// in-memory cache — true cross-restart idempotency is deferred to a
+// future store-backed phase.
+func (s *Session) RunTurn(ctx context.Context, turnID string, event core.Event, opts *RunOptions) (string, error) {
+	if turnID == "" {
+		return s.Run(ctx, event, opts)
+	}
+
+	candidate := &turnState{done: make(chan struct{})}
+	actual, loaded := s.turnCache.LoadOrStore(turnID, candidate)
+	state := actual.(*turnState)
+
+	if loaded {
+		select {
+		case <-state.done:
+			return state.result, state.err
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	// Cache miss: own the turn. The exec closure encapsulates Run so
+	// runTurnOwner stays testable with a synthetic exec function.
+	s.runTurnOwner(ctx, turnID, state, func(c context.Context) (string, error) {
+		return s.Run(c, event, opts)
+	})
+	return state.result, state.err
+}
+
+// runTurnOwner executes the owner side of a RunTurn — context
+// detachment, panic recovery, done-channel signaling, and TTL
+// scheduling. Split from RunTurn so unit tests can inject a synthetic
+// exec function without constructing a full Session. See RunTurn for
+// the contract.
+func (s *Session) runTurnOwner(ctx context.Context, turnID string, state *turnState, exec func(context.Context) (string, error)) {
+	ownerCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), turnRunMaxTime)
+	defer cancel()
+
+	defer func() {
+		if r := recover(); r != nil {
+			state.err = fmt.Errorf("turn panicked: %v", r)
+			close(state.done)
+			// Poisoned entry — evict immediately. Future retries take
+			// the cold path (re-execute under ErrServerSide guard).
+			s.turnCache.Delete(turnID)
+			panic(r)
+		}
+		close(state.done)
+		time.AfterFunc(turnCacheTTL, func() {
+			s.turnCache.Delete(turnID)
+		})
+	}()
+
+	state.result, state.err = exec(ownerCtx)
 }
 
 // Run processes a single event through the agent loop.
