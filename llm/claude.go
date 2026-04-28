@@ -83,6 +83,28 @@ func (c *ClaudeProvider) Generate(ctx context.Context, messages []core.LlmMessag
 	return c.GenerateStream(ctx, messages, nil)
 }
 
+// GenerateWithTools sends messages along with a tool definition list.
+// When tools is non-empty the response carries ContentBlocks (text +
+// tool_use) and StopReason so a caller can drive a tool-use loop. Falls
+// back to plain Generate semantics when tools is nil/empty.
+func (c *ClaudeProvider) GenerateWithTools(ctx context.Context, messages []core.LlmMessage, tools []Tool) (*Response, error) {
+	if len(tools) == 0 {
+		return c.Generate(ctx, messages)
+	}
+	system, msgs := splitSystemMessages(messages)
+	body := c.buildRequestBodyWithTools(system, msgs, false, tools)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("claude: marshal request: %w", err)
+	}
+	resp, err := c.doWithRetry(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return c.parseJSONResponse(resp.Body)
+}
+
 // GenerateStream sends messages and streams tokens via the callback.
 func (c *ClaudeProvider) GenerateStream(ctx context.Context, messages []core.LlmMessage, onToken TokenCallback) (*Response, error) {
 	system, msgs := splitSystemMessages(messages)
@@ -150,6 +172,15 @@ type claudeMessage struct {
 }
 
 func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage, stream bool) map[string]any {
+	return c.buildRequestBodyWithTools(system, msgs, stream, nil)
+}
+
+// buildRequestBodyWithTools is the same as buildRequestBody but emits
+// the Anthropic-required `tools` field when tools is non-empty. The
+// loop in mediateSkillOutputWithTools relies on the model returning
+// stop_reason="tool_use" when it picks a tool — that only happens
+// when `tools` is on the wire.
+func (c *ClaudeProvider) buildRequestBodyWithTools(system string, msgs []core.LlmMessage, stream bool, tools []Tool) map[string]any {
 	apiMsgs := make([]claudeMessage, len(msgs))
 	for i, m := range msgs {
 		// ContentBlocks wins when present so callers that set both (e.g. a
@@ -176,6 +207,21 @@ func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage,
 	}
 	if stream {
 		body["stream"] = true
+	}
+	if len(tools) > 0 {
+		wireTools := make([]map[string]any, 0, len(tools))
+		for _, t := range tools {
+			schema := t.InputSchema
+			if schema == nil {
+				schema = map[string]any{"type": "object", "properties": map[string]any{}}
+			}
+			wireTools = append(wireTools, map[string]any{
+				"name":         t.Name,
+				"description":  t.Description,
+				"input_schema": schema,
+			})
+		}
+		body["tools"] = wireTools
 	}
 	return body
 }
@@ -237,11 +283,21 @@ func (c *ClaudeProvider) doWithRetry(ctx context.Context, payload []byte) (*http
 
 // --- JSON (non-streaming) response parsing ---
 
+// claudeResponse mirrors the shapes Anthropic returns for a single
+// completion. Content is heterogeneous — text blocks carry .text,
+// tool_use blocks carry id/name/input. We decode into a flat struct
+// covering both so the parser can route per Type without a second
+// round of JSON.
 type claudeResponse struct {
 	Content []struct {
-		Text string `json:"text"`
+		Type  string         `json:"type"`
+		Text  string         `json:"text,omitempty"`
+		ID    string         `json:"id,omitempty"`
+		Name  string         `json:"name,omitempty"`
+		Input map[string]any `json:"input,omitempty"`
 	} `json:"content"`
-	Usage struct {
+	StopReason string `json:"stop_reason"`
+	Usage      struct {
 		InputTokens              int64 `json:"input_tokens"`
 		OutputTokens             int64 `json:"output_tokens"`
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
@@ -257,12 +313,30 @@ func (c *ClaudeProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 	}
 
 	var content strings.Builder
-	for _, block := range resp.Content {
-		content.WriteString(block.Text)
+	blocks := make([]core.ContentBlock, 0, len(resp.Content))
+	for _, b := range resp.Content {
+		switch b.Type {
+		case core.BlockTypeText, "":
+			// "" handles Anthropic responses that elide type for text-only.
+			content.WriteString(b.Text)
+			blocks = append(blocks, core.ContentBlock{
+				Type: core.BlockTypeText,
+				Text: b.Text,
+			})
+		case core.BlockTypeToolUse:
+			blocks = append(blocks, core.ContentBlock{
+				Type:  core.BlockTypeToolUse,
+				ID:    b.ID,
+				Name:  b.Name,
+				Input: b.Input,
+			})
+		}
 	}
 
 	return &Response{
-		Content: content.String(),
+		Content:       content.String(),
+		ContentBlocks: blocks,
+		StopReason:    resp.StopReason,
 		Usage: &TokenUsage{
 			InputTokens:              resp.Usage.InputTokens,
 			OutputTokens:             resp.Usage.OutputTokens,

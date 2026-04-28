@@ -86,6 +86,16 @@ func (o *OpenAIProvider) Generate(ctx context.Context, messages []core.LlmMessag
 	return o.GenerateStream(ctx, messages, nil)
 }
 
+// GenerateWithTools degrades to Generate — the current OpenAI wire
+// builder does not emit native tool definitions. Callers can still
+// invoke this method; the tools argument is ignored. A future commit
+// can wire OpenAI's function-calling shape if cross-provider tool use
+// becomes load-bearing. For now Anthropic is the only path that
+// surfaces tool_use blocks back through the iteration loop.
+func (o *OpenAIProvider) GenerateWithTools(ctx context.Context, messages []core.LlmMessage, _ []Tool) (*Response, error) {
+	return o.Generate(ctx, messages)
+}
+
 // GenerateStream sends messages and streams tokens via the callback.
 func (o *OpenAIProvider) GenerateStream(ctx context.Context, messages []core.LlmMessage, onToken TokenCallback) (*Response, error) {
 	streaming := onToken != nil

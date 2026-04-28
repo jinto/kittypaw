@@ -45,6 +45,10 @@ func (m *moaMockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMes
 	return m.Generate(ctx, msgs)
 }
 
+func (m *moaMockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return m.Generate(ctx, msgs)
+}
+
 func (m *moaMockProvider) ContextWindow() int { return 128_000 }
 func (m *moaMockProvider) MaxTokens() int     { return 4096 }
 
