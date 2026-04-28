@@ -57,7 +57,7 @@
     <div class="case-step-num">1</div>
     <div class="case-step-body">
       <h3>원하는 걸 말로 설명합니다</h3>
-      <p>CLI에서 teach 명령어를 실행하고, 원하는 자동화를 자연어로 설명합니다.</p>
+      <p>CLI에서 <code>kittypaw skill create</code> 에 자연어로 원하는 자동화를 설명합니다.</p>
       <div class="mock-code">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -66,9 +66,7 @@
           kittypaw — bash
         </div>
         <div class="mock-code-body">
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw teach</span></div>
-          <div class="t-out">? 어떤 자동화를 만들까요?</div>
-          <div class="t-out">&gt; 매주 토요일 아침에 로또 당첨번호를 확인해서 텔레그램으로 보내줘</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill create "매주 토요일 아침에 로또 당첨번호를 확인해서 텔레그램으로 보내줘"</span></div>
         </div>
       </div>
     </div>
@@ -107,9 +105,7 @@
           kittypaw — bash
         </div>
         <div class="mock-code-body">
-          <div class="t-out">⏳ goja 샌드박스에서 검증 중...</div>
-          <div class="t-out"><span class="t-highlight">✓</span> 검증 통과!</div>
-          <div class="t-out">✅ 등록할까요? (y/n)</div>
+          <div class="t-out"><span class="t-highlight">✓</span> goja 샌드박스 syntax 검증 통과</div>
         </div>
       </div>
     </div>
@@ -119,7 +115,7 @@
     <div class="case-step-num">3</div>
     <div class="case-step-body">
       <h3>등록 완료, 매주 자동 실행</h3>
-      <p>승인하면 스킬이 등록되고 스케줄러에 cron이 설정됩니다. 다음 토요일부터 자동 실행.</p>
+      <p>검증을 통과한 스킬은 그대로 등록되고 스케줄러에 cron이 설정됩니다. 다음 토요일부터 자동 실행.</p>
       <div class="mock-code" style="margin-bottom:16px">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -128,12 +124,8 @@
           kittypaw — bash
         </div>
         <div class="mock-code-body">
-          <div class="t-out">&gt; y</div>
           <div class="t-out"><span class="t-highlight">✓</span> 'lotto-check' 스킬 등록 완료</div>
           <div class="t-out"><span class="t-highlight">✓</span> 스케줄: 매주 토요일 09:00 (0 9 * * 6)</div>
-          <div class="t-out"><span class="t-highlight">✓</span> 텔레그램 전송 설정됨</div>
-          <div>&nbsp;</div>
-          <div class="t-out">🐾 다음 실행: 토요일 오전 9시</div>
         </div>
       </div>
 
