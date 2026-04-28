@@ -29,10 +29,6 @@ func (m *mediateMockProvider) Generate(_ context.Context, _ []core.LlmMessage) (
 	return &llm.Response{Content: m.response}, nil
 }
 
-func (m *mediateMockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
-	return m.Generate(ctx, msgs)
-}
-
 func (m *mediateMockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
 	return m.Generate(ctx, msgs)
 }
@@ -57,10 +53,6 @@ type toolUseScriptedProvider struct {
 
 func (p *toolUseScriptedProvider) Generate(_ context.Context, _ []core.LlmMessage) (*llm.Response, error) {
 	return &llm.Response{Content: p.finalText, StopReason: "end_turn"}, nil
-}
-
-func (p *toolUseScriptedProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
-	return p.Generate(ctx, msgs)
 }
 
 func (p *toolUseScriptedProvider) GenerateWithTools(_ context.Context, _ []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {

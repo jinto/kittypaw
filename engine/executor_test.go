@@ -808,10 +808,6 @@ func (r *recordingProvider) Generate(_ context.Context, msgs []core.LlmMessage) 
 	return r.resp, nil
 }
 
-func (r *recordingProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
-	return r.Generate(ctx, msgs)
-}
-
 func (r *recordingProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
 	return r.Generate(ctx, msgs)
 }

@@ -44,17 +44,19 @@ type Tool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
-// TokenCallback receives streaming tokens as they arrive.
-type TokenCallback func(token string)
+// llmMaxResponseBytes caps a single LLM response body. 32 MiB is
+// far above any realistic max_tokens × 4-byte upper bound but
+// bounds memory against a malicious or misconfigured upstream
+// (Ollama / custom base URL) returning unbounded JSON.
+const llmMaxResponseBytes = 32 << 20
 
-// Provider is the interface all LLM backends must implement.
+// Provider is the interface all LLM backends must implement. The wire
+// is plain non-streaming JSON; callers receive a buffered final
+// response. Token-level streaming was removed in Phase 13.3 (no
+// surviving consumer).
 type Provider interface {
 	// Generate sends messages and returns a complete response.
 	Generate(ctx context.Context, messages []core.LlmMessage) (*Response, error)
-
-	// GenerateStream sends messages and streams tokens via the callback.
-	// Returns the complete response when done.
-	GenerateStream(ctx context.Context, messages []core.LlmMessage, onToken TokenCallback) (*Response, error)
 
 	// GenerateWithTools sends messages along with a tool definition
 	// list and returns the next response. When tools is non-empty the

@@ -41,10 +41,6 @@ func (m *moaMockProvider) Generate(ctx context.Context, _ []core.LlmMessage) (*l
 	}, nil
 }
 
-func (m *moaMockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
-	return m.Generate(ctx, msgs)
-}
-
 func (m *moaMockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
 	return m.Generate(ctx, msgs)
 }
