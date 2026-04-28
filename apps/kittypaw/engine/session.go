@@ -316,6 +316,113 @@ The current user turn is short (≤30 chars) and may reference this data implici
 	messages[0].Content += fmt.Sprintf(augmentTemplate, recent)
 }
 
+// suggestionSilenceWindow is how long a surfaced suggestion stays
+// suppressed before becoming eligible to surface again. Chosen to match
+// the "weekly reflection" cadence — a candidate seen Sunday will not
+// re-surface until at least the next Sunday, even if the user has many
+// chat sessions in between.
+const suggestionSilenceWindow = 7 * 24 * time.Hour
+
+// augmentSystemPromptWithSuggestion injects an active reflection
+// suggestion into the system prompt on the FIRST turn of a session,
+// then records the surface time so the same candidate stays silent for
+// suggestionSilenceWindow.
+//
+// This is the chat-side delivery path the cases/landing page promises
+// ("AI가 먼저 자동화 제안"). Without it the reflection cycle's
+// suggest_candidate:* rows never reach the user — they're queryable on
+// admin-API only. The injection is a soft instruction; the LLM decides
+// whether and how to surface the suggestion in its natural reply.
+//
+// "First turn of a session" is detected by the absence of any prior
+// assistant turn — the just-added user turn is already in state.Turns
+// at the call site. Mutates messages in place; no-op when there's no
+// leading system message, the turn is not the first, the store probe
+// fails, no candidate is ready to surface, or any candidate's value is
+// malformed.
+func augmentSystemPromptWithSuggestion(
+	messages []core.LlmMessage,
+	st *store.Store,
+	turns []core.ConversationTurn,
+) {
+	if len(messages) == 0 || messages[0].Role != core.RoleSystem {
+		return
+	}
+	for _, t := range turns {
+		if t.Role == core.RoleAssistant {
+			return // not the first turn
+		}
+	}
+	if st == nil {
+		return
+	}
+	candidate, hash := pickActiveSuggestion(st)
+	if candidate == "" {
+		return
+	}
+
+	const augmentTemplate = `
+
+## Optional proactive suggestion
+Reflection has detected a repeating user intent: %q.
+Skip this entirely if the current message is unrelated. Otherwise, at a
+natural beat after answering the user's actual question, you MAY append
+a short one-line proposal to automate the recurring intent — e.g.
+"이거 자주 보시는 것 같아요. 매일 아침 자동으로 받으시겠어요?". The
+proposal is a coda, not the main course; never derail the answer.`
+
+	messages[0].Content += fmt.Sprintf(augmentTemplate, candidate)
+
+	// Record the surface time so this candidate stays silent for
+	// suggestionSilenceWindow, even across daemon restarts. Best-effort:
+	// a write failure is logged warn but does not block delivery — at
+	// worst the same suggestion surfaces again on the next session.
+	if err := st.SetUserContext(
+		"surfaced_at:"+hash,
+		time.Now().UTC().Format(time.RFC3339),
+		"suggestion",
+	); err != nil {
+		slog.Warn("suggestion: failed to record surface time", "hash", hash, "error", err)
+	}
+}
+
+// pickActiveSuggestion returns the label of the first reflection
+// candidate that has not been surfaced within suggestionSilenceWindow,
+// along with the hash used for dedup keying. ("", "") when none.
+//
+// Candidate value layout (from RunReflectionCycle): "label|count|cron".
+// We only need the label here; count and cron are dropped silently.
+func pickActiveSuggestion(st *store.Store) (label, hash string) {
+	candidates, err := st.ListUserContextPrefix("suggest_candidate:")
+	if err != nil || len(candidates) == 0 {
+		return "", ""
+	}
+	cutoff := time.Now().Add(-suggestionSilenceWindow)
+	for _, kv := range candidates {
+		h := strings.TrimPrefix(kv.Key, "suggest_candidate:")
+		if h == kv.Key {
+			continue // malformed prefix
+		}
+		// Skip if surfaced within the silence window. A corrupt
+		// surfaced_at value (parse error) is treated as expired —
+		// surface again so the user is not silenced indefinitely by a
+		// bad write.
+		if rawTS, ok, _ := st.GetUserContext("surfaced_at:" + h); ok {
+			if t, err := time.Parse(time.RFC3339, rawTS); err == nil && t.After(cutoff) {
+				continue
+			}
+		}
+		// Value layout "label|count|cron" — split on first '|' only;
+		// labels in user prose may contain bars in rare cases.
+		parts := strings.SplitN(kv.Value, "|", 2)
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		return strings.TrimSpace(parts[0]), h
+	}
+	return "", ""
+}
+
 // stripBranchControlMarker removes engine-emitted control prefixes
 // (currently just the InstallConsentBranch ack) from a branch response
 // before it lands in conversation history. The user-visible reply
@@ -553,6 +660,12 @@ observeLoop:
 			// the data inside the system message itself so the prior cannot
 			// route around it.
 			augmentSystemPromptWithRecentSkillOutput(messages, eventText, s.Pipeline)
+
+			// First-turn proactive suggestion — surface a reflection
+			// candidate when this is the user's first message of the
+			// session. The 7-day silence window prevents the same
+			// suggestion repeating across back-to-back sessions.
+			augmentSystemPromptWithSuggestion(messages, s.Store, state.Turns)
 
 			slog.Info("prompt built",
 				"phase", core.PhasePrompt,
