@@ -31,7 +31,7 @@ kittypaw skill install https://github.com/owner/repo   # install from GitHub
 kittypaw skill install /path/to/local/skill       # install from local directory
 kittypaw skill search <keyword>                   # search skill registry
 kittypaw skill list                               # list installed skills
-kittypaw teach                                    # create a skill from conversation
+kittypaw skill create <description>               # generate a skill from natural language
 ```
 
 ## Config
