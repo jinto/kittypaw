@@ -3,11 +3,20 @@
 package client
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// processStartTime stub for Windows. Phase 13.4 PID hardening only
+// targets Unix; Windows daemons fall through to legacy single-line
+// PID files (recorded start time = 0 → start-time verification
+// skipped, see VerifyDaemonStartTime).
+var processStartTime = func(_ int) (int64, error) {
+	return 0, errors.New("processStartTime: not supported on windows")
+}
 
 func setSysProcAttr(cmd *exec.Cmd) {}
 
