@@ -614,6 +614,17 @@ observeLoop:
 				// Record execution metrics.
 				s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
 
+				// Cache invalidation — successful legacy-LLM turn
+				// consumed (or rejected) the cached raw skill output.
+				// Leaving the cache populated risks the next-turn
+				// augmentation block contradicting the assistant's
+				// transformed reply already in history (2026-04-28
+				// transcript T5a freeze). Cache is re-filled when the
+				// next deterministic skill dispatch records output.
+				if s.Pipeline != nil {
+					s.Pipeline.ClearSkillOutput()
+				}
+
 				return output, nil
 			}
 

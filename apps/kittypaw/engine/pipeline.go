@@ -95,6 +95,17 @@ func matchInstalledSkill(text string, sess *Session) *core.SkillPackage {
 	if runeCount(text) < 2 {
 		return nil
 	}
+	// Modifier-shaped queries ("원화로 환율", "간단히 환율", "다시")
+	// signal a *transform of prior data*, not a fresh skill run.
+	// Defer to the legacy LLM so the cross-turn augmentation block
+	// (Phase 10) can reframe the cached raw output. RunInstalled's
+	// single-shot mediation cannot reliably do active arithmetic
+	// (USD-base → KRW-base), so routing modifier queries through it
+	// produces the "어설픈" 2026-04-28 transcript ("원화로 환율" →
+	// USD-base paraphrase).
+	if queryHasModifier(text) {
+		return nil
+	}
 	if sess == nil || sess.PackageManager == nil {
 		return nil
 	}
@@ -114,6 +125,44 @@ func matchInstalledSkill(text string, sess *Session) *core.SkillPackage {
 		return nil
 	}
 	return &matches[0]
+}
+
+// queryHasModifier returns true when the user's query contains a
+// generic Korean transform-modifier — a pattern that signals "do
+// something with the prior data" rather than "fetch fresh data". The
+// list is intentionally limited to *generic* transform shapes (unit
+// conversion, base reframe, verbosity, repeat, substitution, explicit
+// transform) so it does not overlap with raw-retrieval phrasing
+// ("오늘 환율", "내일 날씨" — those are time-stamped fresh requests,
+// not transforms of prior data).
+//
+// When this returns true, matchInstalledSkill defers to the legacy
+// LLM so the Phase 10 cross-turn augmentation can apply. The
+// hardcoded list is the smallest practical compromise — Korean
+// morphology is too varied for a regex without false positives, and
+// LLM-driven classification on every turn is over-engineered.
+func queryHasModifier(query string) bool {
+	lowered := strings.ToLower(query)
+	modifiers := []string{
+		// Unit / currency conversion
+		"원화로", "원으로", "엔으로", "엔화로", "달러로", "유로로", "위안으로", "파운드로",
+		// Base reframe ("X 기준으로", "기준의")
+		"기준으로", "기준의",
+		// Verbosity / format
+		"간단히", "자세히", "짧게", "길게", "요약",
+		// Repeat / explicit recompute
+		"다시", "재계산",
+		// Substitution / comparison
+		"대신", "외에",
+		// Explicit transform vocabulary
+		"변환", "환산", "전환",
+	}
+	for _, m := range modifiers {
+		if strings.Contains(lowered, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // pkgKeywordMatches checks whether a query keyword appears in the

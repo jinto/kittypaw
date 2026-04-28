@@ -280,6 +280,62 @@ func TestRecordSkillOutput_EmptyIgnored(t *testing.T) {
 	}
 }
 
+func TestQueryHasModifier_PositiveCases(t *testing.T) {
+	cases := []string{
+		"원화로 환율",
+		"엔으로 환율",
+		"기준으로 다시",
+		"원화 기준의 환율",
+		"간단히 환율",
+		"자세히 알려줘",
+		"다시 계산",
+		"환산해줘",
+		"USD에서 KRW로 변환",
+	}
+	for _, q := range cases {
+		t.Run(q, func(t *testing.T) {
+			if !queryHasModifier(q) {
+				t.Errorf("expected modifier detection for %q", q)
+			}
+		})
+	}
+}
+
+func TestQueryHasModifier_NegativeCases(t *testing.T) {
+	cases := []string{
+		"환율",
+		"환율 알려줘",
+		"오늘 환율",
+		"내일 날씨",
+		"엔화는?",
+		"주식",
+	}
+	for _, q := range cases {
+		t.Run(q, func(t *testing.T) {
+			if queryHasModifier(q) {
+				t.Errorf("unexpected modifier detection for %q (would deflect a fresh-retrieval query)", q)
+			}
+		})
+	}
+}
+
+func TestClearSkillOutput_RemovesCache(t *testing.T) {
+	ps := NewPipelineState()
+	ps.RecordSkillOutput("1 USD = 1477.04 KRW")
+	if ps.RecentSkillOutput() == "" {
+		t.Fatal("setup failed: cache empty after Record")
+	}
+	ps.ClearSkillOutput()
+	if got := ps.RecentSkillOutput(); got != "" {
+		t.Errorf("after Clear, cache must be empty, got %q", got)
+	}
+}
+
+func TestClearSkillOutput_NilSafe(t *testing.T) {
+	var ps *PipelineState
+	ps.ClearSkillOutput() // must not panic
+}
+
 func TestRecordSkillOutput_NilSafe(t *testing.T) {
 	var ps *PipelineState
 	ps.RecordSkillOutput("x") // must not panic
