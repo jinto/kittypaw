@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 )
 
 // IntentKind classifies a user message into a deterministic branch or
@@ -21,6 +22,7 @@ const (
 	IntentBrowse              IntentKind = "browse"
 	IntentInstallConsentReply IntentKind = "install_consent_reply"
 	IntentRunInstalledSkill   IntentKind = "run_installed_skill"
+	IntentModifierFollowup    IntentKind = "modifier_followup"
 	IntentLegacyFallback      IntentKind = "legacy_fallback"
 )
 
@@ -64,6 +66,22 @@ func classifyIntent(text string, state *PipelineState, sess *Session) Intent {
 	}
 	if state != nil && len(state.RecentSkillSearch()) > 0 && isInstallConsent(t) {
 		return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
+	}
+	// Modifier follow-up dispatch: short modifier-shaped query +
+	// recent skill output cached → mediation tool-use loop. The
+	// mediation prompt sees the raw output as load-bearing context
+	// + Code.exec available as a callable tool, routing around the
+	// legacy LLM's "ignore-history → re-search" prior. Phase 11 of
+	// the level3 plan; closes the 2026-04-28 transcript T4 fail
+	// ("아니 원화를 기준으로 하면?" → web search 잔존).
+	if state != nil && queryHasModifier(t) && state.RecentSkillOutput() != "" && runeCount(t) <= followupQueryRuneCap {
+		return Intent{
+			Kind: IntentModifierFollowup,
+			Params: map[string]any{
+				"raw_output": state.RecentSkillOutput(),
+			},
+			Confidence: 1.0,
+		}
 	}
 	// Installed-skill dispatch: when the query keyword appears in an
 	// already-installed package's name, run that skill directly. This
@@ -333,6 +351,8 @@ func getBranch(kind IntentKind) Branch {
 		return &InstallConsentBranch{}
 	case IntentRunInstalledSkill:
 		return &RunInstalledSkillBranch{}
+	case IntentModifierFollowup:
+		return &ModifierFollowupBranch{}
 	}
 	return nil
 }
@@ -495,6 +515,42 @@ func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event
 	return "✅ '" + pkg.Meta.Name + "' 스킬을 설치했어요.\n\n" + runOutput, nil
 }
 
+// ModifierFollowupBranch handles a short, modifier-shaped follow-up
+// turn ("원화로 환율", "아니 원화를 기준으로 하면?", "다시", "간단히") that
+// references the prior skill output cached in PipelineState. Instead of
+// re-running a skill or asking the legacy LLM (whose "ignore history →
+// re-search" prior dominated through Phase 10/10.1), the branch routes
+// straight into mediateSkillOutputWithTools — a tool-use loop where
+// Code.exec is registered as a callable, so the LLM can compute the
+// requested transform on the cached raw numbers deterministically.
+// Phase 11 of the level3 plan.
+type ModifierFollowupBranch struct{}
+
+func (b *ModifierFollowupBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	rawOutput, _ := intent.Params["raw_output"].(string)
+	if rawOutput == "" {
+		// Cache emptied between classify and execute — fall back so the
+		// legacy LLM can still answer with whatever history holds.
+		return "", errBranchFallback
+	}
+	userText := ""
+	if p, err := event.ParsePayload(); err == nil {
+		userText = p.Text
+	}
+	if userText == "" {
+		return "", errBranchFallback
+	}
+	out := mediateSkillOutputWithTools(ctx, sess, "modifier_followup", userText, rawOutput)
+	if out == "" {
+		return "", errBranchFallback
+	}
+	// Re-record the mediated output as the new "recent" raw so a
+	// chained follow-up ("그럼 EUR 만?") sees the latest table — the
+	// previous turn's result is the new source of truth.
+	sess.Pipeline.RecordSkillOutput(out)
+	return out, nil
+}
+
 // errBranchFallback signals "this branch declined; let the legacy path
 // handle it". dispatchPipeline already turns any branch error into a
 // fallback, but this sentinel makes the intent explicit at the call site.
@@ -587,6 +643,170 @@ func mediateSkillOutput(ctx context.Context, sess *Session, skillID, userText, r
 		return rawOutput
 	}
 	return out
+}
+
+// mediateMaxToolIterations caps how many tool_use rounds
+// mediateSkillOutputWithTools will issue per call. Two is enough for the
+// observed pattern — one Code.exec to compute, one final text reply.
+// More than that is almost always the model looping on its own output;
+// raise the cap only with a measurement showing it's needed.
+const mediateMaxToolIterations = 2
+
+// codeExecToolDef is the Anthropic tool definition the mediation loop
+// registers. The schema mirrors the Code.exec JS API (single jsCode
+// string), so the LLM's tool_use call lands as a SkillCall the same
+// way an in-sandbox Code.exec(jsCode) would. Keeping the surface
+// minimal avoids the model picking exotic argument shapes that
+// executeCode's SkillCall handler can't unmarshal.
+var codeExecToolDef = llm.Tool{
+	Name:        "code_exec",
+	Description: "Execute pure-compute JavaScript (ES2020) in an isolated sandbox to verify or transform numbers from the prior skill output. No network, no filesystem, no other skill APIs. Returns {result, logs} on success or {error, logs} on failure.",
+	InputSchema: map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"code": map[string]any{
+				"type":        "string",
+				"description": "JavaScript source. End with a value or `return` for output.",
+			},
+		},
+		"required": []string{"code"},
+	},
+}
+
+// mediateSkillOutputWithTools is the tool-use upgrade of
+// mediateSkillOutput. Where the single-shot version asks the model to
+// reformat the raw output and trusts whatever text comes back, this
+// version registers code_exec as a callable tool, lets the model run
+// arithmetic on the raw numbers when it wants to, and feeds the
+// computed result back as a tool_result before the model writes the
+// final reply. This is the path the 2026-04-28 transcript T4 fail
+// ("아니 원화를 기준으로 하면?") routes through — instead of the
+// legacy LLM scratching for fresh web data, the mediator sees the
+// cached raw rates plus a deterministic computation tool and produces
+// a transformed table directly.
+//
+// On any failure path (nil provider, error, empty response,
+// fabrication-guard miss, max iterations) the function returns the
+// raw output unchanged — the user never loses the underlying data.
+func mediateSkillOutputWithTools(ctx context.Context, sess *Session, skillID, userText, rawOutput string) string {
+	if sess == nil || sess.Provider == nil || rawOutput == "" || userText == "" {
+		return rawOutput
+	}
+	truncated := rawOutput
+	if len(truncated) > mediateSkillRawOutputCap {
+		truncated = truncated[:mediateSkillRawOutputCap] + "\n…(truncated)"
+	}
+
+	prompt := buildMediatePromptWithTools(skillID, userText, truncated)
+	messages := buildSubLLMMessages(prompt)
+
+	var lastTextResp *llm.Response
+	for i := 0; i < mediateMaxToolIterations; i++ {
+		resp, err := sess.Provider.GenerateWithTools(ctx, messages, []llm.Tool{codeExecToolDef})
+		if err != nil || resp == nil {
+			return rawOutput
+		}
+		if resp.StopReason != "tool_use" {
+			lastTextResp = resp
+			break
+		}
+		// Find the tool_use block(s) and execute each via executeCode.
+		toolUseBlocks := make([]core.ContentBlock, 0, 1)
+		for _, b := range resp.ContentBlocks {
+			if b.Type == core.BlockTypeToolUse && b.Name == codeExecToolDef.Name {
+				toolUseBlocks = append(toolUseBlocks, b)
+			}
+		}
+		if len(toolUseBlocks) == 0 {
+			// stop_reason said tool_use but no recognized tool block —
+			// treat as completion to avoid an infinite loop.
+			lastTextResp = resp
+			break
+		}
+		// Append the assistant turn (full response blocks) so the next
+		// request preserves the tool_use IDs Anthropic correlates against.
+		messages = append(messages, core.LlmMessage{
+			Role:          core.RoleAssistant,
+			ContentBlocks: resp.ContentBlocks,
+		})
+		// Execute each tool_use, append a paired tool_result block.
+		toolResultBlocks := make([]core.ContentBlock, 0, len(toolUseBlocks))
+		for _, tu := range toolUseBlocks {
+			code, _ := tu.Input["code"].(string)
+			result := executeCodeForMediation(ctx, code)
+			toolResultBlocks = append(toolResultBlocks, core.ContentBlock{
+				Type:      core.BlockTypeToolResult,
+				ToolUseID: tu.ID,
+				Content:   result,
+			})
+		}
+		messages = append(messages, core.LlmMessage{
+			Role:          core.RoleUser,
+			ContentBlocks: toolResultBlocks,
+		})
+	}
+
+	if lastTextResp == nil {
+		// Loop exited via cap without a final text response — we have
+		// no answer to deliver, fall back to raw verbatim.
+		return rawOutput
+	}
+	out := strings.TrimSpace(lastTextResp.Content)
+	if out == "" {
+		return rawOutput
+	}
+	if !mediationPreservesFacts(rawOutput, out) {
+		return rawOutput
+	}
+	return out
+}
+
+// executeCodeForMediation invokes the existing executeCode handler
+// using a SkillCall constructed from the LLM's tool input. The result
+// is the JSON envelope executeCode already returns ({result, logs} or
+// {error, logs}); we forward it verbatim into the tool_result block so
+// the model sees the same shape its own JS would see at runtime.
+func executeCodeForMediation(ctx context.Context, jsCode string) string {
+	codeJSON, err := json.Marshal(jsCode)
+	if err != nil {
+		return jsonMarshalErrorEnvelope(err)
+	}
+	call := core.SkillCall{
+		SkillName: "Code",
+		Method:    "exec",
+		Args:      []json.RawMessage{codeJSON},
+	}
+	out, _ := executeCode(ctx, call, nil)
+	return out
+}
+
+func jsonMarshalErrorEnvelope(err error) string {
+	b, _ := json.Marshal(map[string]any{"error": err.Error()})
+	return string(b)
+}
+
+// buildMediatePromptWithTools mirrors buildMediatePrompt but adds the
+// tool-use affordance. The model sees the raw output + the user query
+// + an explicit hint that code_exec is available for arithmetic.
+func buildMediatePromptWithTools(skillID, userText, rawOutput string) string {
+	var b strings.Builder
+	b.WriteString("사용자 query: \"")
+	b.WriteString(userText)
+	b.WriteString("\"\n\n설치된 스킬 \"")
+	b.WriteString(skillID)
+	b.WriteString("\" 의 raw 출력:\n---\n")
+	b.WriteString(rawOutput)
+	b.WriteString("\n---\n\n위 raw 출력을 사용자 query 의 의도에 맞게 정리해 답하세요. 규칙:\n")
+	b.WriteString("- raw 의 수치/사실은 변경 X. 그대로 쓰거나 환산 가능한 단위만 환산.\n")
+	b.WriteString("- 새 정보 추가 X. 추가 검색/추론 fabrication 금지.\n")
+	b.WriteString("- query 의 modifier (단위/언어/scope/verbosity/negation) 를 응답 형식에 반영.\n")
+	b.WriteString("- 응답은 reformatted raw 만. 메타 안내 (추가 도움 권유, 스킬 설치 제안, 후속 질문) 금지.\n")
+	b.WriteString("- raw 가 query 충족에 *부족할 때만* 정직히 인정 + 다음 행동 제안.\n")
+	b.WriteString("- 짧고 자연스러운 비서 톤.\n\n")
+	b.WriteString("**도구**: 단위 변환 / 베이스 재구성 같은 산수가 필요하면 code_exec(code) 도구를 호출하세요. ")
+	b.WriteString("e.g. {code: \"const u=1477.04, e=0.85383; ({eur_krw: u/e}).eur_krw.toFixed(2)\"}. ")
+	b.WriteString("결과를 받은 뒤 최종 답을 작성하세요. 산수가 필요 없으면 도구 없이 바로 답하세요.")
+	return b.String()
 }
 
 // mediationNumberRe captures numeric tokens (with optional decimal) so

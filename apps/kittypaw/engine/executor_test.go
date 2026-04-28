@@ -812,6 +812,10 @@ func (r *recordingProvider) GenerateStream(ctx context.Context, msgs []core.LlmM
 	return r.Generate(ctx, msgs)
 }
 
+func (r *recordingProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return r.Generate(ctx, msgs)
+}
+
 func (r *recordingProvider) ContextWindow() int { return 128_000 }
 func (r *recordingProvider) MaxTokens() int     { return 4096 }
 

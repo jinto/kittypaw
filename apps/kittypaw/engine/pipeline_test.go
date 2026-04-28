@@ -33,8 +33,70 @@ func (m *mediateMockProvider) GenerateStream(ctx context.Context, msgs []core.Ll
 	return m.Generate(ctx, msgs)
 }
 
+func (m *mediateMockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return m.Generate(ctx, msgs)
+}
+
 func (m *mediateMockProvider) ContextWindow() int { return 200000 }
 func (m *mediateMockProvider) MaxTokens() int     { return 4096 }
+
+// toolUseScriptedProvider scripts a tool-use loop: the first N calls
+// return a tool_use response (with the supplied tool_use input), the
+// rest return a final text response. This shape is what
+// mediateSkillOutputWithTools drives, so the test can assert the loop
+// terminates correctly and the tool input is forwarded.
+type toolUseScriptedProvider struct {
+	// scripted tool_use turns (one entry consumed per GenerateWithTools call)
+	toolUses []map[string]any
+	// final text returned once toolUses is exhausted
+	finalText string
+	// when nonzero, GenerateWithTools always returns tool_use (loop cap)
+	infinite bool
+	calls    int
+}
+
+func (p *toolUseScriptedProvider) Generate(_ context.Context, _ []core.LlmMessage) (*llm.Response, error) {
+	return &llm.Response{Content: p.finalText, StopReason: "end_turn"}, nil
+}
+
+func (p *toolUseScriptedProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
+	return p.Generate(ctx, msgs)
+}
+
+func (p *toolUseScriptedProvider) GenerateWithTools(_ context.Context, _ []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	p.calls++
+	if p.infinite {
+		return &llm.Response{
+			ContentBlocks: []core.ContentBlock{{
+				Type:  core.BlockTypeToolUse,
+				ID:    "toolu_inf",
+				Name:  "code_exec",
+				Input: map[string]any{"code": "1+1"},
+			}},
+			StopReason: "tool_use",
+		}, nil
+	}
+	if len(p.toolUses) > 0 {
+		input := p.toolUses[0]
+		p.toolUses = p.toolUses[1:]
+		return &llm.Response{
+			ContentBlocks: []core.ContentBlock{{
+				Type:  core.BlockTypeToolUse,
+				ID:    "toolu_test",
+				Name:  "code_exec",
+				Input: input,
+			}},
+			StopReason: "tool_use",
+		}, nil
+	}
+	return &llm.Response{
+		Content:    p.finalText,
+		StopReason: "end_turn",
+	}, nil
+}
+
+func (p *toolUseScriptedProvider) ContextWindow() int { return 200000 }
+func (p *toolUseScriptedProvider) MaxTokens() int     { return 4096 }
 
 func TestMediateSkillOutput_NilProvider(t *testing.T) {
 	sess := &Session{Provider: nil}
@@ -257,6 +319,105 @@ func TestRecordPipelineTurn_StripsAckBeforeStoring(t *testing.T) {
 	}
 	if !strings.Contains(stored, "1477.04") {
 		t.Errorf("data part dropped from history: %q", stored)
+	}
+}
+
+func TestMediateWithTools_CodeExecLoop(t *testing.T) {
+	// Provider scripts: 1) tool_use with arithmetic on raw, 2) final text.
+	// Asserts the loop forwards the LLM-issued code through executeCode
+	// and the final response (which preserves a raw number) reaches the
+	// caller.
+	p := &toolUseScriptedProvider{
+		toolUses: []map[string]any{
+			{"code": "const u=1477.04, e=0.85383; (u/e).toFixed(2)"},
+		},
+		finalText: "1 EUR = 1730.20 KRW (raw 1477.04 보존)",
+	}
+	sess := &Session{Provider: p}
+	out := mediateSkillOutputWithTools(context.Background(), sess, "exchange-rate", "원화로 환율", "1 USD = 1477.04 KRW, 1 USD = 0.85383 EUR")
+	if !strings.Contains(out, "1730.20") {
+		t.Fatalf("final text not delivered, got: %q", out)
+	}
+	if !strings.Contains(out, "1477.04") {
+		t.Errorf("raw number not preserved in final text: %q", out)
+	}
+	if p.calls != 2 {
+		t.Errorf("expected 2 GenerateWithTools calls (tool_use + final), got %d", p.calls)
+	}
+}
+
+func TestMediateWithTools_LoopCapped(t *testing.T) {
+	// Provider keeps returning tool_use forever. After the cap the
+	// loop must fall back to the raw output rather than spin.
+	p := &toolUseScriptedProvider{infinite: true}
+	sess := &Session{Provider: p}
+	raw := "1 USD = 1477.04 KRW"
+	out := mediateSkillOutputWithTools(context.Background(), sess, "exchange-rate", "원화로", raw)
+	if out != raw {
+		t.Fatalf("loop cap should fall back to raw, got %q", out)
+	}
+	if p.calls != mediateMaxToolIterations {
+		t.Errorf("expected exactly %d calls before cap, got %d", mediateMaxToolIterations, p.calls)
+	}
+}
+
+func TestMediateWithTools_FabricationGuardFalls(t *testing.T) {
+	// Provider goes straight to a final text with zero numeric overlap
+	// with the raw — fabrication signature. Caller must receive raw.
+	p := &toolUseScriptedProvider{
+		finalText: "환율 정보를 가져오지 못했습니다. 사이트를 확인하세요.",
+	}
+	sess := &Session{Provider: p}
+	raw := "1 USD = 1477.04 KRW"
+	out := mediateSkillOutputWithTools(context.Background(), sess, "exchange-rate", "원화로", raw)
+	if out != raw {
+		t.Fatalf("zero-overlap final text must fall back to raw, got %q", out)
+	}
+}
+
+func TestMediateWithTools_NilProviderFallsBack(t *testing.T) {
+	sess := &Session{Provider: nil}
+	out := mediateSkillOutputWithTools(context.Background(), sess, "x", "원화로", "1 USD = 1477 KRW")
+	if out != "1 USD = 1477 KRW" {
+		t.Fatalf("nil provider must return raw, got %q", out)
+	}
+}
+
+func TestClassifyIntent_ModifierFollowupRouting(t *testing.T) {
+	// queryHasModifier=true + RecentSkillOutput populated + short →
+	// IntentModifierFollowup with cached raw in Params.
+	state := NewPipelineState()
+	state.RecordSkillOutput("1 USD = 1477.04 KRW")
+	intent := classifyIntent("원화로 환율", state, nil)
+	if intent.Kind != IntentModifierFollowup {
+		t.Fatalf("expected IntentModifierFollowup, got %v", intent.Kind)
+	}
+	raw, _ := intent.Params["raw_output"].(string)
+	if raw == "" {
+		t.Errorf("raw_output not propagated to intent.Params")
+	}
+}
+
+func TestClassifyIntent_ModifierFollowup_NoCacheBypasses(t *testing.T) {
+	// queryHasModifier=true but cache empty → must NOT route to
+	// ModifierFollowup; falls through to legacy fallback (or other
+	// branches if applicable). Without raw output the mediation has
+	// nothing to mediate.
+	state := NewPipelineState()
+	intent := classifyIntent("원화로 환율", state, nil)
+	if intent.Kind == IntentModifierFollowup {
+		t.Fatalf("empty cache must not route to ModifierFollowup")
+	}
+}
+
+func TestClassifyIntent_LongModifierBypassesFollowup(t *testing.T) {
+	// Modifier in a long sentence is a fresh request, not a follow-up.
+	state := NewPipelineState()
+	state.RecordSkillOutput("data")
+	long := strings.Repeat("원화로 환율 한 번 알려줘 자세히 ", 3) // > 30 runes
+	intent := classifyIntent(long, state, nil)
+	if intent.Kind == IntentModifierFollowup {
+		t.Fatalf("long modifier query should not route to ModifierFollowup, got %+v", intent)
 	}
 }
 

@@ -48,6 +48,10 @@ func (m *mockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessag
 	return resp, nil
 }
 
+func (m *mockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return m.Generate(ctx, msgs)
+}
+
 func (m *mockProvider) ContextWindow() int { return 128_000 }
 func (m *mockProvider) MaxTokens() int     { return 4096 }
 
