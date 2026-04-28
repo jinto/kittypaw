@@ -66,12 +66,12 @@
           Terminal
         </div>
         <div class="mock-code-body">
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw install weather-briefing</span></div>
-          <div class="t-out"><span class="t-highlight">✓</span> 날씨 브리핑 설치 완료</div>
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw install macro-economy-report</span></div>
-          <div class="t-out"><span class="t-highlight">✓</span> 매크로 경제 리포트 설치 완료</div>
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw install rss-digest</span></div>
-          <div class="t-out"><span class="t-highlight">✓</span> RSS 뉴스 요약 설치 완료</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill install weather-briefing</span></div>
+          <div class="t-out">Installed package "날씨 브리핑" (weather-briefing) v1.0.0 from registry</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill install macro-economy-report</span></div>
+          <div class="t-out">Installed package "매크로 경제 리포트" (macro-economy-report) v1.0.0 from registry</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill install rss-digest</span></div>
+          <div class="t-out">Installed package "RSS 뉴스 요약" (rss-digest) v1.0.0 from registry</div>
         </div>
       </div>
     </div>
@@ -80,8 +80,8 @@
   <div class="case-step">
     <div class="case-step-num">2</div>
     <div class="case-step-body">
-      <h3>텔레그램 토큰만 입력</h3>
-      <p>각 스킬의 설정에 텔레그램 봇 토큰과 채팅 ID를 넣으면 끝. API 키는 날씨 스킬엔 필요 없습니다 (Open-Meteo 무료).</p>
+      <h3>텔레그램 봇 + 위치만 입력</h3>
+      <p>텔레그램 봇 토큰은 <code>kittypaw setup</code> 으로 한 번에 등록. 날씨 스킬의 위치는 <code>kittypaw skill config weather-briefing latitude/longitude</code> 로 설정. API 키는 필요 없습니다 (Open-Meteo 무료).</p>
       <div class="mock-code">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -90,11 +90,9 @@
           Terminal
         </div>
         <div class="mock-code-body">
-          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw config</span></div>
-          <div class="t-out">? 텔레그램 봇 토큰: ****</div>
-          <div class="t-out">? 채팅 ID: ****</div>
-          <div class="t-out">? 위치 (위도, 경도): 37.56, 126.97</div>
-          <div class="t-out"><span class="t-highlight">✓</span> 설정 완료! 매일 07:00에 실행됩니다.</div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span> <span class="t-out"># LLM 키 + 텔레그램 봇 채널 등록 (대화형)</span></div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill config weather-briefing latitude 37.57</span></div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill config weather-briefing longitude 126.98</span></div>
         </div>
       </div>
     </div>
@@ -104,7 +102,7 @@
     <div class="case-step-num">3</div>
     <div class="case-step-body">
       <h3>매일 아침, 브리핑이 도착합니다</h3>
-      <p>날씨는 오전 7시, 시장은 8시, 뉴스는 9시. 출근길에 폰을 열면 이미 와있습니다.</p>
+      <p>날씨는 오전 7시, 시장은 평일 8시, 뉴스는 9시. 출근길에 폰을 열면 이미 와있습니다.</p>
 
       <div class="mock-tg" style="margin-bottom:16px">
         <div class="mock-tg-header">
