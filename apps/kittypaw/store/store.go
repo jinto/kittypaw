@@ -469,11 +469,18 @@ func (s *Store) CountUserMessagesTotal() (int, error) {
 
 // RecentUserMessagesAll returns user messages from the last `hours` hours,
 // truncated so the combined length does not exceed maxChars.
+//
+// conversations.timestamp is written by core.NowTimestamp() as a unix epoch
+// string ("1777394416"), not a SQL datetime. Comparing it against
+// datetime('now', ...) (which yields "2026-04-29 01:30:00") would do a
+// lexicographic compare where any "1*" < any "2*" — silently dropping
+// every row. Cast to integer and compare against strftime('%s', ...) which
+// emits the matching epoch-seconds form.
 func (s *Store) RecentUserMessagesAll(hours int, maxChars int) ([]string, error) {
 	rows, err := s.db.Query(`
 		SELECT content FROM conversations
 		WHERE role = 'user'
-		  AND timestamp >= datetime('now', ?)
+		  AND CAST(timestamp AS INTEGER) >= strftime('%s', 'now', ?)
 		ORDER BY timestamp DESC`,
 		fmt.Sprintf("-%d hours", hours))
 	if err != nil {
