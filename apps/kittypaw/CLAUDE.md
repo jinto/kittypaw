@@ -10,7 +10,7 @@ core/          Types, config, skill management, persona profiles/presets, tenant
 llm/           LLM provider abstraction (Claude, OpenAI, Ollama)
 mcp/           MCP client registry (external tool server connections)
 sandbox/       JavaScript execution sandbox (in-process goja VM, Agent.observe interrupts)
-store/         SQLite persistence with 17 migrations (WAL mode)
+store/         SQLite persistence with 20 migrations (WAL mode)
 engine/        Agent loop (observe + retry), skill executor, HTML-to-Markdown, SearchBackend, compaction, scheduling
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
 server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload)

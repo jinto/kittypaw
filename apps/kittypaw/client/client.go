@@ -176,16 +176,6 @@ func (c *Client) SuggestionsDismiss(skillID string) (map[string]any, error) {
 	return c.post("/api/v1/suggestions/"+url.PathEscape(skillID)+"/dismiss", nil)
 }
 
-// FixesList returns fixes for a skill.
-func (c *Client) FixesList(skillID string) (map[string]any, error) {
-	return c.get("/api/v1/skills/" + url.PathEscape(skillID) + "/fixes")
-}
-
-// FixesApprove approves a fix by ID.
-func (c *Client) FixesApprove(id string) (map[string]any, error) {
-	return c.post("/api/v1/fixes/"+url.PathEscape(id)+"/approve", nil)
-}
-
 // ReflectionList returns reflection candidates.
 func (c *Client) ReflectionList() (map[string]any, error) {
 	return c.get("/api/v1/reflection")

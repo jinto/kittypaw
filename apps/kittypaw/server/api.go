@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -433,80 +432,6 @@ func (s *Server) handleConfigCheck(w http.ResponseWriter, _ *http.Request) {
 			"daily_token_limit":  s.config.Features.DailyTokenLimit,
 		},
 	})
-}
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/skills/{id}/fixes
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleSkillFixes(w http.ResponseWriter, r *http.Request) {
-	skillID := chi.URLParam(r, "id")
-	if skillID == "" {
-		writeError(w, http.StatusBadRequest, "skill id is required")
-		return
-	}
-	fixes, err := s.store.ListFixes(skillID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if fixes == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"fixes": []any{}})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"fixes": fixes})
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/fixes/{id}/approve
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleFixApprove(w http.ResponseWriter, r *http.Request) {
-	idStr := chi.URLParam(r, "id")
-	fixID, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid fix id")
-		return
-	}
-
-	// Load fix to get skill_id and new code.
-	fix, err := s.store.GetFix(fixID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "fix not found")
-		return
-	}
-
-	// Load current disk code and skill metadata for stale check.
-	skill, currentCode, loadErr := core.LoadSkillFrom(s.session.BaseDir, fix.SkillID)
-	if loadErr != nil || skill == nil {
-		writeError(w, http.StatusNotFound, "skill not found on disk")
-		return
-	}
-
-	applied, err := s.store.ApplyFix(fixID, currentCode)
-	if err != nil {
-		if strings.Contains(err.Error(), "stale") {
-			writeError(w, http.StatusConflict, "code has changed since fix was generated")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "fix application failed")
-		return
-	}
-	if !applied {
-		writeError(w, http.StatusNotFound, "fix not found or already applied")
-		return
-	}
-
-	// Apply the new code to disk using the already-loaded skill.
-	skill.Version++
-	if saveErr := core.SaveSkillTo(s.session.BaseDir, skill, fix.NewCode); saveErr != nil {
-		// Revert DB state since disk write failed.
-		_ = s.store.RevertFix(fixID)
-		writeError(w, http.StatusInternalServerError, "failed to save fix to disk")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,6 @@ import (
 // Scheduler runs scheduled skills at their configured intervals.
 type Scheduler struct {
 	session    *Session
-	budget     *SharedTokenBudget
 	pkgManager *core.PackageManager
 	stop       chan struct{}
 	stopOnce   sync.Once
@@ -26,12 +25,10 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a scheduler that uses the given session for execution.
-// The budget is shared across auto-fix, delegation, and reflection.
 // pkgManager may be nil if packages are not configured.
-func NewScheduler(session *Session, budget *SharedTokenBudget, pkgManager *core.PackageManager) *Scheduler {
+func NewScheduler(session *Session, pkgManager *core.PackageManager) *Scheduler {
 	return &Scheduler{
 		session:    session,
-		budget:     budget,
 		pkgManager: pkgManager,
 		stop:       make(chan struct{}),
 	}
@@ -391,14 +388,10 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 			}
 			return
 		}
-
-		// Auto-fix trigger: 2 consecutive failures, not readonly, not a package skill.
-		s.tryAutoFix(ctx, sk, err.Error())
 		return
 	}
 
 	_ = s.session.Store.ResetFailureCount(sk.Skill.Name)
-	_ = s.session.Store.ResetFixAttempts(sk.Skill.Name)
 
 	// Delete one-shot skills after successful execution
 	if sk.Skill.Trigger.Type == "once" {
@@ -407,59 +400,6 @@ func (s *Scheduler) runSkill(ctx context.Context, sk *core.SkillWithCode) {
 		} else {
 			slog.Info("scheduler: one-shot skill completed and deleted", "name", sk.Skill.Name)
 		}
-	}
-}
-
-// tryAutoFix checks whether a failed skill should trigger auto-fix and, if so,
-// generates and applies a code fix.
-func (s *Scheduler) tryAutoFix(ctx context.Context, sk *core.SkillWithCode, errMsg string) {
-	if s.session.Config.AutonomyLevel == core.AutonomyReadonly {
-		return
-	}
-
-	failCount, _ := s.session.Store.GetFailureCount(sk.Skill.Name)
-	if failCount < 2 {
-		return
-	}
-
-	// Atomic claim: only one goroutine proceeds with the fix.
-	claimed, claimErr := s.session.Store.ClaimFixAttempt(sk.Skill.Name, maxFixAttempts)
-	if claimErr != nil {
-		slog.Error("auto-fix: claim failed", "skill", sk.Skill.Name, "error", claimErr)
-		return
-	}
-	if !claimed {
-		// Either another goroutine claimed it, or max attempts reached.
-		fixAttempts, _ := s.session.Store.GetFixAttempts(sk.Skill.Name)
-		if fixAttempts >= maxFixAttempts {
-			slog.Warn("auto-fix: max attempts reached, disabling skill", "skill", sk.Skill.Name)
-			if disableErr := core.DisableSkillFrom(s.session.BaseDir, sk.Skill.Name); disableErr != nil {
-				slog.Error("auto-fix: disable failed", "skill", sk.Skill.Name, "error", disableErr)
-			}
-			_ = s.session.Store.RecordAudit("auto_fix_exhausted",
-				fmt.Sprintf("skill %q disabled after %d fix attempts", sk.Skill.Name, maxFixAttempts), "warning")
-		}
-		return
-	}
-
-	slog.Info("auto-fix: attempting fix", "skill", sk.Skill.Name, "error", errMsg)
-
-	result, genErr := AttemptAutoFix(ctx, sk.Skill.Name, errMsg, s.session, s.budget)
-	if genErr != nil {
-		slog.Error("auto-fix: generation failed", "skill", sk.Skill.Name, "error", genErr)
-		// LLM failure: we already incremented fix_attempts via ClaimFixAttempt.
-		// Check if this was the last attempt and disable if so.
-		fixAttempts, _ := s.session.Store.GetFixAttempts(sk.Skill.Name)
-		if fixAttempts >= maxFixAttempts {
-			_ = core.DisableSkillFrom(s.session.BaseDir, sk.Skill.Name)
-			_ = s.session.Store.RecordAudit("auto_fix_exhausted",
-				fmt.Sprintf("skill %q disabled after %d fix attempts (generation failed: %v)", sk.Skill.Name, maxFixAttempts, genErr), "warning")
-		}
-		return
-	}
-
-	if applyErr := ApplyAutoFix(s.session, sk.Skill.Name, result, errMsg, sk.Code); applyErr != nil {
-		slog.Error("auto-fix: apply failed", "skill", sk.Skill.Name, "error", applyErr)
 	}
 }
 

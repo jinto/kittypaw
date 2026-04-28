@@ -96,7 +96,6 @@ type ChainStep struct {
 type PackagePermissions struct {
 	Primitives   []string `toml:"primitives"    json:"primitives"`
 	AllowedHosts []string `toml:"allowed_hosts" json:"allowed_hosts"`
-	CanDisable   *bool    `toml:"can_disable"   json:"can_disable,omitempty"`
 	// Context lists the user-context fields this package needs (e.g. "locale",
 	// "location"). Only declared fields are injected into __context__.user.
 	Context []string `toml:"context" json:"context,omitempty"`
@@ -228,13 +227,4 @@ func LoadPackageToml(path string) (*SkillPackage, error) {
 	}
 
 	return &pkg, nil
-}
-
-// CanDisable returns whether a package can be disabled by the auto-fix system.
-// Defaults to false (package-owned skills cannot be auto-disabled).
-func (p *SkillPackage) CanDisable() bool {
-	if p.Permissions.CanDisable != nil {
-		return *p.Permissions.CanDisable
-	}
-	return false
 }

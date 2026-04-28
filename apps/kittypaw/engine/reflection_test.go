@@ -6,6 +6,22 @@ import (
 	"github.com/jinto/kittypaw/store"
 )
 
+func containsAll(s string, substrs ...string) bool {
+	for _, sub := range substrs {
+		found := false
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 // ---------------------------------------------------------------------------
 // IntentHash
 // ---------------------------------------------------------------------------

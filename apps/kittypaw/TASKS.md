@@ -116,7 +116,7 @@ KittyPaw 작업 현황. 완료된 Plan 은 Archive 에 한 줄 요약 + 커밋 �
 - **Plan 11** — Package System (core/package.go + secrets.json + registry + cron + CLI).
 - **Plan 10** — Reflection System (topic preferences + weekly report + evolution approve/reject).
 - **Plan 9** — Agent Delegation (OrchestrateRequest JSON + errgroup fan-out + PM synthesize).
-- **Plan 8** — SharedTokenBudget + Auto-Fix Loop (migration 016 + atomic CAS + 2x retry cap).
+- **Plan 8** — SharedTokenBudget (migration 016). Auto-Fix Loop은 미검증 약속이라 retire (commit `feat!: retire LLM-driven self-healing`).
 - **Plan 7** — MCP Registry (connect + listTools + callTool + prompt injection).
 - **Plan 6** — Memory Context → LLM Prompt Injection (facts/failures/stats 구조).
 - **Plan 5** — Teach Loop (natural language → skill generation + syntax check + approve).

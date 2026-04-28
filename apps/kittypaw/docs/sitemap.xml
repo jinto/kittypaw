@@ -49,11 +49,6 @@
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://kittypaw.app/cases/self-healing.html</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
     <loc>https://kittypaw.app/cases/site-monitoring.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
