@@ -1,4 +1,4 @@
-// KittyPaw Chat Panel — WS streaming + permission modal + reconnect
+// KittyPaw Chat Panel — WS turn-based chat + permission modal + reconnect
 
 const Chat = {
   ws: null,
@@ -119,36 +119,10 @@ const Chat = {
         this.sessionId = msg.id;
         break;
 
-      case 'token':
-        if (this.currentBubble) {
-          this.currentBubble._rawText = (this.currentBubble._rawText || '') + msg.text;
-          // Show streaming tokens as a code preview.
-          this.currentBubble.innerHTML =
-            '<div class="code-preview">' +
-              '<div class="code-preview-header">⚡ running\u2026</div>' +
-              '<pre><code>' + esc(this.currentBubble._rawText) + '</code></pre>' +
-            '</div>';
-          this._scrollToBottom();
-        }
-        break;
-
       case 'done':
         if (this.currentBubble) {
-          const streamed = (this.currentBubble._rawText || '').trim();
           const result = (msg.full_text || '').trim();
-
-          // If result differs from streamed tokens, code was executed.
-          // Show result + collapsible code. Otherwise show as plain markdown.
-          if (streamed && result !== streamed) {
-            this.currentBubble.innerHTML =
-              renderMarkdown(result) +
-              '<details class="code-details">' +
-                '<summary>code</summary>' +
-                '<pre><code>' + esc(streamed) + '</code></pre>' +
-              '</details>';
-          } else {
-            this.currentBubble.innerHTML = renderMarkdown(result);
-          }
+          this.currentBubble.innerHTML = renderMarkdown(result);
           this.currentBubble.classList.remove('streaming');
           this.currentBubble = null;
           this._scrollToBottom();
@@ -198,7 +172,6 @@ const Chat = {
   _addAssistantBubble() {
     const el = document.createElement('div');
     el.className = 'chat-bubble chat-bubble--assistant streaming';
-    el._rawText = '';
     this.messagesEl.appendChild(el);
     this._scrollToBottom();
     return el;

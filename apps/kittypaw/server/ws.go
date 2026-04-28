@@ -20,10 +20,10 @@ const (
 	wsIdleTimeout    = 5 * time.Minute
 	wsMaxLifetime    = 30 * time.Minute
 	wsMaxMessageSize = 64 * 1024
-	// wsWriteTimeout was 10s; LLM streaming with retry can pause >10s
-	// between chunks (Anthropic SSE retry, MoA fan-out, slow tool calls).
-	// 30s gives those legitimate gaps headroom without holding a dead
-	// conn for too long.
+	// wsWriteTimeout caps a single frame write. Mediation tool-use
+	// loops + permission round-trips can buffer up to a few seconds
+	// of silence before the server emits a frame; 30s gives that
+	// headroom without holding a dead conn for too long.
 	wsWriteTimeout = 30 * time.Second
 	// maxTurnIDLen caps the client-supplied turn_id at the WS layer.
 	// A standard UUIDv4 is 36 chars; the slack tolerates whitespace or
@@ -158,7 +158,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, sessionID string,
 	}
 }
 
-// handleWebSocket upgrades to WebSocket and runs a multi-turn streaming chat session.
+// handleWebSocket upgrades to WebSocket and runs a multi-turn chat session.
 // Auth via ?token= query param or Authorization header.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Auth — read config under RLock for reload safety.
@@ -254,9 +254,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			runOpts := &engine.RunOptions{
-				OnToken: func(token string) {
-					sendWsMsg(ctx, conn, core.NewTokenMsg(token))
-				},
 				OnPermission: func(pCtx context.Context, description, resource string) (bool, error) {
 					sendWsMsg(pCtx, conn, core.NewPermissionMsg(description, resource))
 					select {

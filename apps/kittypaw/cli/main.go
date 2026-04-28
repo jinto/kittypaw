@@ -459,7 +459,6 @@ func runChat(_ *cobra.Command, args []string) error {
 		spin.Start()
 		var chatErr error
 		sendErr := cs.Send(oneShot, client.ChatOptions{
-			OnToken: func(_ string) {},
 			OnDone: func(result string, _ *int64) {
 				spin.Stop()
 				fmt.Println(result)
@@ -500,7 +499,6 @@ func runChat(_ *cobra.Command, args []string) error {
 			spin.Start()
 			defer spin.Stop()
 			opts := client.ChatOptions{
-				OnToken: func(_ string) {},
 				OnDone: func(result string, _ *int64) {
 					spin.Stop()
 					gotResult = true

@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -78,21 +77,12 @@ func (c *ClaudeProvider) ContextWindow() int { return c.contextWindow }
 // MaxTokens returns the maximum output tokens.
 func (c *ClaudeProvider) MaxTokens() int { return c.maxTokens }
 
-// Generate sends messages and returns a complete response.
+// Generate sends messages and returns a complete response. Wire is
+// plain JSON (`stream: false`) — see Provider docs for why streaming
+// was removed in Phase 13.3.
 func (c *ClaudeProvider) Generate(ctx context.Context, messages []core.LlmMessage) (*Response, error) {
-	return c.GenerateStream(ctx, messages, nil)
-}
-
-// GenerateWithTools sends messages along with a tool definition list.
-// When tools is non-empty the response carries ContentBlocks (text +
-// tool_use) and StopReason so a caller can drive a tool-use loop. Falls
-// back to plain Generate semantics when tools is nil/empty.
-func (c *ClaudeProvider) GenerateWithTools(ctx context.Context, messages []core.LlmMessage, tools []Tool) (*Response, error) {
-	if len(tools) == 0 {
-		return c.Generate(ctx, messages)
-	}
 	system, msgs := splitSystemMessages(messages)
-	body := c.buildRequestBodyWithTools(system, msgs, false, tools)
+	body := c.buildRequestBody(system, msgs)
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("claude: marshal request: %w", err)
@@ -105,26 +95,25 @@ func (c *ClaudeProvider) GenerateWithTools(ctx context.Context, messages []core.
 	return c.parseJSONResponse(resp.Body)
 }
 
-// GenerateStream sends messages and streams tokens via the callback.
-func (c *ClaudeProvider) GenerateStream(ctx context.Context, messages []core.LlmMessage, onToken TokenCallback) (*Response, error) {
+// GenerateWithTools sends messages along with a tool definition list.
+// When tools is non-empty the response carries ContentBlocks (text +
+// tool_use) and StopReason so a caller can drive a tool-use loop. Falls
+// back to plain Generate semantics when tools is nil/empty.
+func (c *ClaudeProvider) GenerateWithTools(ctx context.Context, messages []core.LlmMessage, tools []Tool) (*Response, error) {
+	if len(tools) == 0 {
+		return c.Generate(ctx, messages)
+	}
 	system, msgs := splitSystemMessages(messages)
-	streaming := onToken != nil
-
-	body := c.buildRequestBody(system, msgs, streaming)
+	body := c.buildRequestBodyWithTools(system, msgs, tools)
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("claude: marshal request: %w", err)
 	}
-
 	resp, err := c.doWithRetry(ctx, payload)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if streaming {
-		return c.parseSSEStream(resp.Body, onToken)
-	}
 	return c.parseJSONResponse(resp.Body)
 }
 
@@ -171,8 +160,8 @@ type claudeMessage struct {
 	Content any    `json:"content"`
 }
 
-func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage, stream bool) map[string]any {
-	return c.buildRequestBodyWithTools(system, msgs, stream, nil)
+func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage) map[string]any {
+	return c.buildRequestBodyWithTools(system, msgs, nil)
 }
 
 // buildRequestBodyWithTools is the same as buildRequestBody but emits
@@ -180,7 +169,7 @@ func (c *ClaudeProvider) buildRequestBody(system string, msgs []core.LlmMessage,
 // loop in mediateSkillOutputWithTools relies on the model returning
 // stop_reason="tool_use" when it picks a tool — that only happens
 // when `tools` is on the wire.
-func (c *ClaudeProvider) buildRequestBodyWithTools(system string, msgs []core.LlmMessage, stream bool, tools []Tool) map[string]any {
+func (c *ClaudeProvider) buildRequestBodyWithTools(system string, msgs []core.LlmMessage, tools []Tool) map[string]any {
 	apiMsgs := make([]claudeMessage, len(msgs))
 	for i, m := range msgs {
 		// ContentBlocks wins when present so callers that set both (e.g. a
@@ -204,9 +193,6 @@ func (c *ClaudeProvider) buildRequestBodyWithTools(system string, msgs []core.Ll
 			"text":          system,
 			"cache_control": map[string]string{"type": "ephemeral"},
 		}}
-	}
-	if stream {
-		body["stream"] = true
 	}
 	if len(tools) > 0 {
 		wireTools := make([]map[string]any, 0, len(tools))
@@ -308,7 +294,11 @@ type claudeResponse struct {
 
 func (c *ClaudeProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 	var resp claudeResponse
-	if err := json.NewDecoder(r).Decode(&resp); err != nil {
+	// Cap response body. Anthropic's normal output stays well under
+	// max_tokens × ~4 bytes, but a misconfigured proxy or malicious
+	// upstream could otherwise pump arbitrary bytes into json.Decode
+	// and exhaust memory.
+	if err := json.NewDecoder(io.LimitReader(r, llmMaxResponseBytes)).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("claude: decode response: %w", err)
 	}
 
@@ -343,124 +333,6 @@ func (c *ClaudeProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 			CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
 			Model:                    resp.Model,
-		},
-	}, nil
-}
-
-// --- SSE streaming response parsing ---
-
-// SSE event types we care about:
-//   event: content_block_delta   -> extract delta.text
-//   event: message_delta         -> extract usage
-//   event: message_start         -> extract model + initial usage
-
-type sseError struct {
-	Error struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-type sseContentDelta struct {
-	Delta struct {
-		Text string `json:"text"`
-	} `json:"delta"`
-}
-
-type sseMessageStart struct {
-	Message struct {
-		Model string `json:"model"`
-		Usage struct {
-			InputTokens              int64 `json:"input_tokens"`
-			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-		} `json:"usage"`
-	} `json:"message"`
-}
-
-type sseMessageDelta struct {
-	Usage struct {
-		OutputTokens int64 `json:"output_tokens"`
-	} `json:"usage"`
-}
-
-func (c *ClaudeProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-
-	var (
-		content                  strings.Builder
-		eventType                string
-		model                    string
-		inputTokens              int64
-		outputTokens             int64
-		cacheCreationInputTokens int64
-		cacheReadInputTokens     int64
-	)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-
-		switch eventType {
-		case "message_start":
-			var msg sseMessageStart
-			if err := json.Unmarshal([]byte(data), &msg); err == nil {
-				model = msg.Message.Model
-				inputTokens = msg.Message.Usage.InputTokens
-				cacheCreationInputTokens = msg.Message.Usage.CacheCreationInputTokens
-				cacheReadInputTokens = msg.Message.Usage.CacheReadInputTokens
-			}
-
-		case "content_block_delta":
-			var delta sseContentDelta
-			if err := json.Unmarshal([]byte(data), &delta); err == nil {
-				text := delta.Delta.Text
-				content.WriteString(text)
-				if text != "" && onToken != nil {
-					onToken(text)
-				}
-			}
-
-		case "message_delta":
-			var md sseMessageDelta
-			if err := json.Unmarshal([]byte(data), &md); err == nil {
-				outputTokens = md.Usage.OutputTokens
-			}
-
-		case "error":
-			var se sseError
-			if err := json.Unmarshal([]byte(data), &se); err == nil {
-				if n := content.Len(); n > 0 {
-					return nil, fmt.Errorf("claude: stream error (%s): %s [%d bytes received]", se.Error.Type, se.Error.Message, n)
-				}
-				return nil, fmt.Errorf("claude: stream error (%s): %s", se.Error.Type, se.Error.Message)
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("claude: read SSE stream: %w", err)
-	}
-
-	return &Response{
-		Content: content.String(),
-		Usage: &TokenUsage{
-			InputTokens:              inputTokens,
-			OutputTokens:             outputTokens,
-			CacheCreationInputTokens: cacheCreationInputTokens,
-			CacheReadInputTokens:     cacheReadInputTokens,
-			Model:                    model,
 		},
 	}, nil
 }

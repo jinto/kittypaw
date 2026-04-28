@@ -64,9 +64,6 @@ func (m *summaryMockProvider) Generate(ctx context.Context, msgs []core.LlmMessa
 	return resp, nil
 }
 
-func (m *summaryMockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, _ llm.TokenCallback) (*llm.Response, error) {
-	return m.Generate(ctx, msgs)
-}
 func (m *summaryMockProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
 	return m.Generate(ctx, msgs)
 }

@@ -34,34 +34,26 @@ func TestStreamChat_TokensAndDone(t *testing.T) {
 			return
 		}
 
-		// Stream tokens.
-		sendMsg(ctx, conn, core.NewTokenMsg("Hello"))
-		sendMsg(ctx, conn, core.NewTokenMsg(" World"))
-
-		// Send done.
+		// Send done — Phase 13.3 removed token streaming, server
+		// emits a single Done frame per turn.
 		sendMsg(ctx, conn, core.NewDoneMsg("Hello World", nil))
 	}))
 	defer srv.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 
-	var tokens []string
 	var doneText string
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	err := StreamChat(ctx, wsURL, "", "hi", ChatOptions{
-		OnToken: func(t string) { tokens = append(tokens, t) },
-		OnDone:  func(full string, _ *int64) { doneText = full },
+		OnDone: func(full string, _ *int64) { doneText = full },
 	})
 	if err != nil {
 		t.Fatalf("StreamChat error: %v", err)
 	}
 
-	if len(tokens) != 2 || tokens[0] != "Hello" || tokens[1] != " World" {
-		t.Errorf("tokens = %v, want [Hello, \" World\"]", tokens)
-	}
 	if doneText != "Hello World" {
 		t.Errorf("doneText = %q, want %q", doneText, "Hello World")
 	}

@@ -36,10 +36,6 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Generate(ctx context.Context, msgs []core.LlmMessage) (*llm.Response, error) {
-	return m.GenerateStream(ctx, msgs, nil)
-}
-
-func (m *mockProvider) GenerateStream(ctx context.Context, msgs []core.LlmMessage, onToken llm.TokenCallback) (*llm.Response, error) {
 	if m.callIdx >= len(m.responses) {
 		return nil, context.DeadlineExceeded
 	}

@@ -21,9 +21,10 @@ import (
 // failure and could double-charge the user.
 var ErrServerSide = errors.New("server error")
 
-// ChatOptions configures callbacks for streaming chat.
+// ChatOptions configures callbacks for chat responses. The server
+// emits a single Done frame per turn — token-level streaming was
+// removed in Phase 13.3 (no consumer was using it).
 type ChatOptions struct {
-	OnToken func(token string)
 	OnDone  func(fullText string, tokensUsed *int64)
 	OnError func(message string)
 }
@@ -83,7 +84,7 @@ func (cs *ChatSession) SendTurn(text string, turnID string, opts ChatOptions) er
 		return fmt.Errorf("write chat msg: %w", err)
 	}
 
-	// Read streaming response with per-read timeout.
+	// Read response frames with per-read timeout.
 	for {
 		readCtx, readCancel := context.WithTimeout(cs.ctx, 5*time.Minute)
 		_, msgBytes, err := cs.conn.Read(readCtx)
@@ -98,10 +99,6 @@ func (cs *ChatSession) SendTurn(text string, turnID string, opts ChatOptions) er
 		}
 
 		switch msg.Type {
-		case core.WsMsgToken:
-			if opts.OnToken != nil {
-				opts.OnToken(msg.Text)
-			}
 		case core.WsMsgDone:
 			if opts.OnDone != nil {
 				opts.OnDone(msg.FullText, msg.TokensUsed)

@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jinto/kittypaw/core"
@@ -81,9 +79,21 @@ func (o *OpenAIProvider) ContextWindow() int { return o.contextWindow }
 // MaxTokens returns the maximum output tokens.
 func (o *OpenAIProvider) MaxTokens() int { return o.maxTokens }
 
-// Generate sends messages and returns a complete response.
+// Generate sends messages and returns a complete response. Wire is
+// plain JSON (`stream: false`) — see Provider docs for why streaming
+// was removed in Phase 13.3.
 func (o *OpenAIProvider) Generate(ctx context.Context, messages []core.LlmMessage) (*Response, error) {
-	return o.GenerateStream(ctx, messages, nil)
+	body := o.buildRequestBody(messages)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("openai: marshal request: %w", err)
+	}
+	resp, err := o.doWithRetry(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return o.parseJSONResponse(resp.Body)
 }
 
 // GenerateWithTools degrades to Generate — the current OpenAI wire
@@ -94,28 +104,6 @@ func (o *OpenAIProvider) Generate(ctx context.Context, messages []core.LlmMessag
 // surfaces tool_use blocks back through the iteration loop.
 func (o *OpenAIProvider) GenerateWithTools(ctx context.Context, messages []core.LlmMessage, _ []Tool) (*Response, error) {
 	return o.Generate(ctx, messages)
-}
-
-// GenerateStream sends messages and streams tokens via the callback.
-func (o *OpenAIProvider) GenerateStream(ctx context.Context, messages []core.LlmMessage, onToken TokenCallback) (*Response, error) {
-	streaming := onToken != nil
-
-	body := o.buildRequestBody(messages, streaming)
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("openai: marshal request: %w", err)
-	}
-
-	resp, err := o.doWithRetry(ctx, payload)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if streaming {
-		return o.parseSSEStream(resp.Body, onToken)
-	}
-	return o.parseJSONResponse(resp.Body)
 }
 
 func (o *OpenAIProvider) newRequest(ctx context.Context, payload []byte) (*http.Request, error) {
@@ -180,24 +168,16 @@ type openAIMessage struct {
 	Content string `json:"content"`
 }
 
-func (o *OpenAIProvider) buildRequestBody(messages []core.LlmMessage, stream bool) map[string]any {
+func (o *OpenAIProvider) buildRequestBody(messages []core.LlmMessage) map[string]any {
 	apiMsgs := make([]openAIMessage, len(messages))
 	for i, m := range messages {
 		apiMsgs[i] = openAIMessage{Role: string(m.Role), Content: m.Content}
 	}
-
-	body := map[string]any{
+	return map[string]any{
 		"model":      o.model,
 		"max_tokens": o.maxTokens,
 		"messages":   apiMsgs,
 	}
-	if stream {
-		body["stream"] = true
-		if o.baseURL == openAIDefaultBaseURL {
-			body["stream_options"] = map[string]any{"include_usage": true}
-		}
-	}
-	return body
 }
 
 // --- JSON (non-streaming) response parsing ---
@@ -217,7 +197,8 @@ type openAIResponse struct {
 
 func (o *OpenAIProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 	var resp openAIResponse
-	if err := json.NewDecoder(r).Decode(&resp); err != nil {
+	// Cap response body — see llmMaxResponseBytes rationale.
+	if err := json.NewDecoder(io.LimitReader(r, llmMaxResponseBytes)).Decode(&resp); err != nil {
 		return nil, fmt.Errorf("openai: decode response: %w", err)
 	}
 
@@ -232,103 +213,6 @@ func (o *OpenAIProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
 			Model:        resp.Model,
-		}
-	}
-	return result, nil
-}
-
-// --- SSE streaming response parsing ---
-//
-// The OpenAI streaming format sends lines like:
-//   data: {"choices":[{"delta":{"content":"token"}}]}
-//   data: [DONE]
-
-type openAIStreamError struct {
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
-}
-
-type openAIStreamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content string `json:"content"`
-		} `json:"delta"`
-	} `json:"choices"`
-	Model string `json:"model"`
-	Usage *struct {
-		PromptTokens     int64 `json:"prompt_tokens"`
-		CompletionTokens int64 `json:"completion_tokens"`
-	} `json:"usage"`
-}
-
-func (o *OpenAIProvider) parseSSEStream(r io.Reader, onToken TokenCallback) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-
-	var (
-		content      strings.Builder
-		model        string
-		inputTokens  int64
-		outputTokens int64
-	)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-
-		var se openAIStreamError
-		if err := json.Unmarshal([]byte(data), &se); err == nil && se.Error != nil {
-			if n := content.Len(); n > 0 {
-				return nil, fmt.Errorf("openai: stream error (%s): %s [%d bytes received]", se.Error.Type, se.Error.Message, n)
-			}
-			return nil, fmt.Errorf("openai: stream error (%s): %s", se.Error.Type, se.Error.Message)
-		}
-
-		var chunk openAIStreamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
-		}
-
-		if chunk.Model != "" {
-			model = chunk.Model
-		}
-
-		if len(chunk.Choices) > 0 {
-			text := chunk.Choices[0].Delta.Content
-			if text != "" {
-				content.WriteString(text)
-				if onToken != nil {
-					onToken(text)
-				}
-			}
-		}
-
-		if chunk.Usage != nil {
-			inputTokens = chunk.Usage.PromptTokens
-			outputTokens = chunk.Usage.CompletionTokens
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("openai: read SSE stream: %w", err)
-	}
-
-	result := &Response{Content: content.String()}
-	if inputTokens > 0 || outputTokens > 0 {
-		result.Usage = &TokenUsage{
-			InputTokens:  inputTokens,
-			OutputTokens: outputTokens,
-			Model:        model,
 		}
 	}
 	return result, nil

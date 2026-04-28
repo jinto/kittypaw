@@ -51,7 +51,6 @@ type PermissionCallback func(ctx context.Context, description, resource string) 
 // RunOptions holds per-call options for Session.Run. Callbacks are scoped to
 // a single Run invocation, avoiding shared mutable state across concurrent calls.
 type RunOptions struct {
-	OnToken       llm.TokenCallback
 	OnPermission  PermissionCallback
 	ModelOverride string // use a named model from config [[models]] for this run
 }
@@ -403,10 +402,8 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 	channelUserID := sessionIDFromEvent(&event)
 
 	// Extract callbacks from options.
-	var onToken llm.TokenCallback
 	var onPermission PermissionCallback
 	if opts != nil {
-		onToken = opts.OnToken
 		onPermission = opts.OnPermission
 	}
 
@@ -605,11 +602,7 @@ observeLoop:
 
 			// Call LLM
 			var resp *llm.Response
-			if onToken != nil {
-				resp, err = activeProvider.GenerateStream(ctx, messages, onToken)
-			} else {
-				resp, err = activeProvider.Generate(ctx, messages)
-			}
+			resp, err = activeProvider.Generate(ctx, messages)
 
 			if err != nil {
 				// Handle retryable errors

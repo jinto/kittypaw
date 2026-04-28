@@ -19,7 +19,6 @@ type WsClientMsg struct {
 type WsServerMsg struct {
 	Type        string `json:"type"`
 	ID          string `json:"id,omitempty"`          // for "session"
-	Text        string `json:"text,omitempty"`        // for "token"
 	FullText    string `json:"full_text,omitempty"`   // for "done"
 	TokensUsed  *int64 `json:"tokens_used,omitempty"` // for "done"
 	Message     string `json:"message,omitempty"`     // for "error"
@@ -36,7 +35,6 @@ type WsServerMsg struct {
 // WsServerMsg type constants
 const (
 	WsMsgSession    = "session"
-	WsMsgToken      = "token"
 	WsMsgDone       = "done"
 	WsMsgError      = "error"
 	WsMsgPermission = "permission"
@@ -51,11 +49,6 @@ const (
 // NewSessionMsg creates a session initialization message.
 func NewSessionMsg(id string) WsServerMsg {
 	return WsServerMsg{Type: WsMsgSession, ID: id}
-}
-
-// NewTokenMsg creates a streaming token message.
-func NewTokenMsg(text string) WsServerMsg {
-	return WsServerMsg{Type: WsMsgToken, Text: text}
 }
 
 // NewDoneMsg creates a completion message.
