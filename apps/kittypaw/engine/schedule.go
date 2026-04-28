@@ -119,8 +119,81 @@ func (s *Scheduler) reflectionTick(ctx context.Context) {
 		}
 	}
 
+	// Weekly report: if today matches WeeklyReportDay, emit the report
+	// to the tenant's first configured telegram channel + AdminChatIDs[0].
+	// Skipped silently when there's no telegram channel — the report is
+	// still queryable on demand via GET /api/v1/reflection/weekly-report.
+	s.deliverWeeklyReport(ctx)
+
 	// Record last run.
 	_ = s.session.Store.SetLastRun("__reflection__", time.Now())
+}
+
+// deliverWeeklyReport sends the topic-preference summary on the configured
+// weekday. Idempotency is anchored on `__weekly_report__` last-run so a
+// daemon restart on the same day does not double-send. Best-effort: any
+// dispatch failure is logged warn and does not abort the reflection cycle.
+func (s *Scheduler) deliverWeeklyReport(ctx context.Context) {
+	cfg := s.session.Config.Reflection
+	// time.Weekday: Sunday=0..Saturday=6. Default 0 (Sunday) matches the
+	// docs/index.html promise "매주 일요일 주간 관심사 리포트".
+	if int(time.Now().Weekday()) != int(cfg.WeeklyReportDay) {
+		return
+	}
+	lastRun, _ := s.session.Store.GetLastRun("__weekly_report__")
+	if lastRun != nil && time.Since(*lastRun) < 23*time.Hour {
+		return
+	}
+
+	prefs, err := s.session.Store.ListUserContextPrefix("topic_pref:")
+	if err != nil {
+		slog.Warn("weekly report: load prefs failed", "error", err)
+		return
+	}
+	if len(prefs) == 0 {
+		// No data yet — skip rather than send an empty report.
+		return
+	}
+
+	report := BuildWeeklyReport(prefs)
+	if strings.TrimSpace(report) == "" {
+		// Topic prefs existed but BuildWeeklyReport produced an empty
+		// summary (e.g. all topics filtered out). Silent skip — better
+		// than mailing a blank message. No last-run record so the next
+		// hourly tick re-evaluates once prefs grow.
+		return
+	}
+	token, chatID := s.firstTelegramTarget()
+	if token == "" || chatID == "" {
+		// No telegram channel configured. Don't burn the dedup window —
+		// when the user wires up telegram later, the next tick should
+		// still attempt delivery within the same weekday window. The
+		// admin API GET /api/v1/reflection/weekly-report stays available
+		// regardless.
+		slog.Info("weekly report: no telegram channel configured, skipping dispatch")
+		return
+	}
+	if err := SendTelegramText(ctx, token, chatID, report); err != nil {
+		slog.Warn("weekly report: telegram dispatch failed", "error", err)
+		return
+	}
+	slog.Info("weekly report: delivered")
+	_ = s.session.Store.SetLastRun("__weekly_report__", time.Now())
+}
+
+// firstTelegramTarget returns the (bot_token, chat_id) of the tenant's
+// first telegram channel, or ("", "") when none is configured.
+func (s *Scheduler) firstTelegramTarget() (string, string) {
+	cfg := s.session.Config
+	if len(cfg.AdminChatIDs) == 0 {
+		return "", ""
+	}
+	for _, ch := range cfg.Channels {
+		if ch.ChannelType == core.ChannelTelegram && ch.Token != "" {
+			return ch.Token, cfg.AdminChatIDs[0]
+		}
+	}
+	return "", ""
 }
 
 // isReflectionDue returns true if the reflection cycle should run now.

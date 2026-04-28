@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -197,5 +198,125 @@ func TestInflightGuard(t *testing.T) {
 	_, loaded = sched.inflight.LoadOrStore("running-skill", struct{}{})
 	if loaded {
 		t.Error("expected inflight guard to allow skill after clearing")
+	}
+}
+
+func TestFirstTelegramTarget_NoChannel(t *testing.T) {
+	sched, _ := newTestScheduler(t)
+	tok, chat := sched.firstTelegramTarget()
+	if tok != "" || chat != "" {
+		t.Errorf("expected empty target with no channels; got token=%q chat=%q", tok, chat)
+	}
+}
+
+func TestFirstTelegramTarget_NoAdminChatID(t *testing.T) {
+	st := newTestStore(t)
+	cfg := &core.Config{
+		Channels: []core.ChannelConfig{
+			{ChannelType: core.ChannelTelegram, Token: "bot-tok"},
+		},
+		// AdminChatIDs intentionally empty — without a chat target we
+		// cannot dispatch, so first-channel match must short-circuit.
+	}
+	sched := NewScheduler(&Session{Store: st, Config: cfg}, nil)
+	if tok, chat := sched.firstTelegramTarget(); tok != "" || chat != "" {
+		t.Errorf("missing admin_chat_ids must yield empty target; got token=%q chat=%q", tok, chat)
+	}
+}
+
+func TestFirstTelegramTarget_PicksFirstTelegram(t *testing.T) {
+	st := newTestStore(t)
+	cfg := &core.Config{
+		AdminChatIDs: []string{"54076829"},
+		Channels: []core.ChannelConfig{
+			{ChannelType: core.ChannelKakaoTalk, Token: ""},
+			{ChannelType: core.ChannelTelegram, Token: "telegram-token-1"},
+			{ChannelType: core.ChannelTelegram, Token: "telegram-token-2"},
+		},
+	}
+	sched := NewScheduler(&Session{Store: st, Config: cfg}, nil)
+	tok, chat := sched.firstTelegramTarget()
+	if tok != "telegram-token-1" {
+		t.Errorf("expected first telegram token; got %q", tok)
+	}
+	if chat != "54076829" {
+		t.Errorf("expected admin chat id; got %q", chat)
+	}
+}
+
+func TestDeliverWeeklyReport_WrongDay(t *testing.T) {
+	sched, st := newTestScheduler(t)
+	// Pick a weekday that is NOT today so the day check rejects.
+	notToday := (int(time.Now().Weekday()) + 3) % 7
+	sched.session.Config.Reflection.WeeklyReportDay = uint32(notToday)
+	// Even with topic prefs and a telegram channel set up, deliver must
+	// short-circuit before any network attempt — verified by absence of
+	// a __weekly_report__ last-run marker afterwards.
+	_ = st.SetUserContext("topic_pref:weather", "0.40", "test")
+	sched.session.Config.AdminChatIDs = []string{"chat-id"}
+	sched.session.Config.Channels = []core.ChannelConfig{
+		{ChannelType: core.ChannelTelegram, Token: "tok"},
+	}
+
+	sched.deliverWeeklyReport(context.Background())
+
+	if last, _ := st.GetLastRun("__weekly_report__"); last != nil {
+		t.Errorf("wrong-day delivery must not record last-run; got %v", last)
+	}
+}
+
+func TestDeliverWeeklyReport_SameDayDedup(t *testing.T) {
+	sched, st := newTestScheduler(t)
+	today := int(time.Now().Weekday())
+	sched.session.Config.Reflection.WeeklyReportDay = uint32(today)
+	// Pretend a prior delivery happened 1 hour ago: the function must
+	// refuse to redeliver within the 23h dedup window.
+	_ = st.SetLastRun("__weekly_report__", time.Now().Add(-1*time.Hour))
+	_ = st.SetUserContext("topic_pref:weather", "0.40", "test")
+
+	sched.deliverWeeklyReport(context.Background())
+
+	last, _ := st.GetLastRun("__weekly_report__")
+	if last == nil {
+		t.Fatal("dedup test: pre-existing last-run got cleared")
+	}
+	if time.Since(*last) < 30*time.Minute {
+		t.Errorf("last-run must not be advanced when dedup blocked; got %v", time.Since(*last))
+	}
+}
+
+func TestDeliverWeeklyReport_NoPrefsSkips(t *testing.T) {
+	sched, st := newTestScheduler(t)
+	today := int(time.Now().Weekday())
+	sched.session.Config.Reflection.WeeklyReportDay = uint32(today)
+	// No topic_pref:* rows — empty report would be useless. Function
+	// must skip dispatch and not record a last-run.
+	sched.session.Config.AdminChatIDs = []string{"chat-id"}
+	sched.session.Config.Channels = []core.ChannelConfig{
+		{ChannelType: core.ChannelTelegram, Token: "tok"},
+	}
+
+	sched.deliverWeeklyReport(context.Background())
+
+	if last, _ := st.GetLastRun("__weekly_report__"); last != nil {
+		t.Errorf("empty-prefs delivery must not record last-run; got %v", last)
+	}
+}
+
+// TestDeliverWeeklyReport_NoChannelPreservesLastRun pins the contract that
+// when telegram is not yet configured, the dedup last-run is NOT advanced.
+// The user can wire up telegram mid-weekday window and the next hourly
+// reflectionTick will still attempt delivery.
+func TestDeliverWeeklyReport_NoChannelPreservesLastRun(t *testing.T) {
+	sched, st := newTestScheduler(t)
+	today := int(time.Now().Weekday())
+	sched.session.Config.Reflection.WeeklyReportDay = uint32(today)
+	_ = st.SetUserContext("topic_pref:weather", "0.40", "test")
+	// No channels, no admin_chat_ids — firstTelegramTarget returns empty.
+
+	sched.deliverWeeklyReport(context.Background())
+
+	if last, _ := st.GetLastRun("__weekly_report__"); last != nil {
+		t.Errorf("no-channel skip must NOT record last-run (would silence the next 7 days); got %v", last)
 	}
 }
