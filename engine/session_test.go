@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/store"
@@ -169,5 +171,129 @@ func TestProfileSwitch_OverriddenByMention(t *testing.T) {
 	got := ResolveProfileName(&cfg, "web", agentID, "mention-profile", st)
 	if got != "mention-profile" {
 		t.Errorf("got %q, want %q", got, "mention-profile")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// augmentSystemPromptWithSuggestion
+// ---------------------------------------------------------------------------
+
+func newSuggestionTestMessages() []core.LlmMessage {
+	return []core.LlmMessage{
+		{Role: core.RoleSystem, Content: "## base prompt"},
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_FirstTurnInjects(t *testing.T) {
+	st := openTestStore(t)
+	// Reflection has detected an intent — store it the way RunReflectionCycle does.
+	if err := st.SetUserContext(
+		"suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection",
+	); err != nil {
+		t.Fatalf("seed candidate: %v", err)
+	}
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{
+		{Role: core.RoleUser, Content: "hello"}, // just-added first turn
+	}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if !strings.Contains(msgs[0].Content, "환율 조회") {
+		t.Errorf("expected suggestion label in system prompt; got: %q", msgs[0].Content)
+	}
+	// Surface time recorded so the next session does not re-surface.
+	if v, ok, _ := st.GetUserContext("surfaced_at:abc123"); !ok || v == "" {
+		t.Errorf("surfaced_at not recorded; got ok=%v v=%q", ok, v)
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_NotFirstTurnSkips(t *testing.T) {
+	st := openTestStore(t)
+	_ = st.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection")
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{
+		{Role: core.RoleUser, Content: "first"},
+		{Role: core.RoleAssistant, Content: "answered"},
+		{Role: core.RoleUser, Content: "second"},
+	}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if strings.Contains(msgs[0].Content, "환율 조회") {
+		t.Error("mid-session turn must not surface suggestion")
+	}
+	if _, ok, _ := st.GetUserContext("surfaced_at:abc123"); ok {
+		t.Error("surfaced_at must not be recorded when no surface happened")
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_SilenceWindowSuppresses(t *testing.T) {
+	st := openTestStore(t)
+	_ = st.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection")
+	// Pretend the candidate was surfaced 1 hour ago — well within the
+	// 7-day silence window. Must stay suppressed even on a first turn.
+	_ = st.SetUserContext(
+		"surfaced_at:abc123",
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339),
+		"suggestion",
+	)
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{{Role: core.RoleUser, Content: "hi"}}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if strings.Contains(msgs[0].Content, "환율 조회") {
+		t.Error("candidate surfaced inside silence window must stay suppressed")
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_AfterSilenceResurfaces(t *testing.T) {
+	st := openTestStore(t)
+	_ = st.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection")
+	// Surfaced 8 days ago — silence window has elapsed. Must surface again.
+	_ = st.SetUserContext(
+		"surfaced_at:abc123",
+		time.Now().Add(-8*24*time.Hour).UTC().Format(time.RFC3339),
+		"suggestion",
+	)
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{{Role: core.RoleUser, Content: "hi"}}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if !strings.Contains(msgs[0].Content, "환율 조회") {
+		t.Error("candidate past silence window must re-surface")
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_NoCandidatesNoOp(t *testing.T) {
+	st := openTestStore(t)
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{{Role: core.RoleUser, Content: "hi"}}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if msgs[0].Content != "## base prompt" {
+		t.Errorf("no-candidate path must not mutate prompt; got %q", msgs[0].Content)
+	}
+}
+
+func TestAugmentSystemPromptWithSuggestion_MalformedValueSkipped(t *testing.T) {
+	st := openTestStore(t)
+	// Empty label after split — must skip this candidate but still
+	// look at the next one.
+	_ = st.SetUserContext("suggest_candidate:bad", "  |3|0 8 * * *", "reflection")
+	_ = st.SetUserContext("suggest_candidate:good", "주가 알림|5|0 9 * * 1-5", "reflection")
+	msgs := newSuggestionTestMessages()
+	turns := []core.ConversationTurn{{Role: core.RoleUser, Content: "hi"}}
+
+	augmentSystemPromptWithSuggestion(msgs, st, turns)
+
+	if strings.Contains(msgs[0].Content, "  |") {
+		t.Error("malformed candidate must not be surfaced")
+	}
+	if !strings.Contains(msgs[0].Content, "주가 알림") {
+		t.Error("subsequent well-formed candidate must surface")
 	}
 }
