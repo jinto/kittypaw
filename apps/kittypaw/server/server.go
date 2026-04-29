@@ -467,7 +467,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
-			if err := ch.SendResponse(ctx, payload.ChatID, response); err != nil {
+			if err := ch.SendResponse(ctx, payload.ChatID, response, payload.ReplyToMessageID); err != nil {
 				slog.Error("channel event: send response failed",
 					"type", event.Type,
 					"tenant", event.TenantID,
@@ -534,7 +534,7 @@ func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
 		return
 	}
 
-	if err := ch.SendResponse(ctx, chatID, p.Text); err != nil {
+	if err := ch.SendResponse(ctx, chatID, p.Text, ""); err != nil {
 		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text,
 			fmt.Sprintf("send failed: %v", err))
 		return
@@ -650,7 +650,7 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 					// Channel absent — do NOT drop. Leave in queue for next tick.
 					continue
 				}
-				if err := ch.SendResponse(ctx, p.ChatID, p.Response); err != nil {
+				if err := ch.SendResponse(ctx, p.ChatID, p.Response, ""); err != nil {
 					slog.Warn("retry: send failed",
 						"id", p.ID, "retry", p.RetryCount, "error", err)
 					if kept, rErr := s.store.IncrementResponseRetry(p.ID); rErr != nil {

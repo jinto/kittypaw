@@ -180,7 +180,8 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 
 // SendResponse sends a reply frame through the WebSocket connection.
 // The relay's Durable Object matches the ID to the pending Kakao callback.
-func (k *KakaoChannel) SendResponse(ctx context.Context, actionID, response string) error {
+// replyToMessageID is unused on Kakao (relay protocol has no reply-quote concept).
+func (k *KakaoChannel) SendResponse(ctx context.Context, actionID, response, _ string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 

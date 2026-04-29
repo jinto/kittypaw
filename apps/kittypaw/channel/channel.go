@@ -21,7 +21,9 @@ type Channel interface {
 
 	// SendResponse sends a text response back to the channel.
 	// chatID identifies the destination (e.g., Telegram chat ID, Slack channel ID).
-	SendResponse(ctx context.Context, chatID, response string) error
+	// replyToMessageID is optional — when non-empty, the channel quotes the
+	// original message (Telegram: reply_to_message_id). Empty string = plain send.
+	SendResponse(ctx context.Context, chatID, response, replyToMessageID string) error
 
 	// Name returns the channel identifier (e.g., "telegram", "slack").
 	Name() string

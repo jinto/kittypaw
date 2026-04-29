@@ -28,7 +28,7 @@ func (s *stubChannel) Start(ctx context.Context, eventCh chan<- core.Event) erro
 	return ctx.Err()
 }
 
-func (s *stubChannel) SendResponse(_ context.Context, chatID, response string) error {
+func (s *stubChannel) SendResponse(_ context.Context, chatID, response, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sends = append(s.sends, chatID+":"+response)

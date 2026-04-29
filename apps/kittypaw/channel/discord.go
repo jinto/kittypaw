@@ -103,7 +103,8 @@ func (d *DiscordChannel) Start(ctx context.Context, eventCh chan<- core.Event) e
 
 // SendResponse posts a message to the given Discord channel via REST.
 // Falls back to the most recently cached channel ID if chatID is empty.
-func (d *DiscordChannel) SendResponse(ctx context.Context, chatID, response string) error {
+// replyToMessageID is currently unused on Discord — see Issue #N for reply-reference support.
+func (d *DiscordChannel) SendResponse(ctx context.Context, chatID, response, _ string) error {
 	ch := chatID
 	if ch == "" {
 		d.mu.Lock()

@@ -86,6 +86,10 @@ type ChatPayload struct {
 	FromName    string `json:"from_name,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
+	// ReplyToMessageID is the platform-specific message ID of the inbound
+	// message. When set, channels that support reply-quoting (Telegram) will
+	// quote the original message in the response. Empty = plain send.
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
 }
 
 // LlmMessage is a single message sent to/from an LLM.
