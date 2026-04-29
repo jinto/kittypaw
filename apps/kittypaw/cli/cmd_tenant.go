@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/jinto/kittypaw/client"
@@ -99,6 +100,17 @@ func resolveTenantToken(f *tenantAddFlags, stdin io.Reader, stderr io.Writer) (s
 }
 
 func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
+	// Interactive fallback: if neither a Telegram token source nor an LLM key
+	// is in scope, walk the user through 4 quick prompts instead of erroring
+	// out. CI / scripted callers (any flag/env set) keep the non-interactive
+	// path. Non-TTY shells fall through to the original error so failure modes
+	// stay loud.
+	if needsTenantPrompt(f) && isatty.IsTerminal(os.Stdin.Fd()) {
+		if err := promptTenantSetup(stdin, stdout, f); err != nil {
+			return err
+		}
+	}
+
 	token, err := resolveTenantToken(f, stdin, stderr)
 	if err != nil {
 		return err
