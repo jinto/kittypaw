@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -295,5 +296,102 @@ func TestAugmentSystemPromptWithSuggestion_MalformedValueSkipped(t *testing.T) {
 	}
 	if !strings.Contains(msgs[0].Content, "주가 알림") {
 		t.Error("subsequent well-formed candidate must surface")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// appendSuggestionForBranchResponse
+// ---------------------------------------------------------------------------
+
+func newSuggestionBranchTestSession(t *testing.T) *Session {
+	t.Helper()
+	st := openTestStore(t)
+	return &Session{Store: st}
+}
+
+func newWebChatEvent(sessionID string) core.Event {
+	payload, _ := json.Marshal(core.ChatPayload{
+		ChatID:    sessionID,
+		SessionID: sessionID,
+		Text:      "환율",
+	})
+	return core.Event{Type: core.EventWebChat, Payload: payload}
+}
+
+func TestAppendSuggestionForBranchResponse_FirstTurnAppends(t *testing.T) {
+	s := newSuggestionBranchTestSession(t)
+	if err := s.Store.SetUserContext(
+		"suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection-test",
+	); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	event := newWebChatEvent("session-fresh")
+	got := appendSuggestionForBranchResponse(s, event, "현재 환율은 1480원입니다")
+
+	if !strings.Contains(got, "💡") {
+		t.Errorf("first-turn branch must append suggestion suffix; got %q", got)
+	}
+	if !strings.Contains(got, "환율 조회") {
+		t.Errorf("suffix must include candidate label; got %q", got)
+	}
+	if v, ok, _ := s.Store.GetUserContext("surfaced_at:abc123"); !ok || v == "" {
+		t.Errorf("surfaced_at not recorded; ok=%v v=%q", ok, v)
+	}
+}
+
+func TestAppendSuggestionForBranchResponse_NotFirstTurnSkips(t *testing.T) {
+	s := newSuggestionBranchTestSession(t)
+	_ = s.Store.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection-test")
+
+	// Pre-existing assistant turn for this agent_id ⇒ not first turn.
+	channelName := core.EventWebChat.ChannelName()
+	agentID := channelName + "-session-existing"
+	state := &core.AgentState{
+		AgentID:      agentID,
+		SystemPrompt: SystemPrompt,
+		Turns: []core.ConversationTurn{
+			{Role: core.RoleUser, Content: "이전"},
+			{Role: core.RoleAssistant, Content: "응답"},
+		},
+	}
+	if err := s.Store.SaveState(state); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	event := newWebChatEvent("session-existing")
+	got := appendSuggestionForBranchResponse(s, event, "현재 환율은 1480원")
+
+	if strings.Contains(got, "💡") {
+		t.Errorf("subsequent turn must not append suggestion; got %q", got)
+	}
+	if _, ok, _ := s.Store.GetUserContext("surfaced_at:abc123"); ok {
+		t.Errorf("surfaced_at must not be recorded when no surface happened")
+	}
+}
+
+func TestAppendSuggestionForBranchResponse_NoCandidateUnchanged(t *testing.T) {
+	s := newSuggestionBranchTestSession(t)
+	event := newWebChatEvent("session-empty")
+	got := appendSuggestionForBranchResponse(s, event, "현재 환율은 1480원")
+
+	if got != "현재 환율은 1480원" {
+		t.Errorf("no-candidate path must not mutate response; got %q", got)
+	}
+}
+
+func TestAppendSuggestionForBranchResponse_SilenceWindowSuppresses(t *testing.T) {
+	s := newSuggestionBranchTestSession(t)
+	_ = s.Store.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection-test")
+	_ = s.Store.SetUserContext(
+		"surfaced_at:abc123",
+		time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339),
+		"suggestion",
+	)
+
+	event := newWebChatEvent("session-silenced")
+	got := appendSuggestionForBranchResponse(s, event, "현재 환율은 1480원")
+
+	if strings.Contains(got, "💡") {
+		t.Errorf("silenced candidate must not surface; got %q", got)
 	}
 }

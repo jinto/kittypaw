@@ -257,6 +257,17 @@ func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (
 		// regression. Errors are logged but do not fail the response;
 		// the user-visible reply already exists and history loss is
 		// graceful.
+		//
+		// First-turn proactive suggestion is appended BEFORE the turn
+		// record. The agent-loop path lets the LLM weave suggestions
+		// into its reply via system-prompt augmentation; the branch
+		// path returns a deterministic skill output with no LLM in the
+		// response loop, so we surface the suggestion as a literal
+		// suffix instead. Without this, the most likely use case for
+		// the "AI가 먼저 자동화 제안" promise — a user asking "환율"
+		// and being routed to RunInstalledSkillBranch — would never
+		// see the suggestion at all.
+		response = appendSuggestionForBranchResponse(s, event, response)
 		if err := s.recordPipelineTurn(event, eventText, response); err != nil {
 			slog.Warn("pipeline turn record failed", "error", err)
 		}
@@ -421,6 +432,67 @@ func pickActiveSuggestion(st *store.Store) (label, hash string) {
 		return strings.TrimSpace(parts[0]), h
 	}
 	return "", ""
+}
+
+// appendSuggestionForBranchResponse adds a literal suggestion suffix to
+// a deterministic branch (RunInstalledSkillBranch / InstallConsentBranch
+// / etc) response when this is the agent's first turn AND there is an
+// active reflection candidate outside the silence window. Branch paths
+// don't run an LLM after the skill executes, so the
+// system-prompt-augmentation path used by the agent loop has no effect
+// here — we have to compose the proposal text ourselves.
+//
+// First-turn detection probes the store: zero prior assistant turns for
+// this agent_id ⇒ first turn. Branch dispatch hasn't yet recorded the
+// just-arrived user turn (recordPipelineTurn runs after this), so the
+// transcript will show role=assistant only if a previous session
+// reached this agent_id, which is exactly the "not first turn" case we
+// want to skip.
+//
+// Best-effort: any store error or missing candidate returns response
+// unchanged. surfaced_at is recorded on success so the same candidate
+// stays silent for suggestionSilenceWindow.
+func appendSuggestionForBranchResponse(s *Session, event core.Event, response string) string {
+	if s == nil || s.Store == nil {
+		return response
+	}
+	channelName := event.Type.ChannelName()
+	channelUserID := sessionIDFromEvent(&event)
+	agentID := channelName + "-" + channelUserID
+	if globalID, ok, err := s.Store.ResolveUser(channelName, channelUserID); err == nil && ok {
+		agentID = "user-" + globalID
+	}
+	state, err := s.Store.LoadState(agentID)
+	if err != nil {
+		return response
+	}
+	// state == nil ⇒ never seen this agent_id ⇒ definitely first turn.
+	// state != nil but no assistant role yet ⇒ also first turn (the
+	// just-arrived user turn isn't yet recorded; recordPipelineTurn
+	// runs after this).
+	if state != nil {
+		for _, t := range state.Turns {
+			if t.Role == core.RoleAssistant {
+				return response // not first turn
+			}
+		}
+	}
+	label, hash := pickActiveSuggestion(s.Store)
+	if label == "" {
+		return response
+	}
+	suffix := fmt.Sprintf(
+		"\n\n💡 \"%s\"을(를) 자주 보시는 것 같아요. 매일 아침 자동으로 받으시겠어요? 원하시면 \"네\"라고 답해주세요.",
+		label,
+	)
+	if err := s.Store.SetUserContext(
+		"surfaced_at:"+hash,
+		time.Now().UTC().Format(time.RFC3339),
+		"suggestion",
+	); err != nil {
+		slog.Warn("suggestion(branch): failed to record surface time", "hash", hash, "error", err)
+	}
+	return response + suffix
 }
 
 // stripBranchControlMarker removes engine-emitted control prefixes
