@@ -108,7 +108,13 @@ Your task: generate a single JavaScript function body that implements the user's
 ## Rules
 - Output ONLY pure JavaScript code. NO markdown fences, NO explanations.
 - Use ES2020 syntax (const, let, arrow functions, template literals, optional chaining).
-- No require(), import, export, or top-level await.
+- The runtime is goja, a synchronous JavaScript engine — NOT Node.js. Critically:
+  * NEVER use the "async" keyword. NEVER use the "await" keyword.
+  * NO Promise, .then(), or .catch() chains either.
+  * Every global below is SYNCHRONOUS — call them as plain functions.
+    Right: const r = Http.get(url);   const data = JSON.parse(r.body);
+    Wrong: const r = await Http.get(url);   // SyntaxError in goja
+- No require(), import, export.
 - No Node.js or browser APIs (no process, window, document, fetch, setTimeout).
 - The code runs inside a sandboxed function — write statements, not a module.
 
