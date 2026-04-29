@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>활용 사례 — KittyPaw</title>
-  <meta name="description" content="KittyPaw로 실제로 할 수 있는 것들. 아침 자동 브리핑, 패턴 자동화, 자연어 스킬 생성, 서비스 모니터링.">
+  <title>실제 시나리오 — KittyPaw</title>
+  <meta name="description" content="레지스트리 패키지로 만든 실제 시나리오. 예약 실행 ✅, 반복 의도 surface ✅, URL 모니터 ✅, 자연어 스킬 생성 🚧.">
   <link rel="canonical" href="https://kittypaw.app/cases/">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
-  <meta property="og:title" content="활용 사례 — KittyPaw">
-  <meta property="og:description" content="KittyPaw로 실제로 할 수 있는 것들. 아침 자동 브리핑부터 서비스 모니터링까지.">
+  <meta property="og:title" content="실제 시나리오 — KittyPaw">
+  <meta property="og:description" content="레지스트리 패키지로 만든 실제 시나리오. 예약 실행 ✅, 반복 의도 surface ✅, URL 모니터 ✅, 자연어 스킬 생성 🚧.">
   <meta property="og:url" content="https://kittypaw.app/cases/">
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="../style.css">
@@ -35,10 +35,10 @@
 <section class="case-hero">
   <div class="case-hero-inner">
     <span class="case-hero-icon">📖</span>
-    <h1>이렇게 쓰고 있습니다</h1>
+    <h1>레지스트리 패키지로 만든 시나리오</h1>
     <p class="case-hero-sub">
-      설치 3분, 코드 0줄.<br>
-      KittyPaw가 실제로 어떻게 동작하는지 확인해보세요.
+      각 카드 의 ✅ / 🚧 는 live test 기준 status.<br>
+      구현 상세 / 한계는 각 페이지 본문에.
     </p>
   </div>
 </section>
@@ -51,8 +51,8 @@
         <div class="case-hub-icon">☀️</div>
       </div>
       <div class="case-hub-body">
-        <h3>아침 자동 브리핑</h3>
-        <p>날씨 + 시장 + 뉴스. 3개 스킬을 설치하면 매일 아침 텔레그램으로 브리핑이 도착합니다.</p>
+        <h3>✅ 예약 패키지 실행</h3>
+        <p>날씨 / 시장 / RSS 패키지 설치 → cron 스케줄 → telegram setup 후 cron 시각에 발송. weekly delivery live verified (commit af0c360).</p>
         <span class="case-hub-arrow">자세히 보기 &rarr;</span>
       </div>
     </a>
@@ -62,8 +62,8 @@
         <div class="case-hub-icon">🔄</div>
       </div>
       <div class="case-hub-body">
-        <h3>반복하면 자동화됩니다</h3>
-        <p>같은 요청을 반복하면 AI가 패턴을 감지하고, 자동화를 먼저 제안합니다.</p>
+        <h3>✅ 반복 의도 surface</h3>
+        <p>Reflection 루프 → 후보 저장 → chat 첫 turn suffix 출력 live verified (commit 8f2536a). 자동 코드 생성은 🚧.</p>
         <span class="case-hub-arrow">자세히 보기 &rarr;</span>
       </div>
     </a>
@@ -73,8 +73,8 @@
         <div class="case-hub-icon">💬</div>
       </div>
       <div class="case-hub-body">
-        <h3>자연어로 스킬 만들기</h3>
-        <p>원하는 자동화를 말로 설명하면 AI가 코드를 짜고, 테스트하고, 등록합니다.</p>
+        <h3>🚧 자연어 스킬 생성</h3>
+        <p>JS 코드 생성 → goja syntax 검증 (5/5 pass measured, commit dbdec0d) → SkillStore 저장. 런타임 동작은 패키지 마다.</p>
         <span class="case-hub-arrow">자세히 보기 &rarr;</span>
       </div>
     </a>
@@ -84,8 +84,8 @@
         <div class="case-hub-icon">🚨</div>
       </div>
       <div class="case-hub-body">
-        <h3>서비스 다운? 즉시 알림</h3>
-        <p>웹사이트와 API를 5분마다 체크하고, 문제가 생기면 즉시 알려줍니다.</p>
+        <h3>✅ URL 상태 확인</h3>
+        <p>cron HTTP 체크 → 이전 상태 비교 → 상태 변경 시 alert 발송. telegram 라우팅 시 정상.</p>
         <span class="case-hub-arrow">자세히 보기 &rarr;</span>
       </div>
     </a>
@@ -96,17 +96,17 @@
 <section class="cta-section">
   <div class="cta-inner">
     <span class="cta-paw">🐾</span>
-    <h2 class="reveal">지금 시작하세요</h2>
+    <h2 class="reveal">GitHub 에서 확인</h2>
     <p class="reveal reveal-delay-1">
-      급할수록 필요한 건, 작고 빠른 고양이손.<br>
-      kittypaw serve 한 줄로 오늘부터 자동화를 시작하세요.
+      각 시나리오의 코드 / 한계 / 진행 상태는 issues 에서 추적합니다.<br>
+      v0.0.8 alpha — bug / 의문 / 기여 모두 환영.
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
-        <span>⭐</span> GitHub에서 받기
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHub 저장소
       </a>
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-cta-secondary">
-        🎨 스킬 갤러리
+      <a href="https://github.com/jinto/kittypaw/issues" class="btn btn-cta-secondary">
+        💬 Issues
       </a>
     </div>
   </div>
@@ -118,7 +118,7 @@
     <span class="footer-sep">·</span>
     <a href="https://github.com/jinto/kittypaw">GitHub</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/kittypaw-app/skills">스킬 갤러리</a>
+    <a href="https://github.com/kittypaw-app/skills">스킬 레지스트리</a>
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
   </div>

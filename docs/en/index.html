@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KittyPaw — AI Agent Framework That Automates Without Code</title>
-  <meta name="description" content="Go-powered AI agent framework. Install skills from the gallery, fill in settings, done. Multi-channel · Local LLM · Source available.">
+  <title>KittyPaw — A Go-based local AI agent experiment</title>
+  <meta name="description" content="A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 
   <!-- Canonical & hreflang -->
@@ -15,23 +15,23 @@
   <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
 
   <!-- Open Graph -->
-  <meta property="og:title" content="KittyPaw — AI Agent Framework That Automates Without Code">
-  <meta property="og:description" content="Install skills from the gallery, fill in settings, done. Daily market reports, RSS summaries, URL monitoring... all automated.">
+  <meta property="og:title" content="KittyPaw — A Go-based local AI agent experiment">
+  <meta property="og:description" content="Single Go binary, goja JS sandbox, 5 channel adapters, skill registry. Building local agent components piece by piece.">
   <meta property="og:url" content="https://kittypaw.app/en/">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="en_US">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KittyPaw — AI Agent Framework That Automates Without Code">
-  <meta name="twitter:description" content="Install skills from the gallery, fill in settings, done. Daily market reports, RSS summaries, URL monitoring... all automated.">
+  <meta name="twitter:title" content="KittyPaw — A Go-based local AI agent experiment">
+  <meta name="twitter:description" content="Single Go binary, goja JS sandbox, 5 channel adapters, skill registry. Building local agent components piece by piece.">
 
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "AI agent framework that automates without code. Install skills from the gallery, fill in settings, done.",
+    "description": "A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.",
     "url": "https://kittypaw.app/en/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux, Windows",
@@ -57,7 +57,6 @@
     <a href="../cases/" class="nav-link">Cases</a>
     <a href="#skills" class="nav-link">Skills</a>
     <a href="#tech" class="nav-link">Tech</a>
-    <a href="#strengths" class="nav-link">Strengths</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/" class="nav-link-active">EN</a> · <a href="https://kittypaw.app/ja/">JA</a></span>
   </div>
@@ -79,18 +78,17 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> Local LLM support · Multi-channel · Source available
+        <span>🔬</span> v0.0.8 alpha · Go 1.25 · Elastic License 2.0
       </div>
     </div>
 
     <h1>
-      No code.<br>
-      <span class="accent-warm">AI handles it</span><br>
-      automatically.
+      KittyPaw<br>
+      <span class="accent-warm">A local AI agent experiment</span>
     </h1>
     <p class="hero-sub">
-      Install from the skill gallery, fill in settings, done.<br>
-      Daily market reports, RSS summaries, URL monitoring&hellip; all on autopilot.
+      A Go project building chat, skills, scheduler, memory, and permissions in small pieces<br>
+      to see how far it can go. Single binary, no external runtimes.
     </p>
 
     <div class="install-box">
@@ -98,13 +96,13 @@
       <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
       <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="Copy">📋</button>
     </div>
-    <p class="install-hint">macOS · Linux — paste in your terminal</p>
+    <p class="install-hint">macOS · Linux — Windows builds available on the releases page</p>
     <div class="hero-buttons">
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-secondary">
-        <span>🎨</span> Browse Skill Gallery
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-secondary">
+        <span>⭐</span> GitHub repo
       </a>
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
-        Other downloads
+      <a href="https://github.com/jinto/kittypaw/issues" class="btn btn-ghost">
+        Issues
       </a>
     </div>
 
@@ -119,34 +117,34 @@
         <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
         <div class="t-out">   LLM provider: Claude (Anthropic)</div>
         <div class="t-out">   Channel: Telegram</div>
-        <div class="t-out">   ✓ Auto-start enabled · Chat ready</div>
+        <div class="t-out">   ✓ Settings saved · Daemon up</div>
         <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">No external runtimes · Single binary · macOS · Linux · Windows</p>
+    <p class="hero-note">single Go binary · sqlite (modernc) · goja JS sandbox · macOS / Linux / Windows</p>
   </div>
 </section>
 
 <!-- ============================================================
-     SOCIAL PROOF STRIP
+     STATUS BOARD
 ============================================================ -->
 <div class="proof-strip">
   <div class="proof-inner">
     <div class="proof-item reveal">
-      <span class="proof-dot"></span>
-      Source available
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ CLI + local daemon
     </div>
     <div class="proof-item reveal reveal-delay-1">
-      <span class="proof-dot"></span>
-      Elastic License 2.0
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
     </div>
     <div class="proof-item reveal reveal-delay-2">
-      <span class="proof-dot"></span>
-      Check it out on GitHub
+      <span class="proof-dot proof-dot-active"></span>
+      🚧 Reflection candidates / NL skill generation
     </div>
     <div class="proof-item reveal reveal-delay-3">
       <span class="proof-dot"></span>
-      macOS · Linux · Windows
+      🔬 Family tenant · MoA · live indexing
     </div>
   </div>
 </div>
@@ -157,40 +155,40 @@
 <section id="features">
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">Core Features</span>
-      <h2 class="section-title">Why KittyPaw?</h2>
-      <p class="section-sub">A local AI agent alternative to automation tools like n8n and Zapier.<br>AI writes the code, runs it safely in a sandbox.</p>
+      <span class="section-eyebrow">Components</span>
+      <h2 class="section-title">What I'm building</h2>
+      <p class="section-sub">Not a polished SaaS — a source-available project building local AI agent components piece by piece.<br>Each card uses ✅ / 🚧 / 🔬 to mark its current verification state.</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
         <div class="feature-icon-wrap">🎯</div>
-        <h3>Automate Without Code</h3>
-        <p>Install any automation from the skill gallery, enter your Telegram token, and it works immediately.</p>
+        <h3>✅ Skill packages</h3>
+        <p>Install from registry / GitHub URL / local path. <code>package.toml</code>, source-bound config (secrets.json), SHA256 verification.</p>
       </div>
       <div class="feature-card reveal reveal-delay-2">
-        <div class="feature-icon-wrap">💬</div>
-        <h3>Personal AI Assistant</h3>
-        <p>Say "I want new episode alerts for my favorite drama" and KittyPaw finds the right skill or creates one. A personal assistant that learns your preferences over time.</p>
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>🚧 Reflection loop</h3>
+        <p>Recent chats → repeated intent / topic candidates stored. First-turn suffix surface ✅ verified, "yes" reply dispatches ✅, generated code stability 🚧.</p>
       </div>
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
-        <h3>Safe Execution</h3>
-        <p>Every skill runs inside a goja sandbox, and dangerous operations are protected by the Permission approval system.</p>
+        <h3>✅ Sandbox + Permission</h3>
+        <p>All skills run in goja. SSRF guard, hop-by-hop header block, dangerous ops (Shell.exec / Git.push) require approval in supervised mode.</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
-        <h3>Skill Chaining</h3>
-        <p>Connect multiple skills into sequential pipelines. Collect data → summarize → deliver, all in one flow.</p>
+        <h3>🔬 Skill chaining</h3>
+        <p>Pipeline of skills. Staged execution validated for some packages. A general-purpose chain DSL is still undecided.</p>
       </div>
       <div class="feature-card reveal reveal-delay-5">
         <div class="feature-icon-wrap">🌐</div>
-        <h3>Web Search</h3>
-        <p>Skills can search the web, read pages, and summarize with AI. Fact-checking included, automatically.</p>
+        <h3>🚧 Web search</h3>
+        <p>DuckDuckGo (no-config) + Google API + Tavily option. <code>Web.search</code> + <code>Web.fetch</code> primitives. Source quality / verification ongoing.</p>
       </div>
       <div class="feature-card reveal reveal-delay-6">
         <div class="feature-icon-wrap">🏠</div>
-        <h3>Local LLM Support</h3>
-        <p>Connect local models via Ollama, LM Studio, and more. Zero API cost. Your data never leaves your machine.</p>
+        <h3>✅ Local LLM</h3>
+        <p>OpenAI-compatible local endpoints (Ollama, LM Studio). Model performance varies — small models often have tool-use limits.</p>
       </div>
     </div>
   </div>
@@ -202,28 +200,28 @@
 <div class="how-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">How It Works</span>
-      <h2 class="section-title">Three steps and you're done</h2>
-      <p class="section-sub" style="margin-bottom: 52px;">Install, configure, and let the cat do the work</p>
+      <span class="section-eyebrow">Workflow</span>
+      <h2 class="section-title">The basic flow</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">From the CLI or local Web UI — all data lives in a local SQLite file.</p>
     </div>
     <div class="steps-row">
       <div class="step reveal reveal-delay-1">
         <div class="step-emoji">📦</div>
         <div class="step-num">1</div>
-        <h3>Install a Skill</h3>
-        <p>Pick the skill you want from the gallery and install it with a single click.</p>
+        <h3>Install a skill</h3>
+        <p><code>kittypaw skill install &lt;name&gt;</code> — registry / GitHub URL / local path all supported.</p>
       </div>
       <div class="step reveal reveal-delay-2">
         <div class="step-emoji">⚙️</div>
         <div class="step-num">2</div>
-        <h3>Fill in Settings</h3>
-        <p>Enter your Telegram token, schedule, and API keys. No code to touch.</p>
+        <h3>Configure</h3>
+        <p><code>kittypaw skill config &lt;name&gt; &lt;key&gt; &lt;value&gt;</code> — or <code>kittypaw setup</code> for LLM/channel in one shot. Required fields are in the package's <code>package.toml</code>.</p>
       </div>
       <div class="step reveal reveal-delay-3">
-        <div class="step-emoji">✨</div>
+        <div class="step-emoji">⏱</div>
         <div class="step-num">3</div>
-        <h3>Run Automatically</h3>
-        <p>Runs on your configured schedule and delivers results as notifications.</p>
+        <h3>Run / schedule</h3>
+        <p><code>kittypaw skill run &lt;name&gt;</code> for manual, or cron triggers driven by the daemon → output flows through the channel adapter.</p>
       </div>
     </div>
   </div>
@@ -235,44 +233,44 @@
 <section>
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">Use Cases</span>
-      <h2 class="section-title">What you can do with it</h2>
-      <p class="section-sub">Ready-to-run automations — install, configure, go</p>
+      <span class="section-eyebrow">Real scenarios</span>
+      <h2 class="section-title">Flows built with registry packages</h2>
+      <p class="section-sub">Live-tested ✅ vs in-progress 🚧 — see status on each card.</p>
     </div>
     <div class="usecases-grid">
       <div class="usecase-card reveal reveal-delay-1">
-        <div class="usecase-num-badge">1</div>
+        <div class="usecase-num-badge">☀️</div>
         <div>
-          <h3>Daily Morning Market Report</h3>
-          <p>Fetches ETF data, summarizes it with AI, and sends it to Telegram. Auto-delivered weekdays at 8 AM.</p>
+          <h3>✅ Scheduled package execution</h3>
+          <p>Install weather / market / RSS packages → cron schedule → telegram setup means delivery at the cron time.</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-2">
-        <div class="usecase-num-badge">2</div>
+        <div class="usecase-num-badge">🔄</div>
         <div>
-          <h3>RSS News Digest</h3>
-          <p>AI summarizes new posts from Hacker News, TechCrunch, and other RSS feeds. Already-read articles are filtered automatically.</p>
+          <h3>✅ Repeat-intent surfacing</h3>
+          <p>Reflection candidates stored → first-turn chat suffix verified (commit 8f2536a). Auto-generated code is 🚧.</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-3">
-        <div class="usecase-num-badge">3</div>
+        <div class="usecase-num-badge">🚨</div>
         <div>
-          <h3>Service Downtime Alerts</h3>
-          <p>Checks your website or API every 5 minutes. Instant Telegram alert when it goes down, another when it recovers.</p>
+          <h3>✅ URL status check</h3>
+          <p>cron HTTP check → alert message on status change. Telegram-routed delivery.</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-4">
-        <div class="usecase-num-badge">4</div>
+        <div class="usecase-num-badge">🌤</div>
         <div>
-          <h3>Weather Briefing</h3>
-          <p>Delivers a 7-day forecast in plain language every morning. No API key required (uses the free Open-Meteo API).</p>
+          <h3>✅ Weather briefing</h3>
+          <p>Open-Meteo 7-day forecast + LLM short summary, no API key needed.</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-5">
-        <div class="usecase-num-badge">5</div>
+        <div class="usecase-num-badge">💬</div>
         <div>
-          <h3>Build Your Own Automation</h3>
-          <p><code>kittypaw skill create "check lottery numbers daily and notify me"</code> — AI writes the code, tests it, and registers it.</p>
+          <h3>🚧 Draft a custom skill</h3>
+          <p><code>kittypaw skill create "..."</code> → JS code → goja syntax check (5/5 pass measured) → SkillStore save. Runtime stability depends on the package.</p>
         </div>
       </div>
     </div>
@@ -285,40 +283,40 @@
 <section id="skills" class="skills-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">Skill Gallery</span>
-      <h2 class="section-title">One command from the gallery</h2>
-      <p class="section-sub">Five popular skills, each a single install command away</p>
+      <span class="section-eyebrow">Registry</span>
+      <h2 class="section-title">Packages currently in the registry</h2>
+      <p class="section-sub"><code>kittypaw skill install &lt;name&gt;</code> to install. Status reflects live tests.</p>
     </div>
     <div class="skills-grid">
       <div class="skill-card reveal reveal-delay-1">
         <span class="skill-icon">📈</span>
         <h4>Macro Economy Report</h4>
         <p>ETF + AI summary</p>
-        <span class="skill-tag">Daily auto</span>
+        <span class="skill-tag">✅ cron</span>
       </div>
       <div class="skill-card reveal reveal-delay-2">
         <span class="skill-icon">🌤</span>
         <h4>Weather Briefing</h4>
-        <p>7-day forecast</p>
-        <span class="skill-tag">No API key</span>
+        <p>7-day forecast (Open-Meteo)</p>
+        <span class="skill-tag">✅ No API key</span>
       </div>
       <div class="skill-card reveal reveal-delay-3">
         <span class="skill-icon">📰</span>
         <h4>RSS News Digest</h4>
         <p>Feed + LLM summary</p>
-        <span class="skill-tag">Dupe filter</span>
+        <span class="skill-tag">✅ dupe filter</span>
       </div>
       <div class="skill-card reveal reveal-delay-4">
-        <span class="skill-icon">✅</span>
+        <span class="skill-icon">⏰</span>
         <h4>Reminder</h4>
-        <p>Chat-based to-do</p>
-        <span class="skill-tag">AI chat</span>
+        <p>Chat keyword + cron</p>
+        <span class="skill-tag">🚧 partial</span>
       </div>
       <div class="skill-card reveal reveal-delay-5">
         <span class="skill-icon">🔍</span>
         <h4>URL Monitor</h4>
-        <p>Status change alerts</p>
-        <span class="skill-tag">Every 5 min</span>
+        <p>HTTP check + status alert</p>
+        <span class="skill-tag">✅ every 5 min</span>
       </div>
     </div>
   </div>
@@ -330,9 +328,9 @@
 <section id="tech" class="tech-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">Tech Stack</span>
-      <h2 class="section-title">Pure Go. No external runtimes.</h2>
-      <p class="section-sub">Ships as a single binary. No npm, no Node, no Python required.</p>
+      <span class="section-eyebrow">Tech stack</span>
+      <h2 class="section-title">Pure Go — zero external runtimes</h2>
+      <p class="section-sub">Single binary. No npm, Node, or Python. 20 SQLite migrations and 159 commits in.</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
@@ -373,8 +371,8 @@
       <div class="tech-card reveal reveal-delay-6">
         <div class="tech-badge">🔑</div>
         <div>
-          <div class="tech-card-name">Local Secret Store</div>
-          <div class="tech-card-desc">File-based local key storage</div>
+          <div class="tech-card-name">per-tenant secrets.json</div>
+          <div class="tech-card-desc">Per-tenant isolated storage</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-1">
@@ -396,57 +394,6 @@
 </section>
 
 <!-- ============================================================
-     STRENGTHS
-============================================================ -->
-<section class="section" id="strengths">
-  <div class="section section-center">
-    <div class="reveal">
-      <h2 class="section-title">What Makes KittyPaw Different</h2>
-      <p class="section-sub">Source available · Free · Self-hosted</p>
-    </div>
-    <div class="features-grid">
-      <div class="feature-card reveal reveal-delay-1">
-        <div class="feature-icon-wrap">📡</div>
-        <h3>True Multi-Channel</h3>
-        <p>Connect Telegram, Slack, Discord, and Kakao <strong>simultaneously</strong>. One agent serves all your channels.</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-2">
-        <div class="feature-icon-wrap">🧠</div>
-        <h3>Conversations Become Skills</h3>
-        <p>Detects repeated request patterns and suggests skills automatically. Gets smarter over time.</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-3">
-        <div class="feature-icon-wrap">📊</div>
-        <h3>Weekly Interest Report</h3>
-        <p>Tracks topics from your conversations and generates weekly reports. Your AI assistant that truly understands you.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
-     CTA
-============================================================ -->
-<section class="cta-section">
-  <div class="cta-inner">
-    <span class="cta-paw" role="img" aria-label="Cat paw">🐾</span>
-    <h2 class="reveal">Get started today</h2>
-    <p class="reveal reveal-delay-1">
-      The busier you are, the more you need a small, fast cat by your side.<br>
-      Start automating today — just run kittypaw setup.
-    </p>
-    <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
-        <span>⭐</span> Get on GitHub
-      </a>
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-cta-secondary">
-        🎨 Skill Gallery
-      </a>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
      FOOTER
 ============================================================ -->
 <footer>
@@ -455,11 +402,9 @@
     <span class="footer-sep">·</span>
     <a href="https://github.com/jinto/kittypaw">GitHub</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/kittypaw-app/skills">Skill Gallery</a>
+    <a href="https://github.com/kittypaw-app/skills">Skill Registry</a>
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
-    <span class="footer-sep">·</span>
-    <span>Made with 🐹 &amp; ❤️</span>
   </div>
 </footer>
 

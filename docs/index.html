@@ -3,27 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KittyPaw — 알아서 일하고, 쓸수록 나를 알아가는 AI</title>
-  <meta name="description" content="코드 없이 자동화. 반복 패턴을 감지하고 스킬을 먼저 제안합니다. Go · CLI + HTTP · 로컬 LLM 지원 · 소스 공개.">
+  <title>KittyPaw — Go 로 만드는 로컬 AI 에이전트 실험</title>
+  <meta name="description" content="Go 단일 binary 로 만드는 로컬 AI 에이전트 프로젝트. CLI + daemon, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.">
   <link rel="canonical" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
   <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
   <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
-  <meta property="og:title" content="KittyPaw — 알아서 일하고, 쓸수록 나를 알아가는 AI">
-  <meta property="og:description" content="같은 요청을 3번 하면 AI가 먼저 자동화를 제안합니다. 반복 패턴 감지, 주간 관심사 리포트, 자동 스킬 생성.">
+  <meta property="og:title" content="KittyPaw — Go 로 만드는 로컬 AI 에이전트 실험">
+  <meta property="og:description" content="단일 Go binary, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. 작은 부품을 하나씩 검증하는 실험 프로젝트.">
   <meta property="og:url" content="https://kittypaw.app/">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="ko_KR">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KittyPaw — 알아서 일하고, 쓸수록 나를 알아가는 AI">
-  <meta name="twitter:description" content="같은 요청을 3번 하면 AI가 먼저 자동화를 제안합니다. 반복 패턴 감지, 주간 관심사 리포트, 자동 스킬 생성.">
+  <meta name="twitter:title" content="KittyPaw — Go 로 만드는 로컬 AI 에이전트 실험">
+  <meta name="twitter:description" content="단일 Go binary, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. 작은 부품을 하나씩 검증하는 실험 프로젝트.">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "코드 없이 자동화하는 AI 에이전트 프레임워크. 스킬 갤러리에서 설치하고, 설정만 채우면 끝.",
+    "description": "Go 단일 binary 로 만드는 로컬 AI 에이전트 실험 프로젝트. CLI + daemon, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.",
     "url": "https://kittypaw.app/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux, Windows",
@@ -51,7 +51,6 @@
     <a href="cases/" class="nav-link">사례</a>
     <a href="#skills" class="nav-link">스킬</a>
     <a href="#tech" class="nav-link">기술</a>
-    <a href="#strengths" class="nav-link">강점</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/" class="nav-link-active">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/">JA</a></span>
   </div>
@@ -73,17 +72,17 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> 로컬 LLM 지원 · 멀티채널 · 소스 공개
+        <span>🔬</span> v0.0.8 alpha · Go 1.25 · Elastic License 2.0
       </div>
     </div>
 
     <h1>
-      알아서 일합니다<br>
-      <span class="accent-warm">쓸수록 나를 알아가는 AI</span>
+      KittyPaw<br>
+      <span class="accent-warm">로컬에서 만드는 AI 에이전트 실험</span>
     </h1>
     <p class="hero-sub">
-      스킬 갤러리에서 설치하면 코드 없이 바로 동작합니다.<br>
-      반복 패턴을 감지하고, 매주 내 관심사를 정리합니다.
+      채팅, 스킬 실행, 스케줄러, 메모리, 권한 제어를 작은 단위로 만들면서<br>
+      어디까지 갈 수 있는지 보고 있는 Go 프로젝트입니다. 단일 binary, 외부 런타임 없음.
     </p>
 
     <div class="install-box">
@@ -91,13 +90,13 @@
       <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
       <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="복사">📋</button>
     </div>
-    <p class="install-hint">macOS · Linux — 터미널에 붙여넣기</p>
+    <p class="install-hint">macOS · Linux — Windows는 릴리스에서 직접 다운로드</p>
     <div class="hero-buttons">
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-secondary">
-        <span>🎨</span> 스킬 갤러리
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-secondary">
+        <span>⭐</span> GitHub 저장소
       </a>
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
-        기타 다운로드
+      <a href="https://github.com/jinto/kittypaw/issues" class="btn btn-ghost">
+        Issues
       </a>
     </div>
 
@@ -112,34 +111,34 @@
         <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
         <div class="t-out">   LLM provider: Claude (Anthropic)</div>
         <div class="t-out">   Channel: Telegram</div>
-        <div class="t-out">   ✓ 자동 실행 등록 · 채팅 시작</div>
+        <div class="t-out">   ✓ 설정 저장 · 데몬 부팅</div>
         <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">외부 런타임 없음 · 바이너리 하나로 실행 · macOS · Linux · Windows</p>
+    <p class="hero-note">single Go binary · sqlite (modernc) · goja JS sandbox · macOS / Linux / Windows</p>
   </div>
 </section>
 
 <!-- ============================================================
-     SOCIAL PROOF STRIP
+     STATUS BOARD
 ============================================================ -->
 <div class="proof-strip">
   <div class="proof-inner">
     <div class="proof-item reveal">
       <span class="proof-dot proof-dot-done"></span>
-      처음 — 갤러리에서 스킬 설치
+      ✅ CLI + 로컬 daemon
     </div>
     <div class="proof-item reveal reveal-delay-1">
       <span class="proof-dot proof-dot-done"></span>
-      며칠 후 — 반복 패턴 감지 시작
+      ✅ 5 채널 어댑터 (Telegram/Slack/Discord/Kakao/WS)
     </div>
     <div class="proof-item reveal reveal-delay-2">
       <span class="proof-dot proof-dot-active"></span>
-      반복하면 — AI가 먼저 자동화 제안
+      🚧 Reflection 후보 / 자연어 스킬 생성
     </div>
     <div class="proof-item reveal reveal-delay-3">
       <span class="proof-dot"></span>
-      쓸수록 — 나만의 AI 비서 완성
+      🔬 Family tenant · MoA · live indexing
     </div>
   </div>
 </div>
@@ -150,78 +149,78 @@
 <section id="features">
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">핵심 기능</span>
-      <h2 class="section-title">왜 KittyPaw인가요?</h2>
-      <p class="section-sub">n8n, Zapier 같은 자동화 도구의 로컬 AI 에이전트 대안.<br>AI가 코드를 쓰고, 샌드박스에서 안전하게 실행합니다.</p>
+      <span class="section-eyebrow">구성 요소</span>
+      <h2 class="section-title">지금 만들고 있는 부품들</h2>
+      <p class="section-sub">완성된 SaaS 가 아니라, 로컬 AI 에이전트의 구성 요소를 하나씩 만들고 검증하는 프로젝트입니다.<br>각 카드 의 ✅ / 🚧 / 🔬 는 현재 검증 상태입니다.</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
         <div class="feature-icon-wrap">🎯</div>
-        <h3>코드 없이 자동화</h3>
-        <p>스킬 갤러리에서 원하는 자동화를 설치하고, 텔레그램 토큰만 넣으면 바로 동작합니다.</p>
+        <h3>✅ Skill 패키지</h3>
+        <p>레지스트리 / GitHub / 로컬 디렉터리에서 설치. <code>package.toml</code>, source-bound config (secrets.json), SHA256 검증.</p>
       </div>
       <div class="feature-card reveal reveal-delay-2">
         <div class="feature-icon-wrap">🧠</div>
-        <h3>학습하는 AI</h3>
-        <p>반복 패턴을 감지해 자동화를 제안하고, 매주 내 관심사를 분석합니다. 쓸수록 나를 알아가는 개인 비서.</p>
+        <h3>🚧 Reflection 루프</h3>
+        <p>최근 대화 → 반복 의도 / 토픽 후보 저장. 첫 turn suffix surface ✅ verified, "네" 답변 시 dispatch ✅, 자동 생성 코드 안정성 🚧.</p>
       </div>
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
-        <h3>안전한 실행</h3>
-        <p>모든 스킬은 goja 샌드박스 안에서 실행되며, 위험한 작업은 Permission 승인 시스템이 보호합니다.</p>
+        <h3>✅ Sandbox + Permission</h3>
+        <p>모든 스킬은 goja 안에서 실행. SSRF 차단, hop-by-hop header 차단, 위험 op (Shell.exec / Git.push) 는 supervised mode 에서 사용자 승인.</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
-        <h3>스킬 체이닝</h3>
-        <p>여러 스킬을 순차 파이프라인으로 연결. 데이터 수집 → 요약 → 발송을 한 번에.</p>
+        <h3>🔬 Skill chaining</h3>
+        <p>여러 스킬을 pipeline 으로 연결. 단계별 실행은 일부 패키지에서 검증. 일반화된 chain DSL 은 미정.</p>
       </div>
       <div class="feature-card reveal reveal-delay-5">
         <div class="feature-icon-wrap">🌐</div>
-        <h3>웹 검색</h3>
-        <p>스킬이 웹을 검색하고, 페이지를 읽고, AI로 요약합니다. 팩트체크도 자동으로.</p>
+        <h3>🚧 Web 검색</h3>
+        <p>DuckDuckGo (no-config) + Google API + Tavily 옵션. <code>Web.search</code> + <code>Web.fetch</code> primitive. 출처 품질 / 결과 검증 진행 중.</p>
       </div>
       <div class="feature-card reveal reveal-delay-6">
         <div class="feature-icon-wrap">🏠</div>
-        <h3>로컬 LLM 지원</h3>
-        <p>Ollama, LM Studio 등 내 컴퓨터의 로컬 모델을 연결하세요. API 비용 0원. 데이터가 내 컴퓨터를 떠나지 않습니다.</p>
+        <h3>✅ Local LLM</h3>
+        <p>Ollama / LM Studio 같은 OpenAI 호환 로컬 endpoint 연결. 모델 성능 편차 큼 — 작은 모델은 tool use 한계 있음.</p>
       </div>
     </div>
   </div>
 </section>
 
 <!-- ============================================================
-     GROW SECTION (Wow #2 Reflection Loop + Wow #3 Adaptive Preference)
+     REFLECTION SECTION
 ============================================================ -->
 <section id="grow" class="grow-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow grow-eyebrow">학습하는 AI</span>
-      <h2 class="section-title grow-title">KittyPaw는 기억합니다</h2>
-      <p class="section-sub grow-sub">쓸수록 내 습관을 이해하고, 내가 요청하기 전에 먼저 제안합니다</p>
+      <span class="section-eyebrow grow-eyebrow">🚧 실험 + 부분 작동</span>
+      <h2 class="section-title grow-title">Reflection 루프</h2>
+      <p class="section-sub grow-sub">최근 대화에서 반복 의도와 토픽 후보를 추출 → 저장 → chat 첫 turn 에 suffix 로 surface. live test verified (commit 8f2536a).</p>
     </div>
     <div class="grow-cards">
 
       <div class="grow-card reveal reveal-delay-1">
         <div class="grow-card-icon">🔄</div>
-        <h3>반복 패턴 감지</h3>
-        <p>같은 종류의 요청을 반복하면 AI가 패턴을 감지하고 자동화를 제안합니다.</p>
+        <h3>반복 의도 후보</h3>
+        <p>최근 사용자 메시지를 묶어 반복된 요청 후보를 저장합니다. 기본 기준은 빈도 3회 이상입니다.</p>
         <div class="grow-card-example">
           <div class="grow-example-chat">
             <span class="grow-bubble-user">환율 알려줘</span>
             <span class="grow-bubble-user">달러 가격이 얼마야?</span>
             <span class="grow-bubble-user">오늘 환율 어때?</span>
-            <span class="grow-bubble-ai">💡 환율을 자주 확인하시네요.<br>매일 아침 자동으로 알려드릴까요?</span>
+            <span class="grow-bubble-ai">후보: 환율 조회<br>count=3 · cron 제안 포함</span>
           </div>
         </div>
       </div>
 
       <div class="grow-card reveal reveal-delay-2">
         <div class="grow-card-icon">📊</div>
-        <h3>주간 관심사 리포트</h3>
-        <p>매주 일요일, 이번 주 내가 무엇에 관심을 가졌는지 자동으로 정리해 드립니다.</p>
+        <h3>토픽 요약</h3>
+        <p>Reflection 결과로 저장된 토픽 비율을 조회합니다. 장기 리포트와 발송 흐름은 아직 검증 중입니다.</p>
         <div class="grow-card-example">
           <div class="grow-report">
-            <div class="grow-report-title">📊 이번 주 관심사 리포트</div>
+            <div class="grow-report-title">📊 저장된 토픽 요약 예시</div>
             <div class="grow-report-item">
               <span class="grow-bar" style="width:65%"></span>
               <span class="grow-topic">AI · 기술</span>
@@ -243,29 +242,29 @@
 
       <div class="grow-card reveal reveal-delay-3">
         <div class="grow-card-icon">⏱</div>
-        <h3>시간이 지날수록</h3>
-        <p>처음엔 내가 설치하지만, 반복하다 보면 어느 날 AI가 먼저 제안하고 있습니다.</p>
+        <h3>승인 → dispatch</h3>
+        <p>자동으로 코드를 바꾸지 않습니다. 후보를 surface → 사용자 "네" → InstallConsentBranch dispatch. 자동 코드 변경 / 자가 수정 (self-healing) 은 한 번 시도 후 retired.</p>
         <div class="grow-card-example">
           <div class="grow-timeline">
             <div class="grow-tl-item">
               <span class="grow-tl-dot grow-tl-done"></span>
-              <span class="grow-tl-label">처음</span>
-              <span class="grow-tl-text">갤러리에서 스킬 설치</span>
+              <span class="grow-tl-label">1</span>
+              <span class="grow-tl-text">✅ 대화 저장</span>
             </div>
             <div class="grow-tl-item">
               <span class="grow-tl-dot grow-tl-done"></span>
-              <span class="grow-tl-label">며칠 후</span>
-              <span class="grow-tl-text">반복 패턴 감지 시작</span>
+              <span class="grow-tl-label">2</span>
+              <span class="grow-tl-text">✅ Reflection 분석</span>
+            </div>
+            <div class="grow-tl-item">
+              <span class="grow-tl-dot grow-tl-done"></span>
+              <span class="grow-tl-label">3</span>
+              <span class="grow-tl-text">✅ Suffix surface</span>
             </div>
             <div class="grow-tl-item">
               <span class="grow-tl-dot grow-tl-active"></span>
-              <span class="grow-tl-label">반복하면</span>
-              <span class="grow-tl-text">AI가 먼저 자동화 제안</span>
-            </div>
-            <div class="grow-tl-item">
-              <span class="grow-tl-dot"></span>
-              <span class="grow-tl-label">쓸수록</span>
-              <span class="grow-tl-text">나만의 AI 비서 완성</span>
+              <span class="grow-tl-label">4</span>
+              <span class="grow-tl-text">🚧 생성 코드 안정성</span>
             </div>
           </div>
         </div>
@@ -281,28 +280,28 @@
 <div class="how-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">사용 방법</span>
-      <h2 class="section-title">3단계로 끝납니다</h2>
-      <p class="section-sub" style="margin-bottom: 52px;">설치하고 설정하면 고양이가 알아서 일합니다</p>
+      <span class="section-eyebrow">사용 흐름</span>
+      <h2 class="section-title">기본 흐름</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">CLI 또는 로컬 Web UI 에서 — 모든 데이터는 로컬 SQLite 에 저장됩니다.</p>
     </div>
     <div class="steps-row">
       <div class="step reveal reveal-delay-1">
         <div class="step-emoji">📦</div>
         <div class="step-num">1</div>
-        <h3>스킬 설치</h3>
-        <p>갤러리에서 원하는 스킬을 선택해 클릭 한 번으로 설치합니다.</p>
+        <h3>Skill 설치</h3>
+        <p><code>kittypaw skill install &lt;name&gt;</code> — 레지스트리 / GitHub URL / 로컬 path 모두 지원.</p>
       </div>
       <div class="step reveal reveal-delay-2">
         <div class="step-emoji">⚙️</div>
         <div class="step-num">2</div>
-        <h3>설정 입력</h3>
-        <p>텔레그램 토큰, 스케줄, API 키만 채웁니다. 코드는 건드리지 않아도 됩니다.</p>
+        <h3>Config 입력</h3>
+        <p><code>kittypaw skill config &lt;name&gt; &lt;key&gt; &lt;value&gt;</code> — 또는 <code>kittypaw setup</code> 으로 LLM/채널 한 번에. 어떤 값 필요한 지는 패키지의 <code>package.toml</code> 에.</p>
       </div>
       <div class="step reveal reveal-delay-3">
-        <div class="step-emoji">✨</div>
+        <div class="step-emoji">⏱</div>
         <div class="step-num">3</div>
-        <h3>자동 실행</h3>
-        <p>설정한 일정에 따라 자동으로 실행되고 결과를 알림으로 받습니다.</p>
+        <h3>실행 / 스케줄</h3>
+        <p><code>kittypaw skill run &lt;name&gt;</code> 수동 실행, 또는 cron trigger 에 따라 daemon 이 자동 실행 → 채널 어댑터 통해 발송.</p>
       </div>
     </div>
   </div>
@@ -314,42 +313,42 @@
 <section>
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">활용 예시</span>
-      <h2 class="section-title">이렇게 쓸 수 있습니다</h2>
-      <p class="section-sub">설치하고 설정만 채우면 바로 동작하는 자동화들</p>
+      <span class="section-eyebrow">실제 시나리오</span>
+      <h2 class="section-title">레지스트리 패키지로 만든 흐름</h2>
+      <p class="section-sub">live test 로 검증된 / 진행 중인 흐름입니다. 각 카드 내 status 참고.</p>
     </div>
     <div class="usecases-grid">
       <a href="cases/morning-briefing.html" class="usecase-card reveal reveal-delay-1" style="text-decoration:none;color:inherit">
         <div class="usecase-num-badge">☀️</div>
         <div>
-          <h3>아침 자동 브리핑</h3>
-          <p>날씨 + 시장 + 뉴스. 3개 스킬을 설치하면 매일 아침 텔레그램으로 도착합니다.</p>
+          <h3>✅ 예약 패키지 실행</h3>
+          <p>날씨 / 시장 / RSS 패키지 설치 → cron 스케줄 → telegram setup 후 cron 시각에 발송.</p>
         </div>
       </a>
       <a href="cases/pattern-automation.html" class="usecase-card reveal reveal-delay-2" style="text-decoration:none;color:inherit">
         <div class="usecase-num-badge">🔄</div>
         <div>
-          <h3>반복하면 자동화됩니다</h3>
-          <p>같은 요청을 반복하면 AI가 패턴을 감지하고, 자동화를 먼저 제안합니다.</p>
+          <h3>✅ 반복 의도 분석</h3>
+          <p>Reflection 후보 저장 → chat 첫 turn suffix surface verified (commit 8f2536a). 자동 생성 코드는 🚧.</p>
         </div>
       </a>
       <a href="cases/teach-skill.html" class="usecase-card reveal reveal-delay-3" style="text-decoration:none;color:inherit">
         <div class="usecase-num-badge">💬</div>
         <div>
-          <h3>자연어로 스킬 만들기</h3>
-          <p>원하는 자동화를 말로 설명하면 AI가 코드를 짜고, 테스트하고, 등록합니다.</p>
+          <h3>🚧 자연어 스킬 생성</h3>
+          <p>JS 코드 생성 → goja syntax 검증 (5/5 pass measured) → SkillStore 저장. 런타임 동작은 패키지 마다.</p>
         </div>
       </a>
       <a href="cases/site-monitoring.html" class="usecase-card reveal reveal-delay-4" style="text-decoration:none;color:inherit">
         <div class="usecase-num-badge">🚨</div>
         <div>
-          <h3>서비스 다운? 즉시 알림</h3>
-          <p>5분마다 체크. 다운되면 즉시 텔레그램 알림. 복구되면 다시 알림.</p>
+          <h3>✅ URL 상태 확인</h3>
+          <p>cron HTTP 체크 → 상태 변경 시 alert 메시지. telegram 라우팅 시 발송.</p>
         </div>
       </a>
     </div>
     <div style="text-align:center;margin-top:28px">
-      <a href="cases/" class="btn btn-secondary" style="font-size:14px">📖 모든 활용 사례 보기 &rarr;</a>
+      <a href="cases/" class="btn btn-secondary" style="font-size:14px">📖 모든 시나리오 보기 &rarr;</a>
     </div>
   </div>
 </section>
@@ -360,40 +359,40 @@
 <section id="skills" class="skills-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">스킬 갤러리</span>
-      <h2 class="section-title">갤러리에서 한 줄로 설치</h2>
-      <p class="section-sub">자주 쓰는 스킬 5개를 명령 한 번이면 갖출 수 있어요</p>
+      <span class="section-eyebrow">레지스트리</span>
+      <h2 class="section-title">현재 레지스트리에 있는 패키지</h2>
+      <p class="section-sub"><code>kittypaw skill install &lt;name&gt;</code> 으로 설치. 모든 status 는 live test 기준.</p>
     </div>
     <div class="skills-grid">
       <div class="skill-card reveal reveal-delay-1">
         <span class="skill-icon">📈</span>
         <h4>매크로 경제 리포트</h4>
         <p>ETF + AI 요약</p>
-        <span class="skill-tag">매일 자동</span>
+        <span class="skill-tag">✅ cron</span>
       </div>
       <div class="skill-card reveal reveal-delay-2">
         <span class="skill-icon">🌤</span>
         <h4>날씨 브리핑</h4>
-        <p>7일 예보</p>
-        <span class="skill-tag">API 키 불필요</span>
+        <p>7일 예보 (Open-Meteo)</p>
+        <span class="skill-tag">✅ API 키 불필요</span>
       </div>
       <div class="skill-card reveal reveal-delay-3">
         <span class="skill-icon">📰</span>
         <h4>RSS 뉴스 요약</h4>
         <p>피드 + LLM 요약</p>
-        <span class="skill-tag">중복 필터</span>
+        <span class="skill-tag">✅ 중복 필터</span>
       </div>
       <div class="skill-card reveal reveal-delay-4">
-        <span class="skill-icon">✅</span>
+        <span class="skill-icon">⏰</span>
         <h4>리마인더</h4>
-        <p>채팅 할 일 관리</p>
-        <span class="skill-tag">AI 채팅</span>
+        <p>채팅 keyword + cron</p>
+        <span class="skill-tag">🚧 partial</span>
       </div>
       <div class="skill-card reveal reveal-delay-5">
         <span class="skill-icon">🔍</span>
         <h4>URL 모니터</h4>
-        <p>상태 변경 알림</p>
-        <span class="skill-tag">5분 주기</span>
+        <p>HTTP 체크 + 상태 변경 alert</p>
+        <span class="skill-tag">✅ 5분 주기</span>
       </div>
     </div>
   </div>
@@ -406,8 +405,8 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">기술 스택</span>
-      <h2 class="section-title">외부 런타임 없이 Go만으로</h2>
-      <p class="section-sub">단일 바이너리로 배포. npm도 Node도 Python도 필요 없습니다.</p>
+      <h2 class="section-title">Go 만으로 — 외부 런타임 0</h2>
+      <p class="section-sub">단일 바이너리. npm / Node / Python 의존성 없음. 20 SQLite migrations, 159 commits 진행 중.</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
@@ -448,8 +447,8 @@
       <div class="tech-card reveal reveal-delay-6">
         <div class="tech-badge">🔑</div>
         <div>
-          <div class="tech-card-name">Local Secret Store</div>
-          <div class="tech-card-desc">로컬 파일 기반 키 관리</div>
+          <div class="tech-card-name">per-tenant secrets.json</div>
+          <div class="tech-card-desc">tenant 별 분리 저장</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-1">
@@ -471,57 +470,6 @@
 </section>
 
 <!-- ============================================================
-     STRENGTHS
-============================================================ -->
-<section class="section" id="strengths">
-  <div class="section section-center">
-    <div class="reveal">
-      <h2 class="section-title">KittyPaw만의 강점</h2>
-      <p class="section-sub">소스 공개 · 무료 · 셀프호스팅</p>
-    </div>
-    <div class="features-grid">
-      <div class="feature-card reveal reveal-delay-1">
-        <div class="feature-icon-wrap">📡</div>
-        <h3>진정한 멀티채널</h3>
-        <p>텔레그램, 슬랙, 디스코드, 카카오를 <strong>동시에</strong> 연결. 하나의 에이전트가 모든 채널에서 동작합니다.</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-2">
-        <div class="feature-icon-wrap">🧠</div>
-        <h3>대화에서 스킬로</h3>
-        <p>반복되는 요청 패턴을 감지하고, 자동으로 스킬을 제안합니다. 시간이 갈수록 더 똑똑해집니다.</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-3">
-        <div class="feature-icon-wrap">📊</div>
-        <h3>주간 관심사 리포트</h3>
-        <p>대화 속 관심 토픽을 추적하고, 매주 리포트를 생성합니다. 나만의 AI 비서가 나를 이해합니다.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
-     CTA
-============================================================ -->
-<section class="cta-section">
-  <div class="cta-inner">
-    <span class="cta-paw" role="img" aria-label="고양이 발바닥">🐾</span>
-    <h2 class="reveal">지금 시작하세요</h2>
-    <p class="reveal reveal-delay-1">
-      급할수록 필요한 건, 작고 빠른 고양이손.<br>
-      kittypaw setup 한 줄로 오늘부터 자동화를 시작하세요.
-    </p>
-    <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
-        <span>⭐</span> GitHub에서 받기
-      </a>
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-cta-secondary">
-        🎨 스킬 갤러리
-      </a>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
      FOOTER
 ============================================================ -->
 <footer>
@@ -530,11 +478,9 @@
     <span class="footer-sep">·</span>
     <a href="https://github.com/jinto/kittypaw">GitHub</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/kittypaw-app/skills">스킬 갤러리</a>
+    <a href="https://github.com/kittypaw-app/skills">스킬 레지스트리</a>
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
-    <span class="footer-sep">·</span>
-    <span>Made with 🐹 &amp; ❤️</span>
   </div>
   <div class="biz-info">
     <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>

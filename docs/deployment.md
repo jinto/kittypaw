@@ -25,9 +25,9 @@ kittypaw service install
 kittypaw service install --bind-port 3001
 ```
 
-That's it for single-host, single-user installs. Everything below is detail
-for operators who need multi-user setups, custom binary paths, logs, or
-uninstall.
+For a single-host, single-user install, the quick start stops here.
+Everything below is detail for operators who need multi-user setups, custom
+binary paths, logs, or uninstall.
 
 ---
 
