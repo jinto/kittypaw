@@ -75,6 +75,37 @@ func truncW(s string, w int) string {
 	return runewidth.Truncate(s, w, "..")
 }
 
+// setupBoxInner is the inner column count of the setup completion box (CJK-aware).
+const setupBoxInner = 56
+
+// renderSetupBox writes the setup completion box to w with CJK-aware right-edge alignment.
+// Each line's right `│` lands at the same column regardless of mixed Korean/ASCII content.
+func renderSetupBox(w io.Writer, cfgPath string) {
+	lines := []string{
+		"",
+		"✓ 설정 완료",
+		truncW(cfgPath, setupBoxInner),
+		"",
+		"다음 단계",
+		"  kittypaw serve    # 메시지 수신 서비스 실행",
+		"  kittypaw chat     # 터미널에서 바로 대화",
+		"",
+	}
+	border := strings.Repeat("─", setupBoxInner+2)
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  ╭"+border+"╮")
+	for _, l := range lines {
+		_, _ = fmt.Fprintf(w, "  │ %s │\n", padW(l, setupBoxInner))
+	}
+	_, _ = fmt.Fprintln(w, "  ╰"+border+"╯")
+	_, _ = fmt.Fprintln(w)
+}
+
+// printSetupBox renders the setup completion box to stdout.
+func printSetupBox(cfgPath string) {
+	renderSetupBox(os.Stdout, cfgPath)
+}
+
 // ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
@@ -272,18 +303,7 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	// new config (AC-RELOAD-SYNC). Outcome gates auto-entry below.
 	reloadRes := maybeReloadDaemon(defaultDaemonDial, os.Stdout, os.Stderr)
 
-	fmt.Println()
-	fmt.Println("  ╭──────────────────────────────────────────────╮")
-	fmt.Println("  │")
-	fmt.Println("  │  ✓ 설정 완료")
-	fmt.Printf("  │  %s\n", cfgPath)
-	fmt.Println("  │")
-	fmt.Println("  │  다음 단계")
-	fmt.Println("  │    kittypaw serve    # 메시지 수신 서비스 실행")
-	fmt.Println("  │    kittypaw chat     # 터미널에서 바로 대화")
-	fmt.Println("  │")
-	fmt.Println("  ╰──────────────────────────────────────────────╯")
-	fmt.Println()
+	printSetupBox(cfgPath)
 
 	// Share a single stdin scanner across the service-install and chat
 	// prompts so one prompt's unread bytes don't get swallowed by a fresh

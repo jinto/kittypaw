@@ -5,7 +5,60 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
+
+// AC-BOX: setup completion box's right `│` border must land at the same column
+// for every content line, regardless of mixed Korean (2-col) / ASCII (1-col) /
+// emoji content. Failing this means runewidth-aware padding is broken.
+func TestRenderSetupBox_RightBorderAligns(t *testing.T) {
+	var buf bytes.Buffer
+	renderSetupBox(&buf, "/Users/jinto/.kittypaw/tenants/default/config.toml")
+
+	out := buf.String()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	// Collect every content line that starts with the box's left "  │ " and
+	// verify its trailing "│" appears at the same display column as its peers.
+	type rowMetric struct {
+		idx      int
+		raw      string
+		rightOk  bool
+		rightCol int
+	}
+	var rows []rowMetric
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "  │") || !strings.HasSuffix(ln, "│") {
+			continue
+		}
+		// Skip top/bottom borders (start with ╭ or ╰)
+		if strings.Contains(ln, "╭") || strings.Contains(ln, "╰") {
+			continue
+		}
+		// Display column = runewidth.StringWidth of the entire line minus 1
+		// (the trailing │ itself spans 1 col but its left edge is what we care
+		// about; equivalently, the *length-up-to-and-including-│* should match).
+		col := displayWidth(ln)
+		rows = append(rows, rowMetric{idx: i, raw: ln, rightCol: col, rightOk: true})
+	}
+
+	if len(rows) < 3 {
+		t.Fatalf("expected at least 3 box content rows, got %d:\n%s", len(rows), out)
+	}
+
+	want := rows[0].rightCol
+	for _, r := range rows {
+		if r.rightCol != want {
+			t.Errorf("line %d right `│` at col %d, want %d. line=%q", r.idx, r.rightCol, want, r.raw)
+		}
+	}
+}
+
+// displayWidth returns the runewidth-based display column count of s.
+func displayWidth(s string) int {
+	return runewidth.StringWidth(s)
+}
 
 // AC-1: autoChatEligible truth table — gates auto-entry on (stdin+stdout TTY)
 // AND (provider=="") AND (!noChat). Non-interactive or opt-out paths must
