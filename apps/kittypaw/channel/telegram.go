@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,6 +155,13 @@ type TelegramChannel struct {
 	offset   int64 // next update_id to request
 	mu       sync.Mutex
 	pending  sync.Map // requestID → chan bool (for permission dialog responses)
+
+	// typing indicator state — typingCancels[chatID] cancels the in-flight
+	// typingLoop for that chat. Started at message-receive (Start loop) and
+	// canceled at SendResponse so the "..." dots stay visible across the
+	// entire agent-loop window, not just the post-LLM send window.
+	typingMu      sync.Mutex
+	typingCancels map[int64]context.CancelFunc
 }
 
 // NewTelegram creates a TelegramChannel with the given bot token, tagging
@@ -165,6 +173,7 @@ func NewTelegram(tenantID, botToken string) *TelegramChannel {
 		client: &http.Client{
 			Timeout: time.Duration(telegramPollSecs+10) * time.Second,
 		},
+		typingCancels: make(map[int64]context.CancelFunc),
 	}
 }
 
@@ -276,11 +285,51 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 
 			select {
 			case eventCh <- event:
+				// Start typing as early as possible — before the agent loop
+				// even begins. SendResponse will cancel this when it's time
+				// to deliver the actual reply.
+				t.startTyping(ctx, msg.Chat.ID)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 		}
 	}
+}
+
+// startTyping spawns (or replaces) a typingLoop for chatID. Subsequent calls
+// for the same chat cancel the prior loop first so a quick second message
+// doesn't end up with two tickers double-pinging the API.
+func (t *TelegramChannel) startTyping(parent context.Context, chatID int64) {
+	typingCtx, cancel := context.WithCancel(parent)
+
+	t.typingMu.Lock()
+	if old, ok := t.typingCancels[chatID]; ok {
+		old()
+	}
+	t.typingCancels[chatID] = cancel
+	t.typingMu.Unlock()
+
+	go func() {
+		t.typingLoop(typingCtx, chatID)
+		t.typingMu.Lock()
+		// Only delete the map entry if we still own it — otherwise a
+		// concurrent startTyping has already replaced us.
+		if cur, ok := t.typingCancels[chatID]; ok && reflect.ValueOf(cur).Pointer() == reflect.ValueOf(cancel).Pointer() {
+			delete(t.typingCancels, chatID)
+		}
+		t.typingMu.Unlock()
+	}()
+}
+
+// stopTyping cancels any active typingLoop for chatID. Safe to call even when
+// no loop is active.
+func (t *TelegramChannel) stopTyping(chatID int64) {
+	t.typingMu.Lock()
+	if cancel, ok := t.typingCancels[chatID]; ok {
+		cancel()
+		delete(t.typingCancels, chatID)
+	}
+	t.typingMu.Unlock()
 }
 
 // telegramTypingRefresh is the cadence for resending the typing indicator.
@@ -313,12 +362,11 @@ func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response,
 		}
 	}
 
-	// Persistent typing indicator: send immediately, then refresh on a ticker
-	// until the response is fully delivered. Telegram auto-expires the
-	// "..." dots after ~5s, so a long agent loop without refresh appears idle.
-	typingCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go t.typingLoop(typingCtx, chatID)
+	// Stop any event-time typingLoop now that we have a real reply ready —
+	// otherwise the dots would briefly linger after the message arrives.
+	// startTyping at message-receive (Start loop) covers the agent-loop window;
+	// this stopTyping closes that window cleanly.
+	t.stopTyping(chatID)
 
 	// Split into chunks.
 	chunks := core.SplitChunks(response, telegramMaxChunk)
