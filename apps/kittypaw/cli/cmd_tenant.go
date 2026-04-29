@@ -54,6 +54,12 @@ Bot-token sources (highest priority wins):
   2. $` + tenantEnvBotToken + `
   3. --telegram-bot-token        (visible in process list; prints a warning)
 
+Interactive fallback: when no token source AND no LLM key is supplied AND
+stdin is a TTY, a 4-step prompt walks through telegram token, LLM provider,
+api-key, and model. Secrets (token, api-key) are read with terminal echo
+disabled. CI / scripted callers passing any flag/env keep the original
+non-interactive path.
+
 If a daemon is already running, the tenant is hot-activated: channels spawn
 and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
 the activation RPC and only stage files on disk.`,
