@@ -43,8 +43,8 @@ func (e *emittingStub) Start(ctx context.Context, eventCh chan<- core.Event) err
 	}
 }
 
-func (e *emittingStub) SendResponse(_ context.Context, _, _ string) error { return nil }
-func (e *emittingStub) Name() string                                      { return e.name }
+func (e *emittingStub) SendResponse(_ context.Context, _, _, _ string) error { return nil }
+func (e *emittingStub) Name() string                                         { return e.name }
 
 // emit tells the stub to produce an Event tagged with the stub's tenantID.
 func (e *emittingStub) emit(text string) {

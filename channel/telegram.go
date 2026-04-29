@@ -95,10 +95,11 @@ type telegramInlineKeyboardMarkup struct {
 
 // telegramMessage is the message object inside an update.
 type telegramMessage struct {
-	Chat  telegramChat   `json:"chat"`
-	Text  string         `json:"text"`
-	From  *telegramUser  `json:"from,omitempty"`
-	Voice *telegramVoice `json:"voice,omitempty"`
+	MessageID int64          `json:"message_id"`
+	Chat      telegramChat   `json:"chat"`
+	Text      string         `json:"text"`
+	From      *telegramUser  `json:"from,omitempty"`
+	Voice     *telegramVoice `json:"voice,omitempty"`
 }
 
 // telegramChat identifies a Telegram chat.
@@ -255,10 +256,11 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 			}
 
 			payload := core.ChatPayload{
-				ChatID:    chatIDStr,
-				Text:      text,
-				FromName:  fromName,
-				SessionID: sessionID,
+				ChatID:           chatIDStr,
+				Text:             text,
+				FromName:         fromName,
+				SessionID:        sessionID,
+				ReplyToMessageID: strconv.FormatInt(msg.MessageID, 10),
 			}
 			raw, err := json.Marshal(payload)
 			if err != nil {
@@ -281,11 +283,17 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 	}
 }
 
+// telegramTypingRefresh is the cadence for resending the typing indicator.
+// Telegram's chat action expires ~5s after each call, so we refresh slightly
+// faster to keep the "..." dots visible during long agent loops.
+const telegramTypingRefresh = 4 * time.Second
+
 // SendResponse sends a text response to a Telegram chat.
 // The chatIDStr parameter is the numeric chat ID as a string (from ChatPayload.ChatID).
 // Falls back to the most recently cached chat ID if parsing fails.
 // Long messages are split into chunks of telegramMaxChunk characters.
-func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response string) error {
+// replyToMessageID, when non-empty, makes each chunk reply-quote the original message.
+func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response, replyToMessageID string) error {
 	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
 	if err != nil {
 		// Fall back to cached chat ID.
@@ -298,17 +306,44 @@ func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response 
 		return fmt.Errorf("telegram: no chat_id to respond to")
 	}
 
-	// Send typing indicator.
-	_ = t.sendChatAction(ctx, chatID, "typing")
+	var replyToID int64
+	if replyToMessageID != "" {
+		if id, err := strconv.ParseInt(replyToMessageID, 10, 64); err == nil {
+			replyToID = id
+		}
+	}
+
+	// Persistent typing indicator: send immediately, then refresh on a ticker
+	// until the response is fully delivered. Telegram auto-expires the
+	// "..." dots after ~5s, so a long agent loop without refresh appears idle.
+	typingCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go t.typingLoop(typingCtx, chatID)
 
 	// Split into chunks.
 	chunks := core.SplitChunks(response, telegramMaxChunk)
 	for _, chunk := range chunks {
-		if err := t.sendMessage(ctx, chatID, chunk); err != nil {
+		if err := t.sendMessage(ctx, chatID, chunk, replyToID); err != nil {
 			return fmt.Errorf("telegram: sendMessage: %w", err)
 		}
 	}
 	return nil
+}
+
+// typingLoop sends the typing chat action immediately, then refreshes it every
+// telegramTypingRefresh until ctx is canceled.
+func (t *TelegramChannel) typingLoop(ctx context.Context, chatID int64) {
+	_ = t.sendChatAction(ctx, chatID, "typing")
+	ticker := time.NewTicker(telegramTypingRefresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = t.sendChatAction(ctx, chatID, "typing")
+		}
+	}
 }
 
 // --- internal helpers ---
@@ -357,10 +392,13 @@ func (t *TelegramChannel) getUpdates(ctx context.Context) ([]telegramUpdate, err
 	return *result.Result, nil
 }
 
-func (t *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text string) error {
+func (t *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text string, replyToID int64) error {
 	body := map[string]any{
 		"chat_id": chatID,
 		"text":    text,
+	}
+	if replyToID != 0 {
+		body["reply_to_message_id"] = replyToID
 	}
 	data, err := json.Marshal(body)
 	if err != nil {

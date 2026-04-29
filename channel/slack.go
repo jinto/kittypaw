@@ -87,7 +87,8 @@ func (s *SlackChannel) Start(ctx context.Context, eventCh chan<- core.Event) err
 
 // SendResponse posts a message to the given Slack channel.
 // Falls back to the most recently cached channel ID if chatID is empty.
-func (s *SlackChannel) SendResponse(ctx context.Context, chatID, response string) error {
+// replyToMessageID is currently unused on Slack — see Issue #N for thread-reply support.
+func (s *SlackChannel) SendResponse(ctx context.Context, chatID, response, _ string) error {
 	ch := chatID
 	if ch == "" {
 		s.mu.Lock()

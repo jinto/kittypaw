@@ -31,7 +31,7 @@ func (m *mockPushChannel) Start(ctx context.Context, _ chan<- core.Event) error 
 	return nil
 }
 
-func (m *mockPushChannel) SendResponse(_ context.Context, chatID, response string) error {
+func (m *mockPushChannel) SendResponse(_ context.Context, chatID, response, _ string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, pushCall{ChatID: chatID, Response: response})

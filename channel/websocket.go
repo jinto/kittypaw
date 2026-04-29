@@ -73,7 +73,8 @@ func (w *WebSocketChannel) Start(ctx context.Context, eventCh chan<- core.Event)
 
 // SendResponse sends a text response to the WebSocket client matching chatID.
 // Falls back to broadcast only if no matching session is found.
-func (w *WebSocketChannel) SendResponse(ctx context.Context, chatID, response string) error {
+// replyToMessageID is unused on WebSocket — clients handle context themselves.
+func (w *WebSocketChannel) SendResponse(ctx context.Context, chatID, response, _ string) error {
 	msg := core.NewDoneMsg(response, nil)
 	data, err := json.Marshal(msg)
 	if err != nil {
