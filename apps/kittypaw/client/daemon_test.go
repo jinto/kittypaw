@@ -181,9 +181,9 @@ func TestNewDaemonConn_ServerToml_Wins(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\n")
 
-	// Also plant a tenant config with DIFFERENT values — tier 1 must win.
-	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
-		"[server]\nbind = \":9999\"\napi_key = \"tenant-key\"\n")
+	// Also plant an account config with DIFFERENT values — tier 1 must win.
+	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
+		"[server]\nbind = \":9999\"\napi_key = \"account-key\"\n")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -205,8 +205,8 @@ func TestNewDaemonConn_ServerTomlPartial_FallsBack(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"bind = \"127.0.0.1:3456\"\n")
 
-	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"tenant-key\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -215,18 +215,18 @@ func TestNewDaemonConn_ServerTomlPartial_FallsBack(t *testing.T) {
 	if d.BaseURL != "http://127.0.0.1:4567" {
 		t.Errorf("partial server.toml should fall through; BaseURL = %q", d.BaseURL)
 	}
-	if d.APIKey != "tenant-key" {
-		t.Errorf("APIKey = %q, want tenant-key", d.APIKey)
+	if d.APIKey != "account-key" {
+		t.Errorf("APIKey = %q, want account-key", d.APIKey)
 	}
 }
 
-func TestNewDaemonConn_TenantsDefault(t *testing.T) {
+func TestNewDaemonConn_AccountsDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 
-	// Post-migration layout: only tenants/default/config.toml exists.
-	writeFile(t, filepath.Join(dir, "tenants", "default", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"tenant-key\"\n")
+	// Post-migration layout: only accounts/default/config.toml exists.
+	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -235,8 +235,8 @@ func TestNewDaemonConn_TenantsDefault(t *testing.T) {
 	if d.BaseURL != "http://127.0.0.1:4567" {
 		t.Errorf("BaseURL = %q, want http://127.0.0.1:4567", d.BaseURL)
 	}
-	if d.APIKey != "tenant-key" {
-		t.Errorf("APIKey = %q, want tenant-key", d.APIKey)
+	if d.APIKey != "account-key" {
+		t.Errorf("APIKey = %q, want account-key", d.APIKey)
 	}
 }
 
@@ -272,7 +272,7 @@ func TestNewDaemonConn_NothingExists(t *testing.T) {
 	// path that was tried so they can verify the probe landed where they
 	// expected.
 	msg := err.Error()
-	for _, want := range []string{"kittypaw setup", "server.toml", "tenants", "config.toml"} {
+	for _, want := range []string{"kittypaw setup", "server.toml", "accounts", "config.toml"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q: %s", want, msg)
 		}

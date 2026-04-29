@@ -139,7 +139,7 @@ func newRootCmd() *cobra.Command {
 		newReloadCmd(),
 		newResetCmd(),
 		newLoginCmd(),
-		newTenantCmd(),
+		newAccountCmd(),
 		newFamilyCmd(),
 		newServiceCmd(),
 	)
@@ -240,12 +240,12 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	if err != nil {
 		return err
 	}
-	tenantDir := filepath.Dir(cfgPath)
+	accountDir := filepath.Dir(cfgPath)
 	for _, dir := range []string{
 		kittypawDir,
 		filepath.Join(kittypawDir, "data"),
 		filepath.Join(kittypawDir, "skills"),
-		tenantDir,
+		accountDir,
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
@@ -280,19 +280,19 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		}
 	}
 
-	// Save API server URL to per-tenant secrets for package source bindings.
+	// Save API server URL to per-account secrets for package source bindings.
 	if result.APIServerURL != "" {
-		if secrets, err := core.LoadTenantSecrets(core.DefaultTenantID); err == nil {
+		if secrets, err := core.LoadAccountSecrets(core.DefaultAccountID); err == nil {
 			_ = secrets.Set("kittypaw-api", "api_url", result.APIServerURL)
 		}
 	}
 
-	// Ensure default profile under the multi-tenant default-tenant base when
+	// Ensure default profile under the multi-account default-account base when
 	// migration has already run; otherwise the top-level path so a fresh
 	// install still lands somewhere `MigrateLegacyLayout` will pick up.
-	profileBase, err := defaultTenantBase()
+	profileBase, err := defaultAccountBase()
 	if err != nil {
-		return fmt.Errorf("resolve tenant base: %w", err)
+		return fmt.Errorf("resolve account base: %w", err)
 	}
 	if err := core.EnsureDefaultProfile(profileBase); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
@@ -434,12 +434,12 @@ func runChat(_ *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Readline with history. Per-tenant so a household using multiple
-	// tenants (one human user per tenant per CLAUDE.md) does not leak chat
+	// Readline with history. Per-account so a household using multiple
+	// accounts (one human user per account per CLAUDE.md) does not leak chat
 	// fragments from one person's REPL into another's. Falls back to the
 	// top-level path before migration.
 	historyFile := ""
-	if base, err := defaultTenantBase(); err == nil {
+	if base, err := defaultAccountBase(); err == nil {
 		historyFile = filepath.Join(base, "chat_history")
 	}
 	rl, err := readline.NewEx(&readline.Config{
@@ -787,7 +787,7 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			// Otherwise treat as a registry package ID.
-			secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+			secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 			if err != nil {
 				return err
 			}
@@ -829,9 +829,9 @@ func newSkillInstallCmd() *cobra.Command {
 
 					switch choice {
 					case "A":
-						skillBase, baseErr := defaultTenantBase()
+						skillBase, baseErr := defaultAccountBase()
 						if baseErr != nil {
-							return fmt.Errorf("resolve tenant base: %w", baseErr)
+							return fmt.Errorf("resolve account base: %w", baseErr)
 						}
 						if delErr := core.DeleteSkillFrom(skillBase, entry.ID); delErr != nil {
 							return fmt.Errorf("사용자 스킬 삭제 실패: %w", delErr)
@@ -2038,37 +2038,37 @@ func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error 
 	return nil
 }
 
-// defaultTenantBase returns the base directory CLI commands should treat as
-// the default tenant: ~/.kittypaw/tenants/default/ when the multi-tenant
+// defaultAccountBase returns the base directory CLI commands should treat as
+// the default account: ~/.kittypaw/accounts/default/ when the multi-account
 // layout exists, falling back to ~/.kittypaw/ for fresh installs that have
 // not yet been migrated. Centralizing this probe keeps CLI helpers and the
 // daemon session looking at the same files — the daemon side has always
 // used Session.BaseDir, but multiple CLI helpers were hardcoded to the
 // legacy top-level path before this consolidation.
-func defaultTenantBase() (string, error) {
+func defaultAccountBase() (string, error) {
 	cfgDir, err := core.ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	tenantBase := filepath.Join(cfgDir, "tenants", "default")
-	if info, statErr := os.Stat(tenantBase); statErr == nil && info.IsDir() {
-		return tenantBase, nil
+	accountBase := filepath.Join(cfgDir, "accounts", "default")
+	if info, statErr := os.Stat(accountBase); statErr == nil && info.IsDir() {
+		return accountBase, nil
 	}
 	return cfgDir, nil
 }
 
-// localPackageManager returns a PackageManager bound to the default tenant's
+// localPackageManager returns a PackageManager bound to the default account's
 // BaseDir so CLI commands see the same packages the daemon does. CLI
 // commands that touch packages (list/info/config/install/uninstall) MUST go
 // through this helper — the bare `core.NewPackageManager` is baseDir-empty
 // and only finds packages at the legacy path, which has been wrong since
-// the multi-tenant migration.
+// the multi-account migration.
 func localPackageManager() (*core.PackageManager, error) {
-	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 	if err != nil {
 		return nil, err
 	}
-	base, err := defaultTenantBase()
+	base, err := defaultAccountBase()
 	if err != nil {
 		return nil, err
 	}
@@ -2416,42 +2416,45 @@ func jsonSlice(m map[string]any, key string) []map[string]any {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// bootstrap discovers every tenant under ~/.kittypaw/tenants/ and opens
-// per-tenant dependencies (store, LLM provider, sandbox, MCP, secrets,
+// bootstrap discovers every account under ~/.kittypaw/accounts/ and opens
+// per-account dependencies (store, LLM provider, sandbox, MCP, secrets,
 // package manager, API token manager).
 //
 // Before discovery, a legacy ~/.kittypaw layout (config.toml at root, no
-// tenants/) is migrated into tenants/default/ via MigrateLegacyLayout so
+// accounts/) is migrated into accounts/default/ via MigrateLegacyLayout so
 // v0.x installs upgrade transparently. Discovery fails loudly when no
-// tenants are present — a daemon with nothing to route is not useful.
-func bootstrap() ([]*server.TenantDeps, error) {
+// accounts are present — a daemon with nothing to route is not useful.
+func bootstrap() ([]*server.AccountDeps, error) {
 	baseDir, err := core.ConfigDir()
 	if err != nil {
 		return nil, fmt.Errorf("config dir: %w", err)
 	}
 
+	if err := core.MigrateTenantsToAccounts(baseDir); err != nil {
+		return nil, fmt.Errorf("migrate tenants→accounts: %w", err)
+	}
 	if err := core.MigrateLegacyLayout(baseDir); err != nil {
 		return nil, fmt.Errorf("migrate legacy layout: %w", err)
 	}
 
-	tenantsRoot := filepath.Join(baseDir, "tenants")
-	tenants, err := core.DiscoverTenants(tenantsRoot)
+	accountsRoot := filepath.Join(baseDir, "accounts")
+	accounts, err := core.DiscoverAccounts(accountsRoot)
 	if err != nil {
-		return nil, fmt.Errorf("discover tenants: %w", err)
+		return nil, fmt.Errorf("discover accounts: %w", err)
 	}
-	if len(tenants) == 0 {
-		return nil, fmt.Errorf("no tenants found under %s (run `kittypaw setup` first)", tenantsRoot)
+	if len(accounts) == 0 {
+		return nil, fmt.Errorf("no accounts found under %s (run `kittypaw setup` first)", accountsRoot)
 	}
 
-	deps := make([]*server.TenantDeps, 0, len(tenants))
+	deps := make([]*server.AccountDeps, 0, len(accounts))
 	closeOnErr := func() {
 		for _, td := range deps {
 			_ = td.Close()
 		}
 	}
 
-	for _, t := range tenants {
-		td, err := server.OpenTenantDeps(t)
+	for _, t := range accounts {
+		td, err := server.OpenAccountDeps(t)
 		if err != nil {
 			closeOnErr()
 			return nil, err

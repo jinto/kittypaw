@@ -30,8 +30,8 @@ const (
 	EventKakaoTalk EventType = "kakao_talk"
 	EventSlack     EventType = "slack"
 	EventDiscord   EventType = "discord"
-	// EventFamilyPush is emitted by ChannelFanout when the family tenant
-	// pushes a message to a personal tenant. TenantRouter dispatches to
+	// EventFamilyPush is emitted by ChannelFanout when the family account
+	// pushes a message to a personal account. AccountRouter dispatches to
 	// the target Session the same way it dispatches inbound chat events,
 	// so the personal agent can treat it as a normal observation.
 	EventFamilyPush EventType = "family.push"
@@ -65,13 +65,13 @@ type ConversationTurn struct {
 }
 
 // Event is an inbound message from any channel.
-// TenantID identifies which tenant the event belongs to. Empty TenantID is
-// rejected by the TenantRouter (no default fallback) to prevent cross-tenant
-// leaks in multi-tenant deployments.
+// AccountID identifies which account the event belongs to. Empty AccountID is
+// rejected by the AccountRouter (no default fallback) to prevent cross-account
+// leaks in multi-account deployments.
 type Event struct {
-	Type     EventType       `json:"type"`
-	TenantID string          `json:"tenant_id,omitempty"`
-	Payload  json.RawMessage `json:"payload"`
+	Type      EventType       `json:"type"`
+	AccountID string          `json:"account_id,omitempty"`
+	Payload   json.RawMessage `json:"payload"`
 }
 
 // ChatPayload is the common structure inside Event.Payload.

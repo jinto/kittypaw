@@ -17,7 +17,7 @@ import (
 // recent tool calls, etc.) lands here.
 //
 // One PipelineState per Session — same isolation boundary as the rest
-// of the tenant. All access is mutex-guarded; the Session.Run loop is
+// of the account. All access is mutex-guarded; the Session.Run loop is
 // single-goroutine per event but server-side reload could race on init.
 type PipelineState struct {
 	mu                     sync.Mutex

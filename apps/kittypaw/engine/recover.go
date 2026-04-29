@@ -7,19 +7,19 @@ import (
 	"time"
 )
 
-// RecoverTenantPanic is the single panic-recovery chokepoint for tenant
-// goroutines — one tenant's panic must not take down the shared daemon
-// (family-multi-tenant spec AC-T8). site names the caller
+// RecoverAccountPanic is the single panic-recovery chokepoint for account
+// goroutines — one account's panic must not take down the shared daemon
+// (family-multi-account spec AC-T8). site names the caller
 // ("scheduler.runSkill", "server.dispatchLoop") so structured logs
 // identify which layer caught the panic. Nil-safe on sess and
 // sess.Health for bare-struct test fixtures.
-func RecoverTenantPanic(sess *Session, site string, r any) {
-	tenant := ""
+func RecoverAccountPanic(sess *Session, site string, r any) {
+	account := ""
 	if sess != nil {
-		tenant = sess.TenantID
+		account = sess.AccountID
 	}
-	slog.Error("tenant_panic_recovered",
-		"tenant", tenant,
+	slog.Error("account_panic_recovered",
+		"account", account,
 		"site", site,
 		"panic", fmt.Sprintf("%v", r),
 		"stack", string(debug.Stack()),
@@ -29,26 +29,26 @@ func RecoverTenantPanic(sess *Session, site string, r any) {
 	}
 }
 
-// MarkTenantReady promotes Health back to Ready on clean completion so a
+// MarkAccountReady promotes Health back to Ready on clean completion so a
 // transient panic self-heals on the next successful iteration. Nil-safe.
-func MarkTenantReady(sess *Session) {
+func MarkAccountReady(sess *Session) {
 	if sess == nil || sess.Health == nil {
 		return
 	}
 	sess.Health.MarkReady()
 }
 
-// runWithTenantRecover executes fn under a deferred recover. A panic
-// marks the tenant Degraded via RecoverTenantPanic; clean completion
+// runWithAccountRecover executes fn under a deferred recover. A panic
+// marks the account Degraded via RecoverAccountPanic; clean completion
 // promotes it back to Ready. Use from every worker goroutine where a
-// single panic should not wedge the tenant.
-func runWithTenantRecover(sess *Session, site string, fn func()) {
+// single panic should not wedge the account.
+func runWithAccountRecover(sess *Session, site string, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			RecoverTenantPanic(sess, site, r)
+			RecoverAccountPanic(sess, site, r)
 			return
 		}
-		MarkTenantReady(sess)
+		MarkAccountReady(sess)
 	}()
 	fn()
 }

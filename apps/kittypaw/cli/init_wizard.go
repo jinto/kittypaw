@@ -478,7 +478,7 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 		return
 	}
 
-	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 	if err != nil {
 		fmt.Printf("  secrets 로드 실패: %v\n", err)
 		return
@@ -637,7 +637,7 @@ func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
 	fmt.Println("  KittyPaw 는 사용자 편의를 위해 몇 가지 API 를 제공하고 있습니다.")
 	fmt.Println("  대기질·날씨 등 인증이 필요한 스킬을 사용하시려면 로그인 해주세요.")
 
-	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 	if err != nil {
 		fmt.Printf("  secrets 로드 실패: %v\n", err)
 		return

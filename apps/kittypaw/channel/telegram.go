@@ -148,13 +148,13 @@ type telegramFile struct {
 // TelegramChannel implements Channel and Confirmer using the Telegram Bot API.
 // It uses long polling via getUpdates and raw HTTP (no SDK).
 type TelegramChannel struct {
-	tenantID string
-	botToken string
-	client   *http.Client
-	chatID   int64 // last chat_id for responses
-	offset   int64 // next update_id to request
-	mu       sync.Mutex
-	pending  sync.Map // requestID → chan bool (for permission dialog responses)
+	accountID string
+	botToken  string
+	client    *http.Client
+	chatID    int64 // last chat_id for responses
+	offset    int64 // next update_id to request
+	mu        sync.Mutex
+	pending   sync.Map // requestID → chan bool (for permission dialog responses)
 
 	// typing indicator state — typingCancels[chatID] cancels the in-flight
 	// typingLoop for that chat. Started at message-receive (Start loop) and
@@ -165,11 +165,11 @@ type TelegramChannel struct {
 }
 
 // NewTelegram creates a TelegramChannel with the given bot token, tagging
-// every emitted Event with tenantID so the TenantRouter can dispatch.
-func NewTelegram(tenantID, botToken string) *TelegramChannel {
+// every emitted Event with accountID so the AccountRouter can dispatch.
+func NewTelegram(accountID, botToken string) *TelegramChannel {
 	return &TelegramChannel{
-		tenantID: tenantID,
-		botToken: botToken,
+		accountID: accountID,
+		botToken:  botToken,
 		client: &http.Client{
 			Timeout: time.Duration(telegramPollSecs+10) * time.Second,
 		},
@@ -278,9 +278,9 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 			}
 
 			event := core.Event{
-				Type:     core.EventTelegram,
-				TenantID: t.tenantID,
-				Payload:  raw,
+				Type:      core.EventTelegram,
+				AccountID: t.accountID,
+				Payload:   raw,
 			}
 
 			select {

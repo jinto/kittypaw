@@ -18,7 +18,7 @@ const (
 	validTok3 = "33333:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
 )
 
-// Batch stdin would let an automated script blow away existing tenants in a loop.
+// Batch stdin would let an automated script blow away existing accounts in a loop.
 // The wizard must refuse unless stdin is a real TTY.
 func TestFamilyInit_NonTTY_Rejects(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -33,45 +33,45 @@ func TestFamilyInit_NonTTY_Rejects(t *testing.T) {
 	}
 }
 
-// scanExistingTenants powers idempotency (skip a name that's already on disk)
+// scanExistingAccounts powers idempotency (skip a name that's already on disk)
 // AND in-run token dedup (reject a token already claimed by a peer).
-// If either side is wrong the wizard corrupts the tenants dir.
-func TestScanExistingTenants_BuildsSeenSet(t *testing.T) {
-	tenantsDir := t.TempDir()
+// If either side is wrong the wizard corrupts the accounts dir.
+func TestScanExistingAccounts_BuildsSeenSet(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	// alice: personal tenant with a bot token.
+	// alice: personal account with a bot token.
 	aliceToken := "11111:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
-	writeTenantConfig(t, tenantsDir, "alice", `
+	writeAccountConfig(t, accountsDir, "alice", `
 admin_chat_ids = ["111"]
 [[channels]]
 channel_type = "telegram"
 token = "`+aliceToken+`"
 `)
 	// family: no channels, IsFamily-style.
-	writeTenantConfig(t, tenantsDir, "family", `
+	writeAccountConfig(t, accountsDir, "family", `
 is_family = true
 `)
-	// bob: tenant with a different token.
+	// bob: account with a different token.
 	bobToken := "22222:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
-	writeTenantConfig(t, tenantsDir, "bob", `
+	writeAccountConfig(t, accountsDir, "bob", `
 admin_chat_ids = ["222"]
 [[channels]]
 channel_type = "telegram"
 token = "`+bobToken+`"
 `)
 	// non-directory entries and hidden staging must be ignored.
-	if err := os.WriteFile(filepath.Join(tenantsDir, "loose.txt"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(accountsDir, "loose.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write loose file: %v", err)
 	}
 
-	seen, err := scanExistingTenants(tenantsDir)
+	seen, err := scanExistingAccounts(accountsDir)
 	if err != nil {
-		t.Fatalf("scanExistingTenants: %v", err)
+		t.Fatalf("scanExistingAccounts: %v", err)
 	}
 
 	for _, id := range []string{"alice", "bob", "family"} {
-		if _, ok := seen.tenants[id]; !ok {
-			t.Errorf("tenants set missing %q; got %v", id, seen.tenants)
+		if _, ok := seen.accounts[id]; !ok {
+			t.Errorf("accounts set missing %q; got %v", id, seen.accounts)
 		}
 	}
 	if owner := seen.tokens[aliceToken]; owner != "alice" {
@@ -88,9 +88,9 @@ token = "`+bobToken+`"
 	}
 }
 
-func writeTenantConfig(t *testing.T, tenantsDir, id, body string) {
+func writeAccountConfig(t *testing.T, accountsDir, id, body string) {
 	t.Helper()
-	dir := filepath.Join(tenantsDir, id)
+	dir := filepath.Join(accountsDir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
@@ -100,14 +100,14 @@ func writeTenantConfig(t *testing.T, tenantsDir, id, body string) {
 }
 
 // Re-running the wizard with a half-finished household must NOT overwrite the
-// already-onboarded tenants — the idempotent skip is the only thing standing
+// already-onboarded accounts — the idempotent skip is the only thing standing
 // between the admin and a wiped alice dir.
 func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
-	tenantsDir := t.TempDir()
-	writeTenantConfig(t, tenantsDir, "alice", `admin_chat_ids = ["111"]`)
+	accountsDir := t.TempDir()
+	writeAccountConfig(t, accountsDir, "alice", `admin_chat_ids = ["111"]`)
 
 	var stdout, stderr bytes.Buffer
-	entry := provisionMember(tenantsDir, "alice",
+	entry := provisionMember(accountsDir, "alice",
 		"11111:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij", "111",
 		&stdout, &stderr)
 
@@ -118,7 +118,7 @@ func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
 		t.Errorf("name = %q, want alice", entry.Name)
 	}
 	// Prior config must be byte-identical — skip must not touch it.
-	got, err := os.ReadFile(filepath.Join(tenantsDir, "alice", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(accountsDir, "alice", "config.toml"))
 	if err != nil {
 		t.Fatalf("read alice config: %v", err)
 	}
@@ -128,13 +128,13 @@ func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
 }
 
 // If the token is bogus the wizard must record a FAILED entry and leave disk
-// untouched — swallowing the error would mint a broken tenant the daemon
+// untouched — swallowing the error would mint a broken account the daemon
 // can't boot.
 func TestProvisionMember_InvalidTokenFails(t *testing.T) {
-	tenantsDir := t.TempDir()
+	accountsDir := t.TempDir()
 
 	var stdout, stderr bytes.Buffer
-	entry := provisionMember(tenantsDir, "charlie",
+	entry := provisionMember(accountsDir, "charlie",
 		"not-a-real-token", "111", &stdout, &stderr)
 
 	if entry.Status != statusFailed {
@@ -143,17 +143,17 @@ func TestProvisionMember_InvalidTokenFails(t *testing.T) {
 	if !strings.Contains(entry.Reason, "token") {
 		t.Errorf("reason should mention token, got %q", entry.Reason)
 	}
-	if _, err := os.Stat(filepath.Join(tenantsDir, "charlie")); !os.IsNotExist(err) {
-		t.Errorf("no tenant dir should be created on validation failure")
+	if _, err := os.Stat(filepath.Join(accountsDir, "charlie")); !os.IsNotExist(err) {
+		t.Errorf("no account dir should be created on validation failure")
 	}
 }
 
 // AC-W1: the primary happy path. Admin types three name/token/chatID
 // triples then a blank line to finish — wizard must produce three OK
-// entries and three tenants on disk.
+// entries and three accounts on disk.
 func TestPromptMembers_ThreeValidMembers(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	// Each member: name / token / chatID. Blank line on the 4th name ends the loop.
 	input := strings.Join([]string{
@@ -165,7 +165,7 @@ func TestPromptMembers_ThreeValidMembers(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	entries := promptMembers(context.Background(), bufio.NewReader(strings.NewReader(input)),
-		&stdout, &stderr, tenantsDir, 10, seen)
+		&stdout, &stderr, accountsDir, 10, seen)
 
 	if len(entries) != 3 {
 		t.Fatalf("entries = %d, want 3 (stdout=%q stderr=%q)",
@@ -178,7 +178,7 @@ func TestPromptMembers_ThreeValidMembers(t *testing.T) {
 		if entries[i].Status != statusOK {
 			t.Errorf("entries[%d].Status = %q, want %q", i, entries[i].Status, statusOK)
 		}
-		if _, err := os.Stat(filepath.Join(tenantsDir, want, "config.toml")); err != nil {
+		if _, err := os.Stat(filepath.Join(accountsDir, want, "config.toml")); err != nil {
 			t.Errorf("config.toml missing for %s: %v", want, err)
 		}
 	}
@@ -187,14 +187,14 @@ func TestPromptMembers_ThreeValidMembers(t *testing.T) {
 // Stop-on-blank is the primary way the admin ends the wizard — the loop
 // must treat blank name as a clean terminator, not as a validation error.
 func TestPromptMembers_BlankNameStops(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	input := "alice\n" + validTok1 + "\n111\n\n" // blank name terminates
 
 	var stdout, stderr bytes.Buffer
 	entries := promptMembers(context.Background(), bufio.NewReader(strings.NewReader(input)),
-		&stdout, &stderr, tenantsDir, 10, seen)
+		&stdout, &stderr, accountsDir, 10, seen)
 
 	if len(entries) != 1 || entries[0].Name != "alice" {
 		t.Fatalf("entries = %+v, want single alice", entries)
@@ -204,8 +204,8 @@ func TestPromptMembers_BlankNameStops(t *testing.T) {
 // --max guards against a runaway script that pastes 50 members by accident;
 // after max, the loop must stop WITHOUT consuming more stdin.
 func TestPromptMembers_MaxReached(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	// 3 members in input, but max=2 means only 2 get committed.
 	input := strings.Join([]string{
@@ -216,42 +216,42 @@ func TestPromptMembers_MaxReached(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	entries := promptMembers(context.Background(), bufio.NewReader(strings.NewReader(input)),
-		&stdout, &stderr, tenantsDir, 2, seen)
+		&stdout, &stderr, accountsDir, 2, seen)
 
 	if len(entries) != 2 {
 		t.Fatalf("entries = %d, want 2 (max=2)", len(entries))
 	}
-	if _, err := os.Stat(filepath.Join(tenantsDir, "charlie")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(accountsDir, "charlie")); !os.IsNotExist(err) {
 		t.Errorf("charlie should not exist after max-reached stop")
 	}
 }
 
 // Uppercase or special chars in the name would poison the filesystem layout
-// AND the TenantRouter key. The wizard must re-prompt (not fail) so the user
+// AND the AccountRouter key. The wizard must re-prompt (not fail) so the user
 // can correct without restarting.
 func TestPromptMembers_InvalidNameRePrompts(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	input := "Alice\nalice\n" + validTok1 + "\n111\n\n"
 
 	var stdout, stderr bytes.Buffer
 	entries := promptMembers(context.Background(), bufio.NewReader(strings.NewReader(input)),
-		&stdout, &stderr, tenantsDir, 10, seen)
+		&stdout, &stderr, accountsDir, 10, seen)
 
 	if len(entries) != 1 || entries[0].Name != "alice" {
 		t.Fatalf("entries = %+v, want single alice (after re-prompt)", entries)
 	}
-	if !strings.Contains(stderr.String(), "invalid tenant id") {
+	if !strings.Contains(stderr.String(), "invalid account id") {
 		t.Errorf("stderr should explain why Alice was rejected, got %q", stderr.String())
 	}
 }
 
 // D6: two members cannot share a bot token — silently accepting it would
-// land a second tenant with a duplicate token that blocks daemon startup.
+// land a second account with a duplicate token that blocks daemon startup.
 func TestPromptMembers_DuplicateTokenRejected(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	// alice uses validTok1. bob tries validTok1 → rejected → bob types validTok2 → accepted.
 	input := strings.Join([]string{
@@ -262,7 +262,7 @@ func TestPromptMembers_DuplicateTokenRejected(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	entries := promptMembers(context.Background(), bufio.NewReader(strings.NewReader(input)),
-		&stdout, &stderr, tenantsDir, 10, seen)
+		&stdout, &stderr, accountsDir, 10, seen)
 
 	if len(entries) != 2 {
 		t.Fatalf("entries = %d, want 2 (alice + bob after re-prompt)", len(entries))
@@ -275,15 +275,15 @@ func TestPromptMembers_DuplicateTokenRejected(t *testing.T) {
 	}
 }
 
-// The family tenant is the one place that learns cross-tenant read grants;
+// The family account is the one place that learns cross-account read grants;
 // if the [share.family] stanza is missing, the admin has nowhere to add
 // paths later without editing TOML by hand — regression we cannot tolerate.
-func TestCreateFamilyTenant_Default(t *testing.T) {
-	tenantsDir := t.TempDir()
-	seen := &seenSet{tenants: map[string]struct{}{}, tokens: map[string]string{}}
+func TestCreateFamilyAccount_Default(t *testing.T) {
+	accountsDir := t.TempDir()
+	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}
 
 	var stdout, stderr bytes.Buffer
-	entry := createFamilyTenant(tenantsDir, seen, &stdout, &stderr)
+	entry := createFamilyAccount(accountsDir, seen, &stdout, &stderr)
 
 	if entry.Status != statusOK {
 		t.Fatalf("status = %q, want ok (stderr=%q)", entry.Status, stderr.String())
@@ -291,7 +291,7 @@ func TestCreateFamilyTenant_Default(t *testing.T) {
 	if entry.Name != "family" {
 		t.Errorf("name = %q, want family", entry.Name)
 	}
-	cfgPath := filepath.Join(tenantsDir, "family", "config.toml")
+	cfgPath := filepath.Join(accountsDir, "family", "config.toml")
 	body, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read family config: %v", err)
@@ -305,25 +305,25 @@ func TestCreateFamilyTenant_Default(t *testing.T) {
 	}
 }
 
-// Re-running after the family tenant already exists must be a clean skip,
+// Re-running after the family account already exists must be a clean skip,
 // not a failure — the admin may be onboarding one more person six months
 // after the initial household setup.
-func TestCreateFamilyTenant_IdempotentWhenExists(t *testing.T) {
-	tenantsDir := t.TempDir()
-	writeTenantConfig(t, tenantsDir, "family", `is_family = true`)
+func TestCreateFamilyAccount_IdempotentWhenExists(t *testing.T) {
+	accountsDir := t.TempDir()
+	writeAccountConfig(t, accountsDir, "family", `is_family = true`)
 	seen := &seenSet{
-		tenants: map[string]struct{}{"family": {}},
-		tokens:  map[string]string{},
+		accounts: map[string]struct{}{"family": {}},
+		tokens:   map[string]string{},
 	}
 
 	var stdout, stderr bytes.Buffer
-	entry := createFamilyTenant(tenantsDir, seen, &stdout, &stderr)
+	entry := createFamilyAccount(accountsDir, seen, &stdout, &stderr)
 
 	if entry.Status != statusSkippedExisting {
 		t.Errorf("status = %q, want %q", entry.Status, statusSkippedExisting)
 	}
 	// Pre-existing family config must be byte-identical.
-	got, err := os.ReadFile(filepath.Join(tenantsDir, "family", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(accountsDir, "family", "config.toml"))
 	if err != nil {
 		t.Fatalf("read family config: %v", err)
 	}
@@ -360,8 +360,8 @@ func TestPrintSummary_ExitCodes(t *testing.T) {
 	}
 }
 
-// End-to-end: the wizard must produce three personal tenants + one family
-// tenant from a single stdin script. This is the canonical AC-W1 case and
+// End-to-end: the wizard must produce three personal accounts + one family
+// account from a single stdin script. This is the canonical AC-W1 case and
 // the last thing to break before release.
 func TestRunFamilyInit_EndToEnd_HappyPath(t *testing.T) {
 	home := t.TempDir()
@@ -384,14 +384,14 @@ func TestRunFamilyInit_EndToEnd_HappyPath(t *testing.T) {
 	}
 
 	for _, name := range []string{"alice", "bob", "charlie", "family"} {
-		cfg := filepath.Join(home, ".kittypaw", "tenants", name, "config.toml")
+		cfg := filepath.Join(home, ".kittypaw", "accounts", name, "config.toml")
 		if _, err := os.Stat(cfg); err != nil {
 			t.Errorf("%s config.toml missing: %v", name, err)
 		}
 	}
-	// No staging dirs left behind — InitTenant is atomic, but double-check
+	// No staging dirs left behind — InitAccount is atomic, but double-check
 	// the cleanliness invariant from AC-W6.
-	entries, _ := os.ReadDir(filepath.Join(home, ".kittypaw", "tenants"))
+	entries, _ := os.ReadDir(filepath.Join(home, ".kittypaw", "accounts"))
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".") && strings.HasSuffix(e.Name(), ".staging") {
 			t.Errorf("staging dir leaked: %s", e.Name())
@@ -399,7 +399,7 @@ func TestRunFamilyInit_EndToEnd_HappyPath(t *testing.T) {
 	}
 }
 
-// --no-family: admin already has a family tenant elsewhere (or doesn't
+// --no-family: admin already has a family account elsewhere (or doesn't
 // want one). The wizard must not create family/ in that case — AC-W5.
 func TestRunFamilyInit_NoFamilyFlag(t *testing.T) {
 	home := t.TempDir()
@@ -414,18 +414,18 @@ func TestRunFamilyInit_NoFamilyFlag(t *testing.T) {
 		t.Fatalf("runFamilyInit: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "tenants", "alice")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "alice")); err != nil {
 		t.Errorf("alice should exist: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "tenants", "family")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "family")); !os.IsNotExist(err) {
 		t.Errorf("family should NOT exist under --no-family")
 	}
 }
 
 // AC-W6: Ctrl-C before any member is prompted ends the wizard cleanly —
-// no tenants created, no staging dirs left behind. The stronger mid-flow
+// no accounts created, no staging dirs left behind. The stronger mid-flow
 // case (commit alice, Ctrl-C before bob) is covered by inspecting that
-// InitTenant is self-cleaning (tested in core/); here we cover the
+// InitAccount is self-cleaning (tested in core/); here we cover the
 // wizard-level exit path.
 func TestRunFamilyInit_InterruptCleansStaging(t *testing.T) {
 	home := t.TempDir()
@@ -441,8 +441,8 @@ func TestRunFamilyInit_InterruptCleansStaging(t *testing.T) {
 	_ = runFamilyInit(ctx, f, true,
 		strings.NewReader("alice\n"+validTok1+"\n111\n\n"), &stdout, &stderr)
 
-	tenantsDir := filepath.Join(home, ".kittypaw", "tenants")
-	entries, _ := os.ReadDir(tenantsDir)
+	accountsDir := filepath.Join(home, ".kittypaw", "accounts")
+	entries, _ := os.ReadDir(accountsDir)
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".") && strings.HasSuffix(e.Name(), ".staging") {
 			t.Errorf("staging dir leaked: %s", e.Name())

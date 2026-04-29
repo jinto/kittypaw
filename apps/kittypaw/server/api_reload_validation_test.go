@@ -15,11 +15,11 @@ import (
 )
 
 // AC-RELOAD-VALIDATION: pin the symmetry contract with StartChannels and
-// AddTenant — the reload path MUST run ValidateTenantChannels and
-// ValidateFamilyTenants before any state mutation. These tests cover the
+// AddAccount — the reload path MUST run ValidateAccountChannels and
+// ValidateFamilyAccounts before any state mutation. These tests cover the
 // two classes of invalid config that the validators catch:
-//   (1) a new default-tenant bot_token that collides with a live peer,
-//   (2) a default tenant flipping is_family=true while still owning channels.
+//   (1) a new default-account bot_token that collides with a live peer,
+//   (2) a default account flipping is_family=true while still owning channels.
 // Both must reject with 409, leave s.config untouched, and NOT call the
 // spawner. The happy path round-trips: valid cfg → 200 + swap + Reconcile.
 
@@ -29,11 +29,11 @@ func writeReloadConfig(t *testing.T, cfg core.Config) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	tenantCfgDir := filepath.Join(home, ".kittypaw", "tenants", core.DefaultTenantID)
-	if err := os.MkdirAll(tenantCfgDir, 0o755); err != nil {
+	accountCfgDir := filepath.Join(home, ".kittypaw", "accounts", core.DefaultAccountID)
+	if err := os.MkdirAll(accountCfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := core.WriteConfigAtomic(&cfg, filepath.Join(tenantCfgDir, "config.toml")); err != nil {
+	if err := core.WriteConfigAtomic(&cfg, filepath.Join(accountCfgDir, "config.toml")); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 }
@@ -41,12 +41,12 @@ func writeReloadConfig(t *testing.T, cfg core.Config) {
 // newReloadTestServer wires a minimal Server with a counting reloadReconcile
 // hook so tests can assert the spawner was (not) called. Returns the server
 // plus a pointer the caller can dereference to read the call count.
-func newReloadTestServer(t *testing.T, live *core.Config, peers []*core.Tenant) (*Server, *int32) {
+func newReloadTestServer(t *testing.T, live *core.Config, peers []*core.Account) (*Server, *int32) {
 	t.Helper()
 	var callN int32
 	srv := &Server{
-		config:     live,
-		tenantList: peers,
+		config:      live,
+		accountList: peers,
 		reloadReconcile: func(_ string, _ []core.ChannelConfig) error {
 			atomic.AddInt32(&callN, 1)
 			return nil
@@ -56,12 +56,12 @@ func newReloadTestServer(t *testing.T, live *core.Config, peers []*core.Tenant) 
 }
 
 // TestHandleReload_DuplicateTelegramToken_Rejects locks in the stolen-token
-// defense: a reload whose default-tenant [telegram] token matches a live
+// defense: a reload whose default-account [telegram] token matches a live
 // peer's token must 409 before mutating state. Without this check, both
 // long-pollers would race getUpdates and silently duplicate or drop messages.
 func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 	// New cfg (on disk) introduces a duplicate bot_token with the live
-	// "alice" tenant.
+	// "alice" account.
 	newCfg := core.DefaultConfig()
 	newCfg.LLM.Provider = "anthropic"
 	newCfg.LLM.APIKey = "new-key"
@@ -73,8 +73,8 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 	// Live state: default has no channels; alice holds "shared-token".
 	liveCfg := core.DefaultConfig()
 	liveCfg.LLM.APIKey = "old-key"
-	peers := []*core.Tenant{
-		{ID: DefaultTenantID, Config: &liveCfg},
+	peers := []*core.Account{
+		{ID: DefaultAccountID, Config: &liveCfg},
 		{ID: "alice", Config: &core.Config{
 			Channels: []core.ChannelConfig{
 				{ChannelType: core.ChannelTelegram, Token: "shared-token"},
@@ -112,10 +112,10 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 }
 
 // TestHandleReload_FamilyWithChannels_Rejects locks in the coordinator-only
-// rule for family tenants: a reload that flips is_family=true while still
-// declaring [telegram]/[kakao] channels must 409. A family tenant owning a
+// rule for family accounts: a reload that flips is_family=true while still
+// declaring [telegram]/[kakao] channels must 409. A family account owning a
 // chat channel would silently intercept updates meant for the personal
-// tenant that actually owns the real bot_token.
+// account that actually owns the real bot_token.
 func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	newCfg := core.DefaultConfig()
 	newCfg.LLM.APIKey = "new-key"
@@ -127,8 +127,8 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 
 	liveCfg := core.DefaultConfig()
 	liveCfg.LLM.APIKey = "old-key"
-	peers := []*core.Tenant{
-		{ID: DefaultTenantID, Config: &liveCfg},
+	peers := []*core.Account{
+		{ID: DefaultAccountID, Config: &liveCfg},
 	}
 	srv, callN := newReloadTestServer(t, &liveCfg, peers)
 
@@ -160,17 +160,17 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	}
 }
 
-// TestHandleReload_SerializesWithAddTenant locks in the AC-RELOAD-VALIDATION
+// TestHandleReload_SerializesWithAddAccount locks in the AC-RELOAD-VALIDATION
 // serialization contract: the entire validate→swap→reconcile sequence runs
-// under tenantMu, not just the reconcile step. Without this lock the
+// under accountMu, not just the reconcile step. Without this lock the
 // adversary sequence is: reload builds a snapshot that does NOT yet contain
-// token X → releases tenantMu → AddTenant(bob, token=X) acquires tenantMu,
-// snapshots a default-tenant channel list that also does not contain X yet,
+// token X → releases accountMu → AddAccount(bob, token=X) acquires accountMu,
+// snapshots a default-account channel list that also does not contain X yet,
 // passes validation, spawns bob's bot → reload proceeds to swap *s.config
 // (now default has X) and reconcile, spawning default's bot → two long-
-// pollers race getUpdates on token X. The test proves tenantMu cannot be
+// pollers race getUpdates on token X. The test proves accountMu cannot be
 // acquired from another goroutine while Reconcile is in flight.
-func TestHandleReload_SerializesWithAddTenant(t *testing.T) {
+func TestHandleReload_SerializesWithAddAccount(t *testing.T) {
 	cfg := core.DefaultConfig()
 	cfg.LLM.APIKey = "ok"
 	writeReloadConfig(t, cfg)
@@ -203,11 +203,11 @@ func TestHandleReload_SerializesWithAddTenant(t *testing.T) {
 		t.Fatal("reconcile hook never ran")
 	}
 
-	if srv.tenantMu.TryLock() {
-		srv.tenantMu.Unlock()
+	if srv.accountMu.TryLock() {
+		srv.accountMu.Unlock()
 		close(barrier)
 		<-done
-		t.Fatal("tenantMu was not held during Reconcile — TOCTOU window open")
+		t.Fatal("accountMu was not held during Reconcile — TOCTOU window open")
 	}
 
 	close(barrier)
@@ -217,10 +217,10 @@ func TestHandleReload_SerializesWithAddTenant(t *testing.T) {
 		t.Fatal("handleReload did not return after barrier released")
 	}
 
-	if !srv.tenantMu.TryLock() {
-		t.Fatal("tenantMu not released after handleReload returned")
+	if !srv.accountMu.TryLock() {
+		t.Fatal("accountMu not released after handleReload returned")
 	}
-	srv.tenantMu.Unlock()
+	srv.accountMu.Unlock()
 }
 
 // TestHandleReload_ValidConfig_SwapsAndReconciles is the happy-path baseline
@@ -236,8 +236,8 @@ func TestHandleReload_ValidConfig_SwapsAndReconciles(t *testing.T) {
 
 	liveCfg := core.DefaultConfig()
 	liveCfg.LLM.APIKey = "old-key"
-	peers := []*core.Tenant{
-		{ID: DefaultTenantID, Config: &liveCfg},
+	peers := []*core.Account{
+		{ID: DefaultAccountID, Config: &liveCfg},
 	}
 	srv, callN := newReloadTestServer(t, &liveCfg, peers)
 

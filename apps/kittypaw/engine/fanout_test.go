@@ -21,8 +21,8 @@ type fakeFanout struct {
 	bcasts   int
 }
 
-func (f *fakeFanout) Send(_ context.Context, tenantID string, p core.FanoutPayload) error {
-	f.sentTo = tenantID
+func (f *fakeFanout) Send(_ context.Context, accountID string, p core.FanoutPayload) error {
+	f.sentTo = accountID
 	f.payload = p
 	return f.sendErr
 }
@@ -69,7 +69,7 @@ func TestFanout_SendRoutesToInterface(t *testing.T) {
 }
 
 // TestFanout_NoFanoutConfigured is the belt-and-braces check for the
-// "personal tenant tries to fanout" scenario — even if sandbox-level
+// "personal account tries to fanout" scenario — even if sandbox-level
 // blocking is somehow bypassed (e.g. a test harness wires the stub
 // anyway), executor must reject. Defense in depth.
 func TestFanout_NoFanoutConfigured(t *testing.T) {
@@ -84,15 +84,15 @@ func TestFanout_NoFanoutConfigured(t *testing.T) {
 }
 
 // TestFanout_PropagatesError surfaces core.Fanout sentinels so skill
-// authors see "fanout: unknown target tenant" instead of a generic error.
+// authors see "fanout: unknown target account" instead of a generic error.
 func TestFanout_PropagatesError(t *testing.T) {
-	f := &fakeFanout{sendErr: core.ErrFanoutUnknownTenant}
+	f := &fakeFanout{sendErr: core.ErrFanoutUnknownAccount}
 	sess := &Session{Fanout: f}
 
 	out, _ := executeFanout(context.Background(), fanoutCall(t, "send", "ghost", map[string]any{"text": "x"}), sess)
 	var resp map[string]string
 	_ = json.Unmarshal([]byte(out), &resp)
-	if !strings.Contains(resp["error"], "unknown target tenant") {
+	if !strings.Contains(resp["error"], "unknown target account") {
 		t.Errorf("expected fanout error in response, got %q", resp["error"])
 	}
 }

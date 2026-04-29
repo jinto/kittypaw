@@ -67,25 +67,25 @@ func waitForCalls(t *testing.T, m *mockPushChannel, n int, d time.Duration) []pu
 	return m.calls()
 }
 
-// buildFamilyPushServer wires a Server + spawner with a family tenant and a
-// personal tenant whose Config declares the supplied channels. Returns the
-// server, a shutdown func, and the personal tenant's registered mock channels
+// buildFamilyPushServer wires a Server + spawner with a family account and a
+// personal account whose Config declares the supplied channels. Returns the
+// server, a shutdown func, and the personal account's registered mock channels
 // keyed by EventType for assertion access.
 func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[core.EventType]*mockPushChannel) (*Server, context.CancelFunc) {
 	t.Helper()
 	root := t.TempDir()
 
-	familyDeps := buildTenantDeps(t, root, "family", &core.Config{IsFamily: true})
-	aliceDeps := buildTenantDeps(t, root, "alice", personalCfg)
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	aliceDeps := buildAccountDeps(t, root, "alice", personalCfg)
 
-	srv := New([]*TenantDeps{familyDeps, aliceDeps}, "test")
+	srv := New([]*AccountDeps{familyDeps, aliceDeps}, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
 
-	// Register each mock under alice's tenant ID keyed by its Name() (which
+	// Register each mock under alice's account ID keyed by its Name() (which
 	// must match the resolved EventType string). TrySpawn's running map key
-	// is `spawnerKey{TenantID: "alice", ChannelType: ch.Name()}`.
+	// is `spawnerKey{AccountID: "alice", ChannelType: ch.Name()}`.
 	for evType, m := range mocks {
 		if m.name == "" {
 			m.name = string(evType)
@@ -104,41 +104,41 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 	}
 }
 
-// TestFamilyMorningBrief_FansOutToAllPersonalTenants enforces AC-U1: the
-// family tenant's skills (here simulated by direct Fanout.Send calls, one
-// per target) deliver to each personal tenant's own channel with that
-// tenant's own chat_id. A regression here is the defining family-tenant
+// TestFamilyMorningBrief_FansOutToAllPersonalAccounts enforces AC-U1: the
+// family account's skills (here simulated by direct Fanout.Send calls, one
+// per target) deliver to each personal account's own channel with that
+// account's own chat_id. A regression here is the defining family-account
 // failure mode — either the wrong target gets the wrong message, or the
 // chat_id falls back to the family's own (non-existent) AdminChatIDs.
 //
 // The scheduled-skill trigger is exercised elsewhere in engine/schedule;
 // this test narrows in on the Fanout → dispatchLoop → channel.SendResponse
 // leg, which is the delivery surface the AC actually describes.
-func TestFamilyMorningBrief_FansOutToAllPersonalTenants(t *testing.T) {
+func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 	root := t.TempDir()
 
-	// Family drives fanout; three personal tenants receive their own tailored text.
-	familyDeps := buildTenantDeps(t, root, "family", &core.Config{IsFamily: true})
-	aliceDeps := buildTenantDeps(t, root, "alice", &core.Config{
+	// Family drives fanout; three personal accounts receive their own tailored text.
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
 		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AdminChatIDs: []string{"alice-chat"},
 	})
-	bobDeps := buildTenantDeps(t, root, "bob", &core.Config{
+	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
 		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AdminChatIDs: []string{"bob-chat"},
 	})
-	charlieDeps := buildTenantDeps(t, root, "charlie", &core.Config{
+	charlieDeps := buildAccountDeps(t, root, "charlie", &core.Config{
 		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AdminChatIDs: []string{"charlie-chat"},
 	})
-	srv := New([]*TenantDeps{familyDeps, aliceDeps, bobDeps, charlieDeps}, "test")
+	srv := New([]*AccountDeps{familyDeps, aliceDeps, bobDeps, charlieDeps}, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
 	defer srv.spawner.StopAll()
 
-	// Wire a mockPushChannel per personal tenant so SendResponse calls are
+	// Wire a mockPushChannel per personal account so SendResponse calls are
 	// captured per destination. Each mock's Name() must match the telegram
 	// EventType string to match ChannelSpawner's lookup key.
 	mocks := map[string]*mockPushChannel{
@@ -156,7 +156,7 @@ func TestFamilyMorningBrief_FansOutToAllPersonalTenants(t *testing.T) {
 
 	go srv.dispatchLoop(ctx)
 
-	familySess := srv.tenants.Session("family")
+	familySess := srv.accounts.Session("family")
 	if familySess == nil {
 		t.Fatal("family session not registered")
 	}
@@ -164,7 +164,7 @@ func TestFamilyMorningBrief_FansOutToAllPersonalTenants(t *testing.T) {
 		t.Fatal("family session's Fanout is nil (IsFamily wiring regression)")
 	}
 
-	// Simulated morning-brief skill output — three tenant-specific texts.
+	// Simulated morning-brief skill output — three account-specific texts.
 	// In production these would be LLM-generated; here the test controls
 	// the exact strings so assertion failures point to delivery bugs, not
 	// prompt changes.
@@ -200,23 +200,23 @@ func TestFamilyMorningBrief_FansOutToAllPersonalTenants(t *testing.T) {
 }
 
 // TestFamilyMorningBrief_BroadcastFansOutToAllPeers is the Broadcast
-// variant of AC-U1: one call, N-1 targets (the source tenant is excluded).
+// variant of AC-U1: one call, N-1 targets (the source account is excluded).
 // Locks in that Broadcast's "except source" guard works in the multi-
 // personal case — without it, family would push to itself and the event
 // would bounce through dispatchLoop with no destination channel.
 func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 	root := t.TempDir()
 
-	familyDeps := buildTenantDeps(t, root, "family", &core.Config{IsFamily: true})
-	aliceDeps := buildTenantDeps(t, root, "alice", &core.Config{
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
 		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AdminChatIDs: []string{"alice-chat"},
 	})
-	bobDeps := buildTenantDeps(t, root, "bob", &core.Config{
+	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
 		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AdminChatIDs: []string{"bob-chat"},
 	})
-	srv := New([]*TenantDeps{familyDeps, aliceDeps, bobDeps}, "test")
+	srv := New([]*AccountDeps{familyDeps, aliceDeps, bobDeps}, "test")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -237,7 +237,7 @@ func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 
 	go srv.dispatchLoop(ctx)
 
-	familySess := srv.tenants.Session("family")
+	familySess := srv.accounts.Session("family")
 	if familySess == nil || familySess.Fanout == nil {
 		t.Fatal("family session / Fanout missing")
 	}
@@ -267,7 +267,7 @@ func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	return core.Event{Type: core.EventFamilyPush, TenantID: target, Payload: body}
+	return core.Event{Type: core.EventFamilyPush, AccountID: target, Payload: body}
 }
 
 // TestDispatchLoop_FamilyPush_DeliversToTargetChannel is the happy path — a
@@ -364,8 +364,8 @@ func TestDispatchLoop_FamilyPush_NoChannel_Enqueues(t *testing.T) {
 		if len(rows) > 0 {
 			for _, r := range rows {
 				pending = append(pending, r)
-				if r.TenantID != "alice" {
-					t.Errorf("queued row tenant = %q, want alice", r.TenantID)
+				if r.AccountID != "alice" {
+					t.Errorf("queued row account = %q, want alice", r.AccountID)
 				}
 				if r.Response != "큐에 저장돼야 함" {
 					t.Errorf("queued row response = %q", r.Response)

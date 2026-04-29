@@ -12,7 +12,7 @@ import (
 )
 
 // LiveIndexer glues Watcher → Debouncer → Indexer. One LiveIndexer per
-// tenant (D2). AddWorkspace registers a root with the underlying Watcher;
+// account (D2). AddWorkspace registers a root with the underlying Watcher;
 // filesystem events are debounced and translated into IndexFile / RemoveFile
 // calls on the Indexer.
 type LiveIndexer struct {
@@ -122,7 +122,7 @@ func (l *LiveIndexer) RemoveWorkspace(workspaceID string) {
 // Start launches the watcher and the event-consumer goroutine. Safe to call
 // at most once. Serialized with Close via l.mu — if Close landed first the
 // call is a no-op, preventing watcher.Start racing with watcher.Close when a
-// tenant is torn down before its startup goroutine finishes.
+// account is torn down before its startup goroutine finishes.
 func (l *LiveIndexer) Start() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -228,7 +228,7 @@ func (l *LiveIndexer) runRecovery() {
 // IndexFile or recovery call outlives Close. Cancel ctx first so any active
 // flush / Reindex aborts ASAP, then stop accepting fsnotify events, drain
 // consume, wait on pending debounce timers, and finally wait on pending
-// overflow recoveries. Returning only after this sequence lets TenantDeps
+// overflow recoveries. Returning only after this sequence lets AccountDeps
 // safely close the underlying store.
 func (l *LiveIndexer) Close() error {
 	l.mu.Lock()

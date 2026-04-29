@@ -16,18 +16,18 @@ import (
 	"github.com/jinto/kittypaw/store"
 )
 
-// TenantDeps is the per-tenant set of dependencies server.New needs to
-// build an engine.Session for one tenant. The daemon entry point (CLI
-// serve) opens these per-tenant resources (DB, LLM provider, sandbox)
+// AccountDeps is the per-account set of dependencies server.New needs to
+// build an engine.Session for one account. The daemon entry point (CLI
+// serve) opens these per-account resources (DB, LLM provider, sandbox)
 // before handing the slice to server.New — the server package stays out
 // of discovery/migration business.
 //
 // Fallback, McpRegistry, and LiveIndexer may be nil. Everything else is
 // required. LiveIndexer is nil when [workspace] live_index = false or
 // when the OS watcher could not be created (inotify limit, etc.) — the
-// tenant is then in lazy-reindex mode.
-type TenantDeps struct {
-	Tenant      *core.Tenant
+// account is then in lazy-reindex mode.
+type AccountDeps struct {
+	Account     *core.Account
 	Store       *store.Store
 	Provider    llm.Provider
 	Fallback    llm.Provider
@@ -46,13 +46,13 @@ type TenantDeps struct {
 // handles or child processes, so they are left to GC. Safe to call once;
 // subsequent calls on a store that is already closed return the
 // underlying error.
-func (td *TenantDeps) Close() error {
+func (td *AccountDeps) Close() error {
 	if td == nil {
 		return nil
 	}
 	if td.LiveIndexer != nil {
 		if err := td.LiveIndexer.Close(); err != nil {
-			slog.Warn("close live indexer", "tenant", td.Tenant.ID, "error", err)
+			slog.Warn("close live indexer", "account", td.Account.ID, "error", err)
 		}
 	}
 	if td.McpRegistry != nil {
@@ -64,25 +64,25 @@ func (td *TenantDeps) Close() error {
 	return td.Store.Close()
 }
 
-// OpenTenantDeps opens every per-tenant dependency needed to build an
+// OpenAccountDeps opens every per-account dependency needed to build an
 // engine.Session: filesystem layout, SQLite store, LLM provider (plus
 // optional fallback), sandbox, secrets store, package manager, API token
 // manager, and — when [mcp] is declared in config — a connected MCP
 // registry.
 //
 // Used by both the CLI daemon boot path (cli/main.go bootstrap) and the
-// runtime tenant-add path (Server.AddTenant). Keeping the construction
-// in one place ensures hot-added tenants are indistinguishable from
-// tenants loaded at startup.
+// runtime account-add path (Server.AddAccount). Keeping the construction
+// in one place ensures hot-added accounts are indistinguishable from
+// accounts loaded at startup.
 //
 // On error, any resource already opened (notably the SQLite store) is
 // closed before returning so callers never see a half-initialized
-// TenantDeps. LoadSecretsFrom failures do NOT abort: pkgMgr is still
+// AccountDeps. LoadSecretsFrom failures do NOT abort: pkgMgr is still
 // constructed with a nil secrets store, preserving prior bootstrap
-// behavior for tenants missing a secrets.json.
-func OpenTenantDeps(t *core.Tenant) (*TenantDeps, error) {
+// behavior for accounts missing a secrets.json.
+func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 	if t == nil || t.Config == nil {
-		return nil, fmt.Errorf("open tenant deps: tenant or config is nil")
+		return nil, fmt.Errorf("open account deps: account or config is nil")
 	}
 
 	if err := t.EnsureDirs(); err != nil {
@@ -110,7 +110,7 @@ func OpenTenantDeps(t *core.Tenant) (*TenantDeps, error) {
 	secrets, secretsErr := core.LoadSecretsFrom(t.SecretsPath())
 	if secretsErr != nil {
 		slog.Warn("failed to load secrets store, package config will be limited",
-			"tenant", t.ID, "error", secretsErr)
+			"account", t.ID, "error", secretsErr)
 	}
 	pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
@@ -125,13 +125,13 @@ func OpenTenantDeps(t *core.Tenant) (*TenantDeps, error) {
 		connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
 			slog.Warn("some MCP servers failed to connect",
-				"tenant", t.ID, "failures", len(errs))
+				"account", t.ID, "failures", len(errs))
 		}
 		connectCancel()
 	}
 
-	return &TenantDeps{
-		Tenant:      t,
+	return &AccountDeps{
+		Account:     t,
 		Store:       st,
 		Provider:    provider,
 		Fallback:    fallback,
@@ -143,24 +143,24 @@ func OpenTenantDeps(t *core.Tenant) (*TenantDeps, error) {
 	}, nil
 }
 
-// buildTenantSession wires a single TenantDeps into a ready-to-dispatch
-// engine.Session. Used both by server.New at boot and by Server.AddTenant
-// at runtime so hot-added tenants are indistinguishable from those loaded
+// buildAccountSession wires a single AccountDeps into a ready-to-dispatch
+// engine.Session. Used both by server.New at boot and by Server.AddAccount
+// at runtime so hot-added accounts are indistinguishable from those loaded
 // at startup.
 //
 // Side effects (all best-effort, logged on failure — none abort):
 //   - Seeds workspace_files from config.Sandbox.AllowedPaths.
 //   - Populates Session.AllowedPaths via RefreshAllowedPaths.
 //   - Spawns a background goroutine that runs the FTS5 indexer over every
-//     registered workspace for this tenant.
+//     registered workspace for this account.
 //
-// Family tenants receive a ChannelFanout wired to the shared eventCh;
-// personal tenants leave sess.Fanout == nil so the sandbox hides the
+// Family accounts receive a ChannelFanout wired to the shared eventCh;
+// personal accounts leave sess.Fanout == nil so the sandbox hides the
 // Fanout JS global (I5 — personal cannot reach personal).
-func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh chan<- core.Event) *engine.Session {
-	if len(td.Tenant.Config.Sandbox.AllowedPaths) > 0 {
-		if err := td.Store.SeedWorkspacesFromConfig(td.Tenant.Config.Sandbox.AllowedPaths); err != nil {
-			slog.Error("seed workspaces from config", "tenant", td.Tenant.ID, "error", err)
+func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventCh chan<- core.Event) *engine.Session {
+	if len(td.Account.Config.Sandbox.AllowedPaths) > 0 {
+		if err := td.Store.SeedWorkspacesFromConfig(td.Account.Config.Sandbox.AllowedPaths); err != nil {
+			slog.Error("seed workspaces from config", "account", td.Account.ID, "error", err)
 		}
 	}
 
@@ -169,23 +169,23 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 		FallbackProvider: td.Fallback,
 		Sandbox:          td.Sandbox,
 		Store:            td.Store,
-		Config:           td.Tenant.Config,
+		Config:           td.Account.Config,
 		McpRegistry:      td.McpRegistry,
-		BaseDir:          td.Tenant.BaseDir,
+		BaseDir:          td.Account.BaseDir,
 		PackageManager:   td.PkgMgr,
 		APITokenMgr:      td.APITokenMgr,
-		TenantID:         td.Tenant.ID,
-		TenantRegistry:   registry,
+		AccountID:        td.Account.ID,
+		AccountRegistry:  registry,
 		Health:           core.NewHealthState(),
 		SummaryFlight:    &singleflight.Group{},
 	}
-	if td.Tenant.Config.IsFamily {
-		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Tenant.ID)
+	if td.Account.Config.IsFamily {
+		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Account.ID)
 	}
 
 	if err := sess.RefreshAllowedPaths(); err != nil {
 		slog.Warn("startup: failed to load workspace paths, file access denied by default",
-			"tenant", td.Tenant.ID, "error", err)
+			"account", td.Account.ID, "error", err)
 	}
 
 	indexer := engine.NewFTS5Indexer(td.Store)
@@ -196,22 +196,22 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 	// drops us into lazy mode — the bulk Index still runs, File.reindex
 	// still works, just no automatic re-index on filesystem changes.
 	var liveIdx *engine.LiveIndexer
-	if td.Tenant.Config.Workspace.LiveIndex {
+	if td.Account.Config.Workspace.LiveIndex {
 		li, err := engine.NewLiveIndexer(indexer, engine.DefaultLiveInterval, engine.DefaultLiveCap)
 		if err != nil {
 			slog.Warn("workspace entering lazy index mode",
-				"tenant", td.Tenant.ID, "reason", "watcher init failed", "error", err)
+				"account", td.Account.ID, "reason", "watcher init failed", "error", err)
 		} else {
 			liveIdx = li
 			td.LiveIndexer = li
 		}
 	}
 
-	go func(tenantID string, st *store.Store, idx engine.Indexer, live *engine.LiveIndexer) {
+	go func(accountID string, st *store.Store, idx engine.Indexer, live *engine.LiveIndexer) {
 		wss, err := st.ListWorkspaces()
 		if err != nil {
 			slog.Warn("startup: failed to list workspaces for indexing",
-				"tenant", tenantID, "error", err)
+				"account", accountID, "error", err)
 			return
 		}
 		// Watch BEFORE bulk index: a filesystem change during the initial
@@ -223,18 +223,18 @@ func buildTenantSession(td *TenantDeps, registry *core.TenantRegistry, eventCh c
 			for _, ws := range wss {
 				if err := live.AddWorkspace(ws.ID, ws.RootPath); err != nil {
 					slog.Warn("workspace entering lazy index mode",
-						"tenant", tenantID, "workspace_id", ws.ID, "error", err)
+						"account", accountID, "workspace_id", ws.ID, "error", err)
 				}
 			}
 		}
 		for _, ws := range wss {
 			if _, err := idx.Index(context.Background(), ws.ID, ws.RootPath); err != nil {
 				slog.Warn("startup: workspace indexing failed",
-					"tenant", tenantID, "workspace_id", ws.ID,
+					"account", accountID, "workspace_id", ws.ID,
 					"root_path", ws.RootPath, "error", err)
 			}
 		}
-	}(td.Tenant.ID, td.Store, indexer, liveIdx)
+	}(td.Account.ID, td.Store, indexer, liveIdx)
 
 	return sess
 }

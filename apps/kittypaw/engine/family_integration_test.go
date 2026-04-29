@@ -14,7 +14,7 @@ import (
 	"github.com/jinto/kittypaw/sandbox"
 )
 
-// TestFamily_ShareReadE2E drives the full cross-tenant read stack through the
+// TestFamily_ShareReadE2E drives the full cross-account read stack through the
 // JS sandbox: alice's skill calls `Share.read("family", ...)`, the call
 // crosses the resolver into executeShare, passes ValidateSharedReadPath
 // against family's `[share.alice]` allowlist, and returns the file content.
@@ -24,26 +24,26 @@ import (
 func TestFamily_ShareReadE2E(t *testing.T) {
 	root := t.TempDir()
 
-	// --- tenant layout ---
-	family := makeTenant(t, root, "family", &core.Config{
+	// --- account layout ---
+	family := makeAccount(t, root, "family", &core.Config{
 		IsFamily: true,
 		Share: map[string]core.ShareConfig{
 			"alice": {Read: []string{"memory/weather.json"}},
 		},
 	})
-	alice := makeTenant(t, root, "alice", &core.Config{})
-	bob := makeTenant(t, root, "bob", &core.Config{})
+	alice := makeAccount(t, root, "alice", &core.Config{})
+	bob := makeAccount(t, root, "bob", &core.Config{})
 
 	// Drop a file family wants to share.
-	writeTenantFile(t, filepath.Join(family.BaseDir, "memory", "weather.json"),
+	writeAccountFile(t, filepath.Join(family.BaseDir, "memory", "weather.json"),
 		`{"today":"sunny","high":22}`)
 
-	registry := core.NewTenantRegistry(root, "alice")
+	registry := core.NewAccountRegistry(root, "alice")
 	registry.Register(family)
 	registry.Register(alice)
 	registry.Register(bob)
 
-	// Capture slog to verify the cross_tenant_read audit record fires.
+	// Capture slog to verify the cross_account_read audit record fires.
 	var logBuf bytes.Buffer
 	origLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -53,10 +53,10 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 
 	// --- alice: allowlisted reader → success ---
 	aliceSess := &Session{
-		Sandbox:        sbox,
-		Config:         alice.Config,
-		TenantID:       alice.ID,
-		TenantRegistry: registry,
+		Sandbox:         sbox,
+		Config:          alice.Config,
+		AccountID:       alice.ID,
+		AccountRegistry: registry,
 	}
 	resolver := func(ctx context.Context, call core.SkillCall) (string, error) {
 		return resolveSkillCall(ctx, call, aliceSess, nil)
@@ -77,8 +77,8 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		t.Errorf("alice did not receive file content: %q", result.Output)
 	}
 
-	if !strings.Contains(logBuf.String(), `"cross_tenant_read"`) {
-		t.Errorf("missing cross_tenant_read audit log; got: %s", logBuf.String())
+	if !strings.Contains(logBuf.String(), `"cross_account_read"`) {
+		t.Errorf("missing cross_account_read audit log; got: %s", logBuf.String())
 	}
 	if !strings.Contains(logBuf.String(), `"from":"alice"`) {
 		t.Errorf("audit log missing reader identity; got: %s", logBuf.String())
@@ -87,10 +87,10 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 	// --- bob: not allowlisted → denied ---
 	logBuf.Reset()
 	bobSess := &Session{
-		Sandbox:        sbox,
-		Config:         bob.Config,
-		TenantID:       bob.ID,
-		TenantRegistry: registry,
+		Sandbox:         sbox,
+		Config:          bob.Config,
+		AccountID:       bob.ID,
+		AccountRegistry: registry,
 	}
 	bobResolver := func(ctx context.Context, call core.SkillCall) (string, error) {
 		return resolveSkillCall(ctx, call, bobSess, nil)
@@ -112,7 +112,7 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 	if !strings.Contains(result.Output, `"error"`) {
 		t.Errorf("bob should see error field, got: %q", result.Output)
 	}
-	if !strings.Contains(logBuf.String(), "cross_tenant_read_rejected") {
+	if !strings.Contains(logBuf.String(), "cross_account_read_rejected") {
 		t.Errorf("missing rejection audit for bob; got: %s", logBuf.String())
 	}
 }
@@ -120,14 +120,14 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 // TestFamily_FanoutE2E proves the family → personal push path end-to-end.
 // A family skill calls Fanout.send("alice", …) through the actual
 // Sandbox, the event lands on eventCh as EventFamilyPush with the target
-// tenantID, and alice never sees the Fanout global at all (defense in
+// accountID, and alice never sees the Fanout global at all (defense in
 // depth — a personal skill probing `typeof Fanout` hits undefined).
 func TestFamily_FanoutE2E(t *testing.T) {
 	root := t.TempDir()
-	family := makeTenant(t, root, "family", &core.Config{IsFamily: true})
-	alice := makeTenant(t, root, "alice", &core.Config{})
+	family := makeAccount(t, root, "family", &core.Config{IsFamily: true})
+	alice := makeAccount(t, root, "alice", &core.Config{})
 
-	registry := core.NewTenantRegistry(root, "alice")
+	registry := core.NewAccountRegistry(root, "alice")
 	registry.Register(family)
 	registry.Register(alice)
 
@@ -138,11 +138,11 @@ func TestFamily_FanoutE2E(t *testing.T) {
 
 	// --- family: Fanout wired → push succeeds ---
 	famSess := &Session{
-		Sandbox:        sbox,
-		Config:         family.Config,
-		TenantID:       family.ID,
-		TenantRegistry: registry,
-		Fanout:         fanout,
+		Sandbox:         sbox,
+		Config:          family.Config,
+		AccountID:       family.ID,
+		AccountRegistry: registry,
+		Fanout:          fanout,
 	}
 	famResolver := func(ctx context.Context, call core.SkillCall) (string, error) {
 		return resolveSkillCall(ctx, call, famSess, nil)
@@ -169,8 +169,8 @@ func TestFamily_FanoutE2E(t *testing.T) {
 		if ev.Type != core.EventFamilyPush {
 			t.Errorf("expected EventFamilyPush, got %q", ev.Type)
 		}
-		if ev.TenantID != "alice" {
-			t.Errorf("expected target=alice, got %q", ev.TenantID)
+		if ev.AccountID != "alice" {
+			t.Errorf("expected target=alice, got %q", ev.AccountID)
 		}
 		var body core.FanoutPayload
 		if err := json.Unmarshal(ev.Payload, &body); err != nil {
@@ -185,10 +185,10 @@ func TestFamily_FanoutE2E(t *testing.T) {
 
 	// --- alice: no Fanout wired → JS global hidden ---
 	aliceSess := &Session{
-		Sandbox:        sbox,
-		Config:         alice.Config,
-		TenantID:       alice.ID,
-		TenantRegistry: registry,
+		Sandbox:         sbox,
+		Config:          alice.Config,
+		AccountID:       alice.ID,
+		AccountRegistry: registry,
 	}
 	aliceResolver := func(ctx context.Context, call core.SkillCall) (string, error) {
 		return resolveSkillCall(ctx, call, aliceSess, nil)
@@ -200,22 +200,22 @@ func TestFamily_FanoutE2E(t *testing.T) {
 		t.Fatalf("alice probe: %v", err)
 	}
 	if probe.Output != "undefined" {
-		t.Errorf("personal tenant must not see Fanout; got %q", probe.Output)
+		t.Errorf("personal account must not see Fanout; got %q", probe.Output)
 	}
 }
 
 // --- helpers ---
 
-func makeTenant(t *testing.T, root, id string, cfg *core.Config) *core.Tenant {
+func makeAccount(t *testing.T, root, id string, cfg *core.Config) *core.Account {
 	t.Helper()
 	baseDir := filepath.Join(root, id)
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", baseDir, err)
 	}
-	return &core.Tenant{ID: id, BaseDir: baseDir, Config: cfg}
+	return &core.Account{ID: id, BaseDir: baseDir, Config: cfg}
 }
 
-func writeTenantFile(t *testing.T, path, content string) {
+func writeAccountFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir parent: %v", err)

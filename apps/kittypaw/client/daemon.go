@@ -47,7 +47,7 @@ func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
 //     (CLAUDE.md). No production writer yet, so this tier only lights up
 //     when both Bind AND MasterAPIKey are populated — a partial file is
 //     treated as absent to avoid picking up a half-initialized config.
-//  2. ~/.kittypaw/tenants/default/config.toml — the post-migration layout.
+//  2. ~/.kittypaw/accounts/default/config.toml — the post-migration layout.
 //     MigrateLegacyLayout moves the legacy top-level config.toml here the
 //     first time a daemon boots; this is the steady state for existing
 //     users and the state the bug report hit.
@@ -55,7 +55,7 @@ func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
 //     Fresh installs land here after `kittypaw setup` until the first
 //     `serve` triggers migration.
 //
-// This mirrors the read-side of the designed multi-tenant contract while
+// This mirrors the read-side of the designed multi-account contract while
 // leaving the write-side unchanged: whoever ends up implementing
 // WriteServerConfigAtomic later flips tier 1 on with zero client edits.
 func resolveDaemonEndpoint() (bind, apiKey string, err error) {
@@ -74,9 +74,9 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 		return "", "", fmt.Errorf("config dir: %w", derr)
 	}
 
-	tenantCfg := filepath.Join(dir, "tenants", "default", "config.toml")
-	tried = append(tried, tenantCfg)
-	if cfg, lerr := core.LoadConfig(tenantCfg); lerr == nil {
+	accountCfg := filepath.Join(dir, "accounts", "default", "config.toml")
+	tried = append(tried, accountCfg)
+	if cfg, lerr := core.LoadConfig(accountCfg); lerr == nil {
 		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, nil
 	}
 

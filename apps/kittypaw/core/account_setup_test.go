@@ -9,24 +9,24 @@ import (
 	"testing"
 )
 
-func TestInitTenant_HappyPath_Personal(t *testing.T) {
-	tenantsDir := t.TempDir()
+func TestInitAccount_HappyPath_Personal(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	tt, err := InitTenant(tenantsDir, "alice", TenantOpts{
+	tt, err := InitAccount(accountsDir, "alice", AccountOpts{
 		TelegramToken: "12345:alice-token",
 		AdminChatID:   "111",
 	})
 	if err != nil {
-		t.Fatalf("InitTenant: %v", err)
+		t.Fatalf("InitAccount: %v", err)
 	}
 	if tt == nil {
-		t.Fatal("InitTenant returned nil tenant")
+		t.Fatal("InitAccount returned nil account")
 	}
 	if tt.ID != "alice" {
 		t.Errorf("ID = %q, want alice", tt.ID)
 	}
 
-	dir := filepath.Join(tenantsDir, "alice")
+	dir := filepath.Join(accountsDir, "alice")
 	for _, sub := range []string{"data", "skills", "profiles", "packages"} {
 		if info, err := os.Stat(filepath.Join(dir, sub)); err != nil || !info.IsDir() {
 			t.Errorf("expected subdir %q, err=%v", sub, err)
@@ -39,7 +39,7 @@ func TestInitTenant_HappyPath_Personal(t *testing.T) {
 		t.Fatalf("LoadConfig: %v", err)
 	}
 	if cfg.IsFamily {
-		t.Error("personal tenant should not have IsFamily=true")
+		t.Error("personal account should not have IsFamily=true")
 	}
 	if len(cfg.Channels) != 1 || cfg.Channels[0].ChannelType != ChannelTelegram {
 		t.Errorf("expected one telegram channel, got %+v", cfg.Channels)
@@ -62,17 +62,17 @@ func TestInitTenant_HappyPath_Personal(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(tenantsDir, ".alice.staging")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(accountsDir, ".alice.staging")); !os.IsNotExist(err) {
 		t.Errorf("staging dir should be gone after commit, stat err=%v", err)
 	}
 }
 
-func TestInitTenant_HappyPath_Family(t *testing.T) {
-	tenantsDir := t.TempDir()
+func TestInitAccount_HappyPath_Family(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	tt, err := InitTenant(tenantsDir, "family", TenantOpts{IsFamily: true})
+	tt, err := InitAccount(accountsDir, "family", AccountOpts{IsFamily: true})
 	if err != nil {
-		t.Fatalf("InitTenant family: %v", err)
+		t.Fatalf("InitAccount family: %v", err)
 	}
 
 	cfg, err := LoadConfig(filepath.Join(tt.BaseDir, "config.toml"))
@@ -83,39 +83,39 @@ func TestInitTenant_HappyPath_Family(t *testing.T) {
 		t.Error("expected IsFamily=true")
 	}
 	if len(cfg.Channels) != 0 {
-		t.Errorf("family tenant must declare no channels, got %+v", cfg.Channels)
+		t.Errorf("family account must declare no channels, got %+v", cfg.Channels)
 	}
 }
 
 // Re-adding must not clobber existing DB/secrets/skills.
-func TestInitTenant_DuplicateID(t *testing.T) {
-	tenantsDir := t.TempDir()
-	if _, err := InitTenant(tenantsDir, "alice", TenantOpts{TelegramToken: "12345:a"}); err != nil {
-		t.Fatalf("first InitTenant: %v", err)
+func TestInitAccount_DuplicateID(t *testing.T) {
+	accountsDir := t.TempDir()
+	if _, err := InitAccount(accountsDir, "alice", AccountOpts{TelegramToken: "12345:a"}); err != nil {
+		t.Fatalf("first InitAccount: %v", err)
 	}
 
-	marker := filepath.Join(tenantsDir, "alice", "data", "do-not-delete")
+	marker := filepath.Join(accountsDir, "alice", "data", "do-not-delete")
 	if err := os.WriteFile(marker, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
 
-	_, err := InitTenant(tenantsDir, "alice", TenantOpts{TelegramToken: "99999:b"})
-	if !errors.Is(err, ErrTenantExists) {
-		t.Fatalf("expected ErrTenantExists, got %v", err)
+	_, err := InitAccount(accountsDir, "alice", AccountOpts{TelegramToken: "99999:b"})
+	if !errors.Is(err, ErrAccountExists) {
+		t.Fatalf("expected ErrAccountExists, got %v", err)
 	}
 	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("marker file missing — existing tenant was clobbered: %v", err)
+		t.Errorf("marker file missing — existing account was clobbered: %v", err)
 	}
 }
 
 // Collision must surface before any filesystem write — otherwise the error only appears at daemon startup.
-func TestInitTenant_DuplicateTelegramToken(t *testing.T) {
-	tenantsDir := t.TempDir()
-	if _, err := InitTenant(tenantsDir, "alice", TenantOpts{TelegramToken: "shared"}); err != nil {
+func TestInitAccount_DuplicateTelegramToken(t *testing.T) {
+	accountsDir := t.TempDir()
+	if _, err := InitAccount(accountsDir, "alice", AccountOpts{TelegramToken: "shared"}); err != nil {
 		t.Fatalf("alice: %v", err)
 	}
 
-	_, err := InitTenant(tenantsDir, "bob", TenantOpts{TelegramToken: "shared"})
+	_, err := InitAccount(accountsDir, "bob", AccountOpts{TelegramToken: "shared"})
 	if err == nil {
 		t.Fatal("expected duplicate-token error, got nil")
 	}
@@ -123,19 +123,19 @@ func TestInitTenant_DuplicateTelegramToken(t *testing.T) {
 		t.Errorf("error should cite telegram bot_token: %q", err.Error())
 	}
 
-	if _, err := os.Stat(filepath.Join(tenantsDir, "bob")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(accountsDir, "bob")); !os.IsNotExist(err) {
 		t.Errorf("bob dir should not exist after collision, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(tenantsDir, ".bob.staging")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(accountsDir, ".bob.staging")); !os.IsNotExist(err) {
 		t.Errorf("bob staging should be cleaned up, err=%v", err)
 	}
 }
 
 // Family-no-channels invariant must reject before any file is written.
-func TestInitTenant_FamilyWithToken(t *testing.T) {
-	tenantsDir := t.TempDir()
+func TestInitAccount_FamilyWithToken(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	_, err := InitTenant(tenantsDir, "family", TenantOpts{
+	_, err := InitAccount(accountsDir, "family", AccountOpts{
 		IsFamily:      true,
 		TelegramToken: "12345:family",
 	})
@@ -145,26 +145,26 @@ func TestInitTenant_FamilyWithToken(t *testing.T) {
 	if !strings.Contains(err.Error(), "family") {
 		t.Errorf("error should cite family: %q", err.Error())
 	}
-	if _, err := os.Stat(filepath.Join(tenantsDir, "family")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(accountsDir, "family")); !os.IsNotExist(err) {
 		t.Errorf("family dir should not exist after rejection")
 	}
 }
 
 // Accepting "../escape" would be a traversal vulnerability.
-func TestInitTenant_InvalidID(t *testing.T) {
-	tenantsDir := t.TempDir()
+func TestInitAccount_InvalidID(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	_, err := InitTenant(tenantsDir, "../escape", TenantOpts{TelegramToken: "x"})
+	_, err := InitAccount(accountsDir, "../escape", AccountOpts{TelegramToken: "x"})
 	if err == nil {
-		t.Fatal("expected error for invalid tenant id")
+		t.Fatal("expected error for invalid account id")
 	}
 }
 
 // Without this, SIGKILL/disk-full during provisioning would one-shot break the feature.
-func TestInitTenant_StagingRecovery(t *testing.T) {
-	tenantsDir := t.TempDir()
+func TestInitAccount_StagingRecovery(t *testing.T) {
+	accountsDir := t.TempDir()
 
-	stale := filepath.Join(tenantsDir, ".alice.staging")
+	stale := filepath.Join(accountsDir, ".alice.staging")
 	if err := os.MkdirAll(filepath.Join(stale, "data"), 0o755); err != nil {
 		t.Fatalf("seed stale staging: %v", err)
 	}
@@ -172,13 +172,13 @@ func TestInitTenant_StagingRecovery(t *testing.T) {
 		t.Fatalf("seed stale config: %v", err)
 	}
 
-	if _, err := InitTenant(tenantsDir, "alice", TenantOpts{TelegramToken: "12345:a"}); err != nil {
-		t.Fatalf("InitTenant after staging crash: %v", err)
+	if _, err := InitAccount(accountsDir, "alice", AccountOpts{TelegramToken: "12345:a"}); err != nil {
+		t.Fatalf("InitAccount after staging crash: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale staging should be cleaned up, stat err=%v", err)
 	}
-	cfg, err := LoadConfig(filepath.Join(tenantsDir, "alice", "config.toml"))
+	cfg, err := LoadConfig(filepath.Join(accountsDir, "alice", "config.toml"))
 	if err != nil {
 		t.Fatalf("LoadConfig after recovery: %v", err)
 	}

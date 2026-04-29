@@ -14,7 +14,7 @@ import (
 // emoji content. Failing this means runewidth-aware padding is broken.
 func TestRenderSetupBox_RightBorderAligns(t *testing.T) {
 	var buf bytes.Buffer
-	renderSetupBox(&buf, "/Users/jinto/.kittypaw/tenants/default/config.toml")
+	renderSetupBox(&buf, "/Users/jinto/.kittypaw/accounts/default/config.toml")
 
 	out := buf.String()
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")

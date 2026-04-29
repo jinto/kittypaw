@@ -7,29 +7,29 @@ import (
 	"github.com/jinto/kittypaw/engine"
 )
 
-func TestTenantRouter_RouteRegistered(t *testing.T) {
+func TestAccountRouter_RouteRegistered(t *testing.T) {
 	alice := &engine.Session{BaseDir: "/tmp/alice"}
 	bob := &engine.Session{BaseDir: "/tmp/bob"}
 
-	r := NewTenantRouter()
+	r := NewAccountRouter()
 	r.Register("alice", alice)
 	r.Register("bob", bob)
 
-	got := r.Route(core.Event{TenantID: "alice", Type: core.EventTelegram})
+	got := r.Route(core.Event{AccountID: "alice", Type: core.EventTelegram})
 	if got != alice {
 		t.Errorf("Route(alice) got %p, want %p", got, alice)
 	}
-	got = r.Route(core.Event{TenantID: "bob", Type: core.EventTelegram})
+	got = r.Route(core.Event{AccountID: "bob", Type: core.EventTelegram})
 	if got != bob {
 		t.Errorf("Route(bob) got %p, want %p", got, bob)
 	}
 }
 
-// TestTenantRouter_NoFallback enforces C1: empty or unknown TenantID must
-// drop — never fall through to a default tenant (cross-tenant leak risk).
-func TestTenantRouter_NoFallback(t *testing.T) {
+// TestAccountRouter_NoFallback enforces C1: empty or unknown AccountID must
+// drop — never fall through to a default account (cross-account leak risk).
+func TestAccountRouter_NoFallback(t *testing.T) {
 	alice := &engine.Session{BaseDir: "/tmp/alice"}
-	r := NewTenantRouter()
+	r := NewAccountRouter()
 	r.Register("alice", alice)
 	r.Register("default", alice) // default exists, but unknown must still drop
 
@@ -37,8 +37,8 @@ func TestTenantRouter_NoFallback(t *testing.T) {
 		name  string
 		event core.Event
 	}{
-		{"empty_tenant_id", core.Event{TenantID: "", Type: core.EventTelegram}},
-		{"unknown_tenant", core.Event{TenantID: "charlie", Type: core.EventTelegram}},
+		{"empty_account_id", core.Event{AccountID: "", Type: core.EventTelegram}},
+		{"unknown_account", core.Event{AccountID: "charlie", Type: core.EventTelegram}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,12 +54,12 @@ func TestTenantRouter_NoFallback(t *testing.T) {
 	}
 }
 
-func TestTenantRouter_RemoveAndSessions(t *testing.T) {
-	r := NewTenantRouter()
+func TestAccountRouter_RemoveAndSessions(t *testing.T) {
+	r := NewAccountRouter()
 	r.Register("alice", &engine.Session{})
 	r.Register("bob", &engine.Session{})
 
-	if got := r.Route(core.Event{TenantID: "alice"}); got == nil {
+	if got := r.Route(core.Event{AccountID: "alice"}); got == nil {
 		t.Error("alice should be routable")
 	}
 
@@ -70,7 +70,7 @@ func TestTenantRouter_RemoveAndSessions(t *testing.T) {
 		t.Error("Remove(alice) second call = true, want false")
 	}
 
-	if got := r.Route(core.Event{TenantID: "alice"}); got != nil {
+	if got := r.Route(core.Event{AccountID: "alice"}); got != nil {
 		t.Error("alice should be gone after Remove")
 	}
 
@@ -80,13 +80,13 @@ func TestTenantRouter_RemoveAndSessions(t *testing.T) {
 	}
 }
 
-// TestTenantRouter_MismatchCounters locks in the AC-T7 metric surface:
-// RecordMismatch bumps a per-tenant counter; MismatchCount reads only that
-// tenant's count and returns 0 for untouched tenants without allocating.
+// TestAccountRouter_MismatchCounters locks in the AC-T7 metric surface:
+// RecordMismatch bumps a per-account counter; MismatchCount reads only that
+// account's count and returns 0 for untouched accounts without allocating.
 // The /metrics endpoint surfaces this as
-// `tenant_routing_mismatch_total{from=<tenantID>}`.
-func TestTenantRouter_MismatchCounters(t *testing.T) {
-	r := NewTenantRouter()
+// `account_routing_mismatch_total{from=<accountID>}`.
+func TestAccountRouter_MismatchCounters(t *testing.T) {
+	r := NewAccountRouter()
 
 	if n := r.MismatchCount("alice"); n != 0 {
 		t.Errorf("MismatchCount(alice) initial = %d, want 0", n)
@@ -103,12 +103,12 @@ func TestTenantRouter_MismatchCounters(t *testing.T) {
 		t.Errorf("MismatchCount(bob) = %d, want 1", n)
 	}
 	if n := r.MismatchCount("charlie"); n != 0 {
-		t.Errorf("MismatchCount(charlie) = %d, want 0 (unseen tenant)", n)
+		t.Errorf("MismatchCount(charlie) = %d, want 0 (unseen account)", n)
 	}
 }
 
-func TestTenantRouter_ConcurrentAccess(t *testing.T) {
-	r := NewTenantRouter()
+func TestAccountRouter_ConcurrentAccess(t *testing.T) {
+	r := NewAccountRouter()
 	sess := &engine.Session{}
 	r.Register("alice", sess)
 
@@ -116,8 +116,8 @@ func TestTenantRouter_ConcurrentAccess(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func() {
 			for j := 0; j < 100; j++ {
-				_ = r.Route(core.Event{TenantID: "alice"})
-				_ = r.Route(core.Event{TenantID: "unknown"})
+				_ = r.Route(core.Event{AccountID: "alice"})
+				_ = r.Route(core.Event{AccountID: "unknown"})
 			}
 			done <- struct{}{}
 		}()

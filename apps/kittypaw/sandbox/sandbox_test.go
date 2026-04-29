@@ -365,7 +365,7 @@ func TestExecuteWithResolverParsedResults(t *testing.T) {
 }
 
 // TestFanoutHiddenByDefault locks in the defense-in-depth gate: a personal
-// tenant must see `typeof Fanout === "undefined"`. The engine-level nil check
+// account must see `typeof Fanout === "undefined"`. The engine-level nil check
 // would also refuse, but hiding the binding means a buggy skill can't even
 // discover the API exists.
 func TestFanoutHiddenByDefault(t *testing.T) {
@@ -379,11 +379,11 @@ func TestFanoutHiddenByDefault(t *testing.T) {
 		t.Fatalf("expected success, got error: %s", result.Error)
 	}
 	if result.Output != "undefined" {
-		t.Errorf("Fanout must be hidden on personal tenants; got typeof=%q", result.Output)
+		t.Errorf("Fanout must be hidden on personal accounts; got typeof=%q", result.Output)
 	}
 }
 
-// TestFanoutExposedWhenOpted verifies the family-tenant path. When the engine
+// TestFanoutExposedWhenOpted verifies the family-account path. When the engine
 // opts in (Session.Fanout != nil), the global appears with the expected method
 // surface. We check for the two methods explicitly — a bare `typeof` would
 // also pass if the binding was half-wired.
@@ -412,9 +412,9 @@ func TestFanoutExposedWhenOpted(t *testing.T) {
 }
 
 // TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal mirrors the
-// Fanout defense-in-depth model for Share. Family tenants do not read from
+// Fanout defense-in-depth model for Share. Family accounts do not read from
 // peers — they're the authoritative source — so the Share global must be
-// absent there. A personal tenant probing `typeof Share` on the family
+// absent there. A personal account probing `typeof Share` on the family
 // session should see undefined, not a bound object that errors on call.
 func TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal(t *testing.T) {
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
@@ -436,7 +436,7 @@ func TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal(t *testing.T)
 }
 
 // TestExecuteWithResolverOpts_ExposeShareTrue_ShowsShareGlobal is the positive
-// counterpart — personal tenants (the Share readers) must get the full API
+// counterpart — personal accounts (the Share readers) must get the full API
 // surface. We check Share.read is a callable function so a half-wired binding
 // wouldn't slip through as "object".
 func TestExecuteWithResolverOpts_ExposeShareTrue_ShowsShareGlobal(t *testing.T) {

@@ -29,8 +29,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 20 {
-		t.Fatalf("expected 20 migrations, got %d", count)
+	if count != 21 {
+		t.Fatalf("expected 21 migrations, got %d", count)
 	}
 }
 
@@ -1029,7 +1029,7 @@ func TestPendingResponsesRoundTrip(t *testing.T) {
 		t.Fatalf("expected 0, got %d", len(pending))
 	}
 
-	// Enqueue two responses, each tagged to a different tenant.
+	// Enqueue two responses, each tagged to a different account.
 	if err := st.EnqueueResponse("alice", "telegram", "chat-1", "Hello!"); err != nil {
 		t.Fatalf("enqueue 1: %v", err)
 	}
@@ -1045,10 +1045,10 @@ func TestPendingResponsesRoundTrip(t *testing.T) {
 	if len(pending) != 2 {
 		t.Fatalf("expected 2, got %d", len(pending))
 	}
-	if pending[0].EventType != "telegram" || pending[0].ChatID != "chat-1" || pending[0].Response != "Hello!" || pending[0].TenantID != "alice" {
+	if pending[0].EventType != "telegram" || pending[0].ChatID != "chat-1" || pending[0].Response != "Hello!" || pending[0].AccountID != "alice" {
 		t.Errorf("pending[0] mismatch: %+v", pending[0])
 	}
-	if pending[1].EventType != "slack" || pending[1].Response != "World!" || pending[1].TenantID != "bob" {
+	if pending[1].EventType != "slack" || pending[1].Response != "World!" || pending[1].AccountID != "bob" {
 		t.Errorf("pending[1] mismatch: %+v", pending[1])
 	}
 

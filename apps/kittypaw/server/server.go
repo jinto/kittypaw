@@ -24,107 +24,107 @@ import (
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
 // to the agent engine. It owns the chi router, the engine session, the
-// scheduler, channel spawner, tenant router, and all handler state.
+// scheduler, channel spawner, account router, and all handler state.
 type Server struct {
-	config         *core.Config
-	configMu       sync.RWMutex // protects config during hot-reload
-	store          *store.Store
-	session        *engine.Session // default-tenant session; HTTP handlers use this
-	scheduler      *engine.Scheduler
-	router         chi.Router
-	spawner        *ChannelSpawner        // manages channel lifecycle for hot-reload
-	tenants        *TenantRouter          // routes channel events to tenant-scoped sessions
-	tenantList     []*core.Tenant         // ordered tenant metadata for startup validation
-	tenantRegistry *core.TenantRegistry   // shared cross-tenant registry (Share.read / Fanout)
-	eventCh        chan core.Event        // shared event channel between channels and dispatch loop
-	tenantMu       sync.Mutex             // serializes AddTenant/RemoveTenant — validation→register→reconcile must not interleave
-	tenantDeps     map[string]*TenantDeps // retained close-targets (Store+MCP) for RemoveTenant; populated on successful AddTenant
-	version        string
-	pkgManager     *core.PackageManager // default-tenant package manager for API handlers
-	liveIndexer    *engine.LiveIndexer  // default-tenant live indexer (nil if lazy mode)
+	config          *core.Config
+	configMu        sync.RWMutex // protects config during hot-reload
+	store           *store.Store
+	session         *engine.Session // default-account session; HTTP handlers use this
+	scheduler       *engine.Scheduler
+	router          chi.Router
+	spawner         *ChannelSpawner         // manages channel lifecycle for hot-reload
+	accounts        *AccountRouter          // routes channel events to account-scoped sessions
+	accountList     []*core.Account         // ordered account metadata for startup validation
+	accountRegistry *core.AccountRegistry   // shared cross-account registry (Share.read / Fanout)
+	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
+	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
+	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	version         string
+	pkgManager      *core.PackageManager // default-account package manager for API handlers
+	liveIndexer     *engine.LiveIndexer  // default-account live indexer (nil if lazy mode)
 
 	// reloadReconcile, if non-nil, replaces s.spawner.Reconcile inside
 	// handleReload. Test-only hook that lets AC-RELOAD-SYNC inject a barrier
 	// to observe the synchronous contract; production always leaves this nil
 	// and falls through to the live spawner.
-	reloadReconcile func(tenantID string, cfgs []core.ChannelConfig) error
+	reloadReconcile func(accountID string, cfgs []core.ChannelConfig) error
 }
 
-// DefaultTenantID is the tenant ID used when the daemon runs without an
-// explicit tenants/ directory (legacy single-tenant deployments).
-const DefaultTenantID = "default"
+// DefaultAccountID is the account ID used when the daemon runs without an
+// explicit accounts/ directory (legacy single-account deployments).
+const DefaultAccountID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
-// Callers must pass at least one TenantDeps; New panics on an empty slice
-// because a daemon with no tenants has nothing to route to.
+// Callers must pass at least one AccountDeps; New panics on an empty slice
+// because a daemon with no accounts has nothing to route to.
 //
-// One engine.Session is built per tenant. The family tenant (IsFamily=true)
+// One engine.Session is built per account. The family account (IsFamily=true)
 // receives a ChannelFanout wired to the shared eventCh so its skills can
-// push to personal tenants via Fanout.send; personal tenants keep Fanout
+// push to personal accounts via Fanout.send; personal accounts keep Fanout
 // nil so the JS global stays hidden (I5 — personal cannot reach personal).
-// Every session shares the same *core.TenantRegistry pointer so Share.read
-// can resolve peer tenants by ID.
+// Every session shares the same *core.AccountRegistry pointer so Share.read
+// can resolve peer accounts by ID.
 //
 // The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
-// the default tenant in PR-1; multi-tenant HTTP routing is scoped to a
+// the default account in PR-1; multi-account HTTP routing is scoped to a
 // follow-up. Call StartChannels before ListenAndServe to activate messaging.
-func New(tenants []*TenantDeps, version string) *Server {
-	if len(tenants) == 0 {
-		panic("server.New: tenants slice must be non-empty")
+func New(accounts []*AccountDeps, version string) *Server {
+	if len(accounts) == 0 {
+		panic("server.New: accounts slice must be non-empty")
 	}
 
-	// Identify the default tenant: explicit DefaultTenantID match wins; the
-	// first entry is the fallback so a single-tenant install with a non-
+	// Identify the default account: explicit DefaultAccountID match wins; the
+	// first entry is the fallback so a single-account install with a non-
 	// "default" ID still boots.
-	defaultDeps := tenants[0]
-	for _, td := range tenants {
-		if td.Tenant.ID == DefaultTenantID {
+	defaultDeps := accounts[0]
+	for _, td := range accounts {
+		if td.Account.ID == DefaultAccountID {
 			defaultDeps = td
 			break
 		}
 	}
-	cfg := defaultDeps.Tenant.Config
+	cfg := defaultDeps.Account.Config
 
 	// eventCh MUST exist before Fanout construction — ChannelFanout retains
 	// a reference for every future send.
 	eventCh := make(chan core.Event, 64)
 
-	// Shared cross-tenant registry. BaseDir points at the tenants/ root
-	// (the parent of each tenant's BaseDir) so Share.read and future
+	// Shared cross-account registry. BaseDir points at the accounts/ root
+	// (the parent of each account's BaseDir) so Share.read and future
 	// listing operations have a consistent anchor.
-	tenantsRoot := filepath.Dir(defaultDeps.Tenant.BaseDir)
-	registry := core.NewTenantRegistry(tenantsRoot, DefaultTenantID)
-	tenantList := make([]*core.Tenant, 0, len(tenants))
-	for _, td := range tenants {
-		registry.Register(td.Tenant)
-		tenantList = append(tenantList, td.Tenant)
+	accountsRoot := filepath.Dir(defaultDeps.Account.BaseDir)
+	registry := core.NewAccountRegistry(accountsRoot, DefaultAccountID)
+	accountList := make([]*core.Account, 0, len(accounts))
+	for _, td := range accounts {
+		registry.Register(td.Account)
+		accountList = append(accountList, td.Account)
 	}
 
-	router := NewTenantRouter()
+	router := NewAccountRouter()
 	var defaultSession *engine.Session
-	depsByID := make(map[string]*TenantDeps, len(tenants))
-	for _, td := range tenants {
-		sess := buildTenantSession(td, registry, eventCh)
-		router.Register(td.Tenant.ID, sess)
-		depsByID[td.Tenant.ID] = td
+	depsByID := make(map[string]*AccountDeps, len(accounts))
+	for _, td := range accounts {
+		sess := buildAccountSession(td, registry, eventCh)
+		router.Register(td.Account.ID, sess)
+		depsByID[td.Account.ID] = td
 		if td == defaultDeps {
 			defaultSession = sess
 		}
 	}
 
 	s := &Server{
-		config:         cfg,
-		store:          defaultDeps.Store,
-		session:        defaultSession,
-		scheduler:      engine.NewScheduler(defaultSession, defaultDeps.PkgMgr),
-		tenants:        router,
-		tenantList:     tenantList,
-		tenantRegistry: registry,
-		eventCh:        eventCh,
-		tenantDeps:     depsByID,
-		version:        version,
-		pkgManager:     defaultDeps.PkgMgr,
-		liveIndexer:    defaultDeps.LiveIndexer,
+		config:          cfg,
+		store:           defaultDeps.Store,
+		session:         defaultSession,
+		scheduler:       engine.NewScheduler(defaultSession, defaultDeps.PkgMgr),
+		accounts:        router,
+		accountList:     accountList,
+		accountRegistry: registry,
+		eventCh:         eventCh,
+		accountDeps:     depsByID,
+		version:         version,
+		pkgManager:      defaultDeps.PkgMgr,
+		liveIndexer:     defaultDeps.LiveIndexer,
 	}
 	s.router = s.setupRoutes()
 	return s
@@ -210,14 +210,14 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Get("/config/check", s.handleConfigCheck)
 		r.Post("/reload", s.handleReload)
 
-		// Admin — runtime tenant lifecycle. Localhost-only on top of the
+		// Admin — runtime account lifecycle. Localhost-only on top of the
 		// /api/v1 requireAPIKey gate: the daemon binds to 127.0.0.1 by
 		// default, but if a future deployment exposes it, admin mutations
 		// still require local access.
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(s.requireLocalhost)
-			r.Post("/tenants", s.handleAdminTenantAdd)
-			r.Post("/tenants/{id}/delete", s.handleAdminTenantRemove)
+			r.Post("/accounts", s.handleAdminAccountAdd)
+			r.Post("/accounts/{id}/delete", s.handleAdminAccountRemove)
 		})
 
 		// Install
@@ -291,41 +291,41 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 	return s.session.Run(ctx, event, nil)
 }
 
-// StartChannels creates the ChannelSpawner, reconciles each tenant's
+// StartChannels creates the ChannelSpawner, reconciles each account's
 // channel configs, and starts the dispatch and retry goroutines. Must be
 // called before ListenAndServe.
 //
 // Two startup validations run BEFORE any channel spawns:
-//   - ValidateTenantChannels: a single Telegram bot token / Kakao relay
-//     URL cannot be claimed by two tenants (C3 — prevents silent update
-//     races where one tenant's bot steals another's messages).
-//   - ValidateFamilyTenants: the family tenant must not declare channels
+//   - ValidateAccountChannels: a single Telegram bot token / Kakao relay
+//     URL cannot be claimed by two accounts (C3 — prevents silent update
+//     races where one account's bot steals another's messages).
+//   - ValidateFamilyAccounts: the family account must not declare channels
 //     (C10 — family is a coordinator, not a channel owner; a misconfigured
 //     [telegram] on family would race the real personal bot for updates).
 func (s *Server) StartChannels(ctx context.Context) error {
-	tenantChannels := make(map[string][]core.ChannelConfig, len(s.tenantList))
-	for _, t := range s.tenantList {
+	accountChannels := make(map[string][]core.ChannelConfig, len(s.accountList))
+	for _, t := range s.accountList {
 		if t.Config == nil {
 			continue
 		}
-		tenantChannels[t.ID] = t.Config.Channels
+		accountChannels[t.ID] = t.Config.Channels
 	}
 
-	if err := core.ValidateTenantChannels(tenantChannels); err != nil {
+	if err := core.ValidateAccountChannels(accountChannels); err != nil {
 		return fmt.Errorf("channel config validation: %w", err)
 	}
-	if err := core.ValidateFamilyTenants(s.tenantList); err != nil {
-		return fmt.Errorf("family tenant validation: %w", err)
+	if err := core.ValidateFamilyAccounts(s.accountList); err != nil {
+		return fmt.Errorf("family account validation: %w", err)
 	}
 
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)
-	for tenantID, configs := range tenantChannels {
+	for accountID, configs := range accountChannels {
 		if len(configs) == 0 {
 			continue
 		}
-		if err := s.spawner.Reconcile(tenantID, configs); err != nil {
+		if err := s.spawner.Reconcile(accountID, configs); err != nil {
 			slog.Warn("initial channel reconcile: some channels failed",
-				"tenant", tenantID, "error", err)
+				"account", accountID, "error", err)
 		}
 	}
 	go s.dispatchLoop(ctx)
@@ -334,11 +334,11 @@ func (s *Server) StartChannels(ctx context.Context) error {
 }
 
 // dispatchLoop reads events from the shared eventCh, routes them to the
-// tenant-scoped engine session, and returns responses via the spawner.
+// account-scoped engine session, and returns responses via the spawner.
 //
-// Events with an empty or unknown TenantID are dropped by the TenantRouter
-// (no default fallback) to avoid cross-tenant privacy leaks — see C1 in
-// the family-multi-tenant spec.
+// Events with an empty or unknown AccountID are dropped by the AccountRouter
+// (no default fallback) to avoid cross-account privacy leaks — see C1 in
+// the family-multi-account spec.
 func (s *Server) dispatchLoop(ctx context.Context) {
 	for {
 		select {
@@ -349,7 +349,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				return
 			}
 			// EventFamilyPush carries a FanoutPayload (not a ChatPayload) and
-			// delivers an already-composed message to the target tenant —
+			// delivers an already-composed message to the target account —
 			// skip the agent loop entirely. Without this branch the generic
 			// ParsePayload below silently produces a zero-valued ChatPayload,
 			// the event routes through session.Run, and the push text never
@@ -364,23 +364,23 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
-			session := s.tenants.Route(event)
+			session := s.accounts.Route(event)
 			if session == nil {
-				// Drop was already logged + counted by TenantRouter.
+				// Drop was already logged + counted by AccountRouter.
 				continue
 			}
 
-			// AC-T7: chat_id ownership check. Route() matched TenantID to a
+			// AC-T7: chat_id ownership check. Route() matched AccountID to a
 			// Session, but a compromised/leaked bot token could still inject
-			// an event whose chat_id belongs to a different tenant. Without
+			// an event whose chat_id belongs to a different account. Without
 			// this gate alice's Session.Run would persist bob's conversation
-			// under alice's store — a privacy breach the TenantID check
+			// under alice's store — a privacy breach the AccountID check
 			// alone cannot catch. Permissive when AdminChatIDs is empty
-			// (legacy single-tenant installs, web_chat-only tenants).
-			if !core.ChatBelongsToTenant(session.Config, payload.ChatID) {
-				s.tenants.RecordMismatch(event.TenantID)
-				slog.Warn("tenant_routing_mismatch",
-					"tenant", event.TenantID,
+			// (legacy single-account installs, web_chat-only accounts).
+			if !core.ChatBelongsToAccount(session.Config, payload.ChatID) {
+				s.accounts.RecordMismatch(event.AccountID)
+				slog.Warn("account_routing_mismatch",
+					"account", event.AccountID,
 					"chat_id", payload.ChatID,
 					"type", event.Type,
 				)
@@ -389,14 +389,14 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 
 			slog.Info("processing channel event",
 				"type", event.Type,
-				"tenant", event.TenantID,
+				"account", event.AccountID,
 				"chat_id", payload.ChatID,
 				"from", payload.FromName,
 			)
 
 			// Build RunOptions with Confirmer-based permission callback if available.
 			var runOpts *engine.RunOptions
-			ch, chOK := s.spawner.GetChannel(event.TenantID, event.Type)
+			ch, chOK := s.spawner.GetChannel(event.AccountID, event.Type)
 			if chOK {
 				if confirmer, ok := ch.(channel.Confirmer); ok {
 					evType := string(event.Type)
@@ -433,7 +433,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				defer func() {
 					if r := recover(); r != nil {
 						panicked = true
-						engine.RecoverTenantPanic(session, "server.dispatchLoop", r)
+						engine.RecoverAccountPanic(session, "server.dispatchLoop", r)
 					}
 				}()
 				response, runErr = session.Run(ctx, event, runOpts)
@@ -442,27 +442,27 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				// Health marked Degraded inside the recover helper.
 				// Drop this event — re-invoking the same panicking run
 				// on the same input would loop; AC-T8 only requires that
-				// the daemon survive and other tenants keep ticking.
+				// the daemon survive and other accounts keep ticking.
 				continue
 			}
 			if runErr != nil {
 				slog.Error("channel event: engine error",
 					"type", event.Type,
-					"tenant", event.TenantID,
+					"account", event.AccountID,
 					"chat_id", payload.ChatID,
 					"error", runErr,
 				)
 				continue
 			}
-			// Clean completion re-promotes the tenant to Ready so a
+			// Clean completion re-promotes the account to Ready so a
 			// transient panic self-heals without operator action.
-			engine.MarkTenantReady(session)
+			engine.MarkAccountReady(session)
 
 			if !chOK {
 				slog.Warn("channel event: no channel for response routing, enqueuing for retry",
-					"type", event.Type, "tenant", event.TenantID)
+					"type", event.Type, "account", event.AccountID)
 				if event.Type != core.EventKakaoTalk {
-					_ = s.store.EnqueueResponse(event.TenantID, string(event.Type), payload.ChatID, response)
+					_ = s.store.EnqueueResponse(event.AccountID, string(event.Type), payload.ChatID, response)
 				}
 				continue
 			}
@@ -470,13 +470,13 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			if err := ch.SendResponse(ctx, payload.ChatID, response, payload.ReplyToMessageID); err != nil {
 				slog.Error("channel event: send response failed",
 					"type", event.Type,
-					"tenant", event.TenantID,
+					"account", event.AccountID,
 					"chat_id", payload.ChatID,
 					"error", err,
 				)
 				// Kakao uses ephemeral action IDs — retry is futile.
 				if event.Type != core.EventKakaoTalk {
-					if qErr := s.store.EnqueueResponse(event.TenantID, string(event.Type), payload.ChatID, response); qErr != nil {
+					if qErr := s.store.EnqueueResponse(event.AccountID, string(event.Type), payload.ChatID, response); qErr != nil {
 						slog.Error("channel event: enqueue response failed", "error", qErr)
 					}
 				}
@@ -485,14 +485,14 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 	}
 }
 
-// deliverFamilyPush routes an EventFamilyPush to the target tenant's channel
+// deliverFamilyPush routes an EventFamilyPush to the target account's channel
 // and bypasses the agent loop. The payload is a finished outbound message
 // (Fanout.send already gave a skill author's hand-authored text), so we do
 // not re-invoke the LLM — doing so would paraphrase, translate, or drop the
 // message entirely depending on prompt context.
 //
 // Routing order:
-//  1. Target tenant must exist + have at least one declared channel.
+//  1. Target account must exist + have at least one declared channel.
 //  2. ChannelHint picks a specific channel type; fall back to Channels[0].
 //  3. AdminChatIDs[0] is the destination chat; empty = log + drop (nowhere
 //     to send).
@@ -501,18 +501,18 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
 	var p core.FanoutPayload
 	if err := json.Unmarshal(event.Payload, &p); err != nil {
-		slog.Warn("family_push: bad payload", "tenant", event.TenantID, "error", err)
+		slog.Warn("family_push: bad payload", "account", event.AccountID, "error", err)
 		return
 	}
 
-	target := s.tenantRegistry.Get(event.TenantID)
+	target := s.accountRegistry.Get(event.AccountID)
 	if target == nil || target.Config == nil {
-		slog.Warn("family_push: unknown target tenant", "tenant", event.TenantID)
+		slog.Warn("family_push: unknown target account", "account", event.AccountID)
 		return
 	}
 	if len(target.Config.Channels) == 0 {
 		slog.Warn("family_push: target has no channels configured; dropping",
-			"tenant", event.TenantID)
+			"account", event.AccountID)
 		return
 	}
 
@@ -524,38 +524,38 @@ func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
 	}
 	if chatID == "" {
 		slog.Warn("family_push: target has no admin chat; dropping",
-			"tenant", event.TenantID, "channel", channelType)
+			"account", event.AccountID, "channel", channelType)
 		return
 	}
 
-	ch, chOK := s.spawner.GetChannel(event.TenantID, channelType)
+	ch, chOK := s.spawner.GetChannel(event.AccountID, channelType)
 	if !chOK {
-		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text, "channel not running")
+		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text, "channel not running")
 		return
 	}
 
 	if err := ch.SendResponse(ctx, chatID, p.Text, ""); err != nil {
-		s.enqueueFamilyPushForRetry(event.TenantID, channelType, chatID, p.Text,
+		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text,
 			fmt.Sprintf("send failed: %v", err))
 		return
 	}
 
 	slog.Info("family_push_delivered",
-		"from", "family", "to", event.TenantID, "channel", channelType, "chat_id", chatID)
+		"from", "family", "to", event.AccountID, "channel", channelType, "chat_id", chatID)
 }
 
 // enqueueFamilyPushForRetry parks an undelivered family push in pending_responses
 // so the retry loop can pick it up after the channel comes back. Kakao is
 // excluded because its action IDs are ephemeral — by the time the retry fires,
 // the originating action no longer exists, so re-sending would 4xx-loop forever.
-func (s *Server) enqueueFamilyPushForRetry(tenantID string, channelType core.EventType, chatID, text, reason string) {
+func (s *Server) enqueueFamilyPushForRetry(accountID string, channelType core.EventType, chatID, text, reason string) {
 	slog.Warn("family_push: deferred to retry queue",
-		"tenant", tenantID, "channel", channelType, "reason", reason)
+		"account", accountID, "channel", channelType, "reason", reason)
 	if channelType == core.EventKakaoTalk {
 		return
 	}
-	if qErr := s.store.EnqueueResponse(tenantID, string(channelType), chatID, text); qErr != nil {
-		slog.Error("family_push: enqueue failed", "tenant", tenantID, "channel", channelType, "error", qErr)
+	if qErr := s.store.EnqueueResponse(accountID, string(channelType), chatID, text); qErr != nil {
+		slog.Error("family_push: enqueue failed", "account", accountID, "channel", channelType, "error", qErr)
 	}
 }
 
@@ -628,24 +628,24 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 				continue
 			}
 			for _, p := range pending {
-				tenantID := p.TenantID
-				if tenantID == "" {
+				accountID := p.AccountID
+				if accountID == "" {
 					// Pre-migration rows: safe to route to default ONLY while
-					// the daemon is single-tenant. Once a second tenant is
-					// registered, an empty tenant_id is ambiguous and could
+					// the daemon is single-account. Once a second account is
+					// registered, an empty account_id is ambiguous and could
 					// leak across the privacy boundary (spec C1) — drop it
 					// instead of guessing. Uses MarkResponseDelivered for
 					// cleanup until a dedicated dropped-audit table is
 					// introduced (Plan B).
-					if len(s.tenants.Sessions()) > 1 {
-						slog.Warn("retry: PERMANENTLY dropping pending row with empty tenant_id (C1 privacy guard)",
-							"id", p.ID, "chat_id", p.ChatID, "tenants", len(s.tenants.Sessions()))
+					if len(s.accounts.Sessions()) > 1 {
+						slog.Warn("retry: PERMANENTLY dropping pending row with empty account_id (C1 privacy guard)",
+							"id", p.ID, "chat_id", p.ChatID, "accounts", len(s.accounts.Sessions()))
 						_ = s.store.MarkResponseDelivered(p.ID)
 						continue
 					}
-					tenantID = DefaultTenantID
+					accountID = DefaultAccountID
 				}
-				ch, ok := s.spawner.GetChannel(tenantID, core.EventType(p.EventType))
+				ch, ok := s.spawner.GetChannel(accountID, core.EventType(p.EventType))
 				if !ok {
 					// Channel absent — do NOT drop. Leave in queue for next tick.
 					continue
