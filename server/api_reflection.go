@@ -96,13 +96,20 @@ func (s *Server) handleReflectionClear(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/v1/reflection/run — trigger reflection cycle manually.
+//
+// Routes through Scheduler.TriggerReflectionTick so the manual run
+// exercises the same path as the scheduled daily tick: reflection
+// analysis, evolution check, AND weekly-report delivery. Calling
+// engine.RunReflectionCycle directly (the prior shape) silently
+// skipped weekly delivery, so the docs/index.html promise of the
+// weekly Telegram report could only be tested by waiting for the
+// real Sunday cron firing.
 func (s *Server) handleReflectionRun(w http.ResponseWriter, r *http.Request) {
-	cfg := s.getConfig()
-	if err := engine.RunReflectionCycle(r.Context(), s.session, &cfg.Reflection); err != nil {
-		slog.Error("reflection manual trigger failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "reflection cycle failed")
+	if s.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "scheduler not initialized")
 		return
 	}
+	s.scheduler.TriggerReflectionTick(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
