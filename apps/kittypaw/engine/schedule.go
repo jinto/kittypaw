@@ -92,19 +92,40 @@ func (s *Scheduler) runReflectionLoop(ctx context.Context) {
 	}
 }
 
+// TriggerReflectionTick runs the reflection + evolution + weekly-report
+// cycle on demand, bypassing the daily cron gate. Used by the manual
+// HTTP trigger (POST /api/v1/reflection/run) so a single button press
+// exercises the same delivery path the daily scheduler uses — without
+// it, the manual trigger would only run RunReflectionCycle and silently
+// skip the weekly-report dispatch that scheduled runs include.
+//
+// Weekly-report dedup (23h last-run) still applies so a manual trigger
+// during the same weekday window does not double-send. Tests verify by
+// resetting the __weekly_report__ last-run before the call.
+func (s *Scheduler) TriggerReflectionTick(ctx context.Context) {
+	s.runReflectionTick(ctx, true)
+}
+
 // reflectionTick runs one reflection + evolution check with panic recovery
 // so a failure in the daily cycle does not exit the reflection goroutine
 // for the whole process lifetime.
 func (s *Scheduler) reflectionTick(ctx context.Context) {
+	s.runReflectionTick(ctx, false)
+}
+
+// runReflectionTick is the shared body. force=true skips the daily-cron
+// "due" gate so manual triggers can fire any hour; the per-feature dedup
+// (23h last-run for both reflection and weekly report) still applies.
+func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			RecoverTenantPanic(s.session, "scheduler.reflection", r)
 		}
 	}()
-	if !s.isReflectionDue() {
+	if !force && !s.isReflectionDue() {
 		return
 	}
-	slog.Info("scheduler: running reflection cycle")
+	slog.Info("scheduler: running reflection cycle", "manual", force)
 	if err := RunReflectionCycle(ctx, s.session, &s.session.Config.Reflection); err != nil {
 		slog.Error("scheduler: reflection cycle failed", "error", err)
 	}
