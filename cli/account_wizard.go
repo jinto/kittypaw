@@ -11,34 +11,34 @@ import (
 	"golang.org/x/term"
 )
 
-// needsTenantPrompt returns true when `tenant add` was invoked without enough
+// needsAccountPrompt returns true when `account add` was invoked without enough
 // info to proceed unattended: no Telegram token source AND no LLM key (and the
-// tenant is not a family coordinator). In that state we'd otherwise reject
+// account is not a family coordinator). In that state we'd otherwise reject
 // the command — the interactive prompt is a friendlier path.
-func needsTenantPrompt(f *tenantAddFlags) bool {
+func needsAccountPrompt(f *accountAddFlags) bool {
 	if f.isFamily {
 		return false
 	}
-	hasTokenSource := f.telegramToken != "" || f.telegramTokenStdin || os.Getenv(tenantEnvBotToken) != ""
+	hasTokenSource := f.telegramToken != "" || f.telegramTokenStdin || os.Getenv(accountEnvBotToken) != ""
 	hasLLM := f.llmAPIKey != "" || f.llmProvider == "local"
 	return !hasTokenSource && !hasLLM
 }
 
-// promptTenantSetup walks the user through 4 minimal questions and writes
-// the answers back into f. Mutates f directly so the existing runTenantAdd
+// promptAccountSetup walks the user through 4 minimal questions and writes
+// the answers back into f. Mutates f directly so the existing runAccountAdd
 // flow can pick up the values without further branching.
 //
 // Steps: telegram token → LLM provider → LLM api-key (skipped for local) → LLM model.
-// Admin chat ID is left for runTenantAdd's auto-detect (FetchTelegramChatID).
+// Admin chat ID is left for runAccountAdd's auto-detect (FetchTelegramChatID).
 //
 // Secrets (telegram token, api-key) are read with terminal echo disabled when
 // stdin is a TTY — keeps shoulder-surfers and scrollback buffers from picking
 // up the value. Tests use a non-TTY io.Reader and exercise the scanner path.
-func promptTenantSetup(stdin io.Reader, stdout io.Writer, f *tenantAddFlags) error {
+func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) error {
 	scanner := bufio.NewScanner(stdin)
 
 	_, _ = fmt.Fprintln(stdout)
-	_, _ = fmt.Fprintln(stdout, "  새 tenant 설정 — 4 단계 질문")
+	_, _ = fmt.Fprintln(stdout, "  새 account 설정 — 4 단계 질문")
 	_, _ = fmt.Fprintln(stdout)
 
 	// [1/4] Telegram bot token (secret — echo off in TTY)

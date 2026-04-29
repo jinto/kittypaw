@@ -724,7 +724,7 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/reload
 // ---------------------------------------------------------------------------
 
-// handleReload reloads config.toml and reconciles each tenant's channel set.
+// handleReload reloads config.toml and reconciles each account's channel set.
 //
 // Load-bearing sync contract (pinned by TestHandleReload_WaitsForReconcile):
 // callers — notably cli/cmd_setup.maybeReloadDaemon → runChat — assume this
@@ -733,17 +733,17 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // NOT convert Reconcile to a goroutine without first updating the CLI
 // wiring AND TestHandleReload_WaitsForReconcile.
 //
-// Validation contract (symmetric with StartChannels and AddTenant): the
-// proposed config is checked against live tenants BEFORE any state swap.
-// A duplicate Telegram bot_token or a family tenant with channels is
+// Validation contract (symmetric with StartChannels and AddAccount): the
+// proposed config is checked against live accounts BEFORE any state swap.
+// A duplicate Telegram bot_token or a family account with channels is
 // rejected with 409 Conflict, leaving s.config and the spawner untouched.
 // Pinned by TestHandleReload_DuplicateTelegramToken_Rejects and
 // TestHandleReload_FamilyWithChannels_Rejects.
 //
 // Serialization contract: the entire validate→swap→reconcile sequence
-// runs under tenantMu. Releasing the lock between snapshot and reconcile
-// would open a TOCTOU window where a concurrent AddTenant validates
-// against the stale default-tenant channel list, passes, and spawns a
+// runs under accountMu. Releasing the lock between snapshot and reconcile
+// would open a TOCTOU window where a concurrent AddAccount validates
+// against the stale default-account channel list, passes, and spawns a
 // duplicate bot that this reload was about to introduce.
 func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	cfgPath, err := core.ConfigPath()
@@ -757,49 +757,49 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	s.tenantMu.Lock()
-	defer s.tenantMu.Unlock()
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
 
-	// Build the would-be-final snapshot (default tenant substituted with
-	// the proposed cfg, all other tenants as-is) and run the same two
-	// validators StartChannels / AddTenant do.
-	snapshot := make(map[string][]core.ChannelConfig, len(s.tenantList)+1)
-	tenants := make([]*core.Tenant, 0, len(s.tenantList)+1)
+	// Build the would-be-final snapshot (default account substituted with
+	// the proposed cfg, all other accounts as-is) and run the same two
+	// validators StartChannels / AddAccount do.
+	snapshot := make(map[string][]core.ChannelConfig, len(s.accountList)+1)
+	accounts := make([]*core.Account, 0, len(s.accountList)+1)
 	defaultSeen := false
-	for _, peer := range s.tenantList {
+	for _, peer := range s.accountList {
 		if peer == nil || peer.Config == nil {
 			continue
 		}
-		if peer.ID == DefaultTenantID {
+		if peer.ID == DefaultAccountID {
 			// Substitute a proposed copy so validators see the would-be-final
 			// state without mutating the live pointer (rejection must leave
-			// the current default tenant config intact).
-			proposedTenant := *peer
+			// the current default account config intact).
+			proposedAccount := *peer
 			proposedCfg := *cfg
-			proposedTenant.Config = &proposedCfg
-			tenants = append(tenants, &proposedTenant)
+			proposedAccount.Config = &proposedCfg
+			accounts = append(accounts, &proposedAccount)
 			snapshot[peer.ID] = cfg.Channels
 			defaultSeen = true
 		} else {
-			tenants = append(tenants, peer)
+			accounts = append(accounts, peer)
 			snapshot[peer.ID] = peer.Config.Channels
 		}
 	}
 	if !defaultSeen {
-		// A single-tenant install booted with a non-"default" tenant ID
-		// (server.New falls back to tenants[0] as the default-deps anchor).
+		// A single-account install booted with a non-"default" account ID
+		// (server.New falls back to accounts[0] as the default-deps anchor).
 		// Validate the proposed cfg against the live peer so a collision
 		// with its channels is still caught.
-		tenants = append(tenants, &core.Tenant{ID: DefaultTenantID, Config: cfg})
-		snapshot[DefaultTenantID] = cfg.Channels
+		accounts = append(accounts, &core.Account{ID: DefaultAccountID, Config: cfg})
+		snapshot[DefaultAccountID] = cfg.Channels
 	}
 
-	if err := core.ValidateTenantChannels(snapshot); err != nil {
+	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		slog.Error("reload rejected", "reason", "channel_duplicate", "error", err)
 		writeError(w, http.StatusConflict, "channel validation: "+err.Error())
 		return
 	}
-	if err := core.ValidateFamilyTenants(tenants); err != nil {
+	if err := core.ValidateFamilyAccounts(accounts); err != nil {
 		slog.Error("reload rejected", "reason", "family_with_channels", "error", err)
 		writeError(w, http.StatusConflict, "family validation: "+err.Error())
 		return
@@ -815,7 +815,7 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 
 	result := map[string]any{"success": true}
 	if reconcile := s.reconcileFunc(); reconcile != nil {
-		if err := reconcile(DefaultTenantID, cfg.Channels); err != nil {
+		if err := reconcile(DefaultAccountID, cfg.Channels); err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
 		}

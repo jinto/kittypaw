@@ -186,7 +186,7 @@ func TestRunTurnOwner_PanicEvictsAndRePanics(t *testing.T) {
 	// waiters see a real error, (b) close state.done so they wake,
 	// (c) evict the poisoned cache entry so retries take the cold
 	// path instead of inheriting the empty-result poison, and (d)
-	// re-panic so upstream RecoverTenantPanic surfaces the failure.
+	// re-panic so upstream RecoverAccountPanic surfaces the failure.
 	s := &Session{}
 	state := &turnState{done: make(chan struct{})}
 	s.turnCache.Store("owner-panic", state)

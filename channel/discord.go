@@ -63,7 +63,7 @@ type discordUser struct {
 // DiscordChannel implements Channel using the Discord Gateway WebSocket
 // and REST API.
 type DiscordChannel struct {
-	tenantID  string
+	accountID string
 	botToken  string
 	client    *http.Client
 	channelID string
@@ -71,13 +71,13 @@ type DiscordChannel struct {
 	mu        sync.Mutex
 }
 
-// NewDiscord creates a DiscordChannel with the given bot token. tenantID
-// is stamped on every emitted Event for TenantRouter dispatch.
-func NewDiscord(tenantID, botToken string) *DiscordChannel {
+// NewDiscord creates a DiscordChannel with the given bot token. accountID
+// is stamped on every emitted Event for AccountRouter dispatch.
+func NewDiscord(accountID, botToken string) *DiscordChannel {
 	return &DiscordChannel{
-		tenantID: tenantID,
-		botToken: botToken,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		accountID: accountID,
+		botToken:  botToken,
+		client:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -221,9 +221,9 @@ func (d *DiscordChannel) handleMessage(ctx context.Context, data json.RawMessage
 	}
 
 	event := core.Event{
-		Type:     core.EventDiscord,
-		TenantID: d.tenantID,
-		Payload:  raw,
+		Type:      core.EventDiscord,
+		AccountID: d.accountID,
+		Payload:   raw,
 	}
 
 	select {

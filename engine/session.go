@@ -64,7 +64,7 @@ type Session struct {
 	Sandbox          *sandbox.Sandbox
 	Store            *store.Store
 	Config           *core.Config
-	BaseDir          string             // tenant base directory (e.g. ~/.kittypaw/tenants/alice/)
+	BaseDir          string             // account base directory (e.g. ~/.kittypaw/accounts/alice/)
 	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
 	Budget           *SharedTokenBudget // shared across orchestration, MoA, File.summary
 	// SummaryFlight dedups concurrent File.summary misses; nil → per-call group.
@@ -74,24 +74,24 @@ type Session struct {
 	APITokenMgr    *core.APITokenManager    // nil when API token management is not configured
 	allowedPaths   atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
 
-	// TenantID is the tenant this Session belongs to. Empty only for
-	// legacy single-tenant callers that haven't migrated to the tenant
+	// AccountID is the account this Session belongs to. Empty only for
+	// legacy single-account callers that haven't migrated to the account
 	// router yet. Share.read / Fanout.* use this as the *reader* identity
-	// when consulting the owner tenant's Share allowlist.
-	TenantID string
-	// TenantRegistry lets the Session look up peer tenants (for cross-
-	// tenant reads + fanout) without coupling to server state. Nil in
-	// single-tenant mode; Share.read returns an "unavailable" error
+	// when consulting the owner account's Share allowlist.
+	AccountID string
+	// AccountRegistry lets the Session look up peer accounts (for cross-
+	// account reads + fanout) without coupling to server state. Nil in
+	// single-account mode; Share.read returns an "unavailable" error
 	// rather than panicking when the field is unset.
-	TenantRegistry *core.TenantRegistry
-	// Fanout is non-nil only for the family tenant. When nil, the sandbox
+	AccountRegistry *core.AccountRegistry
+	// Fanout is non-nil only for the family account. When nil, the sandbox
 	// skips the Fanout global so personal skills see
 	// `typeof Fanout === "undefined"`.
 	Fanout core.Fanout
 
-	// Health tracks tenant-level liveness for panic isolation (AC-T8).
-	// nil on bare-struct test fixtures; RecoverTenantPanic /
-	// MarkTenantReady are nil-safe, so callers don't need to guard.
+	// Health tracks account-level liveness for panic isolation (AC-T8).
+	// nil on bare-struct test fixtures; RecoverAccountPanic /
+	// MarkAccountReady are nil-safe, so callers don't need to guard.
 	Health *core.HealthState
 
 	// Pipeline carries multi-turn state for the deterministic-branch
@@ -108,7 +108,7 @@ type Session struct {
 	turnCache sync.Map
 }
 
-// sandboxOptions returns the sandbox.Options that govern which tenant-scoped
+// sandboxOptions returns the sandbox.Options that govern which account-scoped
 // JS globals (Share, Fanout) are exposed for this session. Centralized so
 // every sandbox callsite stays consistent — a personal session that wires
 // Share but not Fanout (or vice versa) would silently break the I5 invariant.
@@ -172,7 +172,7 @@ func (s *Session) RefreshAllowedPaths() error {
 // retry case the cache exists for would observe a context-canceled
 // result), bounded by turnRunMaxTime so an abandoned turn cannot run
 // forever. Owner panics are recovered, surface as state.err for
-// waiters, evict the poisoned entry, and re-panic so upstream tenant
+// waiters, evict the poisoned entry, and re-panic so upstream account
 // panic recovery records the failure.
 //
 // The cache entry is evicted after turnCacheTTL by a time.AfterFunc;
@@ -1057,7 +1057,7 @@ func ResolveProfileName(
 }
 
 // loadProfileForPrompt loads a profile from disk and enriches it with config nick.
-// baseDir is the tenant's base directory; falls back to ConfigDir() if empty.
+// baseDir is the account's base directory; falls back to ConfigDir() if empty.
 func loadProfileForPrompt(profileName string, config *core.Config, baseDir string) *core.Profile {
 	base, err := core.ResolveBaseDir(baseDir)
 	if err != nil {

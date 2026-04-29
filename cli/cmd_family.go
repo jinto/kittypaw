@@ -37,15 +37,15 @@ type memberEntry struct {
 }
 
 type seenSet struct {
-	tenants map[string]struct{}
-	tokens  map[string]string // token → tenantID (for dedup error messages)
+	accounts map[string]struct{}
+	tokens   map[string]string // token → accountID (for dedup error messages)
 }
 
 func newFamilyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "family",
-		Short: "Manage the family (household) tenants",
-		Long:  "Bootstrap and manage the household's tenants: one personal tenant per member plus an optional family coordinator.",
+		Short: "Manage the family (household) accounts",
+		Long:  "Bootstrap and manage the household's accounts: one personal account per member plus an optional family coordinator.",
 	}
 	cmd.AddCommand(newFamilyInitCmd())
 	return cmd
@@ -57,13 +57,13 @@ func newFamilyInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Interactively onboard an entire household in one go",
 		Long: `Walk through the family one member at a time — prompting for each member's
-name, Telegram bot token, and admin chat_id — and provision a personal tenant
-per member under ~/.kittypaw/tenants/. A shared "family" coordinator tenant is
+name, Telegram bot token, and admin chat_id — and provision a personal account
+per member under ~/.kittypaw/accounts/. A shared "family" coordinator account is
 created at the end (skip with --no-family).
 
-This is the bulk equivalent of running "kittypaw tenant add" N times. It reuses
+This is the bulk equivalent of running "kittypaw account add" N times. It reuses
 the same staging→rename atomic provisioning and, if a daemon is already running,
-hot-activates each tenant without a restart.`,
+hot-activates each account without a restart.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -73,7 +73,7 @@ hot-activates each tenant without a restart.`,
 		},
 	}
 	cmd.Flags().IntVar(&f.max, "max", 10, "maximum number of members to onboard before stopping")
-	cmd.Flags().BoolVar(&f.noFamily, "no-family", false, "skip creation of the shared family tenant")
+	cmd.Flags().BoolVar(&f.noFamily, "no-family", false, "skip creation of the shared family account")
 	return cmd
 }
 
@@ -100,21 +100,21 @@ func runFamilyInit(ctx context.Context, f *familyInitFlags, interactive bool,
 	if err != nil {
 		return fmt.Errorf("resolve config dir: %w", err)
 	}
-	tenantsDir := filepath.Join(cfgDir, "tenants")
+	accountsDir := filepath.Join(cfgDir, "accounts")
 
-	seen, err := scanExistingTenants(tenantsDir)
+	seen, err := scanExistingAccounts(accountsDir)
 	if err != nil {
-		return fmt.Errorf("scan tenants: %w", err)
+		return fmt.Errorf("scan accounts: %w", err)
 	}
 
 	_, _ = fmt.Fprint(stdout, botFatherHint)
 
 	reader := bufio.NewReader(stdin)
-	entries := promptMembers(ctx, reader, stdout, stderr, tenantsDir, f.max, seen)
+	entries := promptMembers(ctx, reader, stdout, stderr, accountsDir, f.max, seen)
 
 	if !f.noFamily {
 		if err := ctx.Err(); err == nil {
-			entries = append(entries, createFamilyTenant(tenantsDir, seen, stdout, stderr))
+			entries = append(entries, createFamilyAccount(accountsDir, seen, stdout, stderr))
 		}
 	}
 
@@ -128,7 +128,7 @@ func runFamilyInit(ctx context.Context, f *familyInitFlags, interactive bool,
 // printSummary renders the OK/SKIPPED/FAILED buckets and returns the count
 // of failed entries. skipped_existing does not count — an admin re-running
 // the wizard to add one more person should not see a red exit code from
-// already-onboarded tenants.
+// already-onboarded accounts.
 func printSummary(entries []memberEntry, stdout io.Writer) int {
 	var ok, skipped, failed []memberEntry
 	for _, e := range entries {
@@ -173,7 +173,7 @@ func joinNames(entries []memberEntry) string {
 // Validation errors re-prompt instead of aborting so one typo doesn't force
 // the admin to restart the whole wizard.
 func promptMembers(ctx context.Context, reader *bufio.Reader, stdout, stderr io.Writer,
-	tenantsDir string, max int, seen *seenSet) []memberEntry {
+	accountsDir string, max int, seen *seenSet) []memberEntry {
 	var entries []memberEntry
 
 	for len(entries) < max {
@@ -186,7 +186,7 @@ func promptMembers(ctx context.Context, reader *bufio.Reader, stdout, stderr io.
 				if s == "" {
 					return nil // sentinel: "" means stop
 				}
-				return core.ValidateTenantID(s)
+				return core.ValidateAccountID(s)
 			})
 		if !ok || name == "" {
 			return entries
@@ -198,7 +198,7 @@ func promptMembers(ctx context.Context, reader *bufio.Reader, stdout, stderr io.
 					return errors.New("invalid telegram bot token format (expected e.g. 12345:AbCdEf...)")
 				}
 				if owner := seen.tokens[s]; owner != "" {
-					return fmt.Errorf("token already used by tenant %q (duplicate)", owner)
+					return fmt.Errorf("token already used by account %q (duplicate)", owner)
 				}
 				return nil
 			})
@@ -217,10 +217,10 @@ func promptMembers(ctx context.Context, reader *bufio.Reader, stdout, stderr io.
 			return entries
 		}
 
-		entry := provisionMember(tenantsDir, name, token, chatID, stdout, stderr)
+		entry := provisionMember(accountsDir, name, token, chatID, stdout, stderr)
 		entries = append(entries, entry)
 		if entry.Status == statusOK {
-			seen.tenants[name] = struct{}{}
+			seen.accounts[name] = struct{}{}
 			seen.tokens[token] = name
 		}
 	}
@@ -249,10 +249,10 @@ func promptUntilValid(reader *bufio.Reader, stdout, stderr io.Writer,
 	}
 }
 
-// provisionMember turns one prompted member into an on-disk tenant.
+// provisionMember turns one prompted member into an on-disk account.
 // Activation failures are treated as warnings (disk state is good; the
 // admin can restart the daemon later) rather than full failures.
-func provisionMember(tenantsDir, name, token, chatID string, stdout, stderr io.Writer) memberEntry {
+func provisionMember(accountsDir, name, token, chatID string, stdout, stderr io.Writer) memberEntry {
 	if !core.ValidateTelegramToken(token) {
 		return memberEntry{
 			Name:   name,
@@ -261,17 +261,17 @@ func provisionMember(tenantsDir, name, token, chatID string, stdout, stderr io.W
 		}
 	}
 
-	tt, err := core.InitTenant(tenantsDir, name, core.TenantOpts{
+	tt, err := core.InitAccount(accountsDir, name, core.AccountOpts{
 		TelegramToken: token,
 		AdminChatID:   chatID,
 	})
 	if err != nil {
-		if errors.Is(err, core.ErrTenantExists) {
-			_, _ = fmt.Fprintf(stderr, "warning: tenant %q already exists, skipping\n", name)
+		if errors.Is(err, core.ErrAccountExists) {
+			_, _ = fmt.Fprintf(stderr, "warning: account %q already exists, skipping\n", name)
 			return memberEntry{
 				Name:   name,
 				Status: statusSkippedExisting,
-				Reason: "tenant directory already present; not touched",
+				Reason: "account directory already present; not touched",
 			}
 		}
 		return memberEntry{
@@ -281,41 +281,41 @@ func provisionMember(tenantsDir, name, token, chatID string, stdout, stderr io.W
 		}
 	}
 
-	_, _ = fmt.Fprintf(stdout, "tenant %q created at %s\n", tt.ID, tt.BaseDir)
+	_, _ = fmt.Fprintf(stdout, "account %q created at %s\n", tt.ID, tt.BaseDir)
 
-	if err := activateTenantOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed for %q: %v\n", name, err)
 	}
 	return memberEntry{Name: name, Status: statusOK}
 }
 
-const familyTenantID = "family"
+const familyAccountID = "family"
 
-// createFamilyTenant provisions the household coordinator AFTER the
-// personal-member loop so a partial Ctrl-C doesn't leave a family tenant
+// createFamilyAccount provisions the household coordinator AFTER the
+// personal-member loop so a partial Ctrl-C doesn't leave a family account
 // with nobody to fan out to.
-func createFamilyTenant(tenantsDir string, seen *seenSet, stdout, stderr io.Writer) memberEntry {
-	if _, exists := seen.tenants[familyTenantID]; exists {
-		_, _ = fmt.Fprintf(stderr, "warning: tenant %q already exists, skipping\n", familyTenantID)
+func createFamilyAccount(accountsDir string, seen *seenSet, stdout, stderr io.Writer) memberEntry {
+	if _, exists := seen.accounts[familyAccountID]; exists {
+		_, _ = fmt.Fprintf(stderr, "warning: account %q already exists, skipping\n", familyAccountID)
 		return memberEntry{
-			Name:   familyTenantID,
+			Name:   familyAccountID,
 			Status: statusSkippedExisting,
-			Reason: "family tenant already present; not touched",
+			Reason: "family account already present; not touched",
 		}
 	}
 
-	tt, err := core.InitTenant(tenantsDir, familyTenantID, core.TenantOpts{IsFamily: true})
+	tt, err := core.InitAccount(accountsDir, familyAccountID, core.AccountOpts{IsFamily: true})
 	if err != nil {
-		if errors.Is(err, core.ErrTenantExists) {
+		if errors.Is(err, core.ErrAccountExists) {
 			// Defensive: seen set was stale (e.g. another process raced us).
 			return memberEntry{
-				Name:   familyTenantID,
+				Name:   familyAccountID,
 				Status: statusSkippedExisting,
-				Reason: "family tenant already present; not touched",
+				Reason: "family account already present; not touched",
 			}
 		}
 		return memberEntry{
-			Name:   familyTenantID,
+			Name:   familyAccountID,
 			Status: statusFailed,
 			Reason: err.Error(),
 		}
@@ -323,7 +323,7 @@ func createFamilyTenant(tenantsDir string, seen *seenSet, stdout, stderr io.Writ
 
 	// Seed an empty [share.family] stanza as a discoverable placeholder —
 	// absent vs. empty reads the same at runtime, but the admin can see
-	// where to grant cross-tenant reads without hand-editing TOML.
+	// where to grant cross-account reads without hand-editing TOML.
 	cfgPath := filepath.Join(tt.BaseDir, "config.toml")
 	cfg, err := core.LoadConfig(cfgPath)
 	if err != nil {
@@ -332,38 +332,38 @@ func createFamilyTenant(tenantsDir string, seen *seenSet, stdout, stderr io.Writ
 		if cfg.Share == nil {
 			cfg.Share = map[string]core.ShareConfig{}
 		}
-		if _, ok := cfg.Share[familyTenantID]; !ok {
-			cfg.Share[familyTenantID] = core.ShareConfig{Read: []string{}}
+		if _, ok := cfg.Share[familyAccountID]; !ok {
+			cfg.Share[familyAccountID] = core.ShareConfig{Read: []string{}}
 		}
 		if werr := core.WriteConfigAtomic(cfg, cfgPath); werr != nil {
 			_, _ = fmt.Fprintf(stderr, "warning: family share stanza seed skipped (write: %v)\n", werr)
 		}
 	}
 
-	_, _ = fmt.Fprintf(stdout, "family tenant created at %s\n", tt.BaseDir)
+	_, _ = fmt.Fprintf(stdout, "family account created at %s\n", tt.BaseDir)
 
-	if err := activateTenantOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed for family: %v\n", err)
 	}
 
-	return memberEntry{Name: familyTenantID, Status: statusOK}
+	return memberEntry{Name: familyAccountID, Status: statusOK}
 }
 
-// scanExistingTenants snapshots the tenants dir so the wizard can skip
+// scanExistingAccounts snapshots the accounts dir so the wizard can skip
 // duplicate names and reject tokens that a peer already claimed.
-func scanExistingTenants(tenantsDir string) (*seenSet, error) {
+func scanExistingAccounts(accountsDir string) (*seenSet, error) {
 	seen := &seenSet{
-		tenants: make(map[string]struct{}),
-		tokens:  make(map[string]string),
+		accounts: make(map[string]struct{}),
+		tokens:   make(map[string]string),
 	}
 
-	discovered, err := core.DiscoverTenants(tenantsDir)
+	discovered, err := core.DiscoverAccounts(accountsDir)
 	if err != nil {
-		return nil, fmt.Errorf("discover tenants: %w", err)
+		return nil, fmt.Errorf("discover accounts: %w", err)
 	}
 
 	for _, t := range discovered {
-		seen.tenants[t.ID] = struct{}{}
+		seen.accounts[t.ID] = struct{}{}
 		if t.Config == nil {
 			continue
 		}

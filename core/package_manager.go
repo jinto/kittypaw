@@ -22,7 +22,7 @@ func NewPackageManager(secrets *SecretsStore) *PackageManager {
 }
 
 // NewPackageManagerFrom creates a PackageManager with an explicit base directory
-// for multi-tenant isolation.
+// for multi-account isolation.
 func NewPackageManagerFrom(baseDir string, secrets *SecretsStore) *PackageManager {
 	return &PackageManager{baseDir: baseDir, secrets: secrets}
 }

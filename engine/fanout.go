@@ -14,7 +14,7 @@ import (
 // exposes the global still can't reach a nil receiver.
 func executeFanout(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
 	if s.Fanout == nil {
-		return jsonResult(map[string]any{"error": "Fanout is not available for this tenant"})
+		return jsonResult(map[string]any{"error": "Fanout is not available for this account"})
 	}
 
 	parsePayload := func(idx int) (core.FanoutPayload, error) {
@@ -34,17 +34,17 @@ func executeFanout(ctx context.Context, call core.SkillCall, s *Session) (string
 	switch call.Method {
 	case "send":
 		if len(call.Args) < 2 {
-			return jsonResult(map[string]any{"error": "Fanout.send(tenantID, payload) requires two arguments"})
+			return jsonResult(map[string]any{"error": "Fanout.send(accountID, payload) requires two arguments"})
 		}
-		var tenantID string
-		if err := json.Unmarshal(call.Args[0], &tenantID); err != nil {
-			return jsonResult(map[string]any{"error": "tenantID must be a string"})
+		var accountID string
+		if err := json.Unmarshal(call.Args[0], &accountID); err != nil {
+			return jsonResult(map[string]any{"error": "accountID must be a string"})
 		}
 		payload, err := parsePayload(1)
 		if err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
-		if err := s.Fanout.Send(ctx, tenantID, payload); err != nil {
+		if err := s.Fanout.Send(ctx, accountID, payload); err != nil {
 			return jsonResult(map[string]any{"error": err.Error()})
 		}
 		return jsonResult(map[string]any{"success": true})

@@ -369,7 +369,7 @@ func TestRemoveFile_PurgesSummaryCache(t *testing.T) {
 		InputHash:   "ffffffffcafef00d",
 		Model:       "test-model",
 		PromptHash:  currentPromptHash,
-		Result:      "other-tenant summary",
+		Result:      "other-account summary",
 		Metadata:    "{}",
 		UsageInput:  1,
 		UsageOutput: 2,

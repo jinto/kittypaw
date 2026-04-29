@@ -21,15 +21,15 @@ const stopTimeout = 10 * time.Second
 // is not currently running.
 var ErrChannelNotFound = errors.New("channel not found")
 
-// spawnerKey composites tenant ID and channel type into the lookup key.
-// Each tenant hosts at most one channel per type.
+// spawnerKey composites account ID and channel type into the lookup key.
+// Each account hosts at most one channel per type.
 type spawnerKey struct {
-	TenantID    string
+	AccountID   string
 	ChannelType string
 }
 
 // runningChannel tracks a single active channel and the machinery needed
-// to stop it cleanly. The owning tenant is encoded in the spawnerKey used
+// to stop it cleanly. The owning account is encoded in the spawnerKey used
 // to look up this struct, so it is not repeated here.
 type runningChannel struct {
 	cancel func()             // cancels the context passed to Start
@@ -40,10 +40,10 @@ type runningChannel struct {
 
 // ChannelStatus is the API-facing representation of a running channel.
 type ChannelStatus struct {
-	TenantID string `json:"tenant_id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Running  bool   `json:"running"`
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Running   bool   `json:"running"`
 }
 
 // ChannelSpawner manages the lifecycle of messaging channels.
@@ -68,13 +68,13 @@ func NewChannelSpawner(baseCtx context.Context, eventCh chan<- core.Event) *Chan
 	}
 }
 
-// TrySpawn starts a channel for tenantID if one with the same
-// (tenant, type) is not already running. Idempotent — returns nil if
+// TrySpawn starts a channel for accountID if one with the same
+// (account, type) is not already running. Idempotent — returns nil if
 // already running. The channel goroutine's context is derived from the
 // spawner's baseCtx, not the caller's context, so HTTP request contexts
 // won't kill long-lived channels.
-func (s *ChannelSpawner) TrySpawn(tenantID string, ch channel.Channel, cfg core.ChannelConfig) error {
-	key := spawnerKey{TenantID: tenantID, ChannelType: ch.Name()}
+func (s *ChannelSpawner) TrySpawn(accountID string, ch channel.Channel, cfg core.ChannelConfig) error {
+	key := spawnerKey{AccountID: accountID, ChannelType: ch.Name()}
 
 	s.mu.Lock()
 	if _, exists := s.running[key]; exists {
@@ -94,25 +94,25 @@ func (s *ChannelSpawner) TrySpawn(tenantID string, ch channel.Channel, cfg core.
 	s.mu.Unlock()
 
 	slog.Info("channel spawned",
-		"tenant", tenantID, "name", key.ChannelType)
+		"account", accountID, "name", key.ChannelType)
 	go func() {
 		defer close(done)
 		if err := ch.Start(chCtx, s.eventCh); err != nil && chCtx.Err() == nil {
 			slog.Error("channel stopped unexpectedly",
-				"tenant", tenantID, "name", key.ChannelType, "error", err)
+				"account", accountID, "name", key.ChannelType, "error", err)
 		}
 	}()
 
 	return nil
 }
 
-// Stop cancels a running channel for (tenantID, channelType) and waits
+// Stop cancels a running channel for (accountID, channelType) and waits
 // for its goroutine to exit.
 //
 // Lock discipline: the write lock is released BEFORE blocking on <-done.
 // This prevents deadlocking concurrent GetChannel/List callers.
-func (s *ChannelSpawner) Stop(tenantID, channelType string) error {
-	key := spawnerKey{TenantID: tenantID, ChannelType: channelType}
+func (s *ChannelSpawner) Stop(accountID, channelType string) error {
+	key := spawnerKey{AccountID: accountID, ChannelType: channelType}
 	s.mu.Lock()
 	rc, ok := s.running[key]
 	if !ok {
@@ -126,35 +126,35 @@ func (s *ChannelSpawner) Stop(tenantID, channelType string) error {
 	select {
 	case <-rc.done:
 		slog.Info("channel stopped",
-			"tenant", tenantID, "name", channelType)
+			"account", accountID, "name", channelType)
 	case <-time.After(stopTimeout):
 		slog.Error("channel stop: timed out waiting for goroutine",
-			"tenant", tenantID, "name", channelType)
+			"account", accountID, "name", channelType)
 	}
 	return nil
 }
 
-// GetChannel returns the Channel for (tenantID, eventType), or nil and
-// false if not running. Tenants are isolated: a channel registered under
-// tenant A cannot be reached by passing tenant B's ID.
-func (s *ChannelSpawner) GetChannel(tenantID string, eventType core.EventType) (channel.Channel, bool) {
+// GetChannel returns the Channel for (accountID, eventType), or nil and
+// false if not running. Accounts are isolated: a channel registered under
+// account A cannot be reached by passing account B's ID.
+func (s *ChannelSpawner) GetChannel(accountID string, eventType core.EventType) (channel.Channel, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rc, ok := s.running[spawnerKey{TenantID: tenantID, ChannelType: string(eventType)}]
+	rc, ok := s.running[spawnerKey{AccountID: accountID, ChannelType: string(eventType)}]
 	if !ok {
 		return nil, false
 	}
 	return rc.ch, true
 }
 
-// ReplaceSpawn stops the existing channel for (tenantID, ch.Name()) if
+// ReplaceSpawn stops the existing channel for (accountID, ch.Name()) if
 // any and spawns a new one. Used when a channel's config has changed.
-func (s *ChannelSpawner) ReplaceSpawn(tenantID string, ch channel.Channel, cfg core.ChannelConfig) error {
+func (s *ChannelSpawner) ReplaceSpawn(accountID string, ch channel.Channel, cfg core.ChannelConfig) error {
 	name := ch.Name()
-	if err := s.Stop(tenantID, name); err != nil && !errors.Is(err, ErrChannelNotFound) {
-		return fmt.Errorf("stop %s/%s: %w", tenantID, name, err)
+	if err := s.Stop(accountID, name); err != nil && !errors.Is(err, ErrChannelNotFound) {
+		return fmt.Errorf("stop %s/%s: %w", accountID, name, err)
 	}
-	return s.TrySpawn(tenantID, ch, cfg)
+	return s.TrySpawn(accountID, ch, cfg)
 }
 
 // configEqual compares two ChannelConfig values for diff purposes.
@@ -165,19 +165,19 @@ func configEqual(a, b core.ChannelConfig) bool {
 		a.KakaoWSURL == b.KakaoWSURL
 }
 
-// Reconcile compares the currently running channels for tenantID against
+// Reconcile compares the currently running channels for accountID against
 // the desired configs and starts, stops, or replaces channels to match.
-// Channels owned by other tenants are untouched.
+// Channels owned by other accounts are untouched.
 //
 // Serialized via reconcileMu to prevent concurrent calls from corrupting
 // state. Best-effort: individual failures are aggregated, not fatal.
 // WebSocket channels are excluded (port-binding makes hot-reload unsafe).
-func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig) error {
+func (s *ChannelSpawner) Reconcile(accountID string, configs []core.ChannelConfig) error {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
 
-	// Inject Kakao relay WS URL from the tenant's per-tenant secrets into channel configs.
-	core.InjectKakaoWSURL(tenantID, configs)
+	// Inject Kakao relay WS URL from the account's per-account secrets into channel configs.
+	core.InjectKakaoWSURL(accountID, configs)
 
 	// Build desired map keyed by channel type, filtering out WebSocket
 	// channels.
@@ -192,11 +192,11 @@ func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig
 
 	var errs []error
 
-	// Phase 1: Stop removed channels (only within this tenant).
+	// Phase 1: Stop removed channels (only within this account).
 	s.mu.RLock()
 	var toRemove []spawnerKey
 	for key := range s.running {
-		if key.TenantID != tenantID {
+		if key.AccountID != accountID {
 			continue
 		}
 		if _, ok := desired[key.ChannelType]; !ok {
@@ -206,17 +206,17 @@ func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig
 	s.mu.RUnlock()
 
 	for _, key := range toRemove {
-		if err := s.Stop(tenantID, key.ChannelType); err != nil {
+		if err := s.Stop(accountID, key.ChannelType); err != nil {
 			slog.Warn("reconcile: stop removed channel failed",
-				"tenant", tenantID, "name", key.ChannelType, "error", err)
+				"account", accountID, "name", key.ChannelType, "error", err)
 		}
 	}
 
-	// Phase 2: Replace changed channels (only within this tenant).
+	// Phase 2: Replace changed channels (only within this account).
 	s.mu.RLock()
 	var toReplace []core.ChannelConfig
 	for key, rc := range s.running {
-		if key.TenantID != tenantID {
+		if key.AccountID != accountID {
 			continue
 		}
 		if dcfg, ok := desired[key.ChannelType]; ok && !configEqual(rc.config, dcfg) {
@@ -226,33 +226,33 @@ func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig
 	s.mu.RUnlock()
 
 	for _, cfg := range toReplace {
-		ch, err := channel.FromConfig(tenantID, cfg)
+		ch, err := channel.FromConfig(accountID, cfg)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", cfg.ChannelType, err))
 			continue
 		}
-		if err := s.ReplaceSpawn(tenantID, ch, cfg); err != nil {
+		if err := s.ReplaceSpawn(accountID, ch, cfg); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", cfg.ChannelType, err))
 		}
 	}
 
-	// Phase 3: Spawn new channels (only within this tenant).
+	// Phase 3: Spawn new channels (only within this account).
 	s.mu.RLock()
 	var toAdd []core.ChannelConfig
 	for name, cfg := range desired {
-		if _, ok := s.running[spawnerKey{TenantID: tenantID, ChannelType: name}]; !ok {
+		if _, ok := s.running[spawnerKey{AccountID: accountID, ChannelType: name}]; !ok {
 			toAdd = append(toAdd, cfg)
 		}
 	}
 	s.mu.RUnlock()
 
 	for _, cfg := range toAdd {
-		ch, err := channel.FromConfig(tenantID, cfg)
+		ch, err := channel.FromConfig(accountID, cfg)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", cfg.ChannelType, err))
 			continue
 		}
-		if err := s.TrySpawn(tenantID, ch, cfg); err != nil {
+		if err := s.TrySpawn(accountID, ch, cfg); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", cfg.ChannelType, err))
 		}
 	}
@@ -260,7 +260,7 @@ func (s *ChannelSpawner) Reconcile(tenantID string, configs []core.ChannelConfig
 	return errors.Join(errs...)
 }
 
-// StopAll cancels all running channels across all tenants in parallel and
+// StopAll cancels all running channels across all accounts in parallel and
 // waits for them to exit with a single shared deadline. Used during
 // graceful shutdown.
 func (s *ChannelSpawner) StopAll() {
@@ -284,16 +284,16 @@ func (s *ChannelSpawner) StopAll() {
 		select {
 		case <-rc.done:
 			slog.Info("channel stopped",
-				"tenant", key.TenantID, "name", key.ChannelType)
+				"account", key.AccountID, "name", key.ChannelType)
 		case <-deadline:
 			slog.Error("channel stopAll: shared deadline exceeded",
-				"tenant", key.TenantID, "name", key.ChannelType)
+				"account", key.AccountID, "name", key.ChannelType)
 			return // remaining channels will be abandoned
 		}
 	}
 }
 
-// List returns the status of every running channel across all tenants.
+// List returns the status of every running channel across all accounts.
 func (s *ChannelSpawner) List() []ChannelStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -301,10 +301,10 @@ func (s *ChannelSpawner) List() []ChannelStatus {
 	statuses := make([]ChannelStatus, 0, len(s.running))
 	for key, rc := range s.running {
 		statuses = append(statuses, ChannelStatus{
-			TenantID: key.TenantID,
-			Name:     key.ChannelType,
-			Type:     string(rc.config.ChannelType),
-			Running:  true,
+			AccountID: key.AccountID,
+			Name:      key.ChannelType,
+			Type:      string(rc.config.ChannelType),
+			Running:   true,
 		})
 	}
 	return statuses

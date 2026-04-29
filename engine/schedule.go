@@ -64,7 +64,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 func (s *Scheduler) tickOnce(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			RecoverTenantPanic(s.session, "scheduler.tick", r)
+			RecoverAccountPanic(s.session, "scheduler.tick", r)
 		}
 	}()
 	s.checkAndRun(ctx)
@@ -119,7 +119,7 @@ func (s *Scheduler) reflectionTick(ctx context.Context) {
 func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			RecoverTenantPanic(s.session, "scheduler.reflection", r)
+			RecoverAccountPanic(s.session, "scheduler.reflection", r)
 		}
 	}()
 	if !force && !s.isReflectionDue() {
@@ -141,7 +141,7 @@ func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 	}
 
 	// Weekly report: if today matches WeeklyReportDay, emit the report
-	// to the tenant's first configured telegram channel + AdminChatIDs[0].
+	// to the account's first configured telegram channel + AdminChatIDs[0].
 	// Skipped silently when there's no telegram channel — the report is
 	// still queryable on demand via GET /api/v1/reflection/weekly-report.
 	s.deliverWeeklyReport(ctx)
@@ -202,7 +202,7 @@ func (s *Scheduler) deliverWeeklyReport(ctx context.Context) {
 	_ = s.session.Store.SetLastRun("__weekly_report__", time.Now())
 }
 
-// firstTelegramTarget returns the (bot_token, chat_id) of the tenant's
+// firstTelegramTarget returns the (bot_token, chat_id) of the account's
 // first telegram channel, or ("", "") when none is configured.
 func (s *Scheduler) firstTelegramTarget() (string, string) {
 	cfg := s.session.Config
@@ -267,7 +267,7 @@ func (s *Scheduler) checkAndRun(ctx context.Context) {
 			go func(sk core.SkillWithCode) {
 				defer s.wg.Done()
 				defer s.inflight.Delete(sk.Skill.Name)
-				runWithTenantRecover(s.session, "scheduler.runSkill", func() {
+				runWithAccountRecover(s.session, "scheduler.runSkill", func() {
 					s.runSkill(ctx, &sk)
 				})
 			}(sk)
@@ -310,7 +310,7 @@ func (s *Scheduler) checkPackages(ctx context.Context) {
 		go func(pkg core.SkillPackage) {
 			defer s.wg.Done()
 			defer s.inflight.Delete("pkg:" + pkg.Meta.ID)
-			runWithTenantRecover(s.session, "scheduler.runPackage", func() {
+			runWithAccountRecover(s.session, "scheduler.runPackage", func() {
 				s.runPackage(ctx, &pkg)
 			})
 		}(pkg)

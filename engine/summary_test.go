@@ -445,8 +445,8 @@ func TestSummary_BudgetExhaustion_ChargeAfterResponse(t *testing.T) {
 	}
 }
 
-// AC-12: two distinct stores ⇒ structural tenant isolation.
-func TestSummary_MultiTenantIsolation(t *testing.T) {
+// AC-12: two distinct stores ⇒ structural account isolation.
+func TestSummary_MultiAccountIsolation(t *testing.T) {
 	stA := openTestStore(t)
 	stB := openTestStore(t)
 	mock := newSummaryMock("any")
@@ -460,7 +460,7 @@ func TestSummary_MultiTenantIsolation(t *testing.T) {
 		t.Fatalf("B: %v", err)
 	}
 	if mock.calls() != 2 {
-		t.Errorf("each tenant must miss independently, got calls=%d want 2", mock.calls())
+		t.Errorf("each account must miss independently, got calls=%d want 2", mock.calls())
 	}
 }
 
@@ -482,7 +482,7 @@ func TestSummary_NotExposedToShareNamespace(t *testing.T) {
 		}
 	}
 	if shareHasSummary {
-		t.Error("Share.summary must not be exposed (family tenant must not read cross-tenant summaries)")
+		t.Error("Share.summary must not be exposed (family account must not read cross-account summaries)")
 	}
 	if !fileHasSummary {
 		t.Error("File.summary must be registered under File namespace in core.SkillRegistry")

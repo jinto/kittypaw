@@ -17,7 +17,7 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-type tenantAddFlags struct {
+type accountAddFlags struct {
 	telegramToken      string
 	telegramTokenStdin bool
 	adminChatID        string
@@ -28,30 +28,30 @@ type tenantAddFlags struct {
 	noActivate         bool
 }
 
-const tenantEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
+const accountEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
 
-func newTenantCmd() *cobra.Command {
+func newAccountCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tenant",
-		Short: "Manage multi-tenant workspaces",
-		Long:  "Create and inspect tenant workspaces under ~/.kittypaw/tenants/. Each tenant owns its own DB, secrets, skills, and channel bindings.",
+		Use:   "account",
+		Short: "Manage multi-account workspaces",
+		Long:  "Create and inspect account workspaces under ~/.kittypaw/accounts/. Each account owns its own DB, secrets, skills, and channel bindings.",
 	}
-	cmd.AddCommand(newTenantAddCmd())
-	cmd.AddCommand(newTenantRemoveCmd())
+	cmd.AddCommand(newAccountAddCmd())
+	cmd.AddCommand(newAccountRemoveCmd())
 	return cmd
 }
 
-func newTenantAddCmd() *cobra.Command {
-	f := &tenantAddFlags{}
+func newAccountAddCmd() *cobra.Command {
+	f := &accountAddFlags{}
 	cmd := &cobra.Command{
 		Use:   "add <name>",
-		Short: "Provision a new tenant directory",
-		Long: `Create a new tenant under ~/.kittypaw/tenants/<name>/ with its own
+		Short: "Provision a new account directory",
+		Long: `Create a new account under ~/.kittypaw/accounts/<name>/ with its own
 config.toml, data/, skills/, profiles/, and packages/ subtrees.
 
 Bot-token sources (highest priority wins):
   1. --telegram-bot-token-stdin  (reads from stdin — recommended)
-  2. $` + tenantEnvBotToken + `
+  2. $` + accountEnvBotToken + `
   3. --telegram-bot-token        (visible in process list; prints a warning)
 
 Interactive fallback: when no token source AND no LLM key is supplied AND
@@ -60,18 +60,18 @@ api-key, and model. Secrets (token, api-key) are read with terminal echo
 disabled. CI / scripted callers passing any flag/env keep the original
 non-interactive path.
 
-If a daemon is already running, the tenant is hot-activated: channels spawn
+If a daemon is already running, the account is hot-activated: channels spawn
 and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
 the activation RPC and only stage files on disk.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTenantAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runAccountAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVar(&f.telegramToken, "telegram-bot-token", "", "Telegram bot token (visible in ps; prefer --telegram-bot-token-stdin)")
 	cmd.Flags().BoolVar(&f.telegramTokenStdin, "telegram-bot-token-stdin", false, "Read Telegram bot token from stdin")
 	cmd.Flags().StringVar(&f.adminChatID, "admin-chat-id", "", "Telegram admin chat ID (auto-detected from getUpdates when omitted)")
-	cmd.Flags().BoolVar(&f.isFamily, "is-family", false, "Mark this tenant as the family coordinator (no channels)")
+	cmd.Flags().BoolVar(&f.isFamily, "is-family", false, "Mark this account as the family coordinator (no channels)")
 	cmd.Flags().StringVar(&f.llmProvider, "llm-provider", "", "LLM provider (anthropic|openai|local)")
 	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")
@@ -80,7 +80,7 @@ the activation RPC and only stage files on disk.`,
 }
 
 // Empty return means no token configured — family/no-token branches are validated by the caller.
-func resolveTenantToken(f *tenantAddFlags, stdin io.Reader, stderr io.Writer) (string, error) {
+func resolveAccountToken(f *accountAddFlags, stdin io.Reader, stderr io.Writer) (string, error) {
 	if f.telegramTokenStdin {
 		b, err := io.ReadAll(stdin)
 		if err != nil {
@@ -92,9 +92,9 @@ func resolveTenantToken(f *tenantAddFlags, stdin io.Reader, stderr io.Writer) (s
 		}
 		return token, nil
 	}
-	if env := strings.TrimSpace(os.Getenv(tenantEnvBotToken)); env != "" {
+	if env := strings.TrimSpace(os.Getenv(accountEnvBotToken)); env != "" {
 		if f.telegramToken != "" {
-			_, _ = fmt.Fprintf(stderr, "warning: --telegram-bot-token ignored ($%s is set)\n", tenantEnvBotToken)
+			_, _ = fmt.Fprintf(stderr, "warning: --telegram-bot-token ignored ($%s is set)\n", accountEnvBotToken)
 		}
 		return env, nil
 	}
@@ -105,19 +105,19 @@ func resolveTenantToken(f *tenantAddFlags, stdin io.Reader, stderr io.Writer) (s
 	return "", nil
 }
 
-func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
+func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Interactive fallback: if neither a Telegram token source nor an LLM key
 	// is in scope, walk the user through 4 quick prompts instead of erroring
 	// out. CI / scripted callers (any flag/env set) keep the non-interactive
 	// path. Non-TTY shells fall through to the original error so failure modes
 	// stay loud.
-	if needsTenantPrompt(f) && isatty.IsTerminal(os.Stdin.Fd()) {
-		if err := promptTenantSetup(stdin, stdout, f); err != nil {
+	if needsAccountPrompt(f) && isatty.IsTerminal(os.Stdin.Fd()) {
+		if err := promptAccountSetup(stdin, stdout, f); err != nil {
 			return err
 		}
 	}
 
-	token, err := resolveTenantToken(f, stdin, stderr)
+	token, err := resolveAccountToken(f, stdin, stderr)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 		return fmt.Errorf("--is-family and a telegram bot token are mutually exclusive")
 	}
 	if !f.isFamily && token == "" {
-		return fmt.Errorf("a Telegram bot token is required for non-family tenants (set --telegram-bot-token-stdin, $%s, or --telegram-bot-token, or pass --is-family)", tenantEnvBotToken)
+		return fmt.Errorf("a Telegram bot token is required for non-family accounts (set --telegram-bot-token-stdin, $%s, or --telegram-bot-token, or pass --is-family)", accountEnvBotToken)
 	}
 	if token != "" && !core.ValidateTelegramToken(token) {
 		return errors.New("invalid telegram bot token format")
@@ -136,7 +136,7 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 	if err != nil {
 		return fmt.Errorf("resolve config dir: %w", err)
 	}
-	tenantsDir := filepath.Join(cfgDir, "tenants")
+	accountsDir := filepath.Join(cfgDir, "accounts")
 
 	chatID := f.adminChatID
 	if token != "" && chatID == "" {
@@ -150,7 +150,7 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 		}
 	}
 
-	tt, err := core.InitTenant(tenantsDir, name, core.TenantOpts{
+	tt, err := core.InitAccount(accountsDir, name, core.AccountOpts{
 		TelegramToken: token,
 		AdminChatID:   chatID,
 		IsFamily:      f.isFamily,
@@ -162,52 +162,52 @@ func runTenantAdd(name string, f *tenantAddFlags, stdin io.Reader, stdout, stder
 		return err
 	}
 
-	_, _ = fmt.Fprintf(stdout, "tenant %q created at %s\n", tt.ID, tt.BaseDir)
+	_, _ = fmt.Fprintf(stdout, "account %q created at %s\n", tt.ID, tt.BaseDir)
 
 	if f.noActivate {
 		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw serve' or re-run without the flag to activate.")
 		return nil
 	}
-	if err := activateTenantOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
 		// Don't fail the whole command — files are already on disk; the user
 		// can recover with a daemon restart. Surface the error clearly so
 		// they know hot-activate didn't take.
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed: %v\n", err)
-		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate, or re-run `kittypaw tenant add` after starting the daemon.")
+		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate, or re-run `kittypaw account add` after starting the daemon.")
 	}
 	return nil
 }
 
-func newTenantRemoveCmd() *cobra.Command {
+func newAccountRemoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Decommission a tenant (safe, reversible via .trash/)",
-		Long: `Decommission a tenant safely:
+		Short: "Decommission an account (safe, reversible via .trash/)",
+		Long: `Decommission an account safely:
 
-  1. If a daemon is running, deactivate the tenant (stops channels, drains
+  1. If a daemon is running, deactivate the account (stops channels, drains
      sessions) via admin RPC — no restart required.
-  2. If the removed tenant is personal and a family tenant exists, delete
+  2. If the removed account is personal and a family account exists, delete
      the matching [share.<name>] stanza from family/config.toml so stale
      allowlist entries don't re-grant access if the name is re-used later.
-  3. Move ~/.kittypaw/tenants/<name>/ to ~/.kittypaw/.trash/<name>-<ts>/.
+  3. Move ~/.kittypaw/accounts/<name>/ to ~/.kittypaw/.trash/<name>-<ts>/.
      The move is atomic (same partition) and reversible by manual rename.
   4. Print a warning that the Telegram bot token is still valid — the admin
      must revoke it via @BotFather /revoke.
 
-The command aborts BEFORE touching the family config or the tenant
+The command aborts BEFORE touching the family config or the account
 directory if the daemon returns an error, so a failed step 1 leaves the
-tenant fully runnable. Re-running after the daemon reports healthy
+account fully runnable. Re-running after the daemon reports healthy
 completes the decommission.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTenantRemove(args[0], cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runAccountRemove(args[0], cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	return cmd
 }
 
-func runTenantRemove(name string, stdout, stderr io.Writer) error {
-	if err := core.ValidateTenantID(name); err != nil {
+func runAccountRemove(name string, stdout, stderr io.Writer) error {
+	if err := core.ValidateAccountID(name); err != nil {
 		return err
 	}
 
@@ -215,53 +215,53 @@ func runTenantRemove(name string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve config dir: %w", err)
 	}
-	tenantsDir := filepath.Join(cfgDir, "tenants")
-	tenantDir := filepath.Join(tenantsDir, name)
+	accountsDir := filepath.Join(cfgDir, "accounts")
+	accountDir := filepath.Join(accountsDir, name)
 
-	info, err := os.Stat(tenantDir)
+	info, err := os.Stat(accountDir)
 	if err != nil || !info.IsDir() {
-		return fmt.Errorf("tenant %q does not exist at %s", name, tenantDir)
+		return fmt.Errorf("account %q does not exist at %s", name, accountDir)
 	}
 
-	// Load tenant's own config to learn is_family (so we can skip the
+	// Load account's own config to learn is_family (so we can skip the
 	// self-cleanup step and surface the extra warning). A missing
 	// config.toml is treated as personal — the worst case is a no-op scrub.
-	selfCfg, _ := core.LoadConfig(filepath.Join(tenantDir, "config.toml"))
+	selfCfg, _ := core.LoadConfig(filepath.Join(accountDir, "config.toml"))
 	removedIsFamily := selfCfg != nil && selfCfg.IsFamily
 
-	if err := deactivateTenantOnDaemon(name, stdout, stderr); err != nil {
+	if err := deactivateAccountOnDaemon(name, stdout, stderr); err != nil {
 		return fmt.Errorf("deactivate on daemon: %w", err)
 	}
 
 	if !removedIsFamily {
-		if err := scrubFamilyShare(tenantsDir, name, stderr); err != nil {
+		if err := scrubFamilyShare(accountsDir, name, stderr); err != nil {
 			return fmt.Errorf("update family config: %w", err)
 		}
 	}
 
-	trashedPath, err := moveTenantToTrash(cfgDir, tenantsDir, name)
+	trashedPath, err := moveAccountToTrash(cfgDir, accountsDir, name)
 	if err != nil {
 		return fmt.Errorf("move to trash: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(stdout, "tenant %q decommissioned → %s\n", name, trashedPath)
-	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for tenant %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
+	_, _ = fmt.Fprintf(stdout, "account %q decommissioned → %s\n", name, trashedPath)
+	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for account %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
 	if removedIsFamily {
-		_, _ = fmt.Fprintln(stderr, "note: family tenant removed — personal tenants will no longer see cross-tenant shares or fanout until a new family is provisioned.")
+		_, _ = fmt.Fprintln(stderr, "note: family account removed — personal accounts will no longer see cross-account shares or fanout until a new family is provisioned.")
 	}
 	return nil
 }
 
-// deactivateTenantOnDaemon calls POST /api/v1/admin/tenants/{id}/delete when
+// deactivateAccountOnDaemon calls POST /api/v1/admin/accounts/{id}/delete when
 // a daemon is running. Absence of a daemon is not an error (AC-RM2 offline
-// path); 404 from the daemon means the tenant isn't currently active, which
+// path); 404 from the daemon means the account isn't currently active, which
 // is also fine (already decommissioned or never booted with it).
-func deactivateTenantOnDaemon(name string, stdout, stderr io.Writer) error {
+func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
 	if err != nil {
 		// Missing config.toml (pre-onboarding) is treated as offline — the
 		// filesystem part of decommission still matters even if the user
-		// never booted the daemon with this tenant.
+		// never booted the daemon with this account.
 		_, _ = fmt.Fprintf(stdout, "Daemon config unavailable (%v); skipping hot-deactivation.\n", err)
 		return nil
 	}
@@ -271,31 +271,31 @@ func deactivateTenantOnDaemon(name string, stdout, stderr io.Writer) error {
 	}
 
 	cl := client.New(conn.BaseURL, conn.APIKey)
-	if _, err := cl.TenantRemove(name); err != nil {
+	if _, err := cl.AccountRemove(name); err != nil {
 		// Treat 404 as benign (already gone). Everything else aborts so the
 		// CLI doesn't mutate family config or the filesystem while a real
 		// drain error is pending — AC-RM5.
 		if strings.Contains(err.Error(), "404") {
-			_, _ = fmt.Fprintf(stderr, "info: daemon reports tenant %q not active (already decommissioned?); continuing.\n", name)
+			_, _ = fmt.Fprintf(stderr, "info: daemon reports account %q not active (already decommissioned?); continuing.\n", name)
 			return nil
 		}
 		return err
 	}
-	_, _ = fmt.Fprintf(stdout, "tenant %q deactivated on daemon\n", name)
+	_, _ = fmt.Fprintf(stdout, "account %q deactivated on daemon\n", name)
 	return nil
 }
 
 // scrubFamilyShare removes the [share.<removed>] stanza from the family
-// tenant's config.toml. No-op if no family tenant exists (AC-RM4) or the
+// account's config.toml. No-op if no family account exists (AC-RM4) or the
 // stanza is already absent. Uses WriteConfigAtomic so a crash mid-write
 // never leaves the file truncated (AC-RM6).
-func scrubFamilyShare(tenantsDir, removed string, stderr io.Writer) error {
-	tenants, err := core.DiscoverTenants(tenantsDir)
+func scrubFamilyShare(accountsDir, removed string, stderr io.Writer) error {
+	accounts, err := core.DiscoverAccounts(accountsDir)
 	if err != nil {
 		return err
 	}
-	var family *core.Tenant
-	for _, tt := range tenants {
+	var family *core.Account
+	for _, tt := range accounts {
 		if tt != nil && tt.Config != nil && tt.Config.IsFamily {
 			family = tt
 			break
@@ -316,10 +316,10 @@ func scrubFamilyShare(tenantsDir, removed string, stderr io.Writer) error {
 	return nil
 }
 
-// moveTenantToTrash renames tenants/<name>/ to .trash/<name>-<ts>/ atomically
+// moveAccountToTrash renames accounts/<name>/ to .trash/<name>-<ts>/ atomically
 // within the same filesystem. On collision (same-second re-runs or prior
 // residue) it appends a -2, -3, ... suffix rather than overwriting (AC-RM8).
-func moveTenantToTrash(cfgDir, tenantsDir, name string) (string, error) {
+func moveAccountToTrash(cfgDir, accountsDir, name string) (string, error) {
 	trashDir := filepath.Join(cfgDir, ".trash")
 	if err := os.MkdirAll(trashDir, 0o700); err != nil {
 		return "", fmt.Errorf("create trash dir: %w", err)
@@ -333,36 +333,36 @@ func moveTenantToTrash(cfgDir, tenantsDir, name string) (string, error) {
 		}
 		candidate = fmt.Sprintf("%s-%d", base, i)
 	}
-	src := filepath.Join(tenantsDir, name)
+	src := filepath.Join(accountsDir, name)
 	if err := os.Rename(src, candidate); err != nil {
 		return "", fmt.Errorf("rename %s → %s: %w", src, candidate, err)
 	}
 	return candidate, nil
 }
 
-// activateTenantOnDaemon calls POST /api/v1/admin/tenants if a daemon is
+// activateAccountOnDaemon calls POST /api/v1/admin/accounts if a daemon is
 // already running locally. Absence of a daemon is not an error — the user
 // may be provisioning offline before first boot — so we fall back to a
 // restart hint printed by the caller.
-func activateTenantOnDaemon(tenantID string, stdout, stderr io.Writer) error {
+func activateAccountOnDaemon(accountID string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
 	if err != nil {
 		return fmt.Errorf("read daemon config: %w", err)
 	}
 	if !conn.IsRunning() {
-		_, _ = fmt.Fprintln(stdout, "Daemon is not running; start 'kittypaw serve' to activate this tenant.")
+		_, _ = fmt.Fprintln(stdout, "Daemon is not running; start 'kittypaw serve' to activate this account.")
 		return nil
 	}
 
 	cl := client.New(conn.BaseURL, conn.APIKey)
-	resp, err := cl.TenantActivate(tenantID)
+	resp, err := cl.AccountActivate(accountID)
 	if err != nil {
 		return err
 	}
 
 	channels, _ := resp["channels"].(float64)
 	isFamily, _ := resp["is_family"].(bool)
-	_, _ = fmt.Fprintf(stdout, "tenant %q activated (channels=%d, is_family=%t)\n",
-		tenantID, int(channels), isFamily)
+	_, _ = fmt.Fprintf(stdout, "account %q activated (channels=%d, is_family=%t)\n",
+		accountID, int(channels), isFamily)
 	return nil
 }

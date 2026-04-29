@@ -10,15 +10,15 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-func TestRecoverTenantPanic_MarksDegradedAndRecordsStamp(t *testing.T) {
+func TestRecoverAccountPanic_MarksDegradedAndRecordsStamp(t *testing.T) {
 	sess := &Session{
-		TenantID: "alice",
-		Health:   core.NewHealthState(),
+		AccountID: "alice",
+		Health:    core.NewHealthState(),
 	}
 
-	RecoverTenantPanic(sess, "test.site", "boom")
+	RecoverAccountPanic(sess, "test.site", "boom")
 
-	if got := sess.Health.Load(); got != core.TenantHealthDegraded {
+	if got := sess.Health.Load(); got != core.AccountHealthDegraded {
 		t.Errorf("Health = %v, want Degraded", got)
 	}
 	if sess.Health.LastPanic().IsZero() {
@@ -26,39 +26,39 @@ func TestRecoverTenantPanic_MarksDegradedAndRecordsStamp(t *testing.T) {
 	}
 }
 
-func TestRecoverTenantPanic_NilSessionSafe(t *testing.T) {
+func TestRecoverAccountPanic_NilSessionSafe(t *testing.T) {
 	// Must not panic — callers include dispatchLoop fallbacks where
 	// the session lookup may have returned nil just before the crash.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("RecoverTenantPanic panicked on nil session: %v", r)
+			t.Fatalf("RecoverAccountPanic panicked on nil session: %v", r)
 		}
 	}()
-	RecoverTenantPanic(nil, "test.site", "boom")
+	RecoverAccountPanic(nil, "test.site", "boom")
 }
 
-func TestRecoverTenantPanic_NilHealthSafe(t *testing.T) {
+func TestRecoverAccountPanic_NilHealthSafe(t *testing.T) {
 	// Bare-struct test fixtures omit Health; the helper should still
 	// log instead of crashing.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("RecoverTenantPanic panicked on nil Health: %v", r)
+			t.Fatalf("RecoverAccountPanic panicked on nil Health: %v", r)
 		}
 	}()
-	RecoverTenantPanic(&Session{TenantID: "alice"}, "test.site", "boom")
+	RecoverAccountPanic(&Session{AccountID: "alice"}, "test.site", "boom")
 }
 
-func TestMarkTenantReady_TransitionsDegradedToReady(t *testing.T) {
+func TestMarkAccountReady_TransitionsDegradedToReady(t *testing.T) {
 	sess := &Session{
-		TenantID: "alice",
-		Health:   core.NewHealthState(),
+		AccountID: "alice",
+		Health:    core.NewHealthState(),
 	}
 	sess.Health.MarkDegraded(time.Now())
 
-	MarkTenantReady(sess)
+	MarkAccountReady(sess)
 
-	if got := sess.Health.Load(); got != core.TenantHealthReady {
-		t.Errorf("Health after MarkTenantReady = %v, want Ready", got)
+	if got := sess.Health.Load(); got != core.AccountHealthReady {
+		t.Errorf("Health after MarkAccountReady = %v, want Ready", got)
 	}
 	// LastPanic is audit history; recovery should not erase it.
 	if sess.Health.LastPanic().IsZero() {
@@ -66,25 +66,25 @@ func TestMarkTenantReady_TransitionsDegradedToReady(t *testing.T) {
 	}
 }
 
-func TestMarkTenantReady_NilSafe(t *testing.T) {
+func TestMarkAccountReady_NilSafe(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("MarkTenantReady panicked: %v", r)
+			t.Fatalf("MarkAccountReady panicked: %v", r)
 		}
 	}()
-	MarkTenantReady(nil)
-	MarkTenantReady(&Session{})
+	MarkAccountReady(nil)
+	MarkAccountReady(&Session{})
 }
 
-// TestTenantPanicIsolation_AC_T8 demonstrates the invariant the
-// family-multi-tenant spec requires in AC-T8: a panic in one tenant's
-// goroutine, caught by a deferred RecoverTenantPanic, does not prevent a
-// sibling tenant's goroutine from continuing to make progress. This is
+// TestAccountPanicIsolation_AC_T8 demonstrates the invariant the
+// family-multi-account spec requires in AC-T8: a panic in one account's
+// goroutine, caught by a deferred RecoverAccountPanic, does not prevent a
+// sibling account's goroutine from continuing to make progress. This is
 // the minimum empirical proof that the recover helpers glue together
 // into the isolation contract the spec demands.
-func TestTenantPanicIsolation_AC_T8(t *testing.T) {
-	alice := &Session{TenantID: "alice", Health: core.NewHealthState()}
-	bob := &Session{TenantID: "bob", Health: core.NewHealthState()}
+func TestAccountPanicIsolation_AC_T8(t *testing.T) {
+	alice := &Session{AccountID: "alice", Health: core.NewHealthState()}
+	bob := &Session{AccountID: "bob", Health: core.NewHealthState()}
 
 	var bobTicks int32
 	var wg sync.WaitGroup
@@ -94,7 +94,7 @@ func TestTenantPanicIsolation_AC_T8(t *testing.T) {
 		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				RecoverTenantPanic(alice, "test.alice.scheduler", r)
+				RecoverAccountPanic(alice, "test.alice.scheduler", r)
 			}
 		}()
 		panic("alice simulated panic")
@@ -105,7 +105,7 @@ func TestTenantPanicIsolation_AC_T8(t *testing.T) {
 		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				RecoverTenantPanic(bob, "test.bob.scheduler", r)
+				RecoverAccountPanic(bob, "test.bob.scheduler", r)
 			}
 		}()
 		// Simulate the "next 5 ticks" — AC-T8 asks for "tick_count ≥
@@ -113,15 +113,15 @@ func TestTenantPanicIsolation_AC_T8(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			atomic.AddInt32(&bobTicks, 1)
 		}
-		MarkTenantReady(bob)
+		MarkAccountReady(bob)
 	}()
 
 	wg.Wait()
 
-	if got := alice.Health.Load(); got != core.TenantHealthDegraded {
+	if got := alice.Health.Load(); got != core.AccountHealthDegraded {
 		t.Errorf("alice Health = %v, want Degraded", got)
 	}
-	if got := bob.Health.Load(); got != core.TenantHealthReady {
+	if got := bob.Health.Load(); got != core.AccountHealthReady {
 		t.Errorf("bob Health = %v, want Ready (bob never panicked)", got)
 	}
 	if ticks := atomic.LoadInt32(&bobTicks); ticks != 5 {
@@ -139,9 +139,9 @@ func TestSchedulerTickRecovers(t *testing.T) {
 	// will nil-deref on Store.GetLastRun or LoadAllSkillsFrom and panic.
 	// tickOnce must catch that panic rather than propagate it.
 	sess := &Session{
-		TenantID: "alice",
-		Health:   core.NewHealthState(),
-		Config:   &core.Config{},
+		AccountID: "alice",
+		Health:    core.NewHealthState(),
+		Config:    &core.Config{},
 	}
 	s := NewScheduler(sess, nil)
 

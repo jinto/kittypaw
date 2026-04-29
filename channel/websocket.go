@@ -24,19 +24,19 @@ type wsClient struct {
 // It listens on a bind address for incoming WebSocket upgrades, assigns
 // each connection a session ID, and bridges messages to/from the event system.
 type WebSocketChannel struct {
-	tenantID string
-	bindAddr string
-	clients  map[string]*wsClient
-	mu       sync.RWMutex
+	accountID string
+	bindAddr  string
+	clients   map[string]*wsClient
+	mu        sync.RWMutex
 }
 
 // NewWebSocket creates a WebSocketChannel listening on the given address.
-// tenantID is stamped on every emitted Event for TenantRouter dispatch.
-func NewWebSocket(tenantID, bindAddr string) *WebSocketChannel {
+// accountID is stamped on every emitted Event for AccountRouter dispatch.
+func NewWebSocket(accountID, bindAddr string) *WebSocketChannel {
 	return &WebSocketChannel{
-		tenantID: tenantID,
-		bindAddr: bindAddr,
-		clients:  make(map[string]*wsClient),
+		accountID: accountID,
+		bindAddr:  bindAddr,
+		clients:   make(map[string]*wsClient),
 	}
 }
 
@@ -171,9 +171,9 @@ func (w *WebSocketChannel) readLoop(ctx context.Context, client *wsClient, event
 			}
 
 			event := core.Event{
-				Type:     core.EventWebChat,
-				TenantID: w.tenantID,
-				Payload:  raw,
+				Type:      core.EventWebChat,
+				AccountID: w.accountID,
+				Payload:   raw,
 			}
 
 			select {

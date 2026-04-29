@@ -349,9 +349,9 @@ func (ix *FTS5Indexer) IndexFile(ctx context.Context, workspaceID, rootPath, abs
 		return nil
 	}
 
-	// Defense in depth: reject symlinks before following them. A tenant can
+	// Defense in depth: reject symlinks before following them. An account can
 	// plant a symlink inside its workspace pointing at /etc/passwd or another
-	// tenant's BaseDir; os.Stat would follow and leak external content into
+	// account's BaseDir; os.Stat would follow and leak external content into
 	// FTS. Lstat + mode check blocks the escape without resolving the target.
 	li, err := os.Lstat(absPath)
 	if err != nil {

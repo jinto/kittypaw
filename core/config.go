@@ -31,18 +31,18 @@ const (
 )
 
 // TopLevelServerConfig holds server-wide settings loaded from server.toml.
-// This is separate from per-tenant Config — it controls the daemon itself.
+// This is separate from per-account Config — it controls the daemon itself.
 type TopLevelServerConfig struct {
-	Bind          string `toml:"bind"`
-	MasterAPIKey  string `toml:"master_api_key"`
-	TenantsDir    string `toml:"tenants_dir"`
-	DefaultTenant string `toml:"default_tenant"`
+	Bind           string `toml:"bind"`
+	MasterAPIKey   string `toml:"master_api_key"`
+	AccountsDir    string `toml:"accounts_dir"`
+	DefaultAccount string `toml:"default_account"`
 }
 
 // LoadServerConfig reads server.toml from the given path.
 func LoadServerConfig(path string) (*TopLevelServerConfig, error) {
 	sc := &TopLevelServerConfig{
-		DefaultTenant: "default",
+		DefaultAccount: "default",
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -93,27 +93,27 @@ type Config struct {
 	Workspace        WorkspaceConfig     `toml:"workspace"`
 	User             UserConfig          `toml:"user"`
 
-	// IsFamily marks a tenant as the shared/coordinator account. Family
-	// tenants run scheduled skills on behalf of the household (e.g. weather
-	// fetch) and fanout to individual tenants, but MUST NOT own chat
+	// IsFamily marks an account as the shared/coordinator account. Family
+	// accounts run scheduled skills on behalf of the household (e.g. weather
+	// fetch) and fanout to individual accounts, but MUST NOT own chat
 	// channels — a misconfigured [telegram] on family would silently
 	// intercept updates meant for alice/bob. Enforced at startup by
-	// ValidateFamilyTenants.
+	// ValidateFamilyAccounts.
 	IsFamily bool `toml:"is_family"`
 
-	// Share declares which per-path reads this tenant grants to specific
-	// peers, keyed by peer TenantID. Personal tenants list the family
-	// tenant as a peer ("alice grants family read access to these paths"),
-	// and family tenants likewise list personals. The check always runs
-	// against the *owning* tenant's config — alice reading family/x checks
+	// Share declares which per-path reads this account grants to specific
+	// peers, keyed by peer AccountID. Personal accounts list the family
+	// account as a peer ("alice grants family read access to these paths"),
+	// and family accounts likewise list personals. The check always runs
+	// against the *owning* account's config — alice reading family/x checks
 	// family.Share["alice"].Read. Empty map = no sharing (default).
 	Share map[string]ShareConfig `toml:"share"`
 }
 
-// ShareConfig is the per-peer read allowlist for cross-tenant filesystem
-// access. Read paths are tenant-relative (e.g. "memory/weather.json") and
+// ShareConfig is the per-peer read allowlist for cross-account filesystem
+// access. Read paths are account-relative (e.g. "memory/weather.json") and
 // must match exactly after traversal/symlink validation in ValidateSharedReadPath.
-// Write sharing is intentionally absent — the S3-lite scope forbids cross-tenant
+// Write sharing is intentionally absent — the S3-lite scope forbids cross-account
 // writes so a family skill bug can't corrupt alice's store.
 type ShareConfig struct {
 	Read []string `toml:"read"`
@@ -278,17 +278,17 @@ type ChannelConfig struct {
 }
 
 // InjectKakaoWSURL populates KakaoWSURL on kakao_talk channel configs from
-// the named tenant's secrets. Called by ChannelSpawner.Reconcile so
-// hot-reload and initial spawn share the same path. No-op if the tenant's
+// the named account's secrets. Called by ChannelSpawner.Reconcile so
+// hot-reload and initial spawn share the same path. No-op if the account's
 // secrets, api_url, or relay URL are missing.
 //
 // api_url is written by the setup paths under the bare "kittypaw-api"
-// namespace of the tenant's per-tenant secrets store. When absent — e.g.
+// namespace of the account's per-account secrets store. When absent — e.g.
 // the user only completed the KakaoTalk step and skipped API server
 // login — fall back to DefaultAPIServerURL so the host-scoped secret
 // saved by wizardKakao still resolves.
-func InjectKakaoWSURL(tenantID string, channels []ChannelConfig) {
-	secrets, err := LoadTenantSecrets(tenantID)
+func InjectKakaoWSURL(accountID string, channels []ChannelConfig) {
+	secrets, err := LoadAccountSecrets(accountID)
 	if err != nil {
 		return
 	}
@@ -393,7 +393,7 @@ func LoadConfig(path string) (*Config, error) {
 // ConfigDir returns the user's .kittypaw config directory, creating it if needed.
 // On first run after rename, migrates ~/.gopaw → ~/.kittypaw automatically.
 // The directory is owned-by-user only (mode 0700) so other OS users on the same
-// host cannot read tenant data, skill sources, or secrets. KITTYPAW_CONFIG_DIR
+// host cannot read account data, skill sources, or secrets. KITTYPAW_CONFIG_DIR
 // overrides the default location — set by init-system units (systemd/launchd).
 func ConfigDir() (string, error) {
 	if dir := os.Getenv("KITTYPAW_CONFIG_DIR"); dir != "" {
@@ -446,10 +446,10 @@ func ResolveBaseDir(baseDir string) (string, error) {
 	return ConfigDir()
 }
 
-// ConfigPath returns the default tenant's config file path
-// (~/.kittypaw/tenants/<DefaultTenantID>/config.toml). All CLI commands
+// ConfigPath returns the default account's config file path
+// (~/.kittypaw/accounts/<DefaultAccountID>/config.toml). All CLI commands
 // that need to read or write the active config (config check, registry
-// resolution, etc.) target this location so daemon-side DiscoverTenants
+// resolution, etc.) target this location so daemon-side DiscoverAccounts
 // and the CLI see the same file. The legacy global path
 // (~/.kittypaw/config.toml) is only consulted by MigrateLegacyLayout for
 // upgrade paths and is otherwise unused.
@@ -458,7 +458,7 @@ func ConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "tenants", DefaultTenantID, "config.toml"), nil
+	return filepath.Join(dir, "accounts", DefaultAccountID, "config.toml"), nil
 }
 
 // FindAgent returns the agent config matching the given ID, or nil.

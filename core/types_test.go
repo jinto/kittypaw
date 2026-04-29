@@ -155,25 +155,25 @@ func TestParsePayloadInvalid(t *testing.T) {
 	}
 }
 
-// TestEventTenantIDMarshal verifies Event.TenantID round-trips through JSON
-// and is omitted when empty (backward compatibility with pre-multi-tenant events).
-func TestEventTenantIDMarshal(t *testing.T) {
-	t.Run("with_tenant_id", func(t *testing.T) {
+// TestEventAccountIDMarshal verifies Event.AccountID round-trips through JSON
+// and is omitted when empty (backward compatibility with pre-multi-account events).
+func TestEventAccountIDMarshal(t *testing.T) {
+	t.Run("with_account_id", func(t *testing.T) {
 		event := Event{
-			Type:     EventTelegram,
-			TenantID: "alice",
-			Payload:  json.RawMessage(`{"chat_id":"123","text":"hi"}`),
+			Type:      EventTelegram,
+			AccountID: "alice",
+			Payload:   json.RawMessage(`{"chat_id":"123","text":"hi"}`),
 		}
 		raw, err := json.Marshal(event)
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		if !strings.Contains(string(raw), `"tenant_id":"alice"`) {
-			t.Errorf("expected tenant_id in JSON, got %s", raw)
+		if !strings.Contains(string(raw), `"account_id":"alice"`) {
+			t.Errorf("expected account_id in JSON, got %s", raw)
 		}
 	})
 
-	t.Run("empty_tenant_id_omitted", func(t *testing.T) {
+	t.Run("empty_account_id_omitted", func(t *testing.T) {
 		event := Event{
 			Type:    EventTelegram,
 			Payload: json.RawMessage(`{"chat_id":"123"}`),
@@ -182,8 +182,8 @@ func TestEventTenantIDMarshal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		if strings.Contains(string(raw), "tenant_id") {
-			t.Errorf("expected no tenant_id when empty, got %s", raw)
+		if strings.Contains(string(raw), "account_id") {
+			t.Errorf("expected no account_id when empty, got %s", raw)
 		}
 	})
 
@@ -193,8 +193,8 @@ func TestEventTenantIDMarshal(t *testing.T) {
 		if err := json.Unmarshal(legacy, &event); err != nil {
 			t.Fatalf("unmarshal legacy: %v", err)
 		}
-		if event.TenantID != "" {
-			t.Errorf("expected empty TenantID on legacy JSON, got %q", event.TenantID)
+		if event.AccountID != "" {
+			t.Errorf("expected empty AccountID on legacy JSON, got %q", event.AccountID)
 		}
 		if event.Type != EventTelegram {
 			t.Errorf("expected Type=telegram, got %q", event.Type)
@@ -203,9 +203,9 @@ func TestEventTenantIDMarshal(t *testing.T) {
 
 	t.Run("roundtrip", func(t *testing.T) {
 		original := Event{
-			Type:     EventKakaoTalk,
-			TenantID: "family",
-			Payload:  json.RawMessage(`{"text":"weather"}`),
+			Type:      EventKakaoTalk,
+			AccountID: "family",
+			Payload:   json.RawMessage(`{"text":"weather"}`),
 		}
 		raw, err := json.Marshal(original)
 		if err != nil {
@@ -215,7 +215,7 @@ func TestEventTenantIDMarshal(t *testing.T) {
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		if got.TenantID != "family" || got.Type != EventKakaoTalk {
+		if got.AccountID != "family" || got.Type != EventKakaoTalk {
 			t.Errorf("roundtrip mismatch: got %+v", got)
 		}
 	})

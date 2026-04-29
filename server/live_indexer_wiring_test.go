@@ -8,16 +8,16 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-// TestBuildTenantSession_LiveIndexEnabled: default config wires a
-// LiveIndexer onto TenantDeps.
-func TestBuildTenantSession_LiveIndexEnabled(t *testing.T) {
+// TestBuildAccountSession_LiveIndexEnabled: default config wires a
+// LiveIndexer onto AccountDeps.
+func TestBuildAccountSession_LiveIndexEnabled(t *testing.T) {
 	root := t.TempDir()
 	cfg := core.DefaultConfig()
-	td := buildTenantDeps(t, root, "default", &cfg)
+	td := buildAccountDeps(t, root, "default", &cfg)
 
-	registry := core.NewTenantRegistry(root, "default")
+	registry := core.NewAccountRegistry(root, "default")
 	eventCh := make(chan core.Event, 4)
-	_ = buildTenantSession(td, registry, eventCh)
+	_ = buildAccountSession(td, registry, eventCh)
 
 	if td.LiveIndexer == nil {
 		t.Fatal("expected LiveIndexer to be wired when live_index=true")
@@ -28,17 +28,17 @@ func TestBuildTenantSession_LiveIndexEnabled(t *testing.T) {
 	t.Cleanup(func() { _ = td.Close() })
 }
 
-// TestBuildTenantSession_LiveIndexDisabled: config with live_index=false
+// TestBuildAccountSession_LiveIndexDisabled: config with live_index=false
 // leaves LiveIndexer nil (v1 behavior preserved).
-func TestBuildTenantSession_LiveIndexDisabled(t *testing.T) {
+func TestBuildAccountSession_LiveIndexDisabled(t *testing.T) {
 	root := t.TempDir()
 	cfg := core.DefaultConfig()
 	cfg.Workspace.LiveIndex = false
-	td := buildTenantDeps(t, root, "default", &cfg)
+	td := buildAccountDeps(t, root, "default", &cfg)
 
-	registry := core.NewTenantRegistry(root, "default")
+	registry := core.NewAccountRegistry(root, "default")
 	eventCh := make(chan core.Event, 4)
-	_ = buildTenantSession(td, registry, eventCh)
+	_ = buildAccountSession(td, registry, eventCh)
 
 	if td.LiveIndexer != nil {
 		t.Fatal("expected LiveIndexer to be nil when live_index=false")
@@ -47,18 +47,18 @@ func TestBuildTenantSession_LiveIndexDisabled(t *testing.T) {
 	t.Cleanup(func() { _ = td.Close() })
 }
 
-// TestTenantDeps_Close_NoGoroutineLeak: close after buildTenantSession
+// TestAccountDeps_Close_NoGoroutineLeak: close after buildAccountSession
 // tears down LiveIndexer cleanly.
-func TestTenantDeps_Close_NoGoroutineLeak(t *testing.T) {
+func TestAccountDeps_Close_NoGoroutineLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
 
 	for range 3 {
 		root := t.TempDir()
 		cfg := core.DefaultConfig()
-		td := buildTenantDeps(t, root, "default", &cfg)
-		registry := core.NewTenantRegistry(root, "default")
+		td := buildAccountDeps(t, root, "default", &cfg)
+		registry := core.NewAccountRegistry(root, "default")
 		eventCh := make(chan core.Event, 4)
-		_ = buildTenantSession(td, registry, eventCh)
+		_ = buildAccountSession(td, registry, eventCh)
 
 		// Give the startup goroutine a window to call AddWorkspace + Start.
 		time.Sleep(50 * time.Millisecond)

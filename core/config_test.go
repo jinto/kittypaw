@@ -56,7 +56,7 @@ timeout_seconds = 60
 	}
 }
 
-// TestFamilyShareParsing enforces the TOML wire format for family tenants.
+// TestFamilyShareParsing enforces the TOML wire format for family accounts.
 // The shape ([share.<peer>] read=[...]) is the user-facing contract the spec
 // promises — this regression pins it so a future config refactor can't
 // silently reshape it into something that breaks existing family installs.
@@ -92,9 +92,9 @@ read = ["summary.md"]
 }
 
 // TestFamilyShareDefaults locks in the zero-state contract — a personal
-// tenant config with no [share] blocks must decode to IsFamily=false and
+// account config with no [share] blocks must decode to IsFamily=false and
 // a nil Share map. If this drifts (e.g. share becomes a required field),
-// every existing tenant breaks at daemon start.
+// every existing account breaks at daemon start.
 func TestFamilyShareDefaults(t *testing.T) {
 	var cfg Config
 	if _, err := toml.Decode(`autonomy_level = "full"`, &cfg); err != nil {

@@ -21,8 +21,8 @@ type WatchEvent struct {
 	Op          DebounceOp
 }
 
-// Watcher wraps fsnotify with multi-workspace support. One Watcher per tenant
-// hosts all of that tenant's workspaces (D2). Directories are added
+// Watcher wraps fsnotify with multi-workspace support. One Watcher per account
+// hosts all of that account's workspaces (D2). Directories are added
 // recursively at AddWorkspace and whenever new directories are created at
 // runtime. Excluded directories (.git, node_modules, etc.) and editor temp
 // files are filtered here so the Debouncer never sees them.

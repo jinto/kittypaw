@@ -9,21 +9,21 @@ import (
 )
 
 // newFanoutFixture wires a Fanout against a small registry. Tests that
-// need the real TenantRouter downstream live in the server package — this
+// need the real AccountRouter downstream live in the server package — this
 // stays focused on the publishing contract.
-func newFanoutFixture(t *testing.T, source string, peers ...string) (*ChannelFanout, chan Event, *TenantRegistry) {
+func newFanoutFixture(t *testing.T, source string, peers ...string) (*ChannelFanout, chan Event, *AccountRegistry) {
 	t.Helper()
-	reg := NewTenantRegistry(t.TempDir(), "family")
+	reg := NewAccountRegistry(t.TempDir(), "family")
 	for _, id := range append([]string{source}, peers...) {
-		reg.Register(&Tenant{ID: id, Config: &Config{}})
+		reg.Register(&Account{ID: id, Config: &Config{}})
 	}
 	eventCh := make(chan Event, 4)
 	return NewChannelFanout(eventCh, reg, source), eventCh, reg
 }
 
 // TestChannelFanout_SendEmitsEvent pins the wire shape of a fanout push.
-// The whole cross-tenant flow assumes family.push events arrive at the
-// TenantRouter carrying the *target* tenant's ID (not the sender's) —
+// The whole cross-account flow assumes family.push events arrive at the
+// AccountRouter carrying the *target* account's ID (not the sender's) —
 // reversing the direction would dispatch the push back into family's own
 // Session, looping.
 func TestChannelFanout_SendEmitsEvent(t *testing.T) {
@@ -39,8 +39,8 @@ func TestChannelFanout_SendEmitsEvent(t *testing.T) {
 		if ev.Type != EventFamilyPush {
 			t.Errorf("type = %q, want %q", ev.Type, EventFamilyPush)
 		}
-		if ev.TenantID != "alice" {
-			t.Errorf("target tenant = %q, want alice", ev.TenantID)
+		if ev.AccountID != "alice" {
+			t.Errorf("target account = %q, want alice", ev.AccountID)
 		}
 		var p FanoutPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
@@ -55,7 +55,7 @@ func TestChannelFanout_SendEmitsEvent(t *testing.T) {
 }
 
 // TestChannelFanout_RejectsSelfTarget blocks the self-loop — if family
-// sends to "family", TenantRouter would dispatch the push into the
+// sends to "family", AccountRouter would dispatch the push into the
 // family Session, which would (if it has a skill handling family.push)
 // run again and potentially fanout again. Refuse at the boundary.
 func TestChannelFanout_RejectsSelfTarget(t *testing.T) {
@@ -66,27 +66,27 @@ func TestChannelFanout_RejectsSelfTarget(t *testing.T) {
 	}
 }
 
-// TestChannelFanout_RejectsUnknownTarget keeps tenant IDs honest —
+// TestChannelFanout_RejectsUnknownTarget keeps account IDs honest —
 // pushing to a non-registered ID is a skill bug (typo) or hostile. Either
 // way, return a clear error so the skill author sees the problem
 // immediately instead of silently dropping messages.
 func TestChannelFanout_RejectsUnknownTarget(t *testing.T) {
 	f, _, _ := newFanoutFixture(t, "family", "alice")
 	err := f.Send(context.Background(), "bob", FanoutPayload{Text: "x"})
-	if !errors.Is(err, ErrFanoutUnknownTenant) {
-		t.Errorf("expected ErrFanoutUnknownTenant, got %v", err)
+	if !errors.Is(err, ErrFanoutUnknownAccount) {
+		t.Errorf("expected ErrFanoutUnknownAccount, got %v", err)
 	}
 }
 
-// TestChannelFanout_InvalidTenantID rejects hostile tenant names at the
-// fanout boundary for the same reason ValidateTenantID rejects them at
-// intake — the TenantID doubles as a filesystem key downstream, so
+// TestChannelFanout_InvalidAccountID rejects hostile account names at the
+// fanout boundary for the same reason ValidateAccountID rejects them at
+// intake — the AccountID doubles as a filesystem key downstream, so
 // traversal/case-collisions must fail here even if they'd also fail later.
-func TestChannelFanout_InvalidTenantID(t *testing.T) {
+func TestChannelFanout_InvalidAccountID(t *testing.T) {
 	f, _, _ := newFanoutFixture(t, "family")
 	err := f.Send(context.Background(), "../evil", FanoutPayload{Text: "x"})
 	if err == nil {
-		t.Fatal("expected validation error for hostile tenant id")
+		t.Fatal("expected validation error for hostile account id")
 	}
 }
 
@@ -105,7 +105,7 @@ func TestChannelFanout_Broadcast(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		select {
 		case ev := <-ch:
-			got[ev.TenantID] = true
+			got[ev.AccountID] = true
 		case <-time.After(time.Second):
 			t.Fatalf("only %d events received, want 2", i)
 		}
@@ -114,7 +114,7 @@ func TestChannelFanout_Broadcast(t *testing.T) {
 		t.Errorf("broadcast targets = %v, want alice+bob", got)
 	}
 	if got["family"] {
-		t.Error("broadcast must exclude source tenant")
+		t.Error("broadcast must exclude source account")
 	}
 }
 
@@ -123,9 +123,9 @@ func TestChannelFanout_Broadcast(t *testing.T) {
 // The sandbox call site will pass the skill's execution context, so a
 // shutdown cleanly unblocks the goja VM.
 func TestChannelFanout_ContextCancelled(t *testing.T) {
-	reg := NewTenantRegistry(t.TempDir(), "family")
-	reg.Register(&Tenant{ID: "family", Config: &Config{}})
-	reg.Register(&Tenant{ID: "alice", Config: &Config{}})
+	reg := NewAccountRegistry(t.TempDir(), "family")
+	reg.Register(&Account{ID: "family", Config: &Config{}})
+	reg.Register(&Account{ID: "alice", Config: &Config{}})
 	full := make(chan Event) // unbuffered; send will block forever
 	f := NewChannelFanout(full, reg, "family")
 

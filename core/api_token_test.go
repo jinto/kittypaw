@@ -248,13 +248,13 @@ func TestAPITokenManager_ClearTokens(t *testing.T) {
 	}
 }
 
-// TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip pins the contract
-// that a login flow's write (per-tenant secrets) is visible to a
+// TestAPITokenManager_PerAccount_LoginToDaemonRoundTrip pins the contract
+// that a login flow's write (per-account secrets) is visible to a
 // separately constructed APITokenManager reading from the same
-// per-tenant store — the inverse of the bug where login wrote globally
-// and the daemon read per-tenant. The asymmetry guard asserts no global
+// per-account store — the inverse of the bug where login wrote globally
+// and the daemon read per-account. The asymmetry guard asserts no global
 // secrets file is produced.
-func TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip(t *testing.T) {
+func TestAPITokenManager_PerAccount_LoginToDaemonRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 
@@ -262,19 +262,19 @@ func TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip(t *testing.T) {
 	validToken := makeJWT(time.Now().Add(10 * time.Minute).Unix())
 
 	// Login simulation — writer side.
-	writerSecrets, err := LoadTenantSecrets("default")
+	writerSecrets, err := LoadAccountSecrets("default")
 	if err != nil {
-		t.Fatalf("login-side LoadTenantSecrets: %v", err)
+		t.Fatalf("login-side LoadAccountSecrets: %v", err)
 	}
 	writerMgr := NewAPITokenManager("", writerSecrets)
 	if err := writerMgr.SaveTokens(apiURL, validToken, "REFRESH"); err != nil {
 		t.Fatalf("SaveTokens: %v", err)
 	}
 
-	// Daemon simulation — independently open the same per-tenant store.
-	readerSecrets, err := LoadTenantSecrets("default")
+	// Daemon simulation — independently open the same per-account store.
+	readerSecrets, err := LoadAccountSecrets("default")
 	if err != nil {
-		t.Fatalf("daemon-side LoadTenantSecrets: %v", err)
+		t.Fatalf("daemon-side LoadAccountSecrets: %v", err)
 	}
 	readerMgr := NewAPITokenManager("", readerSecrets)
 
@@ -289,6 +289,6 @@ func TestAPITokenManager_PerTenant_LoginToDaemonRoundTrip(t *testing.T) {
 	// Asymmetry guard: a global secrets.json must NOT have been created.
 	globalPath := filepath.Join(root, "secrets.json")
 	if _, err := os.Stat(globalPath); err == nil {
-		t.Fatal("global secrets.json must not exist — write should be per-tenant only")
+		t.Fatal("global secrets.json must not exist — write should be per-account only")
 	}
 }

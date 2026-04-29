@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// setupShareFixture creates an owner tenant layout on disk: baseDir with a
+// setupShareFixture creates an owner account layout on disk: baseDir with a
 // real file plus an "outside" directory that hostile symlinks/hardlinks try
 // to escape to. Every share test starts from this topology so the traversal
 // checks exercise actual filesystem state rather than string manipulation.
@@ -15,7 +15,7 @@ func setupShareFixture(t *testing.T) (ownerBase, outsideFile string, cfg *Config
 	t.Helper()
 	root := t.TempDir()
 
-	ownerBase = filepath.Join(root, "tenants", "family")
+	ownerBase = filepath.Join(root, "accounts", "family")
 	if err := os.MkdirAll(filepath.Join(ownerBase, "memory"), 0o755); err != nil {
 		t.Fatalf("mkdir owner: %v", err)
 	}
@@ -43,7 +43,7 @@ func setupShareFixture(t *testing.T) (ownerBase, outsideFile string, cfg *Config
 // TestValidateSharedReadPath_Allowed pins the happy path: a reader listed
 // in the owner's Share map, asking for a path in the allowlist, should
 // receive the realpath to the file. Without this the whole feature is
-// DoA — every cross-tenant read would silently fail.
+// DoA — every cross-account read would silently fail.
 func TestValidateSharedReadPath_Allowed(t *testing.T) {
 	ownerBase, _, cfg := setupShareFixture(t)
 
@@ -59,7 +59,7 @@ func TestValidateSharedReadPath_Allowed(t *testing.T) {
 
 // TestValidateSharedReadPath_TraversalMatrix is the anti-cutcorner guard.
 // Every attack shape listed must be rejected at the API boundary — a single
-// variant slipping through lets a hostile path string escape the tenant
+// variant slipping through lets a hostile path string escape the account
 // sandbox. The test IS the security contract.
 func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 	ownerBase, outsideFile, cfg := setupShareFixture(t)
@@ -92,15 +92,15 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 		req     string
 		wantErr error
 	}{
-		{"absolute path", "alice", "/etc/passwd", ErrCrossTenantAbsolute},
-		{"dotdot prefix", "alice", "../../etc/passwd", ErrCrossTenantTraversal},
-		{"embedded dotdot", "alice", "memory/../../../etc/passwd", ErrCrossTenantTraversal},
-		{"symlink escape", "alice", "esc.txt", ErrCrossTenantBoundary},
-		{"hardlink escape", "alice", "hard.txt", ErrCrossTenantHardlink},
-		{"unknown peer", "mallory", "memory/weather.json", ErrCrossTenantUnauthorized},
-		{"allowlist miss", "alice", "memory/private.json", ErrCrossTenantNotAllowlisted},
-		{"empty path", "alice", "", ErrCrossTenantPath},
-		{"null byte", "alice", "memory/\x00/weather.json", ErrCrossTenantPath},
+		{"absolute path", "alice", "/etc/passwd", ErrCrossAccountAbsolute},
+		{"dotdot prefix", "alice", "../../etc/passwd", ErrCrossAccountTraversal},
+		{"embedded dotdot", "alice", "memory/../../../etc/passwd", ErrCrossAccountTraversal},
+		{"symlink escape", "alice", "esc.txt", ErrCrossAccountBoundary},
+		{"hardlink escape", "alice", "hard.txt", ErrCrossAccountHardlink},
+		{"unknown peer", "mallory", "memory/weather.json", ErrCrossAccountUnauthorized},
+		{"allowlist miss", "alice", "memory/private.json", ErrCrossAccountNotAllowlisted},
+		{"empty path", "alice", "", ErrCrossAccountPath},
+		{"null byte", "alice", "memory/\x00/weather.json", ErrCrossAccountPath},
 	}
 
 	for _, tc := range cases {
@@ -115,7 +115,7 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 
 // TestValidateSharedReadPath_NotFound splits the "file missing" signal
 // from the "policy violation" signals — a reader with a legit allowlist
-// entry pointing at a deleted file should get ErrCrossTenantNotFound, not
+// entry pointing at a deleted file should get ErrCrossAccountNotFound, not
 // a boundary error. Distinct errors let the sandbox surface a useful
 // message to the skill author ("ENOENT") vs. a policy message ("not
 // allowed"). Conflating them has burned us before.
@@ -124,18 +124,18 @@ func TestValidateSharedReadPath_NotFound(t *testing.T) {
 	cfg.Share["alice"] = ShareConfig{Read: []string{"memory/missing.json"}}
 
 	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/missing.json")
-	if !errors.Is(err, ErrCrossTenantNotFound) {
-		t.Errorf("expected ErrCrossTenantNotFound, got %v", err)
+	if !errors.Is(err, ErrCrossAccountNotFound) {
+		t.Errorf("expected ErrCrossAccountNotFound, got %v", err)
 	}
 }
 
-// TestValidateSharedReadPath_NilConfig enforces that a tenant with no
-// Share map (the default for every personal tenant) rejects all reads.
+// TestValidateSharedReadPath_NilConfig enforces that an account with no
+// Share map (the default for every personal account) rejects all reads.
 // If this silently allowed reads, the fail-closed invariant breaks.
 func TestValidateSharedReadPath_NilConfig(t *testing.T) {
 	ownerBase, _, _ := setupShareFixture(t)
 	_, err := ValidateSharedReadPath(&Config{}, ownerBase, "alice", "memory/weather.json")
-	if !errors.Is(err, ErrCrossTenantUnauthorized) {
+	if !errors.Is(err, ErrCrossAccountUnauthorized) {
 		t.Errorf("nil share must reject; got %v", err)
 	}
 }

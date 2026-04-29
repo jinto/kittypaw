@@ -33,7 +33,7 @@ func newLoginCmd() *cobra.Command {
 			}
 			apiURL = strings.TrimRight(apiURL, "/")
 
-			secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+			secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 			if err != nil {
 				return fmt.Errorf("load secrets: %w", err)
 			}

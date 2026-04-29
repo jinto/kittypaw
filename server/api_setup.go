@@ -179,10 +179,10 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 	// feedback during onboarding — no reload required (AC3).
 	if s.spawner != nil {
 		chCfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: body.BotToken}
-		ch, err := channel.FromConfig(DefaultTenantID, chCfg)
+		ch, err := channel.FromConfig(DefaultAccountID, chCfg)
 		if err != nil {
 			slog.Warn("setup: telegram channel create failed", "error", err)
-		} else if err := s.spawner.TrySpawn(DefaultTenantID, ch, chCfg); err != nil {
+		} else if err := s.spawner.TrySpawn(DefaultAccountID, ch, chCfg); err != nil {
 			slog.Warn("setup: telegram channel spawn failed", "error", err)
 		}
 	}
@@ -226,7 +226,7 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
 
-	secrets, err := core.LoadTenantSecrets(core.DefaultTenantID)
+	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load secrets: "+err.Error())
 		return
@@ -386,7 +386,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 		// Reconcile channels with the generated config. TrySpawn is idempotent,
 		// so channels already started by handleSetupTelegram are safely skipped.
 		if s.spawner != nil {
-			if rErr := s.spawner.Reconcile(DefaultTenantID, cfg.Channels); rErr != nil {
+			if rErr := s.spawner.Reconcile(DefaultAccountID, cfg.Channels); rErr != nil {
 				slog.Warn("setup: channel reconcile partial failure", "error", rErr)
 			}
 		}
@@ -533,12 +533,12 @@ func (s *Server) generateConfig() error {
 	}
 
 	// Save API server URL to secrets for package source bindings.
-	// Open the per-tenant store fresh on every call: a long-lived
+	// Open the per-account store fresh on every call: a long-lived
 	// reference would carry stale in-memory state between web setup
 	// steps (e.g. /kakao/register followed by /complete) and the
 	// second Set's persist would overwrite the first step's writes.
 	if w.APIServerURL != "" {
-		if secrets, err := core.LoadTenantSecrets(core.DefaultTenantID); err == nil {
+		if secrets, err := core.LoadAccountSecrets(core.DefaultAccountID); err == nil {
 			_ = secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
 		}
 	}

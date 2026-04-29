@@ -37,8 +37,8 @@ type Intent struct {
 }
 
 // Branch handles one intent kind end-to-end. Implementations must be
-// safe to call from any tenant Session without sharing state across
-// tenants — branch-local state lives on PipelineState (per-Session).
+// safe to call from any account Session without sharing state across
+// accounts — branch-local state lives on PipelineState (per-Session).
 type Branch interface {
 	Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error)
 }

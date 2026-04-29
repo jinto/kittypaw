@@ -10,15 +10,15 @@ import (
 )
 
 // TestLegacyMigration_PreservesDBRows enforces the AC-T9 completion bar:
-// a pre-multi-tenant install's kittypaw.db must retain its rows after
-// MigrateLegacyLayout moves the whole layout into tenants/default/. A
+// a pre-multi-account install's kittypaw.db must retain its rows after
+// MigrateLegacyLayout moves the whole layout into accounts/default/. A
 // byte-equality check would miss a SQLite corruption, so we re-open the DB
 // through the store API at the new path and read back a seeded row.
 //
-// We deliberately do NOT call OpenTenantDeps here — that path also opens
+// We deliberately do NOT call OpenAccountDeps here — that path also opens
 // the LLM provider, which requires a populated [llm] stanza and would
 // conflate DB-preservation regressions with provider-wiring regressions.
-// DiscoverTenants confirms the tenant is visible; the new Store.Open is
+// DiscoverAccounts confirms the account is visible; the new Store.Open is
 // the narrowly-scoped "rows survived the rename" probe.
 func TestLegacyMigration_PreservesDBRows(t *testing.T) {
 	base := t.TempDir()
@@ -58,15 +58,15 @@ func TestLegacyMigration_PreservesDBRows(t *testing.T) {
 		t.Fatalf("MigrateLegacyLayout: %v", err)
 	}
 
-	tenants, err := core.DiscoverTenants(filepath.Join(base, "tenants"))
+	accounts, err := core.DiscoverAccounts(filepath.Join(base, "accounts"))
 	if err != nil {
-		t.Fatalf("DiscoverTenants: %v", err)
+		t.Fatalf("DiscoverAccounts: %v", err)
 	}
-	if len(tenants) != 1 || tenants[0].ID != "default" {
-		t.Fatalf("expected single 'default' tenant post-migration, got %+v", tenants)
+	if len(accounts) != 1 || accounts[0].ID != "default" {
+		t.Fatalf("expected single 'default' account post-migration, got %+v", accounts)
 	}
 
-	migratedDB := tenants[0].DBPath()
+	migratedDB := accounts[0].DBPath()
 	if migratedDB == legacyDB {
 		t.Fatalf("migrated DB path %s unchanged from legacy", migratedDB)
 	}
@@ -121,8 +121,8 @@ func TestLegacyMigration_ConfigPermissionPreserved(t *testing.T) {
 	}
 
 	for path, want := range map[string]os.FileMode{
-		filepath.Join(base, "tenants", "default", "config.toml"):  0o640,
-		filepath.Join(base, "tenants", "default", "secrets.json"): 0o600,
+		filepath.Join(base, "accounts", "default", "config.toml"):  0o640,
+		filepath.Join(base, "accounts", "default", "secrets.json"): 0o600,
 	} {
 		fi, err := os.Stat(path)
 		if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestFromConfigTelegram(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelTelegram,
 		Token:       "123:ABC",
 	})
@@ -26,7 +26,7 @@ func TestFromConfigTelegram(t *testing.T) {
 }
 
 func TestFromConfigTelegramMissingToken(t *testing.T) {
-	_, err := FromConfig("test-tenant", core.ChannelConfig{
+	_, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelTelegram,
 	})
 	if err == nil {
@@ -35,7 +35,7 @@ func TestFromConfigTelegramMissingToken(t *testing.T) {
 }
 
 func TestFromConfigSlack(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelSlack,
 		Token:       "xoxb-test",
 		BindAddr:    "xapp-test",
@@ -53,7 +53,7 @@ func TestFromConfigSlack(t *testing.T) {
 }
 
 func TestFromConfigSlackMissingToken(t *testing.T) {
-	_, err := FromConfig("test-tenant", core.ChannelConfig{
+	_, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelSlack,
 	})
 	if err == nil {
@@ -62,7 +62,7 @@ func TestFromConfigSlackMissingToken(t *testing.T) {
 }
 
 func TestFromConfigDiscord(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelDiscord,
 		Token:       "discord-bot-token",
 	})
@@ -78,7 +78,7 @@ func TestFromConfigDiscord(t *testing.T) {
 }
 
 func TestFromConfigDiscordMissingToken(t *testing.T) {
-	_, err := FromConfig("test-tenant", core.ChannelConfig{
+	_, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelDiscord,
 	})
 	if err == nil {
@@ -87,7 +87,7 @@ func TestFromConfigDiscordMissingToken(t *testing.T) {
 }
 
 func TestFromConfigWeb(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelWeb,
 		BindAddr:    "0.0.0.0:9090",
 	})
@@ -107,7 +107,7 @@ func TestFromConfigWeb(t *testing.T) {
 }
 
 func TestFromConfigWebDefaultAddr(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelWeb,
 	})
 	if err != nil {
@@ -123,7 +123,7 @@ func TestFromConfigWebDefaultAddr(t *testing.T) {
 }
 
 func TestFromConfigKakao(t *testing.T) {
-	ch, err := FromConfig("test-tenant", core.ChannelConfig{
+	ch, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelKakaoTalk,
 		KakaoWSURL:  "wss://relay.example.com/ws/tok123",
 	})
@@ -140,7 +140,7 @@ func TestFromConfigKakao(t *testing.T) {
 }
 
 func TestFromConfigKakaoMissingWSURL(t *testing.T) {
-	_, err := FromConfig("test-tenant", core.ChannelConfig{
+	_, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: core.ChannelKakaoTalk,
 	})
 	if err == nil {
@@ -149,7 +149,7 @@ func TestFromConfigKakaoMissingWSURL(t *testing.T) {
 }
 
 func TestFromConfigUnsupported(t *testing.T) {
-	_, err := FromConfig("test-tenant", core.ChannelConfig{
+	_, err := FromConfig("test-account", core.ChannelConfig{
 		ChannelType: "carrier_pigeon",
 	})
 	if err == nil {
@@ -257,7 +257,7 @@ func TestDiscordSessionIDFromAuthor(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTelegramConfirmerInterface(t *testing.T) {
-	ch := NewTelegram("test-tenant", "fake-token")
+	ch := NewTelegram("test-account", "fake-token")
 	var _ Confirmer = ch // compile-time check
 	if _, ok := interface{}(ch).(Confirmer); !ok {
 		t.Fatal("TelegramChannel does not implement Confirmer")
@@ -265,7 +265,7 @@ func TestTelegramConfirmerInterface(t *testing.T) {
 }
 
 func TestResolveCallbackApprove(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 	reqID := "test-req-123"
 	ch := make(chan bool, 1)
 	tc.pending.Store(reqID, ch)
@@ -296,7 +296,7 @@ func TestResolveCallbackApprove(t *testing.T) {
 }
 
 func TestResolveCallbackDeny(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 	reqID := "test-req-456"
 	ch := make(chan bool, 1)
 	tc.pending.Store(reqID, ch)
@@ -321,7 +321,7 @@ func TestResolveCallbackDeny(t *testing.T) {
 }
 
 func TestResolveCallbackStale(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 
 	// No pending entry for this ID — should not panic
 	query := &telegramCallbackQuery{
@@ -335,7 +335,7 @@ func TestResolveCallbackStale(t *testing.T) {
 }
 
 func TestResolveCallbackDuplicate(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 	reqID := "test-req-dup"
 	ch := make(chan bool, 1)
 	tc.pending.Store(reqID, ch)
@@ -359,7 +359,7 @@ func TestResolveCallbackDuplicate(t *testing.T) {
 }
 
 func TestAskConfirmationTimeout(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 
 	// Use an already-canceled context to simulate timeout.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -375,7 +375,7 @@ func TestAskConfirmationTimeout(t *testing.T) {
 }
 
 func TestResolveCallbackBadFormat(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -387,7 +387,7 @@ func TestResolveCallbackBadFormat(t *testing.T) {
 }
 
 func TestAskConfirmationApproveViaResolve(t *testing.T) {
-	tc := NewTelegram("test-tenant", "fake-token")
+	tc := NewTelegram("test-account", "fake-token")
 
 	// We can't make real HTTP calls, but we can test the pending map flow.
 	// Simulate: store a pending entry, then resolve it from another goroutine.
@@ -421,7 +421,7 @@ func TestAskConfirmationApproveViaResolve(t *testing.T) {
 
 func TestKakaoWsURL(t *testing.T) {
 	url := "wss://relay.example.com/ws/abc123"
-	k := NewKakao("test-tenant", url)
+	k := NewKakao("test-account", url)
 	got := k.wsURL()
 	if got != url {
 		t.Fatalf("wsURL() = %q, want %q", got, url)

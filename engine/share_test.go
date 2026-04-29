@@ -13,7 +13,7 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-// newShareFixture stands up a two-tenant topology on disk (family owner +
+// newShareFixture stands up a two-account topology on disk (family owner +
 // alice reader) with a weather.json that only alice is cleared to read.
 // The fixture returns a Session wired as alice so each test exercises
 // the same execution path the sandbox uses at runtime — the exported
@@ -22,8 +22,8 @@ func newShareFixture(t *testing.T) (sess *Session, familyDir string) {
 	t.Helper()
 	root := t.TempDir()
 
-	familyDir = filepath.Join(root, "tenants", "family")
-	aliceDir := filepath.Join(root, "tenants", "alice")
+	familyDir = filepath.Join(root, "accounts", "family")
+	aliceDir := filepath.Join(root, "accounts", "alice")
 	if err := os.MkdirAll(filepath.Join(familyDir, "memory"), 0o755); err != nil {
 		t.Fatalf("mkdir family: %v", err)
 	}
@@ -34,8 +34,8 @@ func newShareFixture(t *testing.T) (sess *Session, familyDir string) {
 		t.Fatalf("write weather: %v", err)
 	}
 
-	reg := core.NewTenantRegistry(filepath.Join(root, "tenants"), "family")
-	reg.Register(&core.Tenant{
+	reg := core.NewAccountRegistry(filepath.Join(root, "accounts"), "family")
+	reg.Register(&core.Account{
 		ID:      "family",
 		BaseDir: familyDir,
 		Config: &core.Config{
@@ -43,26 +43,26 @@ func newShareFixture(t *testing.T) (sess *Session, familyDir string) {
 			Share:    map[string]core.ShareConfig{"alice": {Read: []string{"memory/weather.json"}}},
 		},
 	})
-	reg.Register(&core.Tenant{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
+	reg.Register(&core.Account{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
 
 	sess = &Session{
-		Config:         &core.Config{},
-		TenantID:       "alice",
-		TenantRegistry: reg,
+		Config:          &core.Config{},
+		AccountID:       "alice",
+		AccountRegistry: reg,
 	}
 	return sess, familyDir
 }
 
-func mustCall(t *testing.T, tenantID, path string) core.SkillCall {
+func mustCall(t *testing.T, accountID, path string) core.SkillCall {
 	t.Helper()
-	tid, _ := json.Marshal(tenantID)
+	tid, _ := json.Marshal(accountID)
 	p, _ := json.Marshal(path)
 	return core.SkillCall{SkillName: "Share", Method: "read", Args: []json.RawMessage{tid, p}}
 }
 
 // TestShareRead_Success pins the happy path — alice asking for an
-// allowlisted path returns the file body. The pair (Session.TenantID,
-// target Tenant from registry) is what makes the cross-tenant check
+// allowlisted path returns the file body. The pair (Session.AccountID,
+// target Account from registry) is what makes the cross-account check
 // meaningful; without the session field wired up the whole surface is
 // dead code.
 func TestShareRead_Success(t *testing.T) {
@@ -106,16 +106,16 @@ func TestShareRead_AllowlistMiss(t *testing.T) {
 	}
 }
 
-// TestShareRead_UnknownTenant rejects typos at the API boundary — a
-// skill asking to read from "grandma" when no such tenant exists must
-// NOT fall through to some default tenant lookup. The whole value of
-// TenantRouter's strict routing vanishes if share reads silently
+// TestShareRead_UnknownAccount rejects typos at the API boundary — a
+// skill asking to read from "grandma" when no such account exists must
+// NOT fall through to some default account lookup. The whole value of
+// AccountRouter's strict routing vanishes if share reads silently
 // rewrite unknown targets.
 //
 // The externally-visible error string is the same as a non-family target
-// (defense against tenant ID enumeration via error oracle); the audit log
-// carries reason=unknown_tenant for forensics.
-func TestShareRead_UnknownTenant(t *testing.T) {
+// (defense against account ID enumeration via error oracle); the audit log
+// carries reason=unknown_account for forensics.
+func TestShareRead_UnknownAccount(t *testing.T) {
 	sess, _ := newShareFixture(t)
 
 	var buf bytes.Buffer
@@ -126,16 +126,16 @@ func TestShareRead_UnknownTenant(t *testing.T) {
 	out, _ := executeShare(context.Background(), mustCall(t, "grandma", "memory/weather.json"), sess)
 	var resp map[string]string
 	_ = json.Unmarshal([]byte(out), &resp)
-	if !strings.Contains(resp["error"], "target is not the family tenant") {
+	if !strings.Contains(resp["error"], "target is not the family account") {
 		t.Errorf("expected unified family-target error, got %q", resp["error"])
 	}
-	if !strings.Contains(buf.String(), `"reason":"unknown_tenant"`) {
-		t.Errorf("audit log should carry unknown_tenant reason; got: %s", buf.String())
+	if !strings.Contains(buf.String(), `"reason":"unknown_account"`) {
+		t.Errorf("audit log should carry unknown_account reason; got: %s", buf.String())
 	}
 }
 
 // TestShareRead_AuditLog verifies the operational contract — every successful
-// cross-tenant read emits a structured slog record with {from, to, path,
+// cross-account read emits a structured slog record with {from, to, path,
 // bytes}. Silent success would make data-flow auditing impossible when a
 // deployment goes sideways.
 func TestShareRead_AuditLog(t *testing.T) {
@@ -151,21 +151,21 @@ func TestShareRead_AuditLog(t *testing.T) {
 	}
 
 	log := buf.String()
-	if !strings.Contains(log, `"msg":"cross_tenant_read"`) {
+	if !strings.Contains(log, `"msg":"cross_account_read"`) {
 		t.Errorf("audit record missing: %s", log)
 	}
 	if !strings.Contains(log, `"from":"alice"`) || !strings.Contains(log, `"to":"family"`) {
-		t.Errorf("audit record missing tenant labels: %s", log)
+		t.Errorf("audit record missing account labels: %s", log)
 	}
 }
 
 // TestShareRead_NoRegistry protects against the "Session wired without
-// tenant context" case — e.g. a legacy single-tenant daemon or a test
+// account context" case — e.g. a legacy single-account daemon or a test
 // setup that forgot to inject the registry. Rather than panic on nil,
 // surface a clear "unavailable" error so skill authors see what's
 // missing instead of debugging a segfault.
 func TestShareRead_NoRegistry(t *testing.T) {
-	sess := &Session{Config: &core.Config{}} // TenantID="", TenantRegistry=nil
+	sess := &Session{Config: &core.Config{}} // AccountID="", AccountRegistry=nil
 
 	out, _ := executeShare(context.Background(), mustCall(t, "family", "x"), sess)
 	var resp map[string]string
@@ -177,7 +177,7 @@ func TestShareRead_NoRegistry(t *testing.T) {
 
 // TestShareRead_RejectsNonFamilyTarget is the invariant that closes the I5
 // hole: even if bob's config legally contains `[share.alice] read = [...]`,
-// alice cannot read from bob because bob is not the family tenant. The
+// alice cannot read from bob because bob is not the family account. The
 // allowlist grants a path inside the owner; the family-only gate decides
 // whether the owner is even reachable. Without this, Plan B's "personal ↔
 // personal forbidden" rule would depend entirely on admins never adding a
@@ -187,8 +187,8 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 
-	bobDir := filepath.Join(root, "tenants", "bob")
-	aliceDir := filepath.Join(root, "tenants", "alice")
+	bobDir := filepath.Join(root, "accounts", "bob")
+	aliceDir := filepath.Join(root, "accounts", "alice")
 	if err := os.MkdirAll(filepath.Join(bobDir, "memory"), 0o755); err != nil {
 		t.Fatalf("mkdir bob: %v", err)
 	}
@@ -201,10 +201,10 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 		t.Fatalf("write bob: %v", err)
 	}
 
-	reg := core.NewTenantRegistry(filepath.Join(root, "tenants"), "family")
-	// bob is a personal tenant (IsFamily=false) that has improperly granted
+	reg := core.NewAccountRegistry(filepath.Join(root, "accounts"), "family")
+	// bob is a personal account (IsFamily=false) that has improperly granted
 	// alice a read allowlist. The gate MUST reject regardless.
-	reg.Register(&core.Tenant{
+	reg.Register(&core.Account{
 		ID:      "bob",
 		BaseDir: bobDir,
 		Config: &core.Config{
@@ -212,12 +212,12 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 			Share:    map[string]core.ShareConfig{"alice": {Read: []string{"memory/notes.json"}}},
 		},
 	})
-	reg.Register(&core.Tenant{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
+	reg.Register(&core.Account{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
 
 	sess := &Session{
-		Config:         &core.Config{},
-		TenantID:       "alice",
-		TenantRegistry: reg,
+		Config:          &core.Config{},
+		AccountID:       "alice",
+		AccountRegistry: reg,
 	}
 
 	var buf bytes.Buffer
@@ -247,7 +247,7 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	}
 
 	log := buf.String()
-	if !strings.Contains(log, "cross_tenant_read_rejected") {
+	if !strings.Contains(log, "cross_account_read_rejected") {
 		t.Errorf("expected rejection audit record, got: %s", log)
 	}
 	if !strings.Contains(log, `"to":"bob"`) {
@@ -258,7 +258,7 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 // TestShareRead_RejectsSelfTarget pins the edge case where alice targets
 // "alice" — self-reads should never need Share.read (direct fs access is
 // the intended path) and allowing them would create a subtle bypass where
-// a personal tenant writes a loopback Share config to exercise the
+// a personal account writes a loopback Share config to exercise the
 // audit/read code path on its own data.
 func TestShareRead_RejectsSelfTarget(t *testing.T) {
 	sess, _ := newShareFixture(t)

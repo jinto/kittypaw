@@ -20,16 +20,16 @@ import (
 type SkillResolver func(ctx context.Context, call core.SkillCall) (string, error)
 
 // Options controls per-execution behavior that varies per Session (not per
-// Sandbox instance). The Sandbox is shared across tenants, so tenant-scoped
+// Sandbox instance). The Sandbox is shared across accounts, so account-scoped
 // toggles must travel on the call — not the constructor.
 type Options struct {
 	// ExposeFanout registers the Fanout.* global. Off by default because only
-	// family tenants may push to peers; personal tenants must not see the API
+	// family accounts may push to peers; personal accounts must not see the API
 	// surface at all (so a skill can't even probe `typeof Fanout`).
 	ExposeFanout bool
 
 	// ExposeShare registers the Share.* global. Off by default because only
-	// personal tenants read from family; the family tenant itself is the
+	// personal accounts read from family; the family account itself is the
 	// authoritative owner and has no peer to read from. Defense in depth on
 	// top of the Go-layer family-only gate in engine/share.go.
 	ExposeShare bool
@@ -64,7 +64,7 @@ func (s *Sandbox) ExecuteWithResolver(
 
 // ExecuteWithResolverOpts is the full-control variant of ExecuteWithResolver.
 // Callers that need to vary behavior per Session (e.g. enabling Fanout for a
-// family tenant) use this. Personal-tenant call sites can keep calling the
+// family account) use this. Personal-account call sites can keep calling the
 // plain ExecuteWithResolver — the zero Options has all gates closed.
 func (s *Sandbox) ExecuteWithResolverOpts(
 	ctx context.Context,
