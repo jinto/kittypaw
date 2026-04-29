@@ -1,6 +1,13 @@
 # KittyPaw
 
-AI agent framework with multi-channel messaging, JavaScript sandbox, and skill learning.
+Experimental Go framework for local AI agents. Single binary, goja JS sandbox, 5 channel adapters, skill registry. **v0.0.8 alpha** — honest status over polish.
+
+## Status
+
+- ✅ **Working** — CLI + daemon, registry install, sandbox + permission, 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
+- 🚧 **Partial** — Reflection candidate surface (verified), `skill create` syntax (5/5 measured), Web search source quality
+- 🔬 **Experimental** — Family tenant, MoA, live workspace indexing
+- ❌ **Not / retired** — Windows GUI signing, "learns the more you use it" auto-adaptation, self-healing (retired)
 
 ## Install
 
@@ -16,7 +23,7 @@ kittypaw skill install weather-briefing   # install a skill from registry
 kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts daemon)
 ```
 
-That's it — Korean weather briefing in 3 commands. The skill reads your locale and location from config, fetches live forecast data, and summarizes it in your language.
+Inspect what you get: a local daemon, one installed skill, an LLM-backed chat. Skill runtime behaviour depends on its package, the configured APIs, and the LLM provider.
 
 ```bash
 kittypaw chat          # interactive REPL mode
@@ -31,7 +38,7 @@ kittypaw skill install https://github.com/owner/repo   # install from GitHub
 kittypaw skill install /path/to/local/skill       # install from local directory
 kittypaw skill search <keyword>                   # search skill registry
 kittypaw skill list                               # list installed skills
-kittypaw skill create <description>               # generate a skill from natural language
+kittypaw skill create <description>               # generate a draft skill from natural language
 ```
 
 ## Config
@@ -76,4 +83,4 @@ rm -rf ~/.kittypaw              # remove config and data
 
 ## License
 
-[Elastic License 2.0](https://www.elastic.co/licensing/elastic-license)
+[Elastic License 2.0](LICENSE)

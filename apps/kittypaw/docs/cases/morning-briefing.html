@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>아침 자동 브리핑 — KittyPaw</title>
-  <meta name="description" content="날씨, 시장 동향, 뉴스 요약이 매일 아침 텔레그램으로 도착합니다. 스킬 3개 설치, 설정 한 번이면 끝.">
+  <title>예약 패키지 실행 — KittyPaw</title>
+  <meta name="description" content="날씨, 시장 동향, RSS 요약 패키지 설치 → cron 스케줄 → telegram 발송. weekly delivery live verified.">
   <link rel="canonical" href="https://kittypaw.app/cases/morning-briefing.html">
-  <meta property="og:title" content="아침 자동 브리핑 — KittyPaw">
-  <meta property="og:description" content="날씨, 시장 동향, 뉴스 요약이 매일 아침 텔레그램으로 도착합니다. 설치 3분, 코드 0줄.">
+  <meta property="og:title" content="예약 패키지 실행 — KittyPaw">
+  <meta property="og:description" content="날씨, 시장 동향, RSS 요약 패키지 설치 → cron 스케줄 → telegram 발송. weekly delivery live verified.">
   <meta property="og:url" content="https://kittypaw.app/cases/morning-briefing.html">
   <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
@@ -33,31 +33,32 @@
 <div class="case-breadcrumb">
   <a href="../">홈</a><span class="bc-sep">›</span>
   <a href="./">활용 사례</a><span class="bc-sep">›</span>
-  아침 자동 브리핑
+  예약 패키지 실행
 </div>
 
 <section class="case-hero">
   <div class="case-hero-inner">
     <span class="case-hero-icon">☀️</span>
-    <h1>아침 자동 브리핑</h1>
+    <h1>✅ 예약 패키지 실행</h1>
     <p class="case-hero-sub">
-      날씨, 시장 동향, 뉴스 요약이 매일 아침 텔레그램으로 도착합니다. 설치 3분, 코드 0줄.
+      날씨, 시장 동향, RSS 요약 패키지 설치 → cron 스케줄 → telegram setup 후 cron 시각에 발송.<br>
+      weekly delivery live verified (commit af0c360).
     </p>
-    <span class="case-tag">내장 스킬</span>
+    <span class="case-tag">✅ 작동 verified</span>
   </div>
 </section>
 
 <section class="case-story">
   <div class="case-story-header">
     <span class="section-eyebrow">시나리오</span>
-    <h2 class="section-title">출근길, 폰을 켜면 이미 와있습니다</h2>
+    <h2 class="section-title">패키지가 데이터를 가져오고 메시지를 만듭니다</h2>
   </div>
 
   <div class="case-step">
     <div class="case-step-num">1</div>
     <div class="case-step-body">
-      <h3>스킬 갤러리에서 3개 설치</h3>
-      <p>날씨 브리핑, 매크로 경제 리포트, RSS 뉴스 요약. 갤러리에서 클릭 한 번이면 설치 완료.</p>
+      <h3>스킬 레지스트리에서 3개 설치</h3>
+      <p>날씨 브리핑, 매크로 경제 리포트, RSS 뉴스 요약 패키지를 레지스트리에서 설치합니다.</p>
       <div class="mock-code">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -80,8 +81,8 @@
   <div class="case-step">
     <div class="case-step-num">2</div>
     <div class="case-step-body">
-      <h3>텔레그램 봇 + 위치만 입력</h3>
-      <p>텔레그램 봇 토큰은 <code>kittypaw setup</code> 으로 한 번에 등록. 날씨 스킬의 위치는 <code>kittypaw skill config weather-briefing latitude/longitude</code> 로 설정. API 키는 필요 없습니다 (Open-Meteo 무료).</p>
+      <h3>패키지 설정 입력</h3>
+      <p>날씨 패키지에 위치 좌표 입력. 텔레그램 봇 토큰은 <code>kittypaw setup</code> 의 대화형 wizard 로 한 번에. API 키 없이 동작 (Open-Meteo 무료).</p>
       <div class="mock-code">
         <div class="mock-code-header">
           <span class="mock-code-dot mock-code-dot-r"></span>
@@ -101,8 +102,8 @@
   <div class="case-step">
     <div class="case-step-num">3</div>
     <div class="case-step-body">
-      <h3>매일 아침, 브리핑이 도착합니다</h3>
-      <p>날씨는 오전 7시, 시장은 평일 8시, 뉴스는 9시. 출근길에 폰을 열면 이미 와있습니다.</p>
+      <h3>cron 시각에 발송</h3>
+      <p>각 패키지의 cron 에 따라 daemon 이 자동 실행 → LLM 요약 → 등록된 telegram 채널로 발송. 출근길에 폰 켜면 도착해 있음.</p>
 
       <div class="mock-tg" style="margin-bottom:16px">
         <div class="mock-tg-header">
@@ -179,8 +180,8 @@
       <div class="step reveal reveal-delay-3">
         <div class="step-emoji">📱</div>
         <div class="step-num">3</div>
-        <h3>결과 전송</h3>
-        <p>LLM이 데이터를 요약하고 텔레그램으로 보냅니다</p>
+        <h3>채널 발송</h3>
+        <p>LLM 요약 결과를 등록된 telegram 채널로 발송. weekly delivery live verified.</p>
       </div>
     </div>
   </div>
@@ -192,18 +193,18 @@
     <div class="case-others-grid">
       <a href="pattern-automation.html" class="case-others-card">
         <div class="case-others-icon">🔄</div>
-        <h4>반복 → 자동화</h4>
-        <p>패턴 감지 &amp; 제안</p>
+        <h4>반복 의도 분석</h4>
+        <p>Reflection 후보</p>
       </a>
       <a href="teach-skill.html" class="case-others-card">
         <div class="case-others-icon">💬</div>
         <h4>자연어 스킬 생성</h4>
-        <p>말로 만드는 자동화</p>
+        <p>생성 + syntax 검증</p>
       </a>
       <a href="site-monitoring.html" class="case-others-card">
         <div class="case-others-icon">🚨</div>
-        <h4>서비스 모니터링</h4>
-        <p>다운 즉시 알림</p>
+        <h4>URL 상태 확인</h4>
+        <p>상태 변경 메시지</p>
       </a>
     </div>
   </div>
@@ -212,17 +213,17 @@
 <section class="cta-section">
   <div class="cta-inner">
     <span class="cta-paw">🐾</span>
-    <h2 class="reveal">지금 시작하세요</h2>
+    <h2 class="reveal">GitHub 에서 확인</h2>
     <p class="reveal reveal-delay-1">
-      급할수록 필요한 건, 작고 빠른 고양이손.<br>
-      kittypaw serve 한 줄로 오늘부터 자동화를 시작하세요.
+      v0.0.8 alpha. 코드 / 한계 / 진행 상태는 issues 에서 추적합니다.<br>
+      bug / 의문 / 기여 환영.
     </p>
     <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
-        <span>⭐</span> GitHub에서 받기
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHub 저장소
       </a>
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-cta-secondary">
-        🎨 스킬 갤러리
+      <a href="https://github.com/jinto/kittypaw/issues" class="btn btn-cta-secondary">
+        💬 Issues
       </a>
     </div>
   </div>
@@ -234,11 +235,9 @@
     <span class="footer-sep">·</span>
     <a href="https://github.com/jinto/kittypaw">GitHub</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/kittypaw-app/skills">스킬 갤러리</a>
+    <a href="https://github.com/kittypaw-app/skills">스킬 레지스트리</a>
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
-    <span class="footer-sep">·</span>
-    <span>Made with 🐹 &amp; ❤️</span>
   </div>
   <div class="biz-info">
     <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>

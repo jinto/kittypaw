@@ -3,28 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KittyPaw — コード不要のAIエージェントフレームワーク</title>
-  <meta name="description" content="Go · CLI + HTTP · ローカルLLM対応。スキルギャラリーからインストールして、設定を入力するだけ。すべて自動化。">
+  <title>KittyPaw — Goで作るローカルAIエージェントの実験</title>
+  <meta name="description" content="Goシングルバイナリで作るローカルAIエージェントプロジェクト。CLI + デーモン、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。v0.0.8 alpha。">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
   <link rel="canonical" href="https://kittypaw.app/ja/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
   <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
   <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
-  <meta property="og:title" content="KittyPaw — コード不要のAIエージェントフレームワーク">
-  <meta property="og:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <meta property="og:title" content="KittyPaw — Goで作るローカルAIエージェントの実験">
+  <meta property="og:description" content="Goシングルバイナリ、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。部品を一つずつ検証する実験プロジェクト。">
   <meta property="og:url" content="https://kittypaw.app/ja/">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="ja_JP">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="KittyPaw — コード不要のAIエージェントフレームワーク">
-  <meta name="twitter:description" content="スキルギャラリーからインストールして、設定を入力するだけ。毎朝のマーケットレポート、RSSニュース要約、URL監視...すべて自動化。">
+  <meta name="twitter:title" content="KittyPaw — Goで作るローカルAIエージェントの実験">
+  <meta name="twitter:description" content="Goシングルバイナリ、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。部品を一つずつ検証する実験プロジェクト。">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "コード不要のAIエージェントフレームワーク。スキルギャラリーからインストールして、設定を入力するだけ。",
+    "description": "Goシングルバイナリで作るローカルAIエージェントプロジェクト。CLI + デーモン、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。v0.0.8 alpha。",
     "url": "https://kittypaw.app/ja/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux, Windows",
@@ -50,7 +50,6 @@
     <a href="../cases/" class="nav-link">事例</a>
     <a href="#skills" class="nav-link">スキル</a>
     <a href="#tech" class="nav-link">技術</a>
-    <a href="#strengths" class="nav-link">強み</a>
     <a href="https://github.com/jinto/kittypaw" class="nav-link nav-cta">GitHub</a>
     <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/" class="nav-link-active">JA</a></span>
   </div>
@@ -72,18 +71,17 @@
         <div class="paw-pad"></div>
       </div>
       <div class="hero-badge">
-        <span>🏠</span> ローカルLLM対応 · マルチチャネル · ソースコード公開
+        <span>🔬</span> v0.0.8 alpha · Go 1.25 · Elastic License 2.0
       </div>
     </div>
 
     <h1>
-      コード不要で<br>
-      <span class="accent-warm">AIがすべて</span><br>
-      自動化します
+      KittyPaw<br>
+      <span class="accent-warm">ローカルAIエージェントの実験</span>
     </h1>
     <p class="hero-sub">
-      スキルギャラリーからインストールして、設定を入力するだけ。<br>
-      毎朝のマーケットレポート、RSS要約、URL監視&hellip; すべて自動で。
+      チャット、スキル実行、スケジューラ、メモリ、権限制御を小さな単位で作りながら<br>
+      どこまで行けるかを試しているGoプロジェクトです。シングルバイナリ、外部ランタイム不要。
     </p>
 
     <div class="install-box">
@@ -91,13 +89,13 @@
       <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh</code>
       <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="コピー">📋</button>
     </div>
-    <p class="install-hint">macOS · Linux — ターミナルに貼り付け</p>
+    <p class="install-hint">macOS · Linux — Windows版はリリースページから直接ダウンロード</p>
     <div class="hero-buttons">
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-secondary">
-        <span>🎨</span> スキルギャラリーを見る
+      <a href="https://github.com/jinto/kittypaw" class="btn btn-secondary">
+        <span>⭐</span> GitHubリポジトリ
       </a>
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-ghost">
-        その他のダウンロード
+      <a href="https://github.com/jinto/kittypaw/issues" class="btn btn-ghost">
+        Issues
       </a>
     </div>
 
@@ -112,34 +110,34 @@
         <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
         <div class="t-out">   LLM provider: Claude (Anthropic)</div>
         <div class="t-out">   Channel: Telegram</div>
-        <div class="t-out">   ✓ 自動起動を登録 · チャット開始</div>
+        <div class="t-out">   ✓ 設定保存 · デーモン起動</div>
         <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
-    <p class="hero-note">外部ランタイム不要 · シングルバイナリ · macOS · Linux · Windows</p>
+    <p class="hero-note">single Go binary · sqlite (modernc) · goja JS sandbox · macOS / Linux / Windows</p>
   </div>
 </section>
 
 <!-- ============================================================
-     SOCIAL PROOF STRIP
+     STATUS BOARD
 ============================================================ -->
 <div class="proof-strip">
   <div class="proof-inner">
     <div class="proof-item reveal">
-      <span class="proof-dot"></span>
-      ソースコード公開
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ CLI + ローカルデーモン
     </div>
     <div class="proof-item reveal reveal-delay-1">
-      <span class="proof-dot"></span>
-      Elastic License 2.0
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ 5チャンネルアダプタ (Telegram/Slack/Discord/Kakao/WS)
     </div>
     <div class="proof-item reveal reveal-delay-2">
-      <span class="proof-dot"></span>
-      GitHubで確認する
+      <span class="proof-dot proof-dot-active"></span>
+      🚧 Reflection候補 / 自然言語スキル生成
     </div>
     <div class="proof-item reveal reveal-delay-3">
       <span class="proof-dot"></span>
-      macOS · Linux · Windows 対応
+      🔬 Family tenant · MoA · live indexing
     </div>
   </div>
 </div>
@@ -150,40 +148,40 @@
 <section id="features">
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">主な機能</span>
-      <h2 class="section-title">なぜKittyPawなのか？</h2>
-      <p class="section-sub">n8n、ZapierのようなローカルAIエージェントの代替。<br>AIがコードを書き、サンドボックスで安全に実行します。</p>
+      <span class="section-eyebrow">構成要素</span>
+      <h2 class="section-title">作っている部品たち</h2>
+      <p class="section-sub">完成済みSaaSではなく、ローカルAIエージェントの部品を一つずつ作って検証するプロジェクトです。<br>各カードの ✅ / 🚧 / 🔬 は現在の検証状態です。</p>
     </div>
     <div class="features-grid">
       <div class="feature-card reveal reveal-delay-1">
         <div class="feature-icon-wrap">🎯</div>
-        <h3>コード不要の自動化</h3>
-        <p>スキルギャラリーから目的の自動化をインストールし、Telegramトークンを入力するだけですぐに動作します。</p>
+        <h3>✅ Skillパッケージ</h3>
+        <p>レジストリ / GitHub URL / ローカルパスからインストール。<code>package.toml</code>、source-bound config (secrets.json)、SHA256検証。</p>
       </div>
       <div class="feature-card reveal reveal-delay-2">
-        <div class="feature-icon-wrap">💬</div>
-        <h3>対話型AIアシスタント</h3>
-        <p>「ドラマの新エピソードを通知してほしい」と話しかけるだけ。合うスキルを推薦するか、新しく作成します。使うほどあなたを理解するパーソナルアシスタント。</p>
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>🚧 Reflectionループ</h3>
+        <p>最近の会話 → 繰り返し意図 / トピック候補を保存。初回ターンのsuffix表示 ✅ verified、「はい」回答時のdispatch ✅、生成コードの安定性 🚧。</p>
       </div>
       <div class="feature-card reveal reveal-delay-3">
         <div class="feature-icon-wrap">🔒</div>
-        <h3>安全な実行</h3>
-        <p>すべてのスキルはgojaサンドボックスで実行され、危険な操作はPermission承認システムが保護します。</p>
+        <h3>✅ Sandbox + Permission</h3>
+        <p>すべてのスキルはgoja内で実行。SSRFブロック、hop-by-hopヘッダーブロック、危険操作 (Shell.exec / Git.push) はsupervisedモードでユーザー承認。</p>
       </div>
       <div class="feature-card reveal reveal-delay-4">
         <div class="feature-icon-wrap">🔗</div>
-        <h3>スキルチェーン</h3>
-        <p>複数のスキルを順次パイプラインで連結。データ収集 → 要約 → 送信を一度に。</p>
+        <h3>🔬 Skillチェーン</h3>
+        <p>複数スキルをpipelineで接続。一部パッケージで段階実行を検証中。汎用chain DSLは未定。</p>
       </div>
       <div class="feature-card reveal reveal-delay-5">
         <div class="feature-icon-wrap">🌐</div>
-        <h3>ウェブ検索</h3>
-        <p>スキルがウェブを検索し、ページを読み込み、AIで要約します。ファクトチェックも自動で。</p>
+        <h3>🚧 Web検索</h3>
+        <p>DuckDuckGo (no-config) + Google API + Tavilyオプション。<code>Web.search</code> + <code>Web.fetch</code> primitive。出典品質 / 結果検証は継続中。</p>
       </div>
       <div class="feature-card reveal reveal-delay-6">
         <div class="feature-icon-wrap">🏠</div>
-        <h3>ローカルLLM対応</h3>
-        <p>Ollama、LM Studioなど自分のPCのローカルモデルを接続。API費用ゼロ。データが自分のPCから出ません。</p>
+        <h3>✅ ローカルLLM</h3>
+        <p>Ollama / LM Studio などOpenAI互換ローカルendpoint。モデル性能の差は大きい — 小さいモデルはtool useに制限あり。</p>
       </div>
     </div>
   </div>
@@ -196,27 +194,27 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">使い方</span>
-      <h2 class="section-title">3ステップで完了</h2>
-      <p class="section-sub" style="margin-bottom: 52px;">インストールして設定すれば、猫が勝手に働きます</p>
+      <h2 class="section-title">基本フロー</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">CLIまたはローカルWeb UIから — すべてのデータはローカルSQLiteに保存。</p>
     </div>
     <div class="steps-row">
       <div class="step reveal reveal-delay-1">
         <div class="step-emoji">📦</div>
         <div class="step-num">1</div>
-        <h3>スキルをインストール</h3>
-        <p>ギャラリーから目的のスキルを選んで、ワンクリックでインストールします。</p>
+        <h3>Skillインストール</h3>
+        <p><code>kittypaw skill install &lt;name&gt;</code> — レジストリ / GitHub URL / ローカルパス対応。</p>
       </div>
       <div class="step reveal reveal-delay-2">
         <div class="step-emoji">⚙️</div>
         <div class="step-num">2</div>
-        <h3>設定を入力</h3>
-        <p>Telegramトークン、スケジュール、APIキーを入力するだけ。コードに触れる必要はありません。</p>
+        <h3>Config入力</h3>
+        <p><code>kittypaw skill config &lt;name&gt; &lt;key&gt; &lt;value&gt;</code> — または <code>kittypaw setup</code> でLLM/チャンネルを一括。必要項目はパッケージの <code>package.toml</code> 参照。</p>
       </div>
       <div class="step reveal reveal-delay-3">
-        <div class="step-emoji">✨</div>
+        <div class="step-emoji">⏱</div>
         <div class="step-num">3</div>
-        <h3>自動実行</h3>
-        <p>設定したスケジュールに従って自動的に実行され、結果を通知で受け取ります。</p>
+        <h3>実行 / スケジュール</h3>
+        <p><code>kittypaw skill run &lt;name&gt;</code> 手動実行、または cron triggerでデーモンが自動実行 → チャンネルアダプタ経由で発信。</p>
       </div>
     </div>
   </div>
@@ -228,44 +226,44 @@
 <section>
   <div class="section section-center">
     <div class="reveal">
-      <span class="section-eyebrow">活用例</span>
-      <h2 class="section-title">こんな使い方ができます</h2>
-      <p class="section-sub">インストールして設定するだけですぐに動く自動化</p>
+      <span class="section-eyebrow">実シナリオ</span>
+      <h2 class="section-title">レジストリパッケージで作った流れ</h2>
+      <p class="section-sub">Live test 検証済 ✅ / 進行中 🚧 — 各カードのstatus参照。</p>
     </div>
     <div class="usecases-grid">
       <div class="usecase-card reveal reveal-delay-1">
-        <div class="usecase-num-badge">1</div>
+        <div class="usecase-num-badge">☀️</div>
         <div>
-          <h3>毎朝のマーケットレポート</h3>
-          <p>ETFデータを収集しAIが要約してTelegramに送信。平日午前8時に自動配信。</p>
+          <h3>✅ 予約パッケージ実行</h3>
+          <p>天気 / マーケット / RSSパッケージをインストール → cron schedule → telegram setup後cron時刻に発信。</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-2">
-        <div class="usecase-num-badge">2</div>
+        <div class="usecase-num-badge">🔄</div>
         <div>
-          <h3>RSSニュース要約</h3>
-          <p>Hacker News、TechCrunchなどRSSフィードの新着記事をAIが要約。既読記事は自動フィルタリング。</p>
+          <h3>✅ 繰り返し意図のsurface</h3>
+          <p>Reflection候補保存 → chat初回ターンのsuffix surface verified (commit 8f2536a)。自動生成コードは🚧。</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-3">
-        <div class="usecase-num-badge">3</div>
+        <div class="usecase-num-badge">🚨</div>
         <div>
-          <h3>サービスダウン通知</h3>
-          <p>自分のウェブサイト/APIを5分ごとにチェック。ダウン時はすぐにTelegram通知。復旧時も通知。</p>
+          <h3>✅ URL状態確認</h3>
+          <p>cron HTTPチェック → 状態変更時のalertメッセージ。telegram routing時に発信。</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-4">
-        <div class="usecase-num-badge">4</div>
+        <div class="usecase-num-badge">🌤</div>
         <div>
-          <h3>天気ブリーフィング</h3>
-          <p>毎朝7日間の予報を自然言語でお知らせ。APIキー不要（Open-Meteo無料API使用）。</p>
+          <h3>✅ 天気ブリーフィング</h3>
+          <p>Open-Meteoの7日間予報 + LLM短い要約、APIキー不要。</p>
         </div>
       </div>
       <div class="usecase-card reveal reveal-delay-5">
-        <div class="usecase-num-badge">5</div>
+        <div class="usecase-num-badge">💬</div>
         <div>
-          <h3>自分だけの自動化を作る</h3>
-          <p><code>kittypaw skill create "毎日宝くじ当選番号を確認して教えて"</code> — AIがコードを書き、テストして登録します。</p>
+          <h3>🚧 自然言語スキル生成</h3>
+          <p><code>kittypaw skill create "..."</code> → JSコード → goja syntax検証 (5/5 pass measured) → SkillStore保存。Runtime動作はパッケージごと。</p>
         </div>
       </div>
     </div>
@@ -278,40 +276,40 @@
 <section id="skills" class="skills-section section-full">
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
-      <span class="section-eyebrow">スキルギャラリー</span>
-      <h2 class="section-title">ギャラリーから一行でインストール</h2>
-      <p class="section-sub">よく使う5つのスキルが、それぞれコマンド一発でインストール完了</p>
+      <span class="section-eyebrow">レジストリ</span>
+      <h2 class="section-title">現在レジストリにあるパッケージ</h2>
+      <p class="section-sub"><code>kittypaw skill install &lt;name&gt;</code> でインストール。statusはlive test基準。</p>
     </div>
     <div class="skills-grid">
       <div class="skill-card reveal reveal-delay-1">
         <span class="skill-icon">📈</span>
         <h4>マクロ経済レポート</h4>
         <p>ETF + AI要約</p>
-        <span class="skill-tag">毎日自動</span>
+        <span class="skill-tag">✅ cron</span>
       </div>
       <div class="skill-card reveal reveal-delay-2">
         <span class="skill-icon">🌤</span>
         <h4>天気ブリーフィング</h4>
-        <p>7日間予報</p>
-        <span class="skill-tag">APIキー不要</span>
+        <p>7日間予報 (Open-Meteo)</p>
+        <span class="skill-tag">✅ APIキー不要</span>
       </div>
       <div class="skill-card reveal reveal-delay-3">
         <span class="skill-icon">📰</span>
         <h4>RSSニュース要約</h4>
         <p>フィード + LLM要約</p>
-        <span class="skill-tag">重複フィルター</span>
+        <span class="skill-tag">✅ 重複フィルター</span>
       </div>
       <div class="skill-card reveal reveal-delay-4">
-        <span class="skill-icon">✅</span>
+        <span class="skill-icon">⏰</span>
         <h4>リマインダー</h4>
-        <p>チャットでToDo管理</p>
-        <span class="skill-tag">AIチャット</span>
+        <p>チャットkeyword + cron</p>
+        <span class="skill-tag">🚧 partial</span>
       </div>
       <div class="skill-card reveal reveal-delay-5">
         <span class="skill-icon">🔍</span>
         <h4>URLモニター</h4>
-        <p>状態変更通知</p>
-        <span class="skill-tag">5分周期</span>
+        <p>HTTPチェック + 状態変更alert</p>
+        <span class="skill-tag">✅ 5分周期</span>
       </div>
     </div>
   </div>
@@ -324,8 +322,8 @@
   <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
     <div class="reveal">
       <span class="section-eyebrow">技術スタック</span>
-      <h2 class="section-title">外部ランタイム不要、Goのみで</h2>
-      <p class="section-sub">単一バイナリで配布。npmもNodeもPythonも不要です。</p>
+      <h2 class="section-title">Goのみ — 外部ランタイム0</h2>
+      <p class="section-sub">単一バイナリ。npm / Node / Python依存なし。20 SQLite migrations、159 commits 進行中。</p>
     </div>
     <div class="tech-grid">
       <div class="tech-card reveal reveal-delay-1">
@@ -366,8 +364,8 @@
       <div class="tech-card reveal reveal-delay-6">
         <div class="tech-badge">🔑</div>
         <div>
-          <div class="tech-card-name">Local Secret Store</div>
-          <div class="tech-card-desc">ローカルファイルベースのキー管理</div>
+          <div class="tech-card-name">per-tenant secrets.json</div>
+          <div class="tech-card-desc">tenant別分離保存</div>
         </div>
       </div>
       <div class="tech-card reveal reveal-delay-1">
@@ -389,57 +387,6 @@
 </section>
 
 <!-- ============================================================
-     STRENGTHS
-============================================================ -->
-<section class="section" id="strengths">
-  <div class="section section-center">
-    <div class="reveal">
-      <h2 class="section-title">KittyPawの強み</h2>
-      <p class="section-sub">ソースコード公開 · 無料 · セルフホスティング</p>
-    </div>
-    <div class="features-grid">
-      <div class="feature-card reveal reveal-delay-1">
-        <div class="feature-icon-wrap">📡</div>
-        <h3>真のマルチチャネル</h3>
-        <p>Telegram、Slack、Discord、Kakaoを<strong>同時に</strong>接続。一つのエージェントが全チャネルで動作します。</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-2">
-        <div class="feature-icon-wrap">🧠</div>
-        <h3>会話からスキルへ</h3>
-        <p>繰り返しのリクエストパターンを検知し、自動でスキルを提案。時間とともにもっと賢くなります。</p>
-      </div>
-      <div class="feature-card reveal reveal-delay-3">
-        <div class="feature-icon-wrap">📊</div>
-        <h3>週間関心事レポート</h3>
-        <p>会話の中の関心トピックを追跡し、毎週レポートを生成。あなたを理解するAIアシスタント。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
-     CTA
-============================================================ -->
-<section class="cta-section">
-  <div class="cta-inner">
-    <span class="cta-paw" role="img" aria-label="猫の肉球">🐾</span>
-    <h2 class="reveal">今すぐ始めましょう</h2>
-    <p class="reveal reveal-delay-1">
-      急ぐときこそ必要なのは、小さくて速い猫の手。<br>
-      kittypaw setup 一行で、今日から自動化を始めましょう。
-    </p>
-    <div class="cta-buttons reveal reveal-delay-2">
-      <a href="https://github.com/jinto/kittypaw/releases/latest" class="btn btn-cta-primary">
-        <span>⭐</span> GitHubで入手
-      </a>
-      <a href="https://github.com/kittypaw-app/skills" class="btn btn-cta-secondary">
-        🎨 スキルギャラリー
-      </a>
-    </div>
-  </div>
-</section>
-
-<!-- ============================================================
      FOOTER
 ============================================================ -->
 <footer>
@@ -448,11 +395,9 @@
     <span class="footer-sep">·</span>
     <a href="https://github.com/jinto/kittypaw">GitHub</a>
     <span class="footer-sep">·</span>
-    <a href="https://github.com/kittypaw-app/skills">スキルギャラリー</a>
+    <a href="https://github.com/kittypaw-app/skills">スキルレジストリ</a>
     <span class="footer-sep">·</span>
     <span>Elastic License 2.0</span>
-    <span class="footer-sep">·</span>
-    <span>Made with 🐹 &amp; ❤️</span>
   </div>
 </footer>
 
