@@ -14,8 +14,14 @@ func TestLocalAuthStoreCreateAndVerify(t *testing.T) {
 	root := t.TempDir()
 	st := NewLocalAuthStore(filepath.Join(root, "auth.json"))
 
+	if exists, err := st.HasUser("alice"); err != nil || exists {
+		t.Fatalf("HasUser before create = (%v, %v), want false nil", exists, err)
+	}
 	if err := st.CreateUser("alice", "correct horse battery staple"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
+	}
+	if exists, err := st.HasUser("alice"); err != nil || !exists {
+		t.Fatalf("HasUser after create = (%v, %v), want true nil", exists, err)
 	}
 	if ok, err := st.VerifyPassword("alice", "correct horse battery staple"); err != nil || !ok {
 		t.Fatalf("VerifyPassword good = (%v, %v), want true nil", ok, err)
