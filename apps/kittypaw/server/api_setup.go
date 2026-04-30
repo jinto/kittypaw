@@ -25,9 +25,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.configMu.RLock()
-	apiKey := s.config.Server.APIKey
-	s.configMu.RUnlock()
+	apiKey := s.effectiveAPIKey()
 
 	scheme := "ws"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -179,10 +177,11 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 	// feedback during onboarding — no reload required (AC3).
 	if s.spawner != nil {
 		chCfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: body.BotToken}
-		ch, err := channel.FromConfig(DefaultAccountID, chCfg)
+		accountID := s.defaultAccountID()
+		ch, err := channel.FromConfig(accountID, chCfg)
 		if err != nil {
 			slog.Warn("setup: telegram channel create failed", "error", err)
-		} else if err := s.spawner.TrySpawn(DefaultAccountID, ch, chCfg); err != nil {
+		} else if err := s.spawner.TrySpawn(accountID, ch, chCfg); err != nil {
 			slog.Warn("setup: telegram channel spawn failed", "error", err)
 		}
 	}
@@ -226,7 +225,8 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
 
-	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+	accountID := s.defaultAccountID()
+	secrets, err := core.LoadAccountSecrets(accountID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load secrets: "+err.Error())
 		return
@@ -376,7 +376,8 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 	_ = s.store.SetUserContext("onboarding_completed", "true", "system")
 
 	// Hot-reload the config into the running server.
-	cfgPath, _ := core.ConfigPath()
+	accountID := s.defaultAccountID()
+	cfgPath, _ := core.ConfigPathForAccount(accountID)
 	if cfg, err := core.LoadConfig(cfgPath); err == nil {
 		s.configMu.Lock()
 		*s.config = *cfg
@@ -386,7 +387,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
 		// Reconcile channels with the generated config. TrySpawn is idempotent,
 		// so channels already started by handleSetupTelegram are safely skipped.
 		if s.spawner != nil {
-			if rErr := s.spawner.Reconcile(DefaultAccountID, cfg.Channels); rErr != nil {
+			if rErr := s.spawner.Reconcile(accountID, cfg.Channels); rErr != nil {
 				slog.Warn("setup: channel reconcile partial failure", "error", rErr)
 			}
 		}
@@ -514,7 +515,8 @@ func (s *Server) wizardResultFromStore() core.WizardResult {
 
 // generateConfig merges wizard settings into the existing config.toml.
 func (s *Server) generateConfig() error {
-	cfgPath, err := core.ConfigPath()
+	accountID := s.defaultAccountID()
+	cfgPath, err := core.ConfigPathForAccount(accountID)
 	if err != nil {
 		return err
 	}
@@ -538,7 +540,7 @@ func (s *Server) generateConfig() error {
 	// steps (e.g. /kakao/register followed by /complete) and the
 	// second Set's persist would overwrite the first step's writes.
 	if w.APIServerURL != "" {
-		if secrets, err := core.LoadAccountSecrets(core.DefaultAccountID); err == nil {
+		if secrets, err := core.LoadAccountSecrets(accountID); err == nil {
 			_ = secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
 		}
 	}

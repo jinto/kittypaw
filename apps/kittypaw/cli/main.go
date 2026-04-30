@@ -162,8 +162,8 @@ func newServeCmd() *cobra.Command {
 	return cmd
 }
 
-func runServe(_ *cobra.Command, _ []string) error {
-	deps, err := bootstrap()
+func runServe(cmd *cobra.Command, _ []string) error {
+	deps, serverCfg, err := bootstrap()
 	if err != nil {
 		return err
 	}
@@ -172,9 +172,10 @@ func runServe(_ *cobra.Command, _ []string) error {
 			_ = td.Close()
 		}
 	}()
+	bind := resolveServeBind(cmd, serverCfg, deps)
 
 	// Check port availability before starting channels.
-	if err := checkPort(flagBind); err != nil {
+	if err := checkPort(bind); err != nil {
 		return err
 	}
 
@@ -186,14 +187,27 @@ func runServe(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := server.New(deps, version)
+	srv := server.NewWithServerConfig(deps, version, serverCfg)
 	if err := srv.StartChannels(ctx); err != nil {
 		return fmt.Errorf("start channels: %w", err)
 	}
 
 	// Start HTTP server (blocks until shutdown signal).
-	slog.Info("kittypaw serving", "bind", flagBind)
-	return srv.ListenAndServe(flagBind)
+	slog.Info("kittypaw serving", "bind", bind)
+	return srv.ListenAndServe(bind)
+}
+
+func resolveServeBind(cmd *cobra.Command, serverCfg core.TopLevelServerConfig, deps []*server.AccountDeps) string {
+	if cmd != nil && cmd.Flags().Changed("bind") {
+		return flagBind
+	}
+	if serverCfg.Bind != "" {
+		return serverCfg.Bind
+	}
+	if selected := server.SelectDefaultAccountDeps(deps, serverCfg.DefaultAccount); selected != nil && selected.Account != nil && selected.Account.Config != nil {
+		return selected.Account.Config.Server.BindOrDefault()
+	}
+	return flagBind
 }
 
 // ---------------------------------------------------------------------------
@@ -2614,26 +2628,43 @@ func jsonSlice(m map[string]any, key string) []map[string]any {
 // accounts/) is migrated into accounts/default/ via MigrateLegacyLayout so
 // v0.x installs upgrade transparently. Discovery fails loudly when no
 // accounts are present — a daemon with nothing to route is not useful.
-func bootstrap() ([]*server.AccountDeps, error) {
+func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 	baseDir, err := core.ConfigDir()
 	if err != nil {
-		return nil, fmt.Errorf("config dir: %w", err)
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("config dir: %w", err)
+	}
+
+	serverCfg, err := core.LoadServerConfig(filepath.Join(baseDir, "server.toml"))
+	if err != nil {
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("load server config: %w", err)
 	}
 
 	if err := core.MigrateTenantsToAccounts(baseDir); err != nil {
-		return nil, fmt.Errorf("migrate tenants→accounts: %w", err)
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("migrate tenants→accounts: %w", err)
 	}
 	if err := core.MigrateLegacyLayout(baseDir); err != nil {
-		return nil, fmt.Errorf("migrate legacy layout: %w", err)
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("migrate legacy layout: %w", err)
 	}
 
 	accountsRoot := filepath.Join(baseDir, "accounts")
 	accounts, err := core.DiscoverAccounts(accountsRoot)
 	if err != nil {
-		return nil, fmt.Errorf("discover accounts: %w", err)
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("discover accounts: %w", err)
 	}
 	if len(accounts) == 0 {
-		return nil, fmt.Errorf("no accounts found under %s (run `kittypaw setup` first)", accountsRoot)
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("no accounts found under %s (run `kittypaw setup` first)", accountsRoot)
+	}
+	if serverCfg.DefaultAccount != "" {
+		foundDefault := false
+		for _, account := range accounts {
+			if account.ID == serverCfg.DefaultAccount {
+				foundDefault = true
+				break
+			}
+		}
+		if !foundDefault {
+			return nil, core.TopLevelServerConfig{}, fmt.Errorf("server.toml default_account %q not found under %s", serverCfg.DefaultAccount, accountsRoot)
+		}
 	}
 
 	deps := make([]*server.AccountDeps, 0, len(accounts))
@@ -2647,11 +2678,11 @@ func bootstrap() ([]*server.AccountDeps, error) {
 		td, err := server.OpenAccountDeps(t)
 		if err != nil {
 			closeOnErr()
-			return nil, err
+			return nil, core.TopLevelServerConfig{}, err
 		}
 		deps = append(deps, td)
 	}
-	return deps, nil
+	return deps, *serverCfg, nil
 }
 
 func resolveCLIAccount(explicit string) (string, error) {
