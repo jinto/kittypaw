@@ -42,9 +42,9 @@ func LoadSecrets() (*SecretsStore, error) {
 // LoadAccountSecrets returns the SecretsStore for the named account
 // (~/.kittypaw/accounts/<accountID>/secrets.json). Creates the parent
 // directory (mode 0o700) so the first Set() after a fresh wipe doesn't
-// fail with ENOENT. Validates accountID to refuse path traversal even
-// though every current caller passes a hardcoded literal — Plan 2 will
-// wire this to a `--user` flag and the helper must be self-defending.
+// fail with ENOENT. Validates accountID to refuse path traversal; callers
+// should pass an account resolved from --account, KITTYPAW_ACCOUNT, or an
+// authenticated local Web UI session.
 func LoadAccountSecrets(accountID string) (*SecretsStore, error) {
 	if err := ValidateAccountID(accountID); err != nil {
 		return nil, fmt.Errorf("account id: %w", err)
