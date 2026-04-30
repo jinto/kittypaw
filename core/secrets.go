@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// SecretsStore manages per-package secrets in ~/.kittypaw/secrets.json.
+// SecretsStore manages per-package secrets at a caller-provided path.
 // Secrets are stored as plain JSON with 0600 file permissions to keep
 // them out of package-level config.toml files that might be shared.
 type SecretsStore struct {
@@ -19,9 +19,9 @@ type SecretsStore struct {
 	data map[string]map[string]string // package_id → key → value
 }
 
-// DefaultAccountID is the account ID used by single-user CLI flows
-// (kittypaw login, kittypaw setup, Kakao wizard). Plan 2's --user flag
-// will replace literal references at call sites.
+// DefaultAccountID is the legacy account ID retained for migration and
+// compatibility. New multi-user flows should resolve an account explicitly
+// and pass it to helpers such as LoadAccountSecrets.
 const DefaultAccountID = "default"
 
 // LoadSecrets reads the global secrets file. Retained for migration
@@ -42,9 +42,9 @@ func LoadSecrets() (*SecretsStore, error) {
 // LoadAccountSecrets returns the SecretsStore for the named account
 // (~/.kittypaw/accounts/<accountID>/secrets.json). Creates the parent
 // directory (mode 0o700) so the first Set() after a fresh wipe doesn't
-// fail with ENOENT. Validates accountID to refuse path traversal even
-// though every current caller passes a hardcoded literal — Plan 2 will
-// wire this to a `--user` flag and the helper must be self-defending.
+// fail with ENOENT. Validates accountID to refuse path traversal; callers
+// should pass an account resolved from --account, KITTYPAW_ACCOUNT, or an
+// authenticated local Web UI session.
 func LoadAccountSecrets(accountID string) (*SecretsStore, error) {
 	if err := ValidateAccountID(accountID); err != nil {
 		return nil, fmt.Errorf("account id: %w", err)

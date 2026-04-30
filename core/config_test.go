@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -23,6 +24,24 @@ func TestBindOrDefault(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("BindOrDefault(%q) = %q, want %q", tt.bind, got, tt.want)
 		}
+	}
+}
+
+func TestConfigPathForAccount(t *testing.T) {
+	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+	got, err := ConfigPathForAccount("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, filepath.Join("accounts", "alice", "config.toml")) {
+		t.Fatalf("ConfigPathForAccount = %q", got)
+	}
+}
+
+func TestConfigPathForAccountRejectsInvalidID(t *testing.T) {
+	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+	if _, err := ConfigPathForAccount("../bad"); err == nil {
+		t.Fatal("expected invalid account id error")
 	}
 }
 

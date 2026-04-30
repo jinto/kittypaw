@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -159,27 +158,14 @@ func readPump(ctx context.Context, conn *websocket.Conn, sessionID string,
 }
 
 // handleWebSocket upgrades to WebSocket and runs a multi-turn chat session.
-// Auth via ?token= query param or Authorization header.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Auth — read config under RLock for reload safety.
-	s.configMu.RLock()
-	apiKey := s.config.Server.APIKey
-	originPatterns := s.config.Server.AllowedOrigins
-	s.configMu.RUnlock()
-
-	if apiKey != "" {
-		token := r.URL.Query().Get("token")
-		if token == "" {
-			auth := r.Header.Get("Authorization")
-			if strings.HasPrefix(auth, "Bearer ") {
-				token = strings.TrimPrefix(auth, "Bearer ")
-			}
-		}
-		if !fixedLenEqual(token, apiKey) {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
+	acct, err := s.requestAccount(r)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
 	}
+
+	originPatterns := s.allowedOriginsForAccount(acct)
 
 	if len(originPatterns) == 0 {
 		originPatterns = []string{"*"}
@@ -195,7 +181,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 
 	sessionID := uuid.New().String()
-	slog.Info("ws session started", "session_id", sessionID)
+	slog.Info("ws session started", "session_id", sessionID, "account", acct.ID)
 
 	ctx, cancel := context.WithTimeout(r.Context(), wsMaxLifetime)
 	defer cancel()
@@ -230,6 +216,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if clientMsg.Text == "" {
 				continue
 			}
+			if !s.accountActive(acct.ID) || s.accounts.Session(acct.ID) != acct.Session {
+				sendWsMsg(ctx, conn, core.NewErrorMsgForTurn(clientMsg.TurnID, "account inactive"))
+				return
+			}
 
 			// Validate the client-supplied turn_id. UUID format +
 			// length cap together keep the cache safe from oracle
@@ -249,8 +239,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				SessionID: sessionID,
 			})
 			event := core.Event{
-				Type:    core.EventWebChat,
-				Payload: payload,
+				Type:      core.EventWebChat,
+				AccountID: acct.ID,
+				Payload:   payload,
 			}
 
 			runOpts := &engine.RunOptions{
@@ -270,7 +261,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			// RunTurn dedupes retries that share clientMsg.TurnID via
 			// Session.turnCache. Empty TurnID falls through to plain
 			// Run (legacy client without idempotency).
-			result, err := s.session.RunTurn(ctx, clientMsg.TurnID, event, runOpts)
+			result, err := acct.Session.RunTurn(ctx, clientMsg.TurnID, event, runOpts)
 			if err != nil {
 				sendWsMsg(ctx, conn, core.NewErrorMsgForTurn(clientMsg.TurnID, err.Error()))
 				continue

@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
 ## Quick Start
 
 ```bash
-kittypaw setup                            # interactive setup (LLM, channels); auto-enters chat on TTY — pass --no-chat to skip
+kittypaw setup --account alice            # interactive setup (account login, LLM, channels); auto-enters chat on TTY
 kittypaw skill install weather-briefing   # install a skill from registry
 kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts daemon)
 ```
@@ -29,6 +29,23 @@ Inspect what you get: a local daemon, one installed skill, an LLM-backed chat. S
 kittypaw chat          # interactive REPL mode
 kittypaw serve         # start as HTTP/WebSocket server
 ```
+
+## Accounts
+
+Fresh installs create named local accounts under `~/.kittypaw/accounts/<accountID>/`.
+The legacy `~/.kittypaw/accounts/default/` layout still works for upgraded installs.
+
+```bash
+printf '%s\n' "$LOCAL_WEB_PASSWORD" | kittypaw setup --account alice --password-stdin
+printf '%s\n' "$BOB_WEB_PASSWORD" | kittypaw account add bob --password-stdin
+
+KITTYPAW_ACCOUNT=bob kittypaw chat
+kittypaw chat --account bob
+```
+
+If multiple accounts exist, CLI commands that read or write account config require
+`--account <id>` or `KITTYPAW_ACCOUNT=<id>`. The local Web UI requires login once
+`~/.kittypaw/auth.json` has local users; each account has its own Web UI password.
 
 ## Skills
 
@@ -43,7 +60,9 @@ kittypaw skill create <description>               # generate a draft skill from 
 
 ## Config
 
-TOML config at `~/.kittypaw/config.toml`.
+Account TOML config lives at `~/.kittypaw/accounts/<accountID>/config.toml`.
+Server-wide settings live at `~/.kittypaw/server.toml`, and local Web UI login
+metadata lives at `~/.kittypaw/auth.json`.
 
 ```toml
 [registry]

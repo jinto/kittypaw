@@ -11,6 +11,16 @@ import (
 // Uses constant-time comparison to prevent timing attacks.
 func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		required, err := s.apiAuthRequired()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "read local auth store")
+			return
+		}
+		if !required {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		key := r.Header.Get("x-api-key")
 		if key == "" {
 			auth := r.Header.Get("Authorization")
@@ -18,15 +28,33 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 				key = strings.TrimPrefix(auth, "Bearer ")
 			}
 		}
-		s.configMu.RLock()
-		apiKey := s.config.Server.APIKey
-		s.configMu.RUnlock()
-		if !fixedLenEqual(key, apiKey) {
+		if !s.apiTokenAccepted(key) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) apiAuthRequired() (bool, error) {
+	if s.effectiveAPIKey() != "" {
+		return true, nil
+	}
+	required, err := s.localAuthRequired()
+	if err != nil {
+		return false, err
+	}
+	return required, nil
+}
+
+func (s *Server) apiTokenAccepted(token string) bool {
+	if token == "" {
+		return false
+	}
+	if apiKey := s.effectiveAPIKey(); apiKey != "" && fixedLenEqual(token, apiKey) {
+		return true
+	}
+	return s.defaultWebSessionTokenOK(token)
 }
 
 // fixedLenEqual compares two strings in constant time using HMAC.

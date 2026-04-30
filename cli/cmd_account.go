@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ type accountAddFlags struct {
 	llmAPIKey          string
 	llmModel           string
 	noActivate         bool
+	passwordStdin      bool
 }
 
 const accountEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
@@ -54,6 +56,11 @@ Bot-token sources (highest priority wins):
   2. $` + accountEnvBotToken + `
   3. --telegram-bot-token        (visible in process list; prints a warning)
 
+Local Web UI credentials are required for every account. Use
+--password-stdin in non-interactive scripts, or run from a TTY to enter and
+confirm the password interactively. When both stdin flags are set, stdin is
+framed as two lines: Telegram token first, local password second.
+
 Interactive fallback: when no token source AND no LLM key is supplied AND
 stdin is a TTY, a 4-step prompt walks through telegram token, LLM provider,
 api-key, and model. Secrets (token, api-key) are read with terminal echo
@@ -76,17 +83,18 @@ the activation RPC and only stage files on disk.`,
 	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")
 	cmd.Flags().BoolVar(&f.noActivate, "no-activate", false, "Stage files only; skip hot-activation against a running daemon")
+	cmd.Flags().BoolVar(&f.passwordStdin, "password-stdin", false, "Read local Web UI password from stdin")
 	return cmd
 }
 
 // Empty return means no token configured — family/no-token branches are validated by the caller.
 func resolveAccountToken(f *accountAddFlags, stdin io.Reader, stderr io.Writer) (string, error) {
 	if f.telegramTokenStdin {
-		b, err := io.ReadAll(stdin)
+		line, err := readStdinLine(stdin)
 		if err != nil {
 			return "", fmt.Errorf("read token from stdin: %w", err)
 		}
-		token := strings.TrimSpace(string(b))
+		token := strings.TrimSpace(line)
 		if token == "" {
 			return "", errors.New("--telegram-bot-token-stdin was set but stdin is empty")
 		}
@@ -105,6 +113,46 @@ func resolveAccountToken(f *accountAddFlags, stdin io.Reader, stderr io.Writer) 
 	return "", nil
 }
 
+func resolveAccountPassword(f *accountAddFlags, stdin io.Reader) (string, error) {
+	if f.passwordStdin {
+		password, err := readStdinLine(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read password from stdin: %w", err)
+		}
+		if password == "" {
+			return "", errors.New("password is required")
+		}
+		return password, nil
+	}
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return "", errors.New("--password-stdin is required")
+	}
+	return promptLocalPassword()
+}
+
+type stdinLineReader interface {
+	ReadString(byte) (string, error)
+}
+
+func readStdinLine(stdin io.Reader) (string, error) {
+	if lr, ok := stdin.(stdinLineReader); ok {
+		line, err := lr.ReadString('\n')
+		if err != nil && !(errors.Is(err, io.EOF) && line != "") {
+			return "", err
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+	return scanner.Text(), nil
+}
+
 func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Interactive fallback: if neither a Telegram token source nor an LLM key
 	// is in scope, walk the user through 4 quick prompts instead of erroring
@@ -117,6 +165,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		}
 	}
 
+	stdin = bufio.NewReader(stdin)
 	token, err := resolveAccountToken(f, stdin, stderr)
 	if err != nil {
 		return err
@@ -130,6 +179,10 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	}
 	if token != "" && !core.ValidateTelegramToken(token) {
 		return errors.New("invalid telegram bot token format")
+	}
+	password, err := resolveAccountPassword(f, stdin)
+	if err != nil {
+		return err
 	}
 
 	cfgDir, err := core.ConfigDir()
@@ -157,6 +210,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		LLMProvider:   f.llmProvider,
 		LLMAPIKey:     f.llmAPIKey,
 		LLMModel:      f.llmModel,
+		LocalPassword: password,
 	})
 	if err != nil {
 		return err

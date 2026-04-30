@@ -88,11 +88,12 @@ service under their own UID.
 ### First user (User A)
 
 ```bash
-# Interactive wizard. Offers service install at the end (unless --no-service).
-kittypaw setup
+# Interactive wizard. Creates ~/.kittypaw/accounts/alice/ and local Web UI credentials.
+kittypaw setup --account alice
 
 # Non-interactive / CI equivalent:
-kittypaw setup --no-service --provider anthropic --api-key $KEY
+printf '%s\n' "$LOCAL_WEB_PASSWORD" |
+  kittypaw setup --account alice --password-stdin --no-service --provider anthropic --api-key "$KEY"
 kittypaw service install
 ```
 
@@ -105,17 +106,34 @@ prompt; the `service install` command stays available as an explicit path.
 substitutes its absolute path into the unit/plist, so a user-local install
 under `~/.local/bin` also works without hand editing.
 
+Fresh setup writes account config under `~/.kittypaw/accounts/<accountID>/`.
+Existing upgraded installs may still have `~/.kittypaw/accounts/default/`;
+that legacy account remains valid. If more than one local account exists, CLI
+commands that need account state must specify one explicitly:
+
+```bash
+KITTYPAW_ACCOUNT=alice kittypaw chat
+kittypaw chat --account alice
+```
+
+Additional local accounts are provisioned with their own Web UI credentials:
+
+```bash
+printf '%s\n' "$BOB_WEB_PASSWORD" | kittypaw account add bob --password-stdin
+```
+
 **Web onboarding.** Once a daemon is listening, `kittypaw setup --web` opens
 the wizard UI in a browser (served by the daemon itself at `http://127.0.0.1:3000/`).
 If no daemon is up the command prints recovery steps instead of silently
 spawning a foreground server — use `kittypaw service install` or
-`kittypaw serve` first.
+`kittypaw serve` first. Once `~/.kittypaw/auth.json` contains local users, the
+Web UI requires login and setup/configuration applies to the logged-in account.
 
 ### Second user (User B, same host)
 
 ```bash
 # Log in as User B.
-kittypaw setup --no-service                   # wizard alone; skip the install prompt
+kittypaw setup --account bob --no-service     # wizard alone; skip the install prompt
 kittypaw service install --bind-port 3001     # :3000 is taken by User A
 ```
 
