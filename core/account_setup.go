@@ -16,6 +16,7 @@ type AccountOpts struct {
 	LLMProvider   string
 	LLMAPIKey     string
 	LLMModel      string
+	LocalPassword string
 }
 
 // InitAccount stages the tree under `.<id>.staging/` and renames into place,
@@ -75,8 +76,27 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		return nil, fmt.Errorf("write config: %w", err)
 	}
 
+	var authStore *LocalAuthStore
+	authCreated := false
+	if opts.LocalPassword != "" {
+		authPath, err := LocalAuthPath()
+		if err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return nil, err
+		}
+		authStore = NewLocalAuthStore(authPath)
+		if err := authStore.CreateUser(id, opts.LocalPassword); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return nil, err
+		}
+		authCreated = true
+	}
+
 	if err := os.Rename(stagingDir, finalDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
+		if authCreated {
+			_ = authStore.DeleteUser(id)
+		}
 		return nil, fmt.Errorf("commit staging → %s: %w", finalDir, err)
 	}
 

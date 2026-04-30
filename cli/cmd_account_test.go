@@ -75,6 +75,84 @@ func TestResolveAccountToken_StdinEmpty(t *testing.T) {
 	}
 }
 
+func TestNewAccountAddCmd_RegistersPasswordStdinFlag(t *testing.T) {
+	cmd := newAccountAddCmd()
+	if f := cmd.Flags().Lookup("password-stdin"); f == nil {
+		t.Fatal("--password-stdin flag not registered on `kittypaw account add`")
+	}
+}
+
+func TestAccountAddCreatesAuthUser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		isFamily:      true,
+		passwordStdin: true,
+		noActivate:    true,
+	}
+	if err := runAccountAdd("alice", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountAdd: %v", err)
+	}
+	if ok, err := core.NewLocalAuthStore(filepath.Join(root, "auth.json")).VerifyPassword("alice", "pw123"); err != nil || !ok {
+		t.Fatalf("VerifyPassword = %v, %v; want true nil", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
+		t.Fatalf("account config missing: %v", err)
+	}
+}
+
+func TestAccountAddTokenAndPasswordStdin(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("HOME", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		telegramTokenStdin: true,
+		adminChatID:        "111",
+		passwordStdin:      true,
+		noActivate:         true,
+	}
+	stdin := strings.NewReader("12345:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\npw123\n")
+	if err := runAccountAdd("alice", f, stdin, &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountAdd: %v", err)
+	}
+	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if ok, err := auth.VerifyPassword("alice", "pw123"); err != nil || !ok {
+		t.Fatalf("VerifyPassword = %v, %v; want true nil", ok, err)
+	}
+}
+
+func TestAccountAddAuthRollback(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("HOME", t.TempDir())
+	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if err := auth.CreateUser("alice", "existing"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		isFamily:      true,
+		passwordStdin: true,
+		noActivate:    true,
+	}
+	err := runAccountAdd("alice", f, strings.NewReader("new-password\n"), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected duplicate auth user error")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "accounts", "alice")); !os.IsNotExist(statErr) {
+		t.Fatalf("account dir should not be committed on auth duplicate, stat err=%v", statErr)
+	}
+	if ok, err := auth.VerifyPassword("alice", "existing"); err != nil || !ok {
+		t.Fatalf("existing password should remain valid, got %v, %v", ok, err)
+	}
+}
+
 // admin-chat-id is supplied so FetchTelegramChatID is skipped; tests must not hit the network.
 func TestRunAccountAdd_HappyPath(t *testing.T) {
 	home := t.TempDir()
@@ -85,8 +163,9 @@ func TestRunAccountAdd_HappyPath(t *testing.T) {
 		telegramToken:      "12345:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",
 		telegramTokenStdin: false,
 		adminChatID:        "111",
+		passwordStdin:      true,
 	}
-	if err := runAccountAdd("alice", f, strings.NewReader(""), &stdout, &stderr); err != nil {
+	if err := runAccountAdd("alice", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountAdd: %v", err)
 	}
 
@@ -109,8 +188,8 @@ func TestRunAccountAdd_Family(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	var stdout, stderr bytes.Buffer
-	f := &accountAddFlags{isFamily: true}
-	if err := runAccountAdd("family", f, strings.NewReader(""), &stdout, &stderr); err != nil {
+	f := &accountAddFlags{isFamily: true, passwordStdin: true}
+	if err := runAccountAdd("family", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountAdd family: %v", err)
 	}
 
