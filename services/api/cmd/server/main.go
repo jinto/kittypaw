@@ -159,6 +159,8 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 	r.Route("/v1/weather/kma", func(r chi.Router) {
 		r.Get("/village-fcst", weather.VillageForecast())
+		r.Get("/ultra-srt-ncst", weather.UltraShortNowcast())
+		r.Get("/ultra-srt-fcst", weather.UltraShortForecast())
 	})
 
 	return r

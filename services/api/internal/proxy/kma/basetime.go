@@ -46,3 +46,44 @@ func NowToBaseDateTime(now time.Time) (baseDate, baseTime string) {
 	baseTime = slotTime.Format("1504")
 	return
 }
+
+// ultraShortNowcastDelay is the publication delay for KMA's getUltraSrtNcst —
+// slots publish at HH:00 and become usable about 40 minutes later.
+const ultraShortNowcastDelay = 40 * time.Minute
+
+// ultraShortForecastDelay is the publication delay for KMA's getUltraSrtFcst —
+// slots publish at HH:30 and become usable about 45 minutes later.
+const ultraShortForecastDelay = 45 * time.Minute
+
+// nowToHourlyBase computes the most recent KMA slot at HH:slotMinute whose
+// publication delay has elapsed. Subtracting the delay yields the latest
+// moment by which the slot must already be live; we then round down to the
+// nearest HH:slotMinute on or before that moment.
+//
+// INVARIANT: delay must be < 1 hour. The math relies on subtracting `delay`
+// rolling `candidate.Hour()` back at most one hour — a delay ≥ 1h would
+// silently skip a publish slot and yield stale data. Today's KMA cadences
+// (40 min / 45 min) sit well within this bound.
+func nowToHourlyBase(now time.Time, slotMinute int, delay time.Duration) (baseDate, baseTime string) {
+	candidate := now.Add(-delay)
+	slotTime := time.Date(candidate.Year(), candidate.Month(), candidate.Day(),
+		candidate.Hour(), slotMinute, 0, 0, candidate.Location())
+	if candidate.Minute() < slotMinute {
+		slotTime = slotTime.Add(-time.Hour)
+	}
+	return slotTime.Format("20060102"), slotTime.Format("1504")
+}
+
+// NowToUltraShortNowcastBaseDateTime maps the current instant to the most
+// recent KMA ultra-short *nowcast* slot (getUltraSrtNcst) usable now. Slots
+// are published every full hour; data becomes available ~40 min after publish.
+func NowToUltraShortNowcastBaseDateTime(now time.Time) (baseDate, baseTime string) {
+	return nowToHourlyBase(now, 0, ultraShortNowcastDelay)
+}
+
+// NowToUltraShortForecastBaseDateTime maps the current instant to the most
+// recent KMA ultra-short *forecast* slot (getUltraSrtFcst) usable now. Slots
+// are published every half hour at HH:30; data becomes available ~45 min after.
+func NowToUltraShortForecastBaseDateTime(now time.Time) (baseDate, baseTime string) {
+	return nowToHourlyBase(now, 30, ultraShortForecastDelay)
+}

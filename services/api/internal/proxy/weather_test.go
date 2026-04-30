@@ -166,3 +166,96 @@ func TestVillageForecast_OutOfPeninsula(t *testing.T) {
 		t.Errorf("expected 400 on out-of-peninsula, got %d", w.Code)
 	}
 }
+
+// TestUltraShortNowcast_HappyPathAndCache — second request must hit cache.
+func TestUltraShortNowcast_HappyPathAndCache(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kmaSuccessBody))
+	}))
+	defer upstream.Close()
+
+	h, c := newWeatherHandler(upstream.URL, nil)
+	defer c.Close()
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/weather/kma/ultra-srt-ncst?lat=37.5665&lon=126.978", nil)
+		w := httptest.NewRecorder()
+		h.UltraShortNowcast().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("call #%d: expected 200, got %d: %s", i, w.Code, w.Body.String())
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("expected upstream hit count 1 (cache served second), got %d", got)
+	}
+}
+
+// TestUltraShortForecast_HappyPathAndCache — same but for forecast endpoint.
+func TestUltraShortForecast_HappyPathAndCache(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kmaSuccessBody))
+	}))
+	defer upstream.Close()
+
+	h, c := newWeatherHandler(upstream.URL, nil)
+	defer c.Close()
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/weather/kma/ultra-srt-fcst?lat=37.5665&lon=126.978", nil)
+		w := httptest.NewRecorder()
+		h.UltraShortForecast().ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("call #%d: expected 200, got %d: %s", i, w.Code, w.Body.String())
+		}
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("expected upstream hit count 1 (cache served second), got %d", got)
+	}
+}
+
+// TestKMAForecasts_DistinctCacheNamespaces verifies the three KMA endpoints
+// (village / nowcast / ultra-fcst) keep their cache entries in separate
+// namespaces — same nx/ny/base_time across endpoints must NOT collide.
+//
+// Without distinct namespaces, hitting one endpoint would silently serve
+// another's cached body, leaking three different envelope shapes across
+// handlers. Pinned here.
+func TestKMAForecasts_DistinctCacheNamespaces(t *testing.T) {
+	var hits atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(kmaSuccessBody))
+	}))
+	defer upstream.Close()
+
+	h, c := newWeatherHandler(upstream.URL, nil)
+	defer c.Close()
+
+	cases := []struct {
+		path    string
+		handler http.HandlerFunc
+	}{
+		{"/v1/weather/kma/village-fcst", h.VillageForecast()},
+		{"/v1/weather/kma/ultra-srt-ncst", h.UltraShortNowcast()},
+		{"/v1/weather/kma/ultra-srt-fcst", h.UltraShortForecast()},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, tc.path+"?lat=37.5665&lon=126.978", nil)
+		w := httptest.NewRecorder()
+		tc.handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", tc.path, w.Code)
+		}
+	}
+	if got := hits.Load(); got != int32(len(cases)) {
+		t.Errorf("expected %d distinct upstream calls (one per endpoint), got %d — cache namespacing regressed",
+			len(cases), got)
+	}
+}
