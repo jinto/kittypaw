@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// SecretsStore manages per-package secrets in ~/.kittypaw/secrets.json.
+// SecretsStore manages per-package secrets at a caller-provided path.
 // Secrets are stored as plain JSON with 0600 file permissions to keep
 // them out of package-level config.toml files that might be shared.
 type SecretsStore struct {
