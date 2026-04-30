@@ -22,6 +22,8 @@ const (
 	argonTime        = 3
 	argonThreads     = 4
 	argonKeyLen      = 32
+	lockTimeout      = 5 * time.Second
+	staleLockAfter   = 30 * time.Second
 )
 
 var ErrLocalUserExists = errors.New("local user already exists")
@@ -70,26 +72,28 @@ func (s *LocalAuthStore) CreateUser(accountID, password string) error {
 		return errors.New("password is required")
 	}
 
-	f, err := s.load()
-	if err != nil {
-		return err
-	}
-	if _, ok := f.Users[accountID]; ok {
-		return fmt.Errorf("%w: %s", ErrLocalUserExists, accountID)
-	}
-
 	hash, err := hashPassword(password)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	f.Users[accountID] = LocalUser{
-		AccountID:    accountID,
-		PasswordHash: hash,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	return s.save(f)
+	return s.withLock(func() error {
+		f, err := s.load()
+		if err != nil {
+			return err
+		}
+		if _, ok := f.Users[accountID]; ok {
+			return fmt.Errorf("%w: %s", ErrLocalUserExists, accountID)
+		}
+
+		now := time.Now().UTC()
+		f.Users[accountID] = LocalUser{
+			AccountID:    accountID,
+			PasswordHash: hash,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		return s.save(f)
+	})
 }
 
 func (s *LocalAuthStore) VerifyPassword(accountID, password string) (bool, error) {
@@ -111,18 +115,20 @@ func (s *LocalAuthStore) SetDisabled(accountID string, disabled bool) error {
 	if err := ValidateAccountID(accountID); err != nil {
 		return err
 	}
-	f, err := s.load()
-	if err != nil {
-		return err
-	}
-	u, ok := f.Users[accountID]
-	if !ok {
-		return fmt.Errorf("local user %q not found", accountID)
-	}
-	u.Disabled = disabled
-	u.UpdatedAt = time.Now().UTC()
-	f.Users[accountID] = u
-	return s.save(f)
+	return s.withLock(func() error {
+		f, err := s.load()
+		if err != nil {
+			return err
+		}
+		u, ok := f.Users[accountID]
+		if !ok {
+			return fmt.Errorf("local user %q not found", accountID)
+		}
+		u.Disabled = disabled
+		u.UpdatedAt = time.Now().UTC()
+		f.Users[accountID] = u
+		return s.save(f)
+	})
 }
 
 func (s *LocalAuthStore) load() (*LocalAuthFile, error) {
@@ -138,8 +144,12 @@ func (s *LocalAuthStore) load() (*LocalAuthFile, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("parse local auth store: %w", err)
 	}
-	if f.Version == 0 {
+	switch f.Version {
+	case 0:
 		f.Version = localAuthVersion
+	case localAuthVersion:
+	default:
+		return nil, fmt.Errorf("unsupported local auth store version %d", f.Version)
 	}
 	if f.Users == nil {
 		f.Users = map[string]LocalUser{}
@@ -167,16 +177,67 @@ func (s *LocalAuthStore) save(f *LocalAuthFile) error {
 		return err
 	}
 
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		_ = os.Remove(tmp)
+	_ = os.Remove(s.path + ".tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		_ = os.Remove(tmp)
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
 		return err
 	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		return err
+	}
+	removeTmp = false
 	return nil
+}
+
+func (s *LocalAuthStore) withLock(fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(filepath.Dir(s.path), 0o700); err != nil {
+		return err
+	}
+
+	lockPath := s.path + ".lock"
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
+			_ = f.Close()
+			defer os.Remove(lockPath)
+			return fn()
+		}
+		if !os.IsExist(err) {
+			return err
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > staleLockAfter {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("local auth store lock timeout: %s", lockPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func hashPassword(password string) (string, error) {
@@ -250,6 +311,9 @@ func parseArgonParams(encoded string) (passwordParams, error) {
 	}
 	if p.memory == 0 || p.time == 0 || p.threads == 0 {
 		return passwordParams{}, errors.New("missing argon2 parameters")
+	}
+	if p.memory != argonMemoryKB || p.time != argonTime || p.threads != argonThreads {
+		return passwordParams{}, fmt.Errorf("unsupported argon2 parameters m=%d,t=%d,p=%d", p.memory, p.time, p.threads)
 	}
 	return p, nil
 }
