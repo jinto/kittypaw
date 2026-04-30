@@ -67,6 +67,8 @@ func TestAutoEntry_RestoresCookedMode(t *testing.T) {
 	// Non-interactive flags so the wizard exits immediately without any
 	// network calls — we only care about termios bookkeeping, not the flow.
 	cmd := exec.Command(bin, "setup",
+		"--account", "alice",
+		"--password-stdin",
 		"--no-chat",
 		"--provider", "anthropic",
 		"--api-key", "test-dummy",
@@ -78,6 +80,9 @@ func TestAutoEntry_RestoresCookedMode(t *testing.T) {
 		t.Fatalf("pty.Start: %v", err)
 	}
 	defer ptmx.Close()
+	if _, err := io.WriteString(ptmx, "local-password\n"); err != nil {
+		t.Fatalf("write password: %v", err)
+	}
 
 	// Capture pre-state and post-state of the pty master side.
 	preState, err := term.GetState(int(ptmx.Fd()))
@@ -132,6 +137,8 @@ func TestAutoEntry_CtrlC_ExitsWith130(t *testing.T) {
 	// For a richer test, a future iteration can script the whole wizard
 	// via expect-style I/O. For now we pin the coarse contract.
 	cmd := exec.Command(bin, "setup",
+		"--account", "alice",
+		"--password-stdin",
 		"--provider", "anthropic",
 		"--api-key", "test-dummy",
 	)
@@ -142,6 +149,9 @@ func TestAutoEntry_CtrlC_ExitsWith130(t *testing.T) {
 		t.Fatalf("pty.Start: %v", err)
 	}
 	defer ptmx.Close()
+	if _, err := io.WriteString(ptmx, "local-password\n"); err != nil {
+		t.Fatalf("write password: %v", err)
+	}
 
 	// Read output in the background so the pty buffer doesn't deadlock.
 	go io.Copy(io.Discard, ptmx)

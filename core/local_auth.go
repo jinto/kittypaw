@@ -96,6 +96,18 @@ func (s *LocalAuthStore) CreateUser(accountID, password string) error {
 	})
 }
 
+func (s *LocalAuthStore) HasUser(accountID string) (bool, error) {
+	if err := ValidateAccountID(accountID); err != nil {
+		return false, err
+	}
+	f, err := s.load()
+	if err != nil {
+		return false, err
+	}
+	_, ok := f.Users[accountID]
+	return ok, nil
+}
+
 func (s *LocalAuthStore) VerifyPassword(accountID, password string) (bool, error) {
 	if err := ValidateAccountID(accountID); err != nil {
 		return false, err

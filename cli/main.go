@@ -211,6 +211,8 @@ func newSetupCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openrouter|local)")
+	cmd.Flags().StringVar(&flags.accountID, "account", "", "local account id")
+	cmd.Flags().BoolVar(&flags.passwordStdin, "password-stdin", false, "read local Web UI password from stdin")
 	cmd.Flags().StringVar(&flags.apiKey, "api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&flags.localURL, "local-url", "", "Local LLM URL (default: http://localhost:11434/v1)")
 	cmd.Flags().StringVar(&flags.localModel, "local-model", "", "Local LLM model name")
@@ -231,51 +233,81 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		return runSetupWeb(cmd)
 	}
 
-	home, err := os.UserHomeDir()
+	cfgDir, err := core.ConfigDir()
 	if err != nil {
 		return err
 	}
 
-	kittypawDir := filepath.Join(home, ".kittypaw")
-	cfgPath, err := core.ConfigPath()
+	accountID, err := resolveSetupAccount(*flags, cfgDir)
+	if err != nil {
+		return err
+	}
+	cfgPath, err := core.ConfigPathForAccount(accountID)
 	if err != nil {
 		return err
 	}
 	accountDir := filepath.Dir(cfgPath)
-	for _, dir := range []string{
-		kittypawDir,
-		filepath.Join(kittypawDir, "data"),
-		filepath.Join(kittypawDir, "skills"),
-		accountDir,
-	} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fmt.Errorf("create %s: %w", dir, err)
+
+	authPath, err := core.LocalAuthPath()
+	if err != nil {
+		return err
+	}
+	authStore := core.NewLocalAuthStore(authPath)
+	hasAuth, err := authStore.HasUser(accountID)
+	if err != nil {
+		return err
+	}
+	var localPassword string
+	if !hasAuth {
+		localPassword, err = resolveSetupPassword(*flags, cmd.InOrStdin())
+		if err != nil {
+			return err
 		}
 	}
+
 	var existing *core.Config
 	if cfg, err := core.LoadConfig(cfgPath); err == nil {
 		existing = cfg
 	}
 
+	base := core.DefaultConfig()
+	if existing != nil {
+		base = *existing
+	}
+	validateResult := func(w core.WizardResult) error {
+		merged := core.MergeWizardSettings(&base, w)
+		return validateSetupConfig(cfgDir, accountID, merged)
+	}
+	wizardFlags := *flags
+	wizardFlags.accountID = accountID
+	wizardFlags.validate = validateResult
+
 	// Run wizard.
-	result, err := runWizard(*flags, existing)
+	result, err := setupWizardRunner(wizardFlags, existing)
 	if err != nil {
 		return err
 	}
 
 	// Merge and write config.
-	base := core.DefaultConfig()
-	if existing != nil {
-		base = *existing
-	}
 	merged := core.MergeWizardSettings(&base, result)
+	if err := validateSetupConfig(cfgDir, accountID, merged); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", accountDir, err)
+	}
+	if !hasAuth {
+		if err := authStore.CreateUser(accountID, localPassword); err != nil {
+			return fmt.Errorf("create local auth user: %w", err)
+		}
+	}
 	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
 	// HTTP access grant (requires store).
 	if result.HTTPAccess {
-		if st, err := openStore(); err == nil {
+		if st, err := openStoreForAccount(accountID); err == nil {
 			_ = st.GrantCapability("http")
 			_ = st.Close()
 		}
@@ -283,19 +315,12 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 
 	// Save API server URL to per-account secrets for package source bindings.
 	if result.APIServerURL != "" {
-		if secrets, err := core.LoadAccountSecrets(core.DefaultAccountID); err == nil {
+		if secrets, err := core.LoadAccountSecrets(accountID); err == nil {
 			_ = secrets.Set("kittypaw-api", "api_url", result.APIServerURL)
 		}
 	}
 
-	// Ensure default profile under the multi-account default-account base when
-	// migration has already run; otherwise the top-level path so a fresh
-	// install still lands somewhere `MigrateLegacyLayout` will pick up.
-	profileBase, err := defaultAccountBase()
-	if err != nil {
-		return fmt.Errorf("resolve account base: %w", err)
-	}
-	if err := core.EnsureDefaultProfile(profileBase); err != nil {
+	if err := core.EnsureDefaultProfile(accountDir); err != nil {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
@@ -340,6 +365,158 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		return nil
 	}
 	return runChat(cmd, nil)
+}
+
+var setupWizardRunner = runWizard
+
+func validateSetupConfig(cfgDir, accountID string, cfg *core.Config) error {
+	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
+	if err != nil {
+		return err
+	}
+
+	snapshot := make(map[string][]core.ChannelConfig, len(accounts)+1)
+	finalAccounts := make([]*core.Account, 0, len(accounts)+1)
+	seen := false
+	for _, peer := range accounts {
+		if peer == nil || peer.Config == nil {
+			continue
+		}
+		if peer.ID == accountID {
+			proposed := *peer
+			proposed.Config = cfg
+			finalAccounts = append(finalAccounts, &proposed)
+			snapshot[accountID] = cfg.Channels
+			seen = true
+			continue
+		}
+		finalAccounts = append(finalAccounts, peer)
+		snapshot[peer.ID] = peer.Config.Channels
+	}
+	if !seen {
+		finalAccounts = append(finalAccounts, &core.Account{
+			ID:      accountID,
+			BaseDir: filepath.Join(cfgDir, "accounts", accountID),
+			Config:  cfg,
+		})
+		snapshot[accountID] = cfg.Channels
+	}
+
+	if err := core.ValidateAccountChannels(snapshot); err != nil {
+		return fmt.Errorf("channel validation: %w", err)
+	}
+	if err := core.ValidateFamilyAccounts(finalAccounts); err != nil {
+		return fmt.Errorf("family validation: %w", err)
+	}
+	return nil
+}
+
+func resolveSetupAccount(flags setupFlags, cfgDir string) (string, error) {
+	if flags.accountID != "" {
+		if err := core.ValidateAccountID(flags.accountID); err != nil {
+			return "", err
+		}
+		return flags.accountID, nil
+	}
+
+	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
+	if err != nil {
+		return "", err
+	}
+	if len(accounts) == 0 {
+		if flags.provider != "" || !isTTY() {
+			return "", errors.New("--account is required for first setup")
+		}
+		return promptSetupAccountID()
+	}
+
+	if env := strings.TrimSpace(os.Getenv("KITTYPAW_ACCOUNT")); env != "" {
+		if err := core.ValidateAccountID(env); err != nil {
+			return "", err
+		}
+		if !setupAccountExists(accounts, env) {
+			return "", fmt.Errorf("KITTYPAW_ACCOUNT %q does not match an existing account; pass --account to create a new account", env)
+		}
+		return env, nil
+	}
+	if len(accounts) == 1 {
+		return accounts[0].ID, nil
+	}
+
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
+	}
+	sort.Strings(ids)
+	return "", fmt.Errorf("multiple accounts found (%s); pass --account or set KITTYPAW_ACCOUNT", strings.Join(ids, ", "))
+}
+
+func setupAccountExists(accounts []*core.Account, id string) bool {
+	for _, account := range accounts {
+		if account.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func promptSetupAccountID() (string, error) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		id := promptLine(scanner, "  Account ID", "")
+		if id == "" {
+			fmt.Println("  Account ID is required.")
+			continue
+		}
+		if err := core.ValidateAccountID(id); err != nil {
+			fmt.Printf("  %v\n", err)
+			continue
+		}
+		return id, nil
+	}
+}
+
+func resolveSetupPassword(flags setupFlags, stdin io.Reader) (string, error) {
+	if flags.passwordStdin {
+		scanner := bufio.NewScanner(stdin)
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				return "", fmt.Errorf("read password from stdin: %w", err)
+			}
+			return "", errors.New("password is required")
+		}
+		password := scanner.Text()
+		if password == "" {
+			return "", errors.New("password is required")
+		}
+		return password, nil
+	}
+	if flags.provider != "" || !isTTY() {
+		return "", errors.New("--password-stdin is required for first setup")
+	}
+	return promptLocalPassword()
+}
+
+func promptLocalPassword() (string, error) {
+	for {
+		password, err := promptPassword("  Local Web UI password: ")
+		if err != nil {
+			return "", err
+		}
+		if password == "" {
+			fmt.Println("  Password is required.")
+			continue
+		}
+		confirm, err := promptPassword("  Confirm password: ")
+		if err != nil {
+			return "", err
+		}
+		if password != confirm {
+			fmt.Println("  Passwords do not match.")
+			continue
+		}
+		return password, nil
+	}
 }
 
 // runSetupWeb handles `kittypaw setup --web`. A daemon has to be listening
@@ -1311,15 +1488,27 @@ func newConfigCmd() *cobra.Command {
 }
 
 func newConfigCheckCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Show config summary",
 		RunE:  runConfigCheck,
 	}
+	cmd.Flags().String("account", "", "account id")
+	return cmd
 }
 
-func runConfigCheck(_ *cobra.Command, _ []string) error {
-	cfgPath, err := core.ConfigPath()
+func runConfigCheck(cmd *cobra.Command, _ []string) error {
+	explicitAccount := ""
+	if cmd != nil {
+		if value, err := cmd.Flags().GetString("account"); err == nil {
+			explicitAccount = value
+		}
+	}
+	accountID, err := resolveCLIAccount(explicitAccount)
+	if err != nil {
+		return err
+	}
+	cfgPath, err := core.ConfigPathForAccount(accountID)
 	if err != nil {
 		return err
 	}
@@ -2511,6 +2700,29 @@ func openStore() (*store.Store, error) {
 		return nil, err
 	}
 	dbPath := filepath.Join(dbDir, "kittypaw.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("open store %s: %w", dbPath, err)
+	}
+	return st, nil
+}
+
+func openStoreForAccount(accountID string) (*store.Store, error) {
+	if err := core.ValidateAccountID(accountID); err != nil {
+		return nil, err
+	}
+	dir, err := core.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	account := &core.Account{
+		ID:      accountID,
+		BaseDir: filepath.Join(dir, "accounts", accountID),
+	}
+	dbPath := account.DBPath()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		return nil, err
+	}
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open store %s: %w", dbPath, err)

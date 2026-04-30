@@ -21,6 +21,9 @@ import (
 
 // setupFlags holds the cobra flag values for `kittypaw setup`.
 type setupFlags struct {
+	accountID      string
+	passwordStdin  bool
+	validate       setupConfigValidator
 	provider       string
 	apiKey         string
 	localURL       string
@@ -36,10 +39,13 @@ type setupFlags struct {
 	web            bool
 }
 
+type setupConfigValidator func(core.WizardResult) error
+
 // runWizard drives the 6-step interactive wizard or applies flags.
 // Returns a WizardResult. Never writes files.
 func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, error) {
 	var w core.WizardResult
+	accountID := flags.accountID
 
 	// Non-interactive: populate from flags.
 	if flags.provider != "" {
@@ -66,20 +72,35 @@ func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, erro
 
 	// [2/6] Telegram
 	wizardTelegram(scanner, existing, &w)
+	if err := validateWizardResult(flags.validate, w); err != nil {
+		return w, err
+	}
 
 	// [3/6] KakaoTalk
-	wizardKakao(scanner, existing, &w)
+	if err := wizardKakao(scanner, accountID, existing, &w, flags.validate); err != nil {
+		return w, err
+	}
 
 	// [4/6] Web Search
 	wizardWebSearch(scanner, existing, &w)
 
 	// [5/6] Workspace & HTTP
 	wizardWorkspaceHTTP(scanner, existing, &w)
+	if err := validateWizardResult(flags.validate, w); err != nil {
+		return w, err
+	}
 
 	// [6/6] KittyPaw API Server
-	wizardAPIServer(scanner, &w)
+	wizardAPIServer(scanner, accountID, &w)
 
 	return w, nil
+}
+
+func validateWizardResult(validate setupConfigValidator, w core.WizardResult) error {
+	if validate == nil {
+		return nil
+	}
+	return validate(w)
 }
 
 func runNonInteractive(flags setupFlags) (core.WizardResult, error) {
@@ -440,7 +461,7 @@ func detectLang() string {
 // Step [3/6]: KakaoTalk
 // ---------------------------------------------------------------------------
 
-func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
+func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config, w *core.WizardResult, validate setupConfigValidator) error {
 	fmt.Println()
 	fmt.Println("  [3/6] KakaoTalk (optional)")
 
@@ -456,32 +477,38 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 
 	if hasExisting {
 		fmt.Println("  ✓ Already enabled")
-		return
+		return nil
 	}
 
 	if !promptYesNo(scanner, "  > Enable?", false) {
-		return
+		return nil
 	}
 
 	// KakaoTalk doesn't need an authenticated API session — it only needs the
 	// relay URL, which GET /discovery exposes anonymously.
 	apiURL := core.DefaultAPIServerURL
+	candidate := *w
+	candidate.APIServerURL = apiURL
+	candidate.KakaoEnabled = true
+	if err := validateWizardResult(validate, candidate); err != nil {
+		return err
+	}
 
 	d, err := core.FetchDiscovery(apiURL)
 	if err != nil {
 		fmt.Printf("  Discovery 실패: %v\n", err)
 		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
-		return
+		return nil
 	}
 	if d.RelayURL == "" {
 		fmt.Println("  Discovery 응답에 relay_url이 없어 페어링을 건너뜁니다.")
-		return
+		return nil
 	}
 
-	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+	secrets, err := core.LoadAccountSecrets(accountID)
 	if err != nil {
 		fmt.Printf("  secrets 로드 실패: %v\n", err)
-		return
+		return nil
 	}
 	mgr := core.NewAPITokenManager("", secrets)
 
@@ -489,13 +516,13 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 	if err != nil {
 		fmt.Printf("  릴레이 등록 실패: %v\n", err)
 		fmt.Println("  KakaoTalk 활성화를 건너뜁니다. 네트워크 확인 후 재실행하세요.")
-		return
+		return nil
 	}
 
 	wsURL := core.WSURLFromRelay(d.RelayURL, reg.Token)
 	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
 		fmt.Printf("  WS URL 저장 실패: %v\n", err)
-		return
+		return nil
 	}
 
 	// Persist apiURL so runSetup writes it to secrets under the bare
@@ -503,6 +530,7 @@ func wizardKakao(scanner *bufio.Scanner, existing *core.Config, w *core.WizardRe
 	w.APIServerURL = apiURL
 	w.KakaoEnabled = true
 	wizardKakaoPairing(scanner, d.RelayURL, reg)
+	return nil
 }
 
 func wizardKakaoPairing(_ *bufio.Scanner, relayBase string, reg *core.RelayRegistration) {
@@ -631,13 +659,13 @@ func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.
 // Step [6/6]: KittyPaw API Server
 // ---------------------------------------------------------------------------
 
-func wizardAPIServer(scanner *bufio.Scanner, w *core.WizardResult) {
+func wizardAPIServer(scanner *bufio.Scanner, accountID string, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [6/6] KittyPaw API Server (optional)")
 	fmt.Println("  KittyPaw 는 사용자 편의를 위해 몇 가지 API 를 제공하고 있습니다.")
 	fmt.Println("  대기질·날씨 등 인증이 필요한 스킬을 사용하시려면 로그인 해주세요.")
 
-	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+	secrets, err := core.LoadAccountSecrets(accountID)
 	if err != nil {
 		fmt.Printf("  secrets 로드 실패: %v\n", err)
 		return
