@@ -244,7 +244,7 @@ func TestWebSocketAcceptsActiveSessionBoundToken(t *testing.T) {
 	}
 }
 
-func TestBootstrapRejectsNonDefaultAccountSession(t *testing.T) {
+func TestBootstrapAllowsNonDefaultAccountSessionWithoutAPIKey(t *testing.T) {
 	aliceCfg := core.DefaultConfig()
 	aliceCfg.Server.APIKey = "alice-key"
 	bobCfg := core.DefaultConfig()
@@ -263,8 +263,17 @@ func TestBootstrapRejectsNonDefaultAccountSession(t *testing.T) {
 	req.AddCookie(bobCookie)
 	rr := httptest.NewRecorder()
 	srv.setupRoutes().ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("bootstrap with non-default session code = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bootstrap with non-default session code = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var bobBootstrap struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&bobBootstrap); err != nil {
+		t.Fatalf("decode bob bootstrap: %v", err)
+	}
+	if bobBootstrap.APIKey != "" {
+		t.Fatalf("bob bootstrap api_key = %q, want empty", bobBootstrap.APIKey)
 	}
 
 	aliceCookie := loginSessionCookie(t, srv, "alice", "alice-pw")

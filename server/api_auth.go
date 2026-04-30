@@ -121,7 +121,7 @@ func (s *Server) browserAPIToken(r *http.Request) (string, bool) {
 	}
 	accountID, ok := s.webSessionTokenAccountID(cookie.Value)
 	if !ok || accountID != s.defaultAccountID() {
-		return "", false
+		return "", ok
 	}
 	return cookie.Value, true
 }
