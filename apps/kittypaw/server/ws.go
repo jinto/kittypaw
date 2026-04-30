@@ -161,14 +161,17 @@ func readPump(ctx context.Context, conn *websocket.Conn, sessionID string,
 // handleWebSocket upgrades to WebSocket and runs a multi-turn chat session.
 // Auth via ?token= query param or Authorization header.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	apiKey := s.effectiveAPIKey()
-
 	// Read origin config under RLock for reload safety.
 	s.configMu.RLock()
 	originPatterns := s.config.Server.AllowedOrigins
 	s.configMu.RUnlock()
 
-	if apiKey != "" {
+	authRequired, err := s.apiAuthRequired()
+	if err != nil {
+		http.Error(w, `{"error":"read local auth store"}`, http.StatusInternalServerError)
+		return
+	}
+	if authRequired {
 		token := r.URL.Query().Get("token")
 		if token == "" {
 			auth := r.Header.Get("Authorization")
@@ -176,7 +179,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				token = strings.TrimPrefix(auth, "Bearer ")
 			}
 		}
-		if !fixedLenEqual(token, apiKey) {
+		if !s.apiTokenAccepted(token) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}

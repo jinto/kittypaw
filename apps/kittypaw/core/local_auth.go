@@ -108,6 +108,26 @@ func (s *LocalAuthStore) HasUser(accountID string) (bool, error) {
 	return ok, nil
 }
 
+func (s *LocalAuthStore) HasUsers() (bool, error) {
+	f, err := s.load()
+	if err != nil {
+		return false, err
+	}
+	return len(f.Users) > 0, nil
+}
+
+func (s *LocalAuthStore) IsActiveUser(accountID string) (bool, error) {
+	if err := ValidateAccountID(accountID); err != nil {
+		return false, err
+	}
+	f, err := s.load()
+	if err != nil {
+		return false, err
+	}
+	u, ok := f.Users[accountID]
+	return ok && !u.Disabled, nil
+}
+
 func (s *LocalAuthStore) DeleteUser(accountID string) error {
 	if err := ValidateAccountID(accountID); err != nil {
 		return err

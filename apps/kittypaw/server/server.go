@@ -39,6 +39,8 @@ type Server struct {
 	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
 	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
 	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	localAuth       *core.LocalAuthStore
+	webSessionKey   []byte
 	masterAPIKey    string
 	version         string
 	pkgManager      *core.PackageManager // default-account package manager for API handlers
@@ -124,6 +126,8 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 		accountRegistry: registry,
 		eventCh:         eventCh,
 		accountDeps:     depsByID,
+		localAuth:       newLocalAuthStore(),
+		webSessionKey:   newWebSessionKey(),
 		masterAPIKey:    sc.MasterAPIKey,
 		version:         version,
 		pkgManager:      defaultDeps.PkgMgr,
@@ -195,11 +199,22 @@ func (s *Server) setupRoutes() chi.Router {
 	// Health check (unauthenticated — daemon liveness probe).
 	r.Get("/health", s.handleHealth)
 
-	// Bootstrap (unauthenticated — returns api_key + ws_url to the GUI).
-	r.Get("/api/bootstrap", s.handleBootstrap)
+	r.Route("/api/auth", func(r chi.Router) {
+		r.Post("/login", s.handleAuthLogin)
+		r.Post("/logout", s.handleAuthLogout)
+		r.Get("/me", s.handleAuthMe)
+	})
 
-	// Setup / onboarding routes (unauthenticated).
+	// Bootstrap is open only before local Web UI users exist; once setup has
+	// created auth.json it requires a browser session before returning api_key.
+	r.With(s.requireDefaultWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
+
+	// Setup / onboarding routes are open for first-run setup only. Existing
+	// installs require the local Web UI session because localhost checks are
+	// not enough when the daemon is reached through a tunnel.
 	r.Route("/api/setup", func(r chi.Router) {
+		r.Use(s.requireDefaultWebSessionIfAuthUsers)
+
 		// Always accessible.
 		r.Get("/status", s.handleSetupStatus)
 		r.Get("/kakao/pair-status", s.handleSetupKakaoPairStatus)
@@ -223,9 +238,7 @@ func (s *Server) setupRoutes() chi.Router {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		if s.effectiveAPIKey() != "" {
-			r.Use(s.requireAPIKey)
-		}
+		r.Use(s.requireAPIKey)
 
 		// Status / history
 		r.Get("/status", s.handleStatus)
