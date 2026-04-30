@@ -1,7 +1,7 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
 
-.PHONY: build test lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
+.PHONY: build test test-integration test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
 
 build:
 	go build -o $(BINARY) $(PKG)
@@ -37,3 +37,23 @@ seed-seoul-metro:
 # Benchmark resolve corpus against a running server. Exits 1 if precision < gate.
 benchmark-resolve:
 	go run ./cmd/benchmark-resolve --base=$${KITTYAPI_BASE:-http://localhost:8080}
+
+# --- Integration test (docker-compose isolated PostgreSQL) ----------------------
+# Spins up postgres:17-alpine on port 15432 with pg_trgm pre-installed,
+# applies all migrations, then runs `go test -tags=integration ./...`.
+# Container persists between runs for fast iteration; tear down with
+# `make test-integration-down`.
+test-integration:
+	@docker-compose -f docker-compose.test.yml up -d
+	@echo "waiting for postgres-test to be healthy..."
+	@for i in $$(seq 1 30); do \
+		if docker exec kittypaw-postgres-test pg_isready -U kittypaw -d kittypaw_api_test >/dev/null 2>&1; then \
+			echo "postgres-test ready"; break; \
+		fi; \
+		sleep 1; \
+	done
+	DATABASE_URL="postgres://kittypaw:kittypaw@localhost:15432/kittypaw_api_test?sslmode=disable" \
+		go test -tags=integration -count=1 ./...
+
+test-integration-down:
+	@docker-compose -f docker-compose.test.yml down -v

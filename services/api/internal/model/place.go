@@ -148,10 +148,14 @@ func (s *PostgresPlaceStore) FindAliasOverride(ctx context.Context, alias string
 
 // Upsert inserts or updates a place keyed by (source, source_ref).
 // Used by seed-wikidata and seed-seoul-metro import cmds.
+//
+// `aliases` defaults to an empty array when nil — pgx encodes a Go nil
+// slice as SQL NULL, which violates the column's NOT NULL constraint
+// (caught by integration test before first prod seed).
 func (s *PostgresPlaceStore) Upsert(ctx context.Context, p *Place) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO places (name_ko, aliases, lat, lon, type, source, source_ref, region, source_priority)
-		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9)
+		VALUES ($1, COALESCE($2, ARRAY[]::text[]), $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9)
 		ON CONFLICT (source, source_ref) DO UPDATE SET
 			name_ko = EXCLUDED.name_ko,
 			aliases = EXCLUDED.aliases,
