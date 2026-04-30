@@ -270,6 +270,33 @@ label.muted { color: var(--text-muted); }
   font-family: var(--font);
 }
 
+/* ── Login ─────────────────────────────────────────────── */
+
+.login-card {
+  padding: 40px;
+}
+
+.login-title {
+  font-size: 34px;
+  margin-bottom: 28px;
+}
+
+.login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.login-error {
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.login-submit {
+  width: 100%;
+}
+
 /* ── Pair code ────────────────────────��────────────────── */
 
 .pair-code {

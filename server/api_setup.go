@@ -25,7 +25,11 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey := s.effectiveAPIKey()
+	apiKey, ok := s.browserAPIToken(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	scheme := "ws"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
