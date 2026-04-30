@@ -4,14 +4,22 @@ const App = {
   root: null,
   apiKey: null,
   wsUrl: null,
+  authRequired: false,
+  accountID: null,
   activeTab: null,
   _dashboardInterval: null,
 
   async init() {
     this.root = document.getElementById('app');
     const auth = await this.checkAuth();
+    this.authRequired = !!auth.auth_required;
+    this.accountID = auth.account_id || null;
     if (auth.auth_required && !auth.authenticated) {
       this.showLogin();
+      return;
+    }
+    if (auth.auth_required && auth.authenticated && auth.is_default === false) {
+      this.showShell();
       return;
     }
     await this.startMainFlow();
@@ -53,6 +61,7 @@ const App = {
     this._teardown();
     this.apiKey = null;
     this.wsUrl = null;
+    this.accountID = null;
     this.root.style.cssText = '';
     this.root.innerHTML = `
       <form class="card card--center login-card" id="login-form">
@@ -90,6 +99,13 @@ const App = {
         });
         if (!res.ok) {
           throw new Error(res.status === 403 ? 'default account required' : 'login failed');
+        }
+        const auth = await res.json();
+        this.authRequired = true;
+        this.accountID = auth.account_id || null;
+        if (auth.is_default === false) {
+          this.showShell();
+          return;
         }
         await this.startMainFlow();
       } catch (e) {

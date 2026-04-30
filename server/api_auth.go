@@ -56,10 +56,6 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid account_id or password")
 		return
 	}
-	if body.AccountID != s.defaultAccountID() {
-		writeError(w, http.StatusForbidden, "default account session required")
-		return
-	}
 	if s.localAuth == nil {
 		writeError(w, http.StatusInternalServerError, "local auth store unavailable")
 		return
@@ -78,6 +74,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"account_id":    body.AccountID,
+		"is_default":    body.AccountID == s.defaultAccountID(),
 	})
 }
 
@@ -109,6 +106,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"auth_required": true,
 		"account_id":    accountID,
+		"is_default":    accountID == s.defaultAccountID(),
 	})
 }
 
@@ -179,9 +177,7 @@ func (s *Server) localAuthRequired() (bool, error) {
 }
 
 func (s *Server) accountActive(accountID string) bool {
-	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
-	return s.accountDeps != nil && s.accountDeps[accountID] != nil
+	return s.accountDepsForID(accountID) != nil
 }
 
 func (s *Server) newWebSessionCookie(r *http.Request, accountID string, expires time.Time) *http.Cookie {

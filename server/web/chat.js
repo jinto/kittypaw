@@ -81,7 +81,7 @@ const Chat = {
     this._setStatus('connecting', 'Connecting...');
 
     let url = App.wsUrl;
-    if (App.apiKey) {
+    if (App.apiKey && !App.authRequired) {
       url += `?token=${encodeURIComponent(App.apiKey)}`;
     }
     this.ws = new WebSocket(url);

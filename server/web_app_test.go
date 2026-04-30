@@ -68,3 +68,17 @@ func TestWebAppBootstrapDoesNotSwallowUnauthorized(t *testing.T) {
 		t.Fatalf("bootstrap must not swallow auth failures, got:\n%s", bootstrap)
 	}
 }
+
+func TestWebAppNonDefaultAccountSkipsDefaultSetupFlow(t *testing.T) {
+	src, err := os.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatalf("read web app: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "auth.auth_required && auth.authenticated && auth.is_default === false") {
+		t.Fatal("init must detect authenticated non-default accounts before setup/bootstrap")
+	}
+	if !strings.Contains(body, "this.showShell()") {
+		t.Fatal("non-default account path must enter shell directly")
+	}
+}
