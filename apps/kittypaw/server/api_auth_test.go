@@ -290,7 +290,7 @@ func TestBootstrapRejectsNonDefaultAccountSession(t *testing.T) {
 	}
 }
 
-func TestAuthLoginRejectsNonDefaultAccountWhileUIIsDefaultBound(t *testing.T) {
+func TestAuthLoginAllowsNonDefaultAccountSession(t *testing.T) {
 	srv := newMultiAccountAuthTestServer(t, "alice", map[string]string{
 		"alice": "alice-pw",
 		"bob":   "bob-pw",
@@ -310,11 +310,75 @@ func TestAuthLoginRejectsNonDefaultAccountWhileUIIsDefaultBound(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.setupRoutes().ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("login code = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login code = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if cookie := findCookie(rr.Result().Cookies(), testWebSessionCookieName); cookie != nil {
-		t.Fatalf("unexpected session cookie for non-default login: %+v", cookie)
+	cookie := findCookie(rr.Result().Cookies(), testWebSessionCookieName)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatal("expected session cookie for non-default login")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.AddCookie(cookie)
+	rr = httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("me code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		AccountID string `json:"account_id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	if resp.AccountID != "bob" {
+		t.Fatalf("account_id = %q, want bob", resp.AccountID)
+	}
+}
+
+func TestAuthResponsesReportDefaultAccount(t *testing.T) {
+	srv := newMultiAccountAuthTestServer(t, "alice", map[string]string{
+		"alice": "alice-pw",
+		"bob":   "bob-pw",
+	}, map[string]*core.Config{
+		"alice": &core.Config{},
+		"bob":   &core.Config{},
+	})
+
+	aliceCookie := loginSessionCookie(t, srv, "alice", "alice-pw")
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.AddCookie(aliceCookie)
+	rr := httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("alice me code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var aliceMe struct {
+		IsDefault bool `json:"is_default"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&aliceMe); err != nil {
+		t.Fatalf("decode alice me: %v", err)
+	}
+	if !aliceMe.IsDefault {
+		t.Fatal("alice is_default = false, want true")
+	}
+
+	bobCookie := loginSessionCookie(t, srv, "bob", "bob-pw")
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.AddCookie(bobCookie)
+	rr = httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bob me code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var bobMe struct {
+		IsDefault bool `json:"is_default"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&bobMe); err != nil {
+		t.Fatalf("decode bob me: %v", err)
+	}
+	if bobMe.IsDefault {
+		t.Fatal("bob is_default = true, want false")
 	}
 }
 

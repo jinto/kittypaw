@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -183,6 +184,137 @@ func (s *Server) effectiveAPIKey() string {
 	s.configMu.RLock()
 	defer s.configMu.RUnlock()
 	return s.config.Server.APIKey
+}
+
+type requestAccount struct {
+	ID      string
+	Deps    *AccountDeps
+	Session *engine.Session
+}
+
+func (s *Server) requestAccount(r *http.Request) (*requestAccount, error) {
+	if accountID, ok := s.webSessionAccountID(r); ok {
+		return s.requestAccountByID(accountID)
+	}
+
+	token := requestAuthToken(r)
+	if token != "" {
+		if accountID, ok := s.webSessionTokenAccountID(token); ok {
+			return s.requestAccountByID(accountID)
+		}
+		if acct, ok, err := s.requestAccountByAPIKey(token); err != nil || ok {
+			return acct, err
+		}
+	}
+
+	authRequired, err := s.localAuthRequired()
+	if err != nil {
+		return nil, fmt.Errorf("read local auth store: %w", err)
+	}
+	deps := s.activeAccountDeps()
+	if !authRequired && s.effectiveAPIKey() == "" && len(deps) == 1 {
+		return s.requestAccountFromDeps(deps[0])
+	}
+	return nil, fmt.Errorf("unauthorized")
+}
+
+func requestAuthToken(r *http.Request) string {
+	if token := r.URL.Query().Get("token"); token != "" {
+		return token
+	}
+	if key := r.Header.Get("x-api-key"); key != "" {
+		return key
+	}
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	return ""
+}
+
+func (s *Server) requestAccountByID(accountID string) (*requestAccount, error) {
+	return s.requestAccountFromDeps(s.accountDepsForID(accountID))
+}
+
+func (s *Server) requestAccountByAPIKey(token string) (*requestAccount, bool, error) {
+	activeDeps := s.activeAccountDeps()
+	var match *AccountDeps
+	for _, deps := range activeDeps {
+		if deps == nil || deps.Account == nil || deps.Account.Config == nil {
+			continue
+		}
+		apiKey := deps.Account.Config.Server.APIKey
+		if fixedLenEqual(token, apiKey) {
+			if match != nil {
+				return nil, true, fmt.Errorf("ambiguous account api key")
+			}
+			match = deps
+		}
+	}
+	if match == nil {
+		if len(activeDeps) == 1 {
+			if apiKey := s.effectiveAPIKey(); fixedLenEqual(token, apiKey) {
+				acct, err := s.requestAccountFromDeps(activeDeps[0])
+				return acct, true, err
+			}
+		}
+		return nil, false, nil
+	}
+	acct, err := s.requestAccountFromDeps(match)
+	return acct, true, err
+}
+
+func (s *Server) requestAccountFromDeps(deps *AccountDeps) (*requestAccount, error) {
+	if deps == nil || deps.Account == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	sess := s.accounts.Session(deps.Account.ID)
+	if sess == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return &requestAccount{
+		ID:      deps.Account.ID,
+		Deps:    deps,
+		Session: sess,
+	}, nil
+}
+
+func (s *Server) accountDepsForID(accountID string) *AccountDeps {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	if s.accountDeps == nil {
+		return nil
+	}
+	return s.accountDeps[accountID]
+}
+
+func (s *Server) activeAccountDeps() []*AccountDeps {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	deps := make([]*AccountDeps, 0, len(s.accountDeps))
+	for _, td := range s.accountDeps {
+		if td != nil {
+			deps = append(deps, td)
+		}
+	}
+	return deps
+}
+
+func (s *Server) allowedOriginsForAccount(acct *requestAccount) []string {
+	var origins []string
+	if acct != nil && acct.ID == s.defaultAccountID() {
+		s.configMu.RLock()
+		origins = append([]string(nil), s.config.Server.AllowedOrigins...)
+		s.configMu.RUnlock()
+		return origins
+	}
+	if acct != nil && acct.Session != nil && acct.Session.Config != nil {
+		return append([]string(nil), acct.Session.Config.Server.AllowedOrigins...)
+	}
+	if acct != nil && acct.Deps != nil && acct.Deps.Account != nil && acct.Deps.Account.Config != nil {
+		return append([]string(nil), acct.Deps.Account.Config.Server.AllowedOrigins...)
+	}
+	return nil
 }
 
 // setupRoutes builds the full route tree. API routes live under /api/v1 and
