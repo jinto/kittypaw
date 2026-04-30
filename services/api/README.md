@@ -69,6 +69,28 @@ make run
 | `GET` | `/v1/air/airkorea/forecast` | Air quality forecast |
 | `GET` | `/v1/air/airkorea/forecast/weekly` | Weekly particulate forecast |
 | `GET` | `/v1/air/airkorea/unhealthy` | Stations exceeding standards |
+| `GET` | `/v1/calendar/holidays` | Holiday info by year/month (KASI) |
+| `GET` | `/v1/calendar/anniversaries` | Anniversary info |
+| `GET` | `/v1/calendar/solar-terms` | 24 solar terms |
+| `GET` | `/v1/weather/kma/village-fcst` | KMA village forecast (3-day) |
+| `GET` | `/v1/weather/kma/ultra-srt-ncst` | KMA ultra-short nowcast |
+| `GET` | `/v1/weather/kma/ultra-srt-fcst` | KMA ultra-short forecast |
+| `GET` | `/v1/geo/resolve?q={query}` | Resolve Korean location → lat/lon (see [maintenance](docs/maintenance.md)) |
+
+#### `/v1/geo/resolve` — LLM normalize guidance
+
+For best results, kittypaw skill prompts should normalize location tokens
+before calling this endpoint:
+
+1. `○○역` (subway station) → pass as-is
+2. Road or lot address → pass as-is
+3. Landmark / POI ("코엑스", "광화문") → pass as-is (Wikidata + alias overrides)
+4. Commercial branch ("스타벅스 강남R점") → substitute the nearest subway station
+5. Unknown / ambiguous → ask the user to clarify
+
+The endpoint returns 422 with a hint when input cannot be resolved; the
+client (LLM) should surface or substitute and retry. KMA forecast grids
+are 5km × 5km, so coordinate accuracy within ~1km is sufficient.
 
 ## Configuration
 

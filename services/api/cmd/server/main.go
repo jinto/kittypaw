@@ -34,8 +34,9 @@ func main() {
 
 	userStore := model.NewUserStore(pool)
 	refreshStore := model.NewRefreshTokenStore(pool)
+	placeStore := model.NewPlaceStore(pool)
 
-	r := NewRouter(cfg, userStore, refreshStore)
+	r := NewRouter(cfg, userStore, refreshStore, placeStore)
 
 	log.Printf("listening on :%s", cfg.Port)
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
@@ -43,7 +44,7 @@ func main() {
 	}
 }
 
-func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore) *chi.Mux {
+func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, placeStore model.PlaceStore) *chi.Mux {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RealIP)
@@ -104,6 +105,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 		APIKey:     cfg.WeatherAPIKey,
 	}
+	places := &proxy.PlacesHandler{
+		Store: placeStore,
+	}
 
 	// Service discovery — SDK reads this once on startup.
 	discovery := map[string]string{
@@ -161,6 +165,10 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/village-fcst", weather.VillageForecast())
 		r.Get("/ultra-srt-ncst", weather.UltraShortNowcast())
 		r.Get("/ultra-srt-fcst", weather.UltraShortForecast())
+	})
+
+	r.Route("/v1/geo", func(r chi.Router) {
+		r.Get("/resolve", places.Resolve())
 	})
 
 	return r

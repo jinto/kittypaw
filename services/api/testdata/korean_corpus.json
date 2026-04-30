@@ -1,0 +1,32 @@
+{
+  "_comment": "T6b PR-1 머지 게이트 corpus — precision ≥ 0.85. 첫 출시는 24건만 박고, 운영 데이터에서 미스 패턴 수집되는 대로 100건까지 확장 (follow-up). expected_status: 200/400/414/422. tolerance_m은 200으로 통일 (KMA 5km 격자가 흡수).",
+  "version": "0.1-bootstrap",
+  "target_precision": 0.85,
+  "items": [
+    {"q": "코엑스",                "expected_status": 200, "tolerance_m": 300},
+    {"q": "광화문",                "expected_status": 200, "tolerance_m": 500},
+    {"q": "광화문 광장",           "expected_status": 200, "tolerance_m": 500, "_normalize": "공백 보정"},
+    {"q": "강남역",                "expected_status": 200, "tolerance_m": 200},
+    {"q": " 강남역 ",              "expected_status": 200, "tolerance_m": 200, "_normalize": "trim"},
+    {"q": "잠실역",                "expected_status": 200, "tolerance_m": 200},
+    {"q": "장한평역",              "expected_status": 200, "tolerance_m": 200},
+    {"q": "63빌딩",                "expected_status": 200, "tolerance_m": 300},
+    {"q": "DDP",                    "expected_status": 200, "tolerance_m": 300},
+    {"q": "동대문디자인플라자",    "expected_status": 200, "tolerance_m": 300},
+    {"q": "롯데월드타워",          "expected_status": 200, "tolerance_m": 300},
+    {"q": "인천공항",              "expected_status": 200, "tolerance_m": 1500},
+    {"q": "김포공항",              "expected_status": 200, "tolerance_m": 1500},
+    {"q": "서울역",                "expected_status": 200, "tolerance_m": 500},
+    {"q": "부산역",                "expected_status": 200, "tolerance_m": 500},
+    {"q": "명동",                  "expected_status": 200, "tolerance_m": 1000},
+    {"q": "홍대",                  "expected_status": 200, "tolerance_m": 1000},
+    {"q": "이태원",                "expected_status": 200, "tolerance_m": 1000},
+    {"q": "잠실",                  "expected_status": 200, "tolerance_m": 1000},
+    {"q": "남산타워",              "expected_status": 200, "tolerance_m": 500},
+
+    {"q": "",                      "expected_status": 400},
+    {"q": "  ",                    "expected_status": 400},
+    {"q": "스타벅스 강남R점",      "expected_status": 422},
+    {"q": "존재하지않는랜드마크",  "expected_status": 422}
+  ]
+}

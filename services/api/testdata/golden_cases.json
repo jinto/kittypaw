@@ -1,0 +1,24 @@
+{
+  "_comment": "PR-1 머지 게이트 — testdata/golden_cases.json. 17건 (12 positive + 5 negative). 좌표는 ±tolerance_m 미터 이내 일치하면 통과. expected_source 또는 expected_source_any 중 하나 명시.",
+  "positive": [
+    {"q": "코엑스",       "expected_lat": 37.5119, "expected_lon": 127.0589, "tolerance_m": 300, "expected_source": "kittypaw_alias"},
+    {"q": "코엑스몰",     "expected_lat": 37.5119, "expected_lon": 127.0589, "tolerance_m": 300, "expected_source": "kittypaw_alias"},
+    {"q": "DDP",          "expected_lat": 37.5673, "expected_lon": 127.0095, "tolerance_m": 300, "expected_source": "kittypaw_alias"},
+    {"q": "63빌딩",       "expected_lat": 37.5197, "expected_lon": 126.94,   "tolerance_m": 300, "expected_source_any": ["kittypaw_alias", "wikidata"]},
+    {"q": "롯데월드타워", "expected_lat": 37.5125, "expected_lon": 127.1025, "tolerance_m": 300, "expected_source_any": ["kittypaw_alias", "wikidata"]},
+    {"q": "경복궁",       "expected_lat": 37.5796, "expected_lon": 126.9770, "tolerance_m": 300, "expected_source_any": ["kittypaw_alias", "wikidata"]},
+    {"q": "광화문",       "expected_lat": 37.5760, "expected_lon": 126.9770, "tolerance_m": 500, "expected_source_any": ["kittypaw_alias", "wikidata"]},
+    {"q": "강남역",       "tolerance_m": 200,                                                    "expected_source_any": ["kogl_seoul_metro", "wikidata"]},
+    {"q": "잠실역",       "tolerance_m": 200,                                                    "expected_source": "kogl_seoul_metro"},
+    {"q": "장한평역",     "tolerance_m": 200,                                                    "expected_source": "kogl_seoul_metro"},
+    {"q": "인천공항",     "expected_lat": 37.4602, "expected_lon": 126.4407, "tolerance_m": 1500, "expected_source": "kittypaw_alias"},
+    {"q": "서울역",       "tolerance_m": 500,                                                    "expected_source_any": ["kittypaw_alias", "kogl_seoul_metro", "wikidata"]}
+  ],
+  "negative": [
+    {"q": "",                       "expected_status": 400, "expected_error": "missing_q"},
+    {"q": "   ",                    "expected_status": 400, "expected_error": "missing_q"},
+    {"q": "스타벅스 강남R점",       "expected_status": 422, "expected_error": "unsupported_input"},
+    {"q": "존재하지않는랜드마크XYZ", "expected_status": 422, "expected_error": "unsupported_input"},
+    {"q": "테헤란로 152",           "expected_status": 422, "expected_error": "unsupported_input", "_comment": "PR-2 진입 시 200으로 변경"}
+  ]
+}

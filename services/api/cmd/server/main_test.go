@@ -12,7 +12,7 @@ import (
 func testRouter() http.Handler {
 	cfg := config.LoadForTest()
 	cfg.JWTSecret = "test-secret"
-	return NewRouter(cfg, nil, nil)
+	return NewRouter(cfg, nil, nil, nil)
 }
 
 func TestHealthEndpoint(t *testing.T) {

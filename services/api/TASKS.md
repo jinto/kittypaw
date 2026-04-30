@@ -32,7 +32,7 @@
 - [x] **T3: Route wiring** — `/v1/calendar/*` 라우트 등록
 - [x] **T4: 검증** — 전체 테스트 65개 통과, lint 0 issues
 
-## Plan 5: KMA Village Forecast Wrapper + KittyPaw fallback wiring ← 현재
+## Plan 5: KMA Village Forecast Wrapper + KittyPaw fallback wiring ✅
 
 > Spec: `.claude/plans/data-go-kr-wrappers.md` (v3, Phase 1+2 합의 통과)
 > Goal: `/v1/weather/kma/village-fcst` proxy + `weather-briefing` skill 의 KMA fallback hook
@@ -81,3 +81,68 @@
 - [ ] data.go.kr 기상청 단기예보 (`15084084`) 인증키 신청 + 승인 (1-3일)
 - [ ] 운영 서버 환경변수 `WEATHER_API_KEY` 등록
 - [ ] 프로덕션 smoke: 서울 좌표 1회 curl → 200
+
+## Plan 6: Places DB + /v1/geo/resolve ← 현재
+
+> Spec: `.claude/plans/geo-address-coords.md` (v8, Phase 1+2 합의 통과)
+> Goal: 자체 통합 places DB로 LLM 자연어 위치 입력 → 좌표 변환. **외부 API 의존 0**
+> 데이터: Wikidata(CC0) + 서울교통공사 1~8호선(제한없음) + 별칭 50 + 행안부 도로명주소(PR-2, 제한없음)
+> PR-1: Wikidata + 서울교통공사 + 별칭 + 벤치마크 (이번)
+> PR-2: 행안부 도로명주소 (별도 PR, EPSG 변환 + 별도 addresses 테이블)
+
+### PR-1 (8 태스크 — TDD 사이클)
+
+- [x] **T1: migration** —
+      RED: `migrations/00X_create_places.up.sql` + `down.sql`. `make migrate` → places + alias_overrides + pg_trgm + 인덱스 생성. `SELECT 1 FROM places LIMIT 0` 통합 테스트.
+      GREEN: SQL 작성. `UNIQUE (source, source_ref)` + GIN 인덱스. pg_trgm 권한 부재 시 명시적 에러.
+
+- [x] **T2: model/place.go** —
+      RED: `internal/model/place_test.go` 5 함수 테이블 테스트 — `FindExact`, `FindByAlias`, `FindByFuzzy`, `FindAliasOverride`, `Upsert`. fixture INSERT 후 검증.
+      GREEN: pgx raw SQL 5 함수. ORDER BY `similarity DESC, (CASE type WHEN 'landmark' THEN 0 ELSE 1 END) ASC, source_priority DESC, id ASC`.
+
+- [x] **T3: proxy/places.go + places_errors.go** —
+      RED: `internal/proxy/places_test.go` Resolve 통합 테스트 — NFC 정규화·길이 검증·typeHint·chain 5단계 + 400/414/422 응답.
+      GREEN: `Resolve` chain (alias_override → exact → alias → fuzzy → 422). 에러 enum const.
+
+- [x] **T4: cmd/seed-wikidata** —
+      RED: `cmd/seed-wikidata/main_test.go` fakeUpstream으로 SPARQL mock — 페이징·재시도·swap·체크포인트.
+      GREEN: SPARQL 클라이언트 (offset+limit 1000, max retry 3, exponential backoff). transactional swap (places_import_<run_id>). 체크포인트 `places_import_state.json`.
+
+- [x] **T5: cmd/seed-seoul-metro** —
+      RED: 작은 CSV 입력 → places에 정확 INSERT 검증.
+      GREEN: CSV 파서 + COPY FROM ON CONFLICT.
+
+- [x] **T6a: 별칭 50개 + 골든 17건** —
+      RED: `migrations/00Y_seed_alias_overrides.up.sql` (§10 정책 준수). `testdata/golden_cases.json` 12 positive + 5 negative. `internal/proxy/places_golden_test.go`.
+      GREEN: 50개 SQL 시드 + 골든 테스트 통과 (코엑스/광화문/강남역/63빌딩/잠실역/장한평역/롯데월드타워/경복궁/DDP/코엑스몰 + 422 케이스).
+
+- [x] **T6b: corpus 인프라 + 벤치마크 cmd** (24건 bootstrap, 100건 확장은 운영 후 follow-up) —
+      RED: `testdata/korean_corpus.json` 100건 (50 시나리오 + 50 변형 NFC/NFD/한자/오타). `cmd/benchmark-resolve/main.go`. `make benchmark-resolve` 타겟.
+      GREEN: corpus 작성 + 측정 + **precision ≥ 0.85 게이트**. 미달 시 alias 보강 또는 threshold 조정.
+
+- [x] **T7: 라우트 등록 + README + Makefile + docs/maintenance.md** —
+      RED: `cmd/server/main.go` `/v1/geo/resolve` 라우트. 통합 테스트.
+      GREEN: 라우트 1줄 + README LLM normalize 가이드 섹션 + Makefile (`seed-wikidata`, `seed-seoul-metro`, `benchmark-resolve`). `make build/lint/test` pass. **사용자 명시 허락 후** atomic commit.
+
+**Operational Checklist**:
+- [ ] PostgreSQL pg_trgm superuser 1회 설치 (RDS 시 `rds.extensions = pg_trgm` 파라미터 그룹)
+- [ ] `make seed-wikidata` 첫 임포트 (~10k row, 수 분)
+- [ ] `make seed-seoul-metro` 첫 임포트 (~280 row, 수 초)
+- [ ] cron: Wikidata 주간, 서울교통공사 연 1회
+
+**Follow-up Issues** (PR-1 범위 외, Phase 2 리뷰 결과 포함):
+- [ ] **Anon rate limit 재검토** — 현재 5 rpm/IP는 LLM 사용에 부족 (Security Lane #2). 옵션: (a) /v1/geo만 별도 한도, (b) 전체 anon 한도 상향, (c) auth 강제. 트래픽 데이터 후 결정
+- [ ] **Integration test harness** — PostgreSQL + pg_trgm 실제 SQL 동작 검증 `//go:build integration` (Adversarial #9). docker-compose 권고
+- [ ] **Fuzzy threshold 튜닝** — 0.7은 한국어 짧은 토큰("강남" → "강남역" similarity ≈ 0.67)에서 미달. corpus benchmark 결과로 0.45~0.5로 조정 검토 (Adversarial #5)
+- [ ] **Curated alias 좌표 검증** — `잠실` 등 round-numbered 좌표는 placeholder 가능성. corpus benchmark에서 ±200m 게이트로 사후 검증 (Adversarial #6)
+- [ ] **alias_overrides 우선순위 메타데이터** — `disabled BOOLEAN` / `defeat_exact BOOLEAN` 등 운영 중 큐레이터 실수 보호 컬럼 (Adversarial #6)
+- [ ] **cron 실패 알림 채널** (Slack/email) — 30일 stale 운영자 무인지 방지
+- [ ] **6개월 정확도 측정 KPI 대시보드** — Steelman 잔여 우려 대응
+- [ ] **PR-2 EPSG 라이브러리 PoC 스파이크** — `go-proj` 등 후보 1개 확정 (PR-2 첫 태스크)
+- [ ] **down.sql 위험성 강화** — `migrate down 003`이 운영 데이터 즉시 삭제. maintenance.md 경고 강화 (Security #6)
+
+### PR-2 (PR-1 머지 후 — 별도 PR)
+- 행안부 도로명주소 DB 임포트 (수백만 row, EPSG:5179→WGS84 변환)
+- 별도 `addresses` 테이블 (places 과적재 방지)
+- 일간 cron + 차분 갱신
+- handler chain에 addresses fallthrough
