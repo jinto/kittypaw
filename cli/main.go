@@ -2490,7 +2490,7 @@ func resolveCLIAccount(explicit string) (string, error) {
 		return accounts[0].ID, nil
 	}
 	if len(accounts) == 0 {
-		return "", errors.New("no accounts found; run `kittypaw setup` first")
+		return "", errors.New("no accounts found; run kittypaw setup first")
 	}
 	ids := make([]string, 0, len(accounts))
 	for _, a := range accounts {
