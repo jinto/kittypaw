@@ -108,6 +108,23 @@ func (s *LocalAuthStore) HasUser(accountID string) (bool, error) {
 	return ok, nil
 }
 
+func (s *LocalAuthStore) DeleteUser(accountID string) error {
+	if err := ValidateAccountID(accountID); err != nil {
+		return err
+	}
+	return s.withLock(func() error {
+		f, err := s.load()
+		if err != nil {
+			return err
+		}
+		if _, ok := f.Users[accountID]; !ok {
+			return nil
+		}
+		delete(f.Users, accountID)
+		return s.save(f)
+	})
+}
+
 func (s *LocalAuthStore) VerifyPassword(accountID, password string) (bool, error) {
 	if err := ValidateAccountID(accountID); err != nil {
 		return false, err

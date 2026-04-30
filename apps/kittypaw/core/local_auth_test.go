@@ -63,6 +63,33 @@ func TestLocalAuthStoreDisabledUserCannotLogin(t *testing.T) {
 	}
 }
 
+func TestLocalAuthStoreDeleteUser(t *testing.T) {
+	root := t.TempDir()
+	st := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if err := st.CreateUser("alice", "pw"); err != nil {
+		t.Fatalf("CreateUser alice: %v", err)
+	}
+	if err := st.CreateUser("bob", "pw"); err != nil {
+		t.Fatalf("CreateUser bob: %v", err)
+	}
+
+	if err := st.DeleteUser("alice"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if ok, err := st.VerifyPassword("alice", "pw"); err != nil || ok {
+		t.Fatalf("deleted VerifyPassword = (%v, %v), want false nil", ok, err)
+	}
+	if ok, err := st.VerifyPassword("bob", "pw"); err != nil || !ok {
+		t.Fatalf("bob VerifyPassword = (%v, %v), want true nil", ok, err)
+	}
+	if err := st.DeleteUser("missing"); err != nil {
+		t.Fatalf("DeleteUser missing should be idempotent: %v", err)
+	}
+	if err := st.DeleteUser("../bad"); err == nil {
+		t.Fatal("DeleteUser accepted invalid account id")
+	}
+}
+
 func TestLocalAuthStoreCorruptJSONReturnsError(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "auth.json")
