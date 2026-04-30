@@ -1,10 +1,12 @@
 package core
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -70,6 +72,19 @@ func TestLocalAuthStoreCorruptJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestLocalAuthStoreUnsupportedVersionReturnsError(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(`{"version":99,"users":{}}`), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	st := NewLocalAuthStore(path)
+	if ok, err := st.VerifyPassword("alice", "pw"); err == nil || ok {
+		t.Fatalf("VerifyPassword unsupported version = (%v, %v), want false error", ok, err)
+	}
+}
+
 func TestLocalAuthStoreWritesSecureArgon2File(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "nested", "auth.json")
@@ -108,5 +123,82 @@ func TestLocalAuthStoreWritesSecureArgon2File(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("temp file still exists or stat failed with unexpected error: %v", err)
+	}
+}
+
+func TestLocalAuthStoreConcurrentCreateAllowsSingleWinner(t *testing.T) {
+	root := t.TempDir()
+	st := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- st.CreateUser("alice", "pw")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	duplicates := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrLocalUserExists):
+			duplicates++
+		default:
+			t.Fatalf("unexpected CreateUser error: %v", err)
+		}
+	}
+	if successes != 1 || duplicates != workers-1 {
+		t.Fatalf("successes=%d duplicates=%d, want 1 and %d", successes, duplicates, workers-1)
+	}
+}
+
+func TestLocalAuthStoreRejectsUnexpectedArgonParams(t *testing.T) {
+	root := t.TempDir()
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
+	hash := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
+	body := `{"version":1,"users":{"alice":{"account_id":"alice","password_hash":"argon2id$v=1$m=65536,t=3,p=5$` + salt + `$` + hash + `","created_at":"2026-04-30T00:00:00Z","updated_at":"2026-04-30T00:00:00Z"}}}`
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	st := NewLocalAuthStore(path)
+	if ok, err := st.VerifyPassword("alice", "pw"); err == nil || ok {
+		t.Fatalf("VerifyPassword with unexpected params = (%v, %v), want false error", ok, err)
+	}
+}
+
+func TestLocalAuthStoreReplacesInsecureStaleTempFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path+".tmp", []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale temp: %v", err)
+	}
+
+	st := NewLocalAuthStore(path)
+	if err := st.CreateUser("alice", "pw"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat auth file: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("auth file mode = %v, want 0600", got)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("stale fixed temp still exists or stat failed with unexpected error: %v", err)
 	}
 }
