@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2462,6 +2463,41 @@ func bootstrap() ([]*server.AccountDeps, error) {
 		deps = append(deps, td)
 	}
 	return deps, nil
+}
+
+func resolveCLIAccount(explicit string) (string, error) {
+	if explicit != "" {
+		if err := core.ValidateAccountID(explicit); err != nil {
+			return "", err
+		}
+		return explicit, nil
+	}
+	if env := strings.TrimSpace(os.Getenv("KITTYPAW_ACCOUNT")); env != "" {
+		if err := core.ValidateAccountID(env); err != nil {
+			return "", err
+		}
+		return env, nil
+	}
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
+	if err != nil {
+		return "", err
+	}
+	if len(accounts) == 1 {
+		return accounts[0].ID, nil
+	}
+	if len(accounts) == 0 {
+		return "", errors.New("no accounts found; run `kittypaw setup` first")
+	}
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
+	}
+	sort.Strings(ids)
+	return "", fmt.Errorf("multiple accounts found (%s); pass --account or set KITTYPAW_ACCOUNT", strings.Join(ids, ", "))
 }
 
 // openStore opens the SQLite store at the default path.

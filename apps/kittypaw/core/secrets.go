@@ -19,9 +19,9 @@ type SecretsStore struct {
 	data map[string]map[string]string // package_id → key → value
 }
 
-// DefaultAccountID is the account ID used by single-user CLI flows
-// (kittypaw login, kittypaw setup, Kakao wizard). Plan 2's --user flag
-// will replace literal references at call sites.
+// DefaultAccountID is the legacy account ID retained for migration and
+// compatibility. New multi-user flows should resolve an account explicitly
+// and pass it to helpers such as LoadAccountSecrets.
 const DefaultAccountID = "default"
 
 // LoadSecrets reads the global secrets file. Retained for migration
