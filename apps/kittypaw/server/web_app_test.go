@@ -69,16 +69,33 @@ func TestWebAppBootstrapDoesNotSwallowUnauthorized(t *testing.T) {
 	}
 }
 
-func TestWebAppNonDefaultAccountSkipsDefaultSetupFlow(t *testing.T) {
+func TestWebAppAuthenticatedAccountsUseSetupStatus(t *testing.T) {
 	src, err := os.ReadFile("web/app.js")
 	if err != nil {
 		t.Fatalf("read web app: %v", err)
 	}
 	body := string(src)
-	if !strings.Contains(body, "auth.auth_required && auth.authenticated && auth.is_default === false") {
-		t.Fatal("init must detect authenticated non-default accounts before setup/bootstrap")
+	if strings.Contains(body, "auth.is_default === false") {
+		t.Fatal("authenticated non-default accounts must not bypass account-scoped setup/status")
 	}
-	if !strings.Contains(body, "this.showShell()") {
-		t.Fatal("non-default account path must enter shell directly")
+	if !strings.Contains(body, "await this.startMainFlow()") {
+		t.Fatal("authenticated accounts must enter setup/status flow")
+	}
+}
+
+func TestWebAppNonDefaultShellHidesDefaultBoundAPITabs(t *testing.T) {
+	src, err := os.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatalf("read web app: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "const fullShell = !this.authRequired || this.isDefault") {
+		t.Fatal("showShell must distinguish default-account UI from non-default chat UI")
+	}
+	if !strings.Contains(body, "const adminNav = fullShell") {
+		t.Fatal("showShell must gate API-backed nav items")
+	}
+	if !strings.Contains(body, "const wizardButton = fullShell") {
+		t.Fatal("showShell must gate default-bound wizard entry")
 	}
 }

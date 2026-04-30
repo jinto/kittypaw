@@ -339,13 +339,13 @@ func (s *Server) setupRoutes() chi.Router {
 
 	// Bootstrap is open only before local Web UI users exist; once setup has
 	// created auth.json it requires a browser session before returning api_key.
-	r.With(s.requireDefaultWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
+	r.With(s.requireWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
 
 	// Setup / onboarding routes are open for first-run setup only. Existing
 	// installs require the local Web UI session because localhost checks are
 	// not enough when the daemon is reached through a tunnel.
 	r.Route("/api/setup", func(r chi.Router) {
-		r.Use(s.requireDefaultWebSessionIfAuthUsers)
+		r.Use(s.requireWebSessionIfAuthUsers)
 
 		// Always accessible.
 		r.Get("/status", s.handleSetupStatus)
@@ -354,9 +354,10 @@ func (s *Server) setupRoutes() chi.Router {
 		// Localhost only.
 		r.Post("/reset", s.handleSetupReset)
 
-		// Guarded — localhost only, blocked after onboarding is complete.
+		// Guarded — localhost during first-run, otherwise authenticated by
+		// the local Web UI session for the account being configured.
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireLocalhost)
+			r.Use(s.requireSetupMutationAccess)
 			r.Use(s.requireOnboardingIncomplete)
 			r.Post("/llm", s.handleSetupLlm)
 			r.Post("/telegram", s.handleSetupTelegram)

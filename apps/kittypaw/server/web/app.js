@@ -6,6 +6,7 @@ const App = {
   wsUrl: null,
   authRequired: false,
   accountID: null,
+  isDefault: true,
   activeTab: null,
   _dashboardInterval: null,
 
@@ -14,12 +15,9 @@ const App = {
     const auth = await this.checkAuth();
     this.authRequired = !!auth.auth_required;
     this.accountID = auth.account_id || null;
+    this.isDefault = auth.is_default !== false;
     if (auth.auth_required && !auth.authenticated) {
       this.showLogin();
-      return;
-    }
-    if (auth.auth_required && auth.authenticated && auth.is_default === false) {
-      this.showShell();
       return;
     }
     await this.startMainFlow();
@@ -62,6 +60,7 @@ const App = {
     this.apiKey = null;
     this.wsUrl = null;
     this.accountID = null;
+    this.isDefault = true;
     this.root.style.cssText = '';
     this.root.innerHTML = `
       <form class="card card--center login-card" id="login-form">
@@ -103,10 +102,7 @@ const App = {
         const auth = await res.json();
         this.authRequired = true;
         this.accountID = auth.account_id || null;
-        if (auth.is_default === false) {
-          this.showShell();
-          return;
-        }
+        this.isDefault = auth.is_default !== false;
         await this.startMainFlow();
       } catch (e) {
         error.textContent = e.message === 'default account required'
@@ -133,6 +129,13 @@ const App = {
 
   showShell() {
     this._teardown();
+    const fullShell = !this.authRequired || this.isDefault;
+    const adminNav = fullShell
+      ? '<button class="nav-item" data-tab="dashboard">Dashboard</button><button class="nav-item" data-tab="skills">Skills</button><button class="nav-item" data-tab="settings">Settings</button>'
+      : '';
+    const wizardButton = fullShell
+      ? '<button class="sidebar-wizard-btn" id="wizard-btn">\uC124\uC815 \uC704\uC790\uB4DC</button>'
+      : '';
 
     // Override #app centering from stylesheet
     this.root.style.display = 'block';
@@ -144,12 +147,10 @@ const App = {
           <div class="sidebar-logo">Kitty<span class="accent">Paw</span></div>
           <nav class="sidebar-nav">
             <button class="nav-item" data-tab="chat">Chat</button>
-            <button class="nav-item" data-tab="dashboard">Dashboard</button>
-            <button class="nav-item" data-tab="skills">Skills</button>
-            <button class="nav-item" data-tab="settings">Settings</button>
+            ${adminNav}
           </nav>
           <div class="sidebar-footer">
-            <button class="sidebar-wizard-btn" id="wizard-btn">\uC124\uC815 \uC704\uC790\uB4DC</button>
+            ${wizardButton}
             <span class="sidebar-version">v0.1.0</span>
           </div>
         </aside>
@@ -163,7 +164,8 @@ const App = {
       btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
     });
 
-    document.getElementById('wizard-btn').addEventListener('click', () => this.launchWizard());
+    const wizardBtn = document.getElementById('wizard-btn');
+    if (wizardBtn) wizardBtn.addEventListener('click', () => this.launchWizard());
 
     this.switchTab('chat');
   },
