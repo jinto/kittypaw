@@ -1,6 +1,7 @@
 # Binary
 kittypaw-api
 kittypaw-api-linux
+/server
 
 # Environment
 .env

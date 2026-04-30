@@ -99,6 +99,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 		APIKey:     cfg.HolidayAPIKey,
 	}
+	weather := &proxy.WeatherHandler{
+		Cache:      dataCache,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		APIKey:     cfg.WeatherAPIKey,
+	}
 
 	// Service discovery — SDK reads this once on startup.
 	discovery := map[string]string{
@@ -150,6 +155,10 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/holidays", holiday.Holidays())
 		r.Get("/anniversaries", holiday.Anniversaries())
 		r.Get("/solar-terms", holiday.SolarTerms())
+	})
+
+	r.Route("/v1/weather/kma", func(r chi.Router) {
+		r.Get("/village-fcst", weather.VillageForecast())
 	})
 
 	return r

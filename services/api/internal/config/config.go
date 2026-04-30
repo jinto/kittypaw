@@ -18,6 +18,7 @@ type Config struct {
 	AllowedOrigins     []string
 	AirKoreaAPIKey     string
 	HolidayAPIKey      string
+	WeatherAPIKey      string
 	RelayURL           string
 	APIBaseURL         string
 	SkillsRegistryURL  string
@@ -35,6 +36,7 @@ func Load() (*Config, error) {
 		BaseURL:            env("BASE_URL", "http://localhost:8080"),
 		AirKoreaAPIKey:     os.Getenv("AIRKOREA_API_KEY"),
 		HolidayAPIKey:      os.Getenv("HOLIDAY_API_KEY"),
+		WeatherAPIKey:      os.Getenv("WEATHER_API_KEY"),
 		RelayURL:           os.Getenv("RELAY_URL"),
 		APIBaseURL:         os.Getenv("API_BASE_URL"),
 		SkillsRegistryURL:  env("SKILLS_REGISTRY_URL", "https://github.com/kittypaw-app/skills"),
