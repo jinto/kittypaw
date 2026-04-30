@@ -124,6 +124,7 @@ func TestResolveCLIAccountEnv(t *testing.T) {
 func TestResolveCLIAccountSingleAccount(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
 
 	got, err := resolveCLIAccount("")
@@ -135,6 +136,7 @@ func TestResolveCLIAccountSingleAccount(t *testing.T) {
 func TestResolveCLIAccountMultipleRequiresExplicit(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
 
@@ -151,6 +153,7 @@ func TestResolveCLIAccountMultipleRequiresExplicit(t *testing.T) {
 
 func TestResolveCLIAccountNoAccounts(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+	t.Setenv("KITTYPAW_ACCOUNT", "")
 	if _, err := resolveCLIAccount(""); err == nil {
 		t.Fatal("expected no accounts error")
 	}
