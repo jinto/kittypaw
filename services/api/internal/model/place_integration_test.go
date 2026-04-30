@@ -189,6 +189,72 @@ func TestIntegration_AliasOverride(t *testing.T) {
 	}
 }
 
+// TestIntegration_TypeHintMissDoesNotStarve guards against the production
+// regression discovered in PR-1: detectTypeHint returns "subway_station"
+// for "강남역" but Wikidata seeds 2k+ "*역" rows as type='landmark'. A
+// strict WHERE filter on type would starve all those rows. The fix moves
+// typeHint to an ORDER BY tiebreaker; a hint *miss* must still return the
+// row, not ErrNotFound.
+func TestIntegration_TypeHintMissDoesNotStarve(t *testing.T) {
+	store, _ := setupPlacesTestDB(t)
+	ctx := context.Background()
+
+	// Wikidata-style: name ends with "역" but type is landmark (Wikidata
+	// default — Wikidata doesn't classify these as subway_station).
+	if err := store.Upsert(ctx, &model.Place{
+		NameKo: "강남역", Lat: 37.4979, Lon: 127.0276,
+		Type: model.TypeLandmark, Source: model.SourceWikidata,
+		SourceRef: "Q17469", SourcePriority: model.PriorityWikidata,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// Caller passes typeHint='subway_station' (matches the *역$ regex);
+	// pre-fix this would strict-filter to zero rows and return ErrNotFound.
+	got, err := store.FindExact(ctx, "강남역", model.TypeSubwayStation)
+	if err != nil {
+		t.Fatalf("typeHint miss should fall back, got %v", err)
+	}
+	if got.NameKo != "강남역" || got.Source != model.SourceWikidata {
+		t.Errorf("expected wikidata 강남역, got %q (source=%s)", got.NameKo, got.Source)
+	}
+}
+
+// TestIntegration_TypeHintHitWinsOverMiss confirms that when both a hint-
+// matching row and a hint-mismatching row exist, the hint-matching one is
+// returned first. typeHint is a soft preference, not a strict filter, but
+// it must still influence ordering.
+func TestIntegration_TypeHintHitWinsOverMiss(t *testing.T) {
+	store, _ := setupPlacesTestDB(t)
+	ctx := context.Background()
+
+	// landmark-typed row (Wikidata) — same name.
+	if err := store.Upsert(ctx, &model.Place{
+		NameKo: "강남역", Lat: 37.5000, Lon: 127.0300,
+		Type: model.TypeLandmark, Source: model.SourceWikidata,
+		SourceRef: "Q17469", SourcePriority: model.PriorityWikidata,
+	}); err != nil {
+		t.Fatalf("upsert wikidata: %v", err)
+	}
+	// subway_station-typed row (Seoul Metro) — same name, different coords.
+	if err := store.Upsert(ctx, &model.Place{
+		NameKo: "강남역", Lat: 37.4979, Lon: 127.0276,
+		Type: model.TypeSubwayStation, Source: model.SourceSeoulMetro,
+		SourceRef: "seoul:2:강남역", SourcePriority: model.PrioritySeoulMetro,
+	}); err != nil {
+		t.Fatalf("upsert station: %v", err)
+	}
+
+	got, err := store.FindExact(ctx, "강남역", model.TypeSubwayStation)
+	if err != nil {
+		t.Fatalf("FindExact: %v", err)
+	}
+	if got.Source != model.SourceSeoulMetro {
+		t.Errorf("typeHint=subway_station should prefer kogl_seoul_metro row, got source=%s lat=%v",
+			got.Source, got.Lat)
+	}
+}
+
 func TestIntegration_UpsertConflict(t *testing.T) {
 	store, _ := setupPlacesTestDB(t)
 	ctx := context.Background()

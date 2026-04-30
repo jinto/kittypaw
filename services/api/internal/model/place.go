@@ -79,9 +79,20 @@ func NewPlaceStore(pool *pgxpool.Pool) *PostgresPlaceStore {
 }
 
 // orderByClause is shared across exact/alias/fuzzy queries to keep result
-// ordering deterministic. The CASE clause encodes the "no typeHint" tiebreaker
-// (landmark > subway_station — landmarks tend to dominate natural-language input).
+// ordering deterministic.
+//
+// First key: typeHint match — when caller passes a hint ("subway_station"),
+// rows with matching type sort first, but rows with other types still appear
+// (downgraded). This avoids strict-filter starvation: e.g., "강남역" gets
+// typeHint='subway_station', but Wikidata seeds the row as type='landmark';
+// strict filter would miss it. Hint guides ordering, not membership.
+//
+// Second key: default type priority (landmark > subway_station). Used when no
+// hint is given — natural-language input skews toward landmarks.
+//
+// Third/fourth: source_priority DESC, id ASC for full determinism.
 const orderByClause = `
+	(CASE WHEN $2::text = '' OR type = $2 THEN 0 ELSE 1 END) ASC,
 	(CASE type WHEN 'landmark' THEN 0 WHEN 'subway_station' THEN 1 ELSE 2 END) ASC,
 	source_priority DESC,
 	id ASC
@@ -91,11 +102,11 @@ const placeColumns = `id, name_ko, aliases, lat, lon, type, source,
 	COALESCE(source_ref, ''), COALESCE(region, ''), source_priority, imported_at, updated_at`
 
 // FindExact returns a place whose name_ko equals name (NFC normalized).
-// typeHint == "" matches any type.
+// typeHint guides ordering (hint-matching rows first) but does not filter:
+// callers with mismatched hints still get a result if one exists.
 func (s *PostgresPlaceStore) FindExact(ctx context.Context, name, typeHint string) (*Place, error) {
 	query := `SELECT ` + placeColumns + ` FROM places
 		WHERE name_ko = $1
-		  AND ($2::text = '' OR type = $2)
 		ORDER BY ` + orderByClause + `LIMIT 1`
 	return s.queryOne(ctx, query, name, typeHint)
 }
@@ -104,18 +115,16 @@ func (s *PostgresPlaceStore) FindExact(ctx context.Context, name, typeHint strin
 func (s *PostgresPlaceStore) FindByAlias(ctx context.Context, alias, typeHint string) (*Place, error) {
 	query := `SELECT ` + placeColumns + ` FROM places
 		WHERE $1 = ANY(aliases)
-		  AND ($2::text = '' OR type = $2)
 		ORDER BY ` + orderByClause + `LIMIT 1`
 	return s.queryOne(ctx, query, alias, typeHint)
 }
 
 // FindByFuzzy returns the best place whose name_ko trigram-similarity to q
 // exceeds threshold. ORDER BY is fully deterministic — same q must yield the
-// same result every run (Architect/Critic ITERATE #2/#3).
+// same result every run.
 func (s *PostgresPlaceStore) FindByFuzzy(ctx context.Context, q, typeHint string, threshold float64) (*Place, error) {
 	query := `SELECT ` + placeColumns + ` FROM places
 		WHERE similarity(name_ko, $1) > $3
-		  AND ($2::text = '' OR type = $2)
 		ORDER BY similarity(name_ko, $1) DESC, ` + orderByClause + `LIMIT 1`
 	return s.queryOne(ctx, query, q, typeHint, threshold)
 }
