@@ -87,6 +87,48 @@ func TestInitAccount_HappyPath_Family(t *testing.T) {
 	}
 }
 
+func TestInitAccountCreatesLocalAuthUser(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	accountsDir := filepath.Join(root, "accounts")
+
+	if _, err := InitAccount(accountsDir, "alice", AccountOpts{
+		IsFamily:      true,
+		LocalPassword: "pw123",
+	}); err != nil {
+		t.Fatalf("InitAccount: %v", err)
+	}
+
+	auth := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if ok, err := auth.VerifyPassword("alice", "pw123"); err != nil || !ok {
+		t.Fatalf("VerifyPassword = (%v, %v), want true nil", ok, err)
+	}
+}
+
+func TestInitAccountAuthDuplicateRollsBackStaging(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	accountsDir := filepath.Join(root, "accounts")
+	auth := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if err := auth.CreateUser("alice", "existing"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	_, err := InitAccount(accountsDir, "alice", AccountOpts{
+		IsFamily:      true,
+		LocalPassword: "new",
+	})
+	if !errors.Is(err, ErrLocalUserExists) {
+		t.Fatalf("InitAccount err = %v, want ErrLocalUserExists", err)
+	}
+	if _, err := os.Stat(filepath.Join(accountsDir, "alice")); !os.IsNotExist(err) {
+		t.Fatalf("account dir should not exist after auth duplicate, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(accountsDir, ".alice.staging")); !os.IsNotExist(err) {
+		t.Fatalf("staging dir should be removed after auth duplicate, stat err=%v", err)
+	}
+}
+
 // Re-adding must not clobber existing DB/secrets/skills.
 func TestInitAccount_DuplicateID(t *testing.T) {
 	accountsDir := t.TempDir()

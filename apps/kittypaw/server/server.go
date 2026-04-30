@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -39,6 +40,9 @@ type Server struct {
 	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
 	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
 	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	localAuth       *core.LocalAuthStore
+	webSessionKey   []byte
+	masterAPIKey    string
 	version         string
 	pkgManager      *core.PackageManager // default-account package manager for API handlers
 	liveIndexer     *engine.LiveIndexer  // default-account live indexer (nil if lazy mode)
@@ -50,8 +54,10 @@ type Server struct {
 	reloadReconcile func(accountID string, cfgs []core.ChannelConfig) error
 }
 
-// DefaultAccountID is the account ID used when the daemon runs without an
-// explicit accounts/ directory (legacy single-account deployments).
+// DefaultAccountID is the legacy account ID retained for migrated installs.
+// Fresh installs may use any account ID; server.New chooses the configured
+// default when present, otherwise this legacy ID when present, otherwise the
+// first loaded account.
 const DefaultAccountID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
@@ -68,21 +74,20 @@ const DefaultAccountID = "default"
 // The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
 // the default account in PR-1; multi-account HTTP routing is scoped to a
 // follow-up. Call StartChannels before ListenAndServe to activate messaging.
-func New(accounts []*AccountDeps, version string) *Server {
+func New(accounts []*AccountDeps, version string, configuredDefault ...string) *Server {
+	sc := core.TopLevelServerConfig{}
+	if len(configuredDefault) > 0 {
+		sc.DefaultAccount = configuredDefault[0]
+	}
+	return NewWithServerConfig(accounts, version, sc)
+}
+
+func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLevelServerConfig) *Server {
 	if len(accounts) == 0 {
 		panic("server.New: accounts slice must be non-empty")
 	}
 
-	// Identify the default account: explicit DefaultAccountID match wins; the
-	// first entry is the fallback so a single-account install with a non-
-	// "default" ID still boots.
-	defaultDeps := accounts[0]
-	for _, td := range accounts {
-		if td.Account.ID == DefaultAccountID {
-			defaultDeps = td
-			break
-		}
-	}
+	defaultDeps := SelectDefaultAccountDeps(accounts, sc.DefaultAccount)
 	cfg := defaultDeps.Account.Config
 
 	// eventCh MUST exist before Fanout construction — ChannelFanout retains
@@ -93,7 +98,7 @@ func New(accounts []*AccountDeps, version string) *Server {
 	// (the parent of each account's BaseDir) so Share.read and future
 	// listing operations have a consistent anchor.
 	accountsRoot := filepath.Dir(defaultDeps.Account.BaseDir)
-	registry := core.NewAccountRegistry(accountsRoot, DefaultAccountID)
+	registry := core.NewAccountRegistry(accountsRoot, defaultDeps.Account.ID)
 	accountList := make([]*core.Account, 0, len(accounts))
 	for _, td := range accounts {
 		registry.Register(td.Account)
@@ -122,12 +127,194 @@ func New(accounts []*AccountDeps, version string) *Server {
 		accountRegistry: registry,
 		eventCh:         eventCh,
 		accountDeps:     depsByID,
+		localAuth:       newLocalAuthStore(),
+		webSessionKey:   newWebSessionKey(),
+		masterAPIKey:    sc.MasterAPIKey,
 		version:         version,
 		pkgManager:      defaultDeps.PkgMgr,
 		liveIndexer:     defaultDeps.LiveIndexer,
 	}
 	s.router = s.setupRoutes()
 	return s
+}
+
+func SelectDefaultAccountDeps(accounts []*AccountDeps, configuredDefault string) *AccountDeps {
+	if len(accounts) == 0 {
+		return nil
+	}
+	if configuredDefault != "" {
+		for _, td := range accounts {
+			if td.Account.ID == configuredDefault {
+				return td
+			}
+		}
+	}
+	for _, td := range accounts {
+		if td.Account.ID == DefaultAccountID {
+			return td
+		}
+	}
+	return accounts[0]
+}
+
+func (s *Server) defaultAccountID() string {
+	if s.accountRegistry != nil {
+		if id := s.accountRegistry.DefaultID(); id != "" {
+			return id
+		}
+	}
+	if s.session != nil && s.session.AccountID != "" {
+		return s.session.AccountID
+	}
+	for _, account := range s.accountList {
+		if account != nil && account.ID == DefaultAccountID {
+			return DefaultAccountID
+		}
+	}
+	if len(s.accountList) == 1 && s.accountList[0] != nil {
+		return s.accountList[0].ID
+	}
+	return DefaultAccountID
+}
+
+func (s *Server) effectiveAPIKey() string {
+	if s.masterAPIKey != "" {
+		return s.masterAPIKey
+	}
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.config.Server.APIKey
+}
+
+type requestAccount struct {
+	ID      string
+	Deps    *AccountDeps
+	Session *engine.Session
+}
+
+func (s *Server) requestAccount(r *http.Request) (*requestAccount, error) {
+	if accountID, ok := s.webSessionAccountID(r); ok {
+		return s.requestAccountByID(accountID)
+	}
+
+	token := requestAuthToken(r)
+	if token != "" {
+		if accountID, ok := s.webSessionTokenAccountID(token); ok {
+			return s.requestAccountByID(accountID)
+		}
+		if acct, ok, err := s.requestAccountByAPIKey(token); err != nil || ok {
+			return acct, err
+		}
+	}
+
+	authRequired, err := s.localAuthRequired()
+	if err != nil {
+		return nil, fmt.Errorf("read local auth store: %w", err)
+	}
+	deps := s.activeAccountDeps()
+	if !authRequired && s.effectiveAPIKey() == "" && len(deps) == 1 {
+		return s.requestAccountFromDeps(deps[0])
+	}
+	return nil, fmt.Errorf("unauthorized")
+}
+
+func requestAuthToken(r *http.Request) string {
+	if token := r.URL.Query().Get("token"); token != "" {
+		return token
+	}
+	if key := r.Header.Get("x-api-key"); key != "" {
+		return key
+	}
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	return ""
+}
+
+func (s *Server) requestAccountByID(accountID string) (*requestAccount, error) {
+	return s.requestAccountFromDeps(s.accountDepsForID(accountID))
+}
+
+func (s *Server) requestAccountByAPIKey(token string) (*requestAccount, bool, error) {
+	activeDeps := s.activeAccountDeps()
+	var match *AccountDeps
+	for _, deps := range activeDeps {
+		if deps == nil || deps.Account == nil || deps.Account.Config == nil {
+			continue
+		}
+		apiKey := deps.Account.Config.Server.APIKey
+		if fixedLenEqual(token, apiKey) {
+			if match != nil {
+				return nil, true, fmt.Errorf("ambiguous account api key")
+			}
+			match = deps
+		}
+	}
+	if match == nil {
+		if len(activeDeps) == 1 {
+			if apiKey := s.effectiveAPIKey(); fixedLenEqual(token, apiKey) {
+				acct, err := s.requestAccountFromDeps(activeDeps[0])
+				return acct, true, err
+			}
+		}
+		return nil, false, nil
+	}
+	acct, err := s.requestAccountFromDeps(match)
+	return acct, true, err
+}
+
+func (s *Server) requestAccountFromDeps(deps *AccountDeps) (*requestAccount, error) {
+	if deps == nil || deps.Account == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	sess := s.accounts.Session(deps.Account.ID)
+	if sess == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return &requestAccount{
+		ID:      deps.Account.ID,
+		Deps:    deps,
+		Session: sess,
+	}, nil
+}
+
+func (s *Server) accountDepsForID(accountID string) *AccountDeps {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	if s.accountDeps == nil {
+		return nil
+	}
+	return s.accountDeps[accountID]
+}
+
+func (s *Server) activeAccountDeps() []*AccountDeps {
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+	deps := make([]*AccountDeps, 0, len(s.accountDeps))
+	for _, td := range s.accountDeps {
+		if td != nil {
+			deps = append(deps, td)
+		}
+	}
+	return deps
+}
+
+func (s *Server) allowedOriginsForAccount(acct *requestAccount) []string {
+	var origins []string
+	if acct != nil && acct.ID == s.defaultAccountID() {
+		s.configMu.RLock()
+		origins = append([]string(nil), s.config.Server.AllowedOrigins...)
+		s.configMu.RUnlock()
+		return origins
+	}
+	if acct != nil && acct.Session != nil && acct.Session.Config != nil {
+		return append([]string(nil), acct.Session.Config.Server.AllowedOrigins...)
+	}
+	if acct != nil && acct.Deps != nil && acct.Deps.Account != nil && acct.Deps.Account.Config != nil {
+		return append([]string(nil), acct.Deps.Account.Config.Server.AllowedOrigins...)
+	}
+	return nil
 }
 
 // setupRoutes builds the full route tree. API routes live under /api/v1 and
@@ -144,11 +331,22 @@ func (s *Server) setupRoutes() chi.Router {
 	// Health check (unauthenticated — daemon liveness probe).
 	r.Get("/health", s.handleHealth)
 
-	// Bootstrap (unauthenticated — returns api_key + ws_url to the GUI).
-	r.Get("/api/bootstrap", s.handleBootstrap)
+	r.Route("/api/auth", func(r chi.Router) {
+		r.Post("/login", s.handleAuthLogin)
+		r.Post("/logout", s.handleAuthLogout)
+		r.Get("/me", s.handleAuthMe)
+	})
 
-	// Setup / onboarding routes (unauthenticated).
+	// Bootstrap is open only before local Web UI users exist; once setup has
+	// created auth.json it requires a browser session before returning api_key.
+	r.With(s.requireWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
+
+	// Setup / onboarding routes are open for first-run setup only. Existing
+	// installs require the local Web UI session because localhost checks are
+	// not enough when the daemon is reached through a tunnel.
 	r.Route("/api/setup", func(r chi.Router) {
+		r.Use(s.requireWebSessionIfAuthUsers)
+
 		// Always accessible.
 		r.Get("/status", s.handleSetupStatus)
 		r.Get("/kakao/pair-status", s.handleSetupKakaoPairStatus)
@@ -156,9 +354,10 @@ func (s *Server) setupRoutes() chi.Router {
 		// Localhost only.
 		r.Post("/reset", s.handleSetupReset)
 
-		// Guarded — localhost only, blocked after onboarding is complete.
+		// Guarded — localhost during first-run, otherwise authenticated by
+		// the local Web UI session for the account being configured.
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireLocalhost)
+			r.Use(s.requireSetupMutationAccess)
 			r.Use(s.requireOnboardingIncomplete)
 			r.Post("/llm", s.handleSetupLlm)
 			r.Post("/telegram", s.handleSetupTelegram)
@@ -172,9 +371,7 @@ func (s *Server) setupRoutes() chi.Router {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		if s.config.Server.APIKey != "" {
-			r.Use(s.requireAPIKey)
-		}
+		r.Use(s.requireAPIKey)
 
 		// Status / history
 		r.Get("/status", s.handleStatus)

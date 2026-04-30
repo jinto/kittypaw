@@ -13,6 +13,7 @@ import (
 
 	"github.com/jinto/kittypaw/channel"
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/store"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,9 +26,11 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.configMu.RLock()
-	apiKey := s.config.Server.APIKey
-	s.configMu.RUnlock()
+	apiKey, ok := s.browserAPIToken(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	scheme := "ws"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -41,16 +44,59 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type setupAccountContext struct {
+	ID     string
+	Config *core.Config
+	Store  *store.Store
+}
+
+func (s *Server) setupAccount(r *http.Request) (*setupAccountContext, error) {
+	required, err := s.localAuthRequired()
+	if err != nil {
+		return nil, err
+	}
+	if required {
+		acct, err := s.requestAccount(r)
+		if err != nil {
+			return nil, err
+		}
+		cfg := acct.Session.Config
+		if cfg == nil && acct.Deps != nil && acct.Deps.Account != nil {
+			cfg = acct.Deps.Account.Config
+		}
+		if acct.Deps == nil || acct.Deps.Store == nil || cfg == nil {
+			return nil, fmt.Errorf("account setup dependencies unavailable")
+		}
+		if cfgPath, err := core.ConfigPathForAccount(acct.ID); err == nil {
+			if loaded, loadErr := core.LoadConfig(cfgPath); loadErr == nil {
+				cfg = loaded
+			}
+		}
+		return &setupAccountContext{ID: acct.ID, Config: cfg, Store: acct.Deps.Store}, nil
+	}
+
+	s.configMu.RLock()
+	cfgCopy := *s.config
+	s.configMu.RUnlock()
+	return &setupAccountContext{
+		ID:     s.defaultAccountID(),
+		Config: &cfgCopy,
+		Store:  s.store,
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/setup/status
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
-	completed := s.isOnboardingCompleted()
-
-	s.configMu.RLock()
-	cfg := s.config
-	s.configMu.RUnlock()
+func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	completed := s.isOnboardingCompletedFor(acct.Store, acct.Config)
+	cfg := acct.Config
 
 	// Determine existing LLM provider from live config.
 	var existingProvider *string
@@ -79,12 +125,12 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
 
 	// Also check pending setup state (wizard in progress).
 	if !hasTelegram {
-		if v, ok, _ := s.store.GetUserContext("setup:telegram_bot_token"); ok && v != "" {
+		if v, ok, _ := acct.Store.GetUserContext("setup:telegram_bot_token"); ok && v != "" {
 			hasTelegram = true
 		}
 	}
 	if hasTelegram {
-		if v, ok, _ := s.store.GetUserContext("setup:telegram_chat_id"); ok && v != "" {
+		if v, ok, _ := acct.Store.GetUserContext("setup:telegram_chat_id"); ok && v != "" {
 			masked := maskValue(v)
 			telegramChatID = &masked
 		}
@@ -105,6 +151,11 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, _ *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var body struct {
 		Provider   string `json:"provider"`
 		APIKey     string `json:"api_key"`
@@ -143,10 +194,10 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 		apiKey = ""
 	}
 
-	_ = s.store.SetUserContext("setup:llm_provider", provider, "setup")
-	_ = s.store.SetUserContext("setup:llm_api_key", apiKey, "setup")
-	_ = s.store.SetUserContext("setup:llm_model", model, "setup")
-	_ = s.store.SetUserContext("setup:llm_base_url", baseURL, "setup")
+	_ = acct.Store.SetUserContext("setup:llm_provider", provider, "setup")
+	_ = acct.Store.SetUserContext("setup:llm_api_key", apiKey, "setup")
+	_ = acct.Store.SetUserContext("setup:llm_model", model, "setup")
+	_ = acct.Store.SetUserContext("setup:llm_base_url", baseURL, "setup")
 
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "provider": body.Provider})
 }
@@ -156,6 +207,11 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var body struct {
 		BotToken string `json:"bot_token"`
 		ChatID   string `json:"chat_id"`
@@ -172,17 +228,37 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = s.store.SetUserContext("setup:telegram_bot_token", body.BotToken, "setup")
-	_ = s.store.SetUserContext("setup:telegram_chat_id", body.ChatID, "setup")
+	wizard := wizardResultFromStore(acct.Store)
+	wizard.TelegramBotToken = body.BotToken
+	wizard.TelegramChatID = body.ChatID
+	proposed := core.MergeWizardSettings(acct.Config, wizard)
+	if err := s.validateAccountConfigUpdateWithKakaoAPIURL(acct.ID, proposed, wizard.APIServerURL); err != nil {
+		slog.Error("setup: telegram rejected", "account", acct.ID, "error", err)
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	// Immediately spawn the Telegram channel so the user gets instant
-	// feedback during onboarding — no reload required (AC3).
-	if s.spawner != nil {
+	// feedback during unauthenticated local onboarding — no reload required
+	// (AC3). Authenticated multi-account setup defers spawning until
+	// /complete, where validation, live config update, and reconcile are
+	// serialized with AddAccount/Reload.
+	authRequired, authErr := s.localAuthRequired()
+	if authErr != nil {
+		writeError(w, http.StatusInternalServerError, "read local auth store")
+		return
+	}
+
+	_ = acct.Store.SetUserContext("setup:telegram_bot_token", body.BotToken, "setup")
+	_ = acct.Store.SetUserContext("setup:telegram_chat_id", body.ChatID, "setup")
+
+	if s.spawner != nil && !authRequired {
 		chCfg := core.ChannelConfig{ChannelType: core.ChannelTelegram, Token: body.BotToken}
-		ch, err := channel.FromConfig(DefaultAccountID, chCfg)
+		accountID := acct.ID
+		ch, err := channel.FromConfig(accountID, chCfg)
 		if err != nil {
 			slog.Warn("setup: telegram channel create failed", "error", err)
-		} else if err := s.spawner.TrySpawn(DefaultAccountID, ch, chCfg); err != nil {
+		} else if err := s.spawner.TrySpawn(accountID, ch, chCfg); err != nil {
 			slog.Warn("setup: telegram channel spawn failed", "error", err)
 		}
 	}
@@ -219,14 +295,20 @@ func (s *Server) handleSetupTelegramChatID(w http.ResponseWriter, r *http.Reques
 // POST /api/setup/kakao/register
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request) {
-	apiURL, _, _ := s.store.GetUserContext("setup:api_server_url")
+func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	apiURL, _, _ := acct.Store.GetUserContext("setup:api_server_url")
 	if apiURL == "" {
 		apiURL = core.DefaultAPIServerURL
 	}
 	apiURL = strings.TrimRight(apiURL, "/")
 
-	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+	accountID := acct.ID
+	secrets, err := core.LoadAccountSecrets(accountID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "load secrets: "+err.Error())
 		return
@@ -251,12 +333,12 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 		return
 	}
 
-	_ = s.store.SetUserContext("setup:kakao_relay_base", relayURL, "setup")
-	_ = s.store.SetUserContext("setup:kakao_relay_token", reg.Token, "setup")
+	_ = acct.Store.SetUserContext("setup:kakao_relay_base", relayURL, "setup")
+	_ = acct.Store.SetUserContext("setup:kakao_relay_token", reg.Token, "setup")
 	// Persist apiURL so generateConfig writes it to the bare "kittypaw-api"
 	// namespace that InjectKakaoWSURL reads at serve time — without this,
 	// users who only complete the Kakao step end up with an unroutable channel.
-	_ = s.store.SetUserContext("setup:api_server_url", apiURL, "setup")
+	_ = acct.Store.SetUserContext("setup:api_server_url", apiURL, "setup")
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"pair_code":   reg.PairCode,
@@ -268,21 +350,23 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, _ *http.Request
 // GET /api/setup/kakao/pair-status
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleSetupKakaoPairStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleSetupKakaoPairStatus(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	// Already configured: no further pairing needed.
-	s.configMu.RLock()
-	for _, ch := range s.config.Channels {
+	for _, ch := range acct.Config.Channels {
 		if ch.ChannelType == core.ChannelKakaoTalk {
-			s.configMu.RUnlock()
 			writeJSON(w, http.StatusOK, map[string]any{"paired": true})
 			return
 		}
 	}
-	s.configMu.RUnlock()
 
 	// Wizard in progress: ask the relay whether the user has completed pairing.
-	relayBase, _, _ := s.store.GetUserContext("setup:kakao_relay_base")
-	token, _, _ := s.store.GetUserContext("setup:kakao_relay_token")
+	relayBase, _, _ := acct.Store.GetUserContext("setup:kakao_relay_base")
+	token, _, _ := acct.Store.GetUserContext("setup:kakao_relay_token")
 	if relayBase == "" || token == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"paired": false})
 		return
@@ -298,6 +382,11 @@ func (s *Server) handleSetupKakaoPairStatus(w http.ResponseWriter, _ *http.Reque
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupAPIServer(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var body struct {
 		URL string `json:"url"`
 	}
@@ -310,7 +399,7 @@ func (s *Server) handleSetupAPIServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = s.store.SetUserContext("setup:api_server_url", body.URL, "setup")
+	_ = acct.Store.SetUserContext("setup:api_server_url", body.URL, "setup")
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "url": body.URL})
 }
 
@@ -319,6 +408,11 @@ func (s *Server) handleSetupAPIServer(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupWorkspace(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var body struct {
 		Path string `json:"path"`
 	}
@@ -341,7 +435,7 @@ func (s *Server) handleSetupWorkspace(w http.ResponseWriter, r *http.Request) {
 		canonical = body.Path
 	}
 
-	_ = s.store.SetUserContext("setup:workspace_path", canonical, "setup")
+	_ = acct.Store.SetUserContext("setup:workspace_path", canonical, "setup")
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "path": canonical})
 }
 
@@ -349,8 +443,13 @@ func (s *Server) handleSetupWorkspace(w http.ResponseWriter, r *http.Request) {
 // POST /api/setup/http-access
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleSetupHttpAccess(w http.ResponseWriter, _ *http.Request) {
-	if err := s.store.GrantCapability("http"); err != nil {
+func (s *Server) handleSetupHttpAccess(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := acct.Store.GrantCapability("http"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -361,36 +460,59 @@ func (s *Server) handleSetupHttpAccess(w http.ResponseWriter, _ *http.Request) {
 // POST /api/setup/complete
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleSetupComplete(w http.ResponseWriter, _ *http.Request) {
-	if s.isOnboardingCompleted() {
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if s.isOnboardingCompletedFor(acct.Store, acct.Config) {
 		writeError(w, http.StatusConflict, "already completed")
 		return
 	}
 
-	if err := s.generateConfig(); err != nil {
-		slog.Error("setup: generate config failed", "error", err)
+	cfg, cfgPath, wizard, err := s.mergedSetupConfigFor(acct.ID, acct.Store)
+	if err != nil {
+		slog.Error("setup: merge config failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to generate config: "+err.Error())
 		return
 	}
 
-	_ = s.store.SetUserContext("onboarding_completed", "true", "system")
+	accountID := acct.ID
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
 
-	// Hot-reload the config into the running server.
-	cfgPath, _ := core.ConfigPath()
-	if cfg, err := core.LoadConfig(cfgPath); err == nil {
-		s.configMu.Lock()
-		*s.config = *cfg
-		s.configMu.Unlock()
-		slog.Info("setup: config reloaded after onboarding")
+	if err := s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, cfg, wizard.APIServerURL); err != nil {
+		slog.Error("setup: complete rejected", "account", accountID, "error", err)
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 
-		// Reconcile channels with the generated config. TrySpawn is idempotent,
-		// so channels already started by handleSetupTelegram are safely skipped.
-		if s.spawner != nil {
-			if rErr := s.spawner.Reconcile(DefaultAccountID, cfg.Channels); rErr != nil {
-				slog.Warn("setup: channel reconcile partial failure", "error", rErr)
-			}
+	if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
+		slog.Error("setup: write config failed", "account", accountID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to write config: "+err.Error())
+		return
+	}
+	if wizard.APIServerURL != "" {
+		s.saveSetupAPIServerURL(accountID, wizard.APIServerURL)
+	}
+
+	if err := s.applyAccountConfigLocked(accountID, cfg); err != nil {
+		slog.Error("setup: config apply failed", "account", accountID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to apply config: "+err.Error())
+		return
+	}
+	slog.Info("setup: config reloaded after onboarding", "account", accountID)
+
+	// Reconcile channels with the generated config. Reconcile is held under
+	// accountMu, matching handleReload/AddAccount's validate→swap→reconcile
+	// serialization contract.
+	if s.spawner != nil {
+		if rErr := s.spawner.Reconcile(accountID, cfg.Channels); rErr != nil {
+			slog.Warn("setup: channel reconcile partial failure", "error", rErr)
 		}
 	}
+	_ = acct.Store.SetUserContext("onboarding_completed", "true", "system")
 
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
@@ -409,7 +531,12 @@ func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = s.store.SetUserContext("onboarding_completed", "false", "system")
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	_ = acct.Store.SetUserContext("onboarding_completed", "false", "system")
 	writeJSON(w, http.StatusOK, map[string]any{"reset": true})
 }
 
@@ -418,24 +545,53 @@ func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) isOnboardingCompleted() bool {
-	v, ok, _ := s.store.GetUserContext("onboarding_completed")
+	return s.isOnboardingCompletedFor(s.store, s.getConfig())
+}
+
+func (s *Server) isOnboardingCompletedFor(st *store.Store, cfg *core.Config) bool {
+	v, ok, _ := st.GetUserContext("onboarding_completed")
 	if ok && v == "true" {
 		return true
 	}
 	// CLI `kittypaw setup` writes config.toml but doesn't set the DB flag.
 	// Treat a configured LLM as onboarding complete.
-	s.configMu.RLock()
-	configured := s.config.LLM.APIKey != "" || s.config.LLM.BaseURL != ""
-	s.configMu.RUnlock()
-	return configured
+	return cfg != nil && (cfg.LLM.APIKey != "" || cfg.LLM.BaseURL != "")
 }
 
 // requireOnboardingIncomplete blocks mutating setup endpoints after
 // onboarding is complete.
 func (s *Server) requireOnboardingIncomplete(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.isOnboardingCompleted() {
+		acct, err := s.setupAccount(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if s.isOnboardingCompletedFor(acct.Store, acct.Config) {
 			writeError(w, http.StatusForbidden, "setup already completed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) requireSetupMutationAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		required, err := s.localAuthRequired()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "read local auth store")
+			return
+		}
+		if required {
+			if _, ok := s.webSessionAccountID(r); !ok {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !isLocalhost(r) {
+			writeError(w, http.StatusForbidden, "access restricted to localhost")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -478,35 +634,39 @@ func maskValue(v string) string {
 
 // wizardResultFromStore reads setup:* keys from the store into a WizardResult.
 func (s *Server) wizardResultFromStore() core.WizardResult {
+	return wizardResultFromStore(s.store)
+}
+
+func wizardResultFromStore(st *store.Store) core.WizardResult {
 	var w core.WizardResult
-	if v, ok, _ := s.store.GetUserContext("setup:llm_provider"); ok {
+	if v, ok, _ := st.GetUserContext("setup:llm_provider"); ok {
 		w.LLMProvider = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_api_key"); ok {
+	if v, ok, _ := st.GetUserContext("setup:llm_api_key"); ok {
 		w.LLMAPIKey = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_model"); ok {
+	if v, ok, _ := st.GetUserContext("setup:llm_model"); ok {
 		w.LLMModel = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:llm_base_url"); ok {
+	if v, ok, _ := st.GetUserContext("setup:llm_base_url"); ok {
 		w.LLMBaseURL = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:telegram_bot_token"); ok {
+	if v, ok, _ := st.GetUserContext("setup:telegram_bot_token"); ok {
 		w.TelegramBotToken = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:telegram_chat_id"); ok {
+	if v, ok, _ := st.GetUserContext("setup:telegram_chat_id"); ok {
 		w.TelegramChatID = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:workspace_path"); ok {
+	if v, ok, _ := st.GetUserContext("setup:workspace_path"); ok {
 		w.WorkspacePath = v
 	}
-	if v, ok, _ := s.store.GetUserContext("setup:api_server_url"); ok {
+	if v, ok, _ := st.GetUserContext("setup:api_server_url"); ok {
 		w.APIServerURL = v
 	}
 	// Kakao has no toggle field in the web wizard: a successful /setup/kakao/register
 	// leaves a relay token in the store. Treat that as the "enabled" signal so
 	// MergeWizardSettings includes the channel in the final config.
-	if v, ok, _ := s.store.GetUserContext("setup:kakao_relay_token"); ok && v != "" {
+	if v, ok, _ := st.GetUserContext("setup:kakao_relay_token"); ok && v != "" {
 		w.KakaoEnabled = true
 	}
 	return w
@@ -514,34 +674,52 @@ func (s *Server) wizardResultFromStore() core.WizardResult {
 
 // generateConfig merges wizard settings into the existing config.toml.
 func (s *Server) generateConfig() error {
-	cfgPath, err := core.ConfigPath()
+	return s.generateConfigFor(s.defaultAccountID(), s.store)
+}
+
+func (s *Server) generateConfigFor(accountID string, st *store.Store) error {
+	merged, cfgPath, wizard, err := s.mergedSetupConfigFor(accountID, st)
 	if err != nil {
 		return err
+	}
+
+	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
+		return err
+	}
+	if wizard.APIServerURL != "" {
+		s.saveSetupAPIServerURL(accountID, wizard.APIServerURL)
+	}
+
+	return nil
+}
+
+func (s *Server) mergedSetupConfigFor(accountID string, st *store.Store) (*core.Config, string, core.WizardResult, error) {
+	cfgPath, err := core.ConfigPathForAccount(accountID)
+	if err != nil {
+		return nil, "", core.WizardResult{}, err
 	}
 
 	cfg := core.DefaultConfig()
 	if data, readErr := os.ReadFile(cfgPath); readErr == nil {
 		if err := toml.Unmarshal(data, &cfg); err != nil {
-			return fmt.Errorf("existing config.toml has syntax errors: %w", err)
+			return nil, "", core.WizardResult{}, fmt.Errorf("existing config.toml has syntax errors: %w", err)
 		}
 	}
 
-	w := s.wizardResultFromStore()
+	w := wizardResultFromStore(st)
 	merged := core.MergeWizardSettings(&cfg, w)
-	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
-		return err
-	}
+	return merged, cfgPath, w, nil
+}
 
+func (s *Server) saveSetupAPIServerURL(accountID, apiServerURL string) {
 	// Save API server URL to secrets for package source bindings.
 	// Open the per-account store fresh on every call: a long-lived
 	// reference would carry stale in-memory state between web setup
 	// steps (e.g. /kakao/register followed by /complete) and the
 	// second Set's persist would overwrite the first step's writes.
-	if w.APIServerURL != "" {
-		if secrets, err := core.LoadAccountSecrets(core.DefaultAccountID); err == nil {
-			_ = secrets.Set("kittypaw-api", "api_url", w.APIServerURL)
+	if apiServerURL != "" {
+		if secrets, err := core.LoadAccountSecrets(accountID); err == nil {
+			_ = secrets.Set("kittypaw-api", "api_url", apiServerURL)
 		}
 	}
-
-	return nil
 }

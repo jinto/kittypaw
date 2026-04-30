@@ -261,3 +261,54 @@ func TestHandleReload_ValidConfig_SwapsAndReconciles(t *testing.T) {
 		t.Errorf("Reconcile called %d times, want 1", n)
 	}
 }
+
+func TestHandleReload_SingleNonDefaultAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	newCfg := core.DefaultConfig()
+	newCfg.LLM.Provider = "anthropic"
+	newCfg.LLM.APIKey = "new-key"
+	newCfg.LLM.Model = "claude-test"
+	accountDir := filepath.Join(root, "accounts", "alice")
+	if err := os.MkdirAll(accountDir, 0o755); err != nil {
+		t.Fatalf("mkdir account dir: %v", err)
+	}
+	if err := core.WriteConfigAtomic(&newCfg, filepath.Join(accountDir, "config.toml")); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	liveCfg := core.DefaultConfig()
+	liveCfg.LLM.APIKey = "old-key"
+	var gotReconcileAccount string
+	srv := &Server{
+		config:          &liveCfg,
+		accountRegistry: core.NewAccountRegistry(filepath.Join(root, "accounts"), "alice"),
+		accountList: []*core.Account{
+			{ID: "alice", BaseDir: accountDir, Config: &liveCfg},
+		},
+		reloadReconcile: func(accountID string, _ []core.ChannelConfig) error {
+			gotReconcileAccount = accountID
+			return nil
+		},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleReload))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %q, want 200", resp.StatusCode, body)
+	}
+	if srv.config.LLM.APIKey != "new-key" {
+		t.Fatalf("config not swapped: LLM.APIKey=%q, want new-key", srv.config.LLM.APIKey)
+	}
+	if gotReconcileAccount != "alice" {
+		t.Fatalf("reconcile account = %q, want alice", gotReconcileAccount)
+	}
+}

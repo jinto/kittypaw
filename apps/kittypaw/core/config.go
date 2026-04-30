@@ -41,9 +41,7 @@ type TopLevelServerConfig struct {
 
 // LoadServerConfig reads server.toml from the given path.
 func LoadServerConfig(path string) (*TopLevelServerConfig, error) {
-	sc := &TopLevelServerConfig{
-		DefaultAccount: "default",
-	}
+	sc := &TopLevelServerConfig{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -446,19 +444,22 @@ func ResolveBaseDir(baseDir string) (string, error) {
 	return ConfigDir()
 }
 
-// ConfigPath returns the default account's config file path
-// (~/.kittypaw/accounts/<DefaultAccountID>/config.toml). All CLI commands
-// that need to read or write the active config (config check, registry
-// resolution, etc.) target this location so daemon-side DiscoverAccounts
-// and the CLI see the same file. The legacy global path
-// (~/.kittypaw/config.toml) is only consulted by MigrateLegacyLayout for
-// upgrade paths and is otherwise unused.
-func ConfigPath() (string, error) {
+// ConfigPathForAccount returns the config file path for accountID.
+func ConfigPathForAccount(accountID string) (string, error) {
+	if err := ValidateAccountID(accountID); err != nil {
+		return "", err
+	}
 	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "accounts", DefaultAccountID, "config.toml"), nil
+	return filepath.Join(dir, "accounts", accountID, "config.toml"), nil
+}
+
+// ConfigPath returns the legacy default account's config file path.
+// New multi-user setup paths should call ConfigPathForAccount.
+func ConfigPath() (string, error) {
+	return ConfigPathForAccount(DefaultAccountID)
 }
 
 // FindAgent returns the agent config matching the given ID, or nil.

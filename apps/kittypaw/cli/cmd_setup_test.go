@@ -1,12 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mattn/go-runewidth"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // AC-BOX: setup completion box's right `│` border must land at the same column
@@ -248,4 +256,386 @@ func TestAutoChatEligible_ProviderFlagSkipsPrompt(t *testing.T) {
 	if autoChatEligible(f, true, true) {
 		t.Fatal("non-interactive (--provider set) must not trigger auto-entry")
 	}
+}
+
+func TestNewSetupCmd_RegistersAccountCredentialFlags(t *testing.T) {
+	cmd := newSetupCmd()
+	if f := cmd.Flags().Lookup("account"); f == nil {
+		t.Fatal("--account flag not registered on `kittypaw setup`")
+	}
+	if f := cmd.Flags().Lookup("password-stdin"); f == nil {
+		t.Fatal("--password-stdin flag not registered on `kittypaw setup`")
+	}
+}
+
+func TestSetupWritesNamedAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+
+	cmd := newSetupCmd()
+	cmd.SetIn(strings.NewReader("secret-password\n"))
+	flags := setupTestFlags("alice")
+	flags.passwordStdin = true
+
+	if err := runSetup(cmd, &flags); err != nil {
+		t.Fatalf("runSetup: %v", err)
+	}
+
+	cfgPath := filepath.Join(root, "accounts", "alice", "config.toml")
+	cfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load named account config: %v", err)
+	}
+	if cfg.LLM.Provider != "openai" || cfg.LLM.Model != "llama3" || cfg.LLM.BaseURL != "http://localhost:11434/v1/chat/completions" {
+		t.Fatalf("LLM config = provider=%q model=%q base=%q", cfg.LLM.Provider, cfg.LLM.Model, cfg.LLM.BaseURL)
+	}
+
+	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if ok, err := auth.VerifyPassword("alice", "secret-password"); err != nil || !ok {
+		t.Fatalf("VerifyPassword alice = (%v, %v), want true nil", ok, err)
+	}
+	mustExist(t, filepath.Join(root, "accounts", "alice", "profiles", "default", "SOUL.md"))
+	mustExist(t, filepath.Join(root, "accounts", "alice", "data", "kittypaw.db"))
+	mustNotExist(t, filepath.Join(root, "data"))
+	mustNotExist(t, filepath.Join(root, "skills"))
+	mustNotExist(t, filepath.Join(root, "accounts", "default"))
+}
+
+func TestRunWizardUsesNamedAccountSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	secrets, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatalf("LoadAccountSecrets alice: %v", err)
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+	if err := mgr.SaveTokens(core.DefaultAPIServerURL, makeSetupTestJWT(t), "refresh"); err != nil {
+		t.Fatalf("SaveTokens: %v", err)
+	}
+
+	var w core.WizardResult
+	wizardAPIServer(bufio.NewScanner(strings.NewReader("")), "alice", &w)
+
+	if w.APIServerURL != core.DefaultAPIServerURL {
+		t.Fatalf("APIServerURL = %q, want %q", w.APIServerURL, core.DefaultAPIServerURL)
+	}
+	mustNotExist(t, filepath.Join(root, "accounts", "default", "secrets.json"))
+}
+
+func TestRunSetupPassesResolvedAccountToWizard(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if err := auth.CreateUser("alice", "existing-password"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	original := setupWizardRunner
+	t.Cleanup(func() { setupWizardRunner = original })
+	called := false
+	setupWizardRunner = func(flags setupFlags, existing *core.Config) (core.WizardResult, error) {
+		called = true
+		if flags.accountID != "alice" {
+			t.Fatalf("wizard accountID = %q, want alice", flags.accountID)
+		}
+		if flags.validate == nil {
+			t.Fatal("wizard validate hook is nil")
+		}
+		result := core.WizardResult{LLMProvider: "openai", LLMModel: "stub-model"}
+		if err := flags.validate(result); err != nil {
+			t.Fatalf("validate hook: %v", err)
+		}
+		return result, nil
+	}
+
+	cmd := newSetupCmd()
+	flags := setupFlags{noChat: true, noService: true}
+	if err := runSetup(cmd, &flags); err != nil {
+		t.Fatalf("runSetup: %v", err)
+	}
+	if !called {
+		t.Fatal("setup wizard was not called")
+	}
+}
+
+func TestSetupMultipleAccountsRequiresExplicitBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
+
+	cmd := newSetupCmd()
+	cmd.SetIn(strings.NewReader("secret-password\n"))
+	flags := setupTestFlags("")
+	flags.passwordStdin = true
+
+	err := runSetup(cmd, &flags)
+	if err == nil {
+		t.Fatal("expected multiple account error")
+	}
+	for _, want := range []string{"alice", "bob", "--account", "KITTYPAW_ACCOUNT"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+	mustNotExist(t, filepath.Join(root, "auth.json"))
+}
+
+func TestSetupRejectsDuplicateTelegramBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	token := "123456:ABCDefghijklmnopqrstuvwxyz012345"
+	mustWriteTestConfigWithChannels(t, filepath.Join(root, "accounts", "bob", "config.toml"), []core.ChannelConfig{
+		{ChannelType: core.ChannelTelegram, Token: token},
+	})
+
+	cmd := newSetupCmd()
+	cmd.SetIn(strings.NewReader("secret-password\n"))
+	flags := setupTestFlags("alice")
+	flags.passwordStdin = true
+	flags.telegramToken = token
+	flags.telegramChatID = "100"
+
+	err := runSetup(cmd, &flags)
+	if err == nil || !strings.Contains(err.Error(), "channel validation") {
+		t.Fatalf("runSetup error = %v, want channel validation", err)
+	}
+	mustNotExist(t, filepath.Join(root, "accounts", "alice"))
+	mustNotExist(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	mustNotExist(t, filepath.Join(root, "auth.json"))
+}
+
+func TestSetupRejectsFamilyAccountWithChannelBeforeWriting(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	cfgPath := filepath.Join(root, "accounts", "family", "config.toml")
+	mustWriteTestConfigWith(t, cfgPath, func(cfg *core.Config) {
+		cfg.IsFamily = true
+	})
+	token := "123456:ABCDefghijklmnopqrstuvwxyz012345"
+
+	cmd := newSetupCmd()
+	cmd.SetIn(strings.NewReader("secret-password\n"))
+	flags := setupTestFlags("family")
+	flags.passwordStdin = true
+	flags.telegramToken = token
+	flags.telegramChatID = "100"
+
+	err := runSetup(cmd, &flags)
+	if err == nil || !strings.Contains(err.Error(), "family validation") {
+		t.Fatalf("runSetup error = %v, want family validation", err)
+	}
+	mustNotExist(t, filepath.Join(root, "auth.json"))
+
+	cfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load family config: %v", err)
+	}
+	if len(cfg.Channels) != 0 {
+		t.Fatalf("family config channels = %v, want unchanged empty", cfg.Channels)
+	}
+}
+
+func TestWizardKakaoValidatesBeforeWritingSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	validateErr := errors.New("reject kakao")
+	called := false
+	var w core.WizardResult
+
+	err := wizardKakao(bufio.NewScanner(strings.NewReader("y\n")), "alice", nil, &w, func(candidate core.WizardResult) error {
+		called = true
+		if !candidate.KakaoEnabled {
+			t.Fatal("candidate did not enable Kakao")
+		}
+		if candidate.APIServerURL != core.DefaultAPIServerURL {
+			t.Fatalf("candidate APIServerURL = %q", candidate.APIServerURL)
+		}
+		return validateErr
+	})
+	if !errors.Is(err, validateErr) {
+		t.Fatalf("wizardKakao error = %v, want %v", err, validateErr)
+	}
+	if !called {
+		t.Fatal("validator was not called")
+	}
+	mustNotExist(t, filepath.Join(root, "accounts", "alice", "secrets.json"))
+}
+
+func TestSetupEnvAccountMustExist(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "alice")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
+
+	cmd := newSetupCmd()
+	cmd.SetIn(strings.NewReader("secret-password\n"))
+	flags := setupTestFlags("")
+	flags.passwordStdin = true
+
+	err := runSetup(cmd, &flags)
+	if err == nil || !strings.Contains(err.Error(), "KITTYPAW_ACCOUNT") {
+		t.Fatalf("runSetup error = %v, want KITTYPAW_ACCOUNT not found", err)
+	}
+	mustNotExist(t, filepath.Join(root, "accounts", "alice"))
+}
+
+func TestSetupExistingAccountWithAuthDoesNotRequirePasswordStdin(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	if err := auth.CreateUser("alice", "existing-password"); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	cmd := newSetupCmd()
+	flags := setupTestFlags("alice")
+
+	if err := runSetup(cmd, &flags); err != nil {
+		t.Fatalf("runSetup with existing auth: %v", err)
+	}
+	if ok, err := auth.VerifyPassword("alice", "existing-password"); err != nil || !ok {
+		t.Fatalf("VerifyPassword existing = (%v, %v), want true nil", ok, err)
+	}
+}
+
+func TestSetupFirstRunRequiresAccountAndPasswordStdin(t *testing.T) {
+	t.Run("account", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("KITTYPAW_CONFIG_DIR", root)
+		t.Setenv("KITTYPAW_ACCOUNT", "")
+
+		cmd := newSetupCmd()
+		cmd.SetIn(strings.NewReader("secret-password\n"))
+		flags := setupTestFlags("")
+		flags.passwordStdin = true
+
+		err := runSetup(cmd, &flags)
+		if err == nil || !strings.Contains(err.Error(), "--account is required") {
+			t.Fatalf("runSetup error = %v, want --account is required", err)
+		}
+		mustNotExist(t, filepath.Join(root, "accounts"))
+	})
+
+	t.Run("password stdin", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("KITTYPAW_CONFIG_DIR", root)
+		t.Setenv("KITTYPAW_ACCOUNT", "")
+
+		cmd := newSetupCmd()
+		flags := setupTestFlags("alice")
+
+		err := runSetup(cmd, &flags)
+		if err == nil || !strings.Contains(err.Error(), "--password-stdin is required") {
+			t.Fatalf("runSetup error = %v, want --password-stdin is required", err)
+		}
+		mustNotExist(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	})
+}
+
+func TestResolveSetupPasswordPreservesStdinWhitespace(t *testing.T) {
+	got, err := resolveSetupPassword(setupFlags{passwordStdin: true}, strings.NewReader("  secret  \n"))
+	if err != nil {
+		t.Fatalf("resolveSetupPassword: %v", err)
+	}
+	if got != "  secret  " {
+		t.Fatalf("password = %q, want surrounding spaces preserved", got)
+	}
+}
+
+func TestConfigCheckUsesDiscoveredNamedAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	if err := runConfigCheck(nil, nil); err != nil {
+		t.Fatalf("runConfigCheck: %v", err)
+	}
+}
+
+func TestConfigCheckAcceptsAccountFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
+
+	cmd := newConfigCheckCmd()
+	if err := cmd.Flags().Set("account", "bob"); err != nil {
+		t.Fatalf("set account flag: %v", err)
+	}
+	if err := runConfigCheck(cmd, nil); err != nil {
+		t.Fatalf("runConfigCheck: %v", err)
+	}
+}
+
+func setupTestFlags(accountID string) setupFlags {
+	return setupFlags{
+		accountID:     accountID,
+		provider:      "local",
+		localURL:      "http://localhost:11434/v1",
+		localModel:    "llama3",
+		httpAccess:    true,
+		noChat:        true,
+		noService:     true,
+		passwordStdin: false,
+	}
+}
+
+func mustExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+}
+
+func mustNotExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to not exist, stat err = %v", path, err)
+	}
+}
+
+func mustWriteTestConfigWithChannels(t *testing.T, path string, channels []core.ChannelConfig) {
+	t.Helper()
+	mustWriteTestConfigWith(t, path, func(cfg *core.Config) {
+		cfg.Channels = channels
+	})
+}
+
+func mustWriteTestConfigWith(t *testing.T, path string, mutate func(*core.Config)) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	cfg := core.DefaultConfig()
+	mutate(&cfg)
+	if err := core.WriteConfigAtomic(&cfg, path); err != nil {
+		t.Fatalf("write config %s: %v", path, err)
+	}
+}
+
+func makeSetupTestJWT(t *testing.T) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256"}`))
+	claims, err := json.Marshal(map[string]any{
+		"uid": "setup-test",
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("marshal JWT claims: %v", err)
+	}
+	payload := base64.RawURLEncoding.EncodeToString(claims)
+	sig := base64.RawURLEncoding.EncodeToString([]byte("signature"))
+	return header + "." + payload + "." + sig
 }

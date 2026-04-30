@@ -4,11 +4,26 @@ const App = {
   root: null,
   apiKey: null,
   wsUrl: null,
+  authRequired: false,
+  accountID: null,
+  isDefault: true,
   activeTab: null,
   _dashboardInterval: null,
 
   async init() {
     this.root = document.getElementById('app');
+    const auth = await this.checkAuth();
+    this.authRequired = !!auth.auth_required;
+    this.accountID = auth.account_id || null;
+    this.isDefault = auth.is_default !== false;
+    if (auth.auth_required && !auth.authenticated) {
+      this.showLogin();
+      return;
+    }
+    await this.startMainFlow();
+  },
+
+  async startMainFlow() {
     const status = await apiRaw('/api/setup/status');
     if (!status.completed) {
       Onboarding.start(this.root, status);
@@ -19,13 +34,85 @@ const App = {
   },
 
   async bootstrap() {
+    const data = await apiRaw('/api/bootstrap');
+    this.apiKey = data.api_key;
+    this.wsUrl = data.ws_url;
+  },
+
+  async checkAuth() {
     try {
-      const data = await apiRaw('/api/bootstrap');
-      this.apiKey = data.api_key;
-      this.wsUrl = data.ws_url;
+      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        return { auth_required: true, authenticated: false };
+      }
+      if (!res.ok) {
+        throw new Error(`auth check failed: ${res.status}`);
+      }
+      return res.json();
     } catch (e) {
-      console.error('Bootstrap failed:', e);
+      console.error('Auth check failed:', e);
+      return { auth_required: true, authenticated: false };
     }
+  },
+
+  showLogin(errorMessage = '') {
+    this._teardown();
+    this.apiKey = null;
+    this.wsUrl = null;
+    this.accountID = null;
+    this.isDefault = true;
+    this.root.style.cssText = '';
+    this.root.innerHTML = `
+      <form class="card card--center login-card" id="login-form">
+        <h1 class="login-title">Kitty<span class="accent">Paw</span></h1>
+        <div class="login-fields">
+          <div class="text-left">
+            <label for="login-account">Account ID</label>
+            <input class="input" id="login-account" name="account_id" autocomplete="username" required>
+          </div>
+          <div class="text-left">
+            <label for="login-password">Password</label>
+            <input class="input" id="login-password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+        </div>
+        <div class="error-box login-error" id="login-error" ${errorMessage ? '' : 'hidden'}>${esc(errorMessage)}</div>
+        <button class="btn btn--primary login-submit" type="submit">Sign in</button>
+      </form>`;
+
+    const form = document.getElementById('login-form');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const error = document.getElementById('login-error');
+      button.disabled = true;
+      error.hidden = true;
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account_id: form.account_id.value.trim(),
+            password: form.password.value,
+          }),
+        });
+        if (!res.ok) {
+          throw new Error(res.status === 403 ? 'default account required' : 'login failed');
+        }
+        const auth = await res.json();
+        this.authRequired = true;
+        this.accountID = auth.account_id || null;
+        this.isDefault = auth.is_default !== false;
+        await this.startMainFlow();
+      } catch (e) {
+        error.textContent = e.message === 'default account required'
+          ? 'This Web UI is currently available only for the default account.'
+          : 'Invalid account ID or password.';
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
   },
 
   _chatMounted: false,
@@ -42,6 +129,13 @@ const App = {
 
   showShell() {
     this._teardown();
+    const fullShell = !this.authRequired || this.isDefault;
+    const adminNav = fullShell
+      ? '<button class="nav-item" data-tab="dashboard">Dashboard</button><button class="nav-item" data-tab="skills">Skills</button><button class="nav-item" data-tab="settings">Settings</button>'
+      : '';
+    const wizardButton = fullShell
+      ? '<button class="sidebar-wizard-btn" id="wizard-btn">\uC124\uC815 \uC704\uC790\uB4DC</button>'
+      : '';
 
     // Override #app centering from stylesheet
     this.root.style.display = 'block';
@@ -53,12 +147,10 @@ const App = {
           <div class="sidebar-logo">Kitty<span class="accent">Paw</span></div>
           <nav class="sidebar-nav">
             <button class="nav-item" data-tab="chat">Chat</button>
-            <button class="nav-item" data-tab="dashboard">Dashboard</button>
-            <button class="nav-item" data-tab="skills">Skills</button>
-            <button class="nav-item" data-tab="settings">Settings</button>
+            ${adminNav}
           </nav>
           <div class="sidebar-footer">
-            <button class="sidebar-wizard-btn" id="wizard-btn">\uC124\uC815 \uC704\uC790\uB4DC</button>
+            ${wizardButton}
             <span class="sidebar-version">v0.1.0</span>
           </div>
         </aside>
@@ -72,7 +164,8 @@ const App = {
       btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
     });
 
-    document.getElementById('wizard-btn').addEventListener('click', () => this.launchWizard());
+    const wizardBtn = document.getElementById('wizard-btn');
+    if (wizardBtn) wizardBtn.addEventListener('click', () => this.launchWizard());
 
     this.switchTab('chat');
   },
@@ -205,16 +298,49 @@ function esc(s) {
 
 /** Fetch without auth (for setup/bootstrap endpoints). */
 async function apiRaw(url, opts) {
-  const res = await fetch(url, opts);
+  const res = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+  if (res.status === 401) {
+    App.showLogin('Session expired. Sign in again.');
+    throw new Error('unauthorized');
+  }
+  if (res.status === 403) {
+    App.showLogin('This Web UI is currently available only for the default account.');
+    throw new Error('forbidden');
+  }
+  if (!res.ok) {
+    let message = `Request failed: ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && body.error) message = body.error;
+    } catch (_) {}
+    throw new Error(message);
+  }
   return res.json();
 }
 
 /** Fetch with Bearer auth header. */
 async function api(url, opts = {}) {
+  opts.credentials = opts.credentials || 'same-origin';
   if (App.apiKey) {
     opts.headers = Object.assign({}, opts.headers || {}, { Authorization: `Bearer ${App.apiKey}` });
   }
   const res = await fetch(url, opts);
+  if (res.status === 401) {
+    App.showLogin('Session expired. Sign in again.');
+    throw new Error('unauthorized');
+  }
+  if (res.status === 403) {
+    App.showLogin('This Web UI is currently available only for the default account.');
+    throw new Error('forbidden');
+  }
+  if (!res.ok) {
+    let message = `Request failed: ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body && body.error) message = body.error;
+    } catch (_) {}
+    throw new Error(message);
+  }
   return res.json();
 }
 

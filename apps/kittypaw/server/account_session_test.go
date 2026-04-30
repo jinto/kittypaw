@@ -1,7 +1,10 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
@@ -91,6 +94,73 @@ func TestServer_New_LegacySingleAccount_NoFanout(t *testing.T) {
 	}
 	if ids := srv.accounts.Sessions(); len(ids) != 1 || ids[0] != DefaultAccountID {
 		t.Errorf("Sessions() = %v, want [%s]", ids, DefaultAccountID)
+	}
+}
+
+func TestServerNewConfiguredDefaultAccount(t *testing.T) {
+	root := t.TempDir()
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{})
+	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{})
+
+	srv := NewWithServerConfig([]*AccountDeps{aliceDeps, bobDeps}, "test", core.TopLevelServerConfig{
+		DefaultAccount: "bob",
+	})
+
+	if got := srv.accounts.Session("bob"); got == nil || got != srv.session {
+		t.Fatalf("default session = %p, want bob session %p", srv.session, got)
+	}
+	if srv.accountRegistry.DefaultID() != "bob" {
+		t.Fatalf("registry default = %q, want bob", srv.accountRegistry.DefaultID())
+	}
+}
+
+func TestServerNewUsesMasterAPIKey(t *testing.T) {
+	root := t.TempDir()
+	cfg := core.DefaultConfig()
+	cfg.Server.APIKey = "account-key"
+	aliceDeps := buildAccountDeps(t, root, "alice", &cfg)
+
+	srv := NewWithServerConfig([]*AccountDeps{aliceDeps}, "test", core.TopLevelServerConfig{
+		MasterAPIKey: "master-key",
+	})
+	if got := srv.effectiveAPIKey(); got != "master-key" {
+		t.Fatalf("effectiveAPIKey = %q, want master-key", got)
+	}
+
+	protected := srv.requireAPIKey(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req.Header.Set("x-api-key", "master-key")
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("master key auth status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec = httptest.NewRecorder()
+	srv.handleBootstrap(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"api_key":"master-key"`) {
+		t.Fatalf("bootstrap body = %q, want master api key", rec.Body.String())
+	}
+}
+
+func TestServerNewSingleNonDefaultAccountIsDefault(t *testing.T) {
+	root := t.TempDir()
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{})
+
+	srv := New([]*AccountDeps{aliceDeps}, "test")
+
+	if got := srv.accounts.Session("alice"); got == nil || got != srv.session {
+		t.Fatalf("default session = %p, want alice session %p", srv.session, got)
+	}
+	if srv.accountRegistry.DefaultID() != "alice" {
+		t.Fatalf("registry default = %q, want alice", srv.accountRegistry.DefaultID())
 	}
 }
 
