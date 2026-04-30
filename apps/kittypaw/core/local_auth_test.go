@@ -179,6 +179,48 @@ func TestLocalAuthStoreRejectsUnexpectedArgonParams(t *testing.T) {
 	}
 }
 
+func TestLocalAuthStoreRejectsUnexpectedHashComponentLengths(t *testing.T) {
+	root := t.TempDir()
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 17))
+	hash := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
+	body := `{"version":1,"users":{"alice":{"account_id":"alice","password_hash":"argon2id$v=1$m=65536,t=3,p=4$` + salt + `$` + hash + `","created_at":"2026-04-30T00:00:00Z","updated_at":"2026-04-30T00:00:00Z"}}}`
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	st := NewLocalAuthStore(path)
+	if ok, err := st.VerifyPassword("alice", "pw"); err == nil || ok {
+		t.Fatalf("VerifyPassword with unexpected salt length = (%v, %v), want false error", ok, err)
+	}
+
+	salt = base64.RawStdEncoding.EncodeToString(make([]byte, 16))
+	hash = base64.RawStdEncoding.EncodeToString(make([]byte, 33))
+	body = `{"version":1,"users":{"alice":{"account_id":"alice","password_hash":"argon2id$v=1$m=65536,t=3,p=4$` + salt + `$` + hash + `","created_at":"2026-04-30T00:00:00Z","updated_at":"2026-04-30T00:00:00Z"}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+	if ok, err := st.VerifyPassword("alice", "pw"); err == nil || ok {
+		t.Fatalf("VerifyPassword with unexpected hash length = (%v, %v), want false error", ok, err)
+	}
+}
+
+func TestLocalAuthStoreRejectsDuplicateArgonParams(t *testing.T) {
+	root := t.TempDir()
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
+	hash := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
+	body := `{"version":1,"users":{"alice":{"account_id":"alice","password_hash":"argon2id$v=1$m=65536,t=3,p=4,p=4$` + salt + `$` + hash + `","created_at":"2026-04-30T00:00:00Z","updated_at":"2026-04-30T00:00:00Z"}}}`
+	path := filepath.Join(root, "auth.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write auth file: %v", err)
+	}
+
+	st := NewLocalAuthStore(path)
+	if ok, err := st.VerifyPassword("alice", "pw"); err == nil || ok {
+		t.Fatalf("VerifyPassword with duplicate params = (%v, %v), want false error", ok, err)
+	}
+}
+
 func TestLocalAuthStoreReplacesInsecureStaleTempFile(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "auth.json")

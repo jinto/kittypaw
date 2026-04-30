@@ -22,8 +22,8 @@ const (
 	argonTime        = 3
 	argonThreads     = 4
 	argonKeyLen      = 32
+	argonSaltLen     = 16
 	lockTimeout      = 5 * time.Second
-	staleLockAfter   = 30 * time.Second
 )
 
 var ErrLocalUserExists = errors.New("local user already exists")
@@ -229,10 +229,6 @@ func (s *LocalAuthStore) withLock(fn func() error) error {
 		if !os.IsExist(err) {
 			return err
 		}
-		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > staleLockAfter {
-			_ = os.Remove(lockPath)
-			continue
-		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("local auth store lock timeout: %s", lockPath)
 		}
@@ -278,19 +274,27 @@ func parsePasswordHash(encoded string) (passwordParams, []byte, []byte, error) {
 	if err != nil {
 		return passwordParams{}, nil, nil, fmt.Errorf("decode password hash: %w", err)
 	}
-	if len(salt) == 0 || len(expected) == 0 {
-		return passwordParams{}, nil, nil, errors.New("invalid empty password hash component")
+	if len(salt) != argonSaltLen {
+		return passwordParams{}, nil, nil, fmt.Errorf("invalid password salt length %d", len(salt))
+	}
+	if len(expected) != argonKeyLen {
+		return passwordParams{}, nil, nil, fmt.Errorf("invalid password hash length %d", len(expected))
 	}
 	return params, salt, expected, nil
 }
 
 func parseArgonParams(encoded string) (passwordParams, error) {
 	var p passwordParams
+	seen := make(map[string]bool, 3)
 	for _, part := range strings.Split(encoded, ",") {
 		k, v, ok := strings.Cut(part, "=")
 		if !ok {
 			return passwordParams{}, fmt.Errorf("invalid argon2 parameter %q", part)
 		}
+		if seen[k] {
+			return passwordParams{}, fmt.Errorf("duplicate argon2 parameter %q", k)
+		}
+		seen[k] = true
 		n, err := strconv.ParseUint(v, 10, 32)
 		if err != nil {
 			return passwordParams{}, fmt.Errorf("invalid argon2 parameter %q: %w", part, err)
