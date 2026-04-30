@@ -41,9 +41,7 @@ type TopLevelServerConfig struct {
 
 // LoadServerConfig reads server.toml from the given path.
 func LoadServerConfig(path string) (*TopLevelServerConfig, error) {
-	sc := &TopLevelServerConfig{
-		DefaultAccount: "default",
-	}
+	sc := &TopLevelServerConfig{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/server"
 )
 
 func TestIsTransportDropErr_StringMatches(t *testing.T) {
@@ -156,6 +157,58 @@ func TestResolveCLIAccountNoAccounts(t *testing.T) {
 	t.Setenv("KITTYPAW_ACCOUNT", "")
 	if _, err := resolveCLIAccount(""); err == nil {
 		t.Fatal("expected no accounts error")
+	}
+}
+
+func TestBootstrapRejectsMissingConfiguredDefaultAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	if err := os.WriteFile(filepath.Join(root, "server.toml"), []byte("default_account = \"charlie\"\n"), 0o600); err != nil {
+		t.Fatalf("write server.toml: %v", err)
+	}
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	_, _, err := bootstrap()
+	if err == nil {
+		t.Fatal("expected missing configured default_account error")
+	}
+	for _, want := range []string{"default_account", "charlie", "accounts"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestResolveServeBindUsesServerTomlUnlessFlagChanged(t *testing.T) {
+	flagBind = ":3000"
+	cmd := newServeCmd()
+	got := resolveServeBind(cmd, core.TopLevelServerConfig{Bind: "127.0.0.1:4567"}, nil)
+	if got != "127.0.0.1:4567" {
+		t.Fatalf("resolveServeBind = %q, want server.toml bind", got)
+	}
+
+	if err := cmd.Flags().Set("bind", "127.0.0.1:9999"); err != nil {
+		t.Fatalf("set bind: %v", err)
+	}
+	got = resolveServeBind(cmd, core.TopLevelServerConfig{Bind: "127.0.0.1:4567"}, nil)
+	if got != "127.0.0.1:9999" {
+		t.Fatalf("resolveServeBind explicit flag = %q, want flag bind", got)
+	}
+}
+
+func TestResolveServeBindFallsBackToSelectedAccount(t *testing.T) {
+	flagBind = ":3000"
+	cmd := newServeCmd()
+	cfg := core.DefaultConfig()
+	cfg.Server.Bind = "127.0.0.1:4567"
+	deps := []*server.AccountDeps{
+		{Account: &core.Account{ID: "alice", Config: &cfg}},
+	}
+
+	got := resolveServeBind(cmd, core.TopLevelServerConfig{MasterAPIKey: "server-key"}, deps)
+	if got != "127.0.0.1:4567" {
+		t.Fatalf("resolveServeBind = %q, want account bind", got)
 	}
 }
 

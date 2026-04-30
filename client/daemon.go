@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,28 +45,28 @@ func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
 // layouts kittypaw can be in at any moment:
 //
 //  1. ~/.kittypaw/server.toml       — the designed-for-server-wide path
-//     (CLAUDE.md). No production writer yet, so this tier only lights up
-//     when both Bind AND MasterAPIKey are populated — a partial file is
-//     treated as absent to avoid picking up a half-initialized config.
-//  2. ~/.kittypaw/accounts/default/config.toml — the post-migration layout.
-//     MigrateLegacyLayout moves the legacy top-level config.toml here the
-//     first time a daemon boots; this is the steady state for existing
-//     users and the state the bug report hit.
+//     (CLAUDE.md). A complete file wins outright; a partial file supplies
+//     only the fields it has, with missing Bind/API key filled from the
+//     selected account config below. default_account is also honored here so
+//     client discovery and server bootstrap pick the same account.
+//  2. ~/.kittypaw/accounts/<id>/config.toml — the named-account layout.
+//     Exactly one account is unambiguous. Multiple accounts require
+//     server.toml because there is no safe client-side daemon endpoint to
+//     infer from per-account configs.
 //  3. ~/.kittypaw/config.toml       — the legacy / pre-migration path.
-//     Fresh installs land here after `kittypaw setup` until the first
-//     `serve` triggers migration.
+//     Used only when no accounts are present.
 //
 // This mirrors the read-side of the designed multi-account contract while
 // leaving the write-side unchanged: whoever ends up implementing
 // WriteServerConfigAtomic later flips tier 1 on with zero client edits.
 func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 	var tried []string
+	var serverCfg *core.TopLevelServerConfig
 
 	if scPath, perr := core.ServerConfigPath(); perr == nil {
 		tried = append(tried, scPath)
-		if sc, lerr := core.LoadServerConfig(scPath); lerr == nil &&
-			sc.Bind != "" && sc.MasterAPIKey != "" {
-			return sc.Bind, sc.MasterAPIKey, nil
+		if sc, lerr := core.LoadServerConfig(scPath); lerr == nil {
+			serverCfg = sc
 		}
 	}
 
@@ -74,10 +75,29 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 		return "", "", fmt.Errorf("config dir: %w", derr)
 	}
 
-	accountCfg := filepath.Join(dir, "accounts", "default", "config.toml")
-	tried = append(tried, accountCfg)
-	if cfg, lerr := core.LoadConfig(accountCfg); lerr == nil {
-		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, nil
+	accountsRoot := filepath.Join(dir, "accounts")
+	tried = append(tried, accountsRoot)
+	accounts, aerr := core.DiscoverAccounts(accountsRoot)
+	if aerr != nil {
+		return "", "", fmt.Errorf("discover accounts: %w", aerr)
+	}
+	if serverCfg != nil && (serverCfg.Bind != "" || serverCfg.MasterAPIKey != "" || serverCfg.DefaultAccount != "") {
+		return resolveFromServerConfig(*serverCfg, accounts, dir)
+	}
+	switch len(accounts) {
+	case 1:
+		return accounts[0].Config.Server.BindOrDefault(), accounts[0].Config.Server.APIKey, nil
+	case 0:
+		// Fall through to the legacy top-level path below.
+	default:
+		ids := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			ids = append(ids, account.ID)
+		}
+		sort.Strings(ids)
+		return "", "", fmt.Errorf(
+			"multiple accounts found (%s); create %s with bind and master_api_key, or pass --remote",
+			strings.Join(ids, ", "), filepath.Join(dir, "server.toml"))
 	}
 
 	legacyPath := filepath.Join(dir, "config.toml")
@@ -89,6 +109,74 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 	return "", "", fmt.Errorf(
 		"no daemon config found — run `kittypaw setup` first (checked: %s)",
 		strings.Join(tried, ", "))
+}
+
+func resolveFromServerConfig(sc core.TopLevelServerConfig, accounts []*core.Account, dir string) (string, string, error) {
+	bind := sc.Bind
+	apiKey := sc.MasterAPIKey
+	if sc.DefaultAccount != "" {
+		if _, err := selectDaemonEndpointAccount(accounts, sc.DefaultAccount); err != nil {
+			return "", "", err
+		}
+	}
+
+	if bind == "" || apiKey == "" {
+		account, err := selectDaemonEndpointAccount(accounts, sc.DefaultAccount)
+		if err != nil {
+			return "", "", err
+		}
+		if account == nil {
+			legacyPath := filepath.Join(dir, "config.toml")
+			cfg, lerr := core.LoadConfig(legacyPath)
+			if lerr != nil {
+				return "", "", fmt.Errorf("server.toml is missing bind or master_api_key and no account config exists")
+			}
+			if bind == "" {
+				bind = cfg.Server.BindOrDefault()
+			}
+			if apiKey == "" {
+				apiKey = cfg.Server.APIKey
+			}
+			return bind, apiKey, nil
+		}
+		if bind == "" {
+			bind = account.Config.Server.BindOrDefault()
+		}
+		if apiKey == "" {
+			apiKey = account.Config.Server.APIKey
+		}
+	}
+	return bind, apiKey, nil
+}
+
+func selectDaemonEndpointAccount(accounts []*core.Account, configuredDefault string) (*core.Account, error) {
+	if len(accounts) == 0 {
+		return nil, nil
+	}
+	if configuredDefault != "" {
+		for _, account := range accounts {
+			if account.ID == configuredDefault {
+				return account, nil
+			}
+		}
+		return nil, fmt.Errorf("server.toml default_account %q not found", configuredDefault)
+	}
+	if len(accounts) == 1 {
+		return accounts[0], nil
+	}
+	for _, account := range accounts {
+		if account.ID == core.DefaultAccountID {
+			return account, nil
+		}
+	}
+	ids := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	sort.Strings(ids)
+	return nil, fmt.Errorf(
+		"multiple accounts found (%s); add default_account to %s or pass --remote",
+		strings.Join(ids, ", "), "server.toml")
 }
 
 // Connect returns a Client connected to a running daemon.

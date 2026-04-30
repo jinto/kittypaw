@@ -197,11 +197,10 @@ func TestNewDaemonConn_ServerToml_Wins(t *testing.T) {
 	}
 }
 
-func TestNewDaemonConn_ServerTomlPartial_FallsBack(t *testing.T) {
+func TestNewDaemonConn_ServerTomlBindOnlyUsesAccountKey(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 
-	// server.toml with Bind but no MasterAPIKey → must fall through.
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"bind = \"127.0.0.1:3456\"\n")
 
@@ -212,11 +211,76 @@ func TestNewDaemonConn_ServerTomlPartial_FallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDaemonConn: %v", err)
 	}
-	if d.BaseURL != "http://127.0.0.1:4567" {
-		t.Errorf("partial server.toml should fall through; BaseURL = %q", d.BaseURL)
+	if d.BaseURL != "http://127.0.0.1:3456" {
+		t.Errorf("BaseURL = %q, want http://127.0.0.1:3456", d.BaseURL)
 	}
 	if d.APIKey != "account-key" {
 		t.Errorf("APIKey = %q, want account-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_ServerTomlMasterOnlyUsesAccountBind(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"master_api_key = \"server-key\"\n")
+
+	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:4567" {
+		t.Errorf("BaseURL = %q, want http://127.0.0.1:4567", d.BaseURL)
+	}
+	if d.APIKey != "server-key" {
+		t.Errorf("APIKey = %q, want server-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_ServerTomlDefaultAccountOnly(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"default_account = \"bob\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:4568" {
+		t.Errorf("BaseURL = %q, want bob bind", d.BaseURL)
+	}
+	if d.APIKey != "bob-key" {
+		t.Errorf("APIKey = %q, want bob-key", d.APIKey)
+	}
+}
+
+func TestNewDaemonConn_ServerTomlInvalidDefaultAccount(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\ndefault_account = \"missing\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+
+	_, err := NewDaemonConn("")
+	if err == nil {
+		t.Fatal("expected missing default_account error")
+	}
+	for _, want := range []string{"default_account", "missing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
@@ -237,6 +301,44 @@ func TestNewDaemonConn_AccountsDefault(t *testing.T) {
 	}
 	if d.APIKey != "account-key" {
 		t.Errorf("APIKey = %q, want account-key", d.APIKey)
+	}
+}
+
+func TestDaemonConnSingleNonDefaultAccount(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+
+	d, err := NewDaemonConn("")
+	if err != nil {
+		t.Fatalf("NewDaemonConn: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:4567" {
+		t.Fatalf("BaseURL = %q, want http://127.0.0.1:4567", d.BaseURL)
+	}
+	if d.APIKey != "account-key" {
+		t.Fatalf("APIKey = %q, want account-key", d.APIKey)
+	}
+}
+
+func TestDaemonConnMultipleAccountsNeedsServerToml(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+
+	_, err := NewDaemonConn("")
+	if err == nil {
+		t.Fatal("expected ambiguity error")
+	}
+	for _, want := range []string{"multiple accounts", "server.toml", "alice", "bob"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 

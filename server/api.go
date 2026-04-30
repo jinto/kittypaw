@@ -746,7 +746,8 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // against the stale default-account channel list, passes, and spawns a
 // duplicate bot that this reload was about to introduce.
 func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
-	cfgPath, err := core.ConfigPath()
+	defaultID := s.defaultAccountID()
+	cfgPath, err := core.ConfigPathForAccount(defaultID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -760,7 +761,7 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	s.accountMu.Lock()
 	defer s.accountMu.Unlock()
 
-	// Build the would-be-final snapshot (default account substituted with
+	// Build the would-be-final snapshot (selected default account substituted with
 	// the proposed cfg, all other accounts as-is) and run the same two
 	// validators StartChannels / AddAccount do.
 	snapshot := make(map[string][]core.ChannelConfig, len(s.accountList)+1)
@@ -770,10 +771,9 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		if peer == nil || peer.Config == nil {
 			continue
 		}
-		if peer.ID == DefaultAccountID {
+		if peer.ID == defaultID {
 			// Substitute a proposed copy so validators see the would-be-final
-			// state without mutating the live pointer (rejection must leave
-			// the current default account config intact).
+			// state without mutating the live pointer.
 			proposedAccount := *peer
 			proposedCfg := *cfg
 			proposedAccount.Config = &proposedCfg
@@ -786,12 +786,8 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	if !defaultSeen {
-		// A single-account install booted with a non-"default" account ID
-		// (server.New falls back to accounts[0] as the default-deps anchor).
-		// Validate the proposed cfg against the live peer so a collision
-		// with its channels is still caught.
-		accounts = append(accounts, &core.Account{ID: DefaultAccountID, Config: cfg})
-		snapshot[DefaultAccountID] = cfg.Channels
+		accounts = append(accounts, &core.Account{ID: defaultID, Config: cfg})
+		snapshot[defaultID] = cfg.Channels
 	}
 
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
@@ -815,7 +811,7 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 
 	result := map[string]any{"success": true}
 	if reconcile := s.reconcileFunc(); reconcile != nil {
-		if err := reconcile(DefaultAccountID, cfg.Channels); err != nil {
+		if err := reconcile(defaultID, cfg.Channels); err != nil {
 			slog.Warn("reload: channel reconcile partial failure", "error", err)
 			result["warnings"] = []string{err.Error()}
 		}

@@ -18,9 +18,7 @@ func (s *Server) requireAPIKey(next http.Handler) http.Handler {
 				key = strings.TrimPrefix(auth, "Bearer ")
 			}
 		}
-		s.configMu.RLock()
-		apiKey := s.config.Server.APIKey
-		s.configMu.RUnlock()
+		apiKey := s.effectiveAPIKey()
 		if !fixedLenEqual(key, apiKey) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return

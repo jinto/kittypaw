@@ -39,6 +39,7 @@ type Server struct {
 	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
 	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
 	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	masterAPIKey    string
 	version         string
 	pkgManager      *core.PackageManager // default-account package manager for API handlers
 	liveIndexer     *engine.LiveIndexer  // default-account live indexer (nil if lazy mode)
@@ -50,8 +51,10 @@ type Server struct {
 	reloadReconcile func(accountID string, cfgs []core.ChannelConfig) error
 }
 
-// DefaultAccountID is the account ID used when the daemon runs without an
-// explicit accounts/ directory (legacy single-account deployments).
+// DefaultAccountID is the legacy account ID retained for migrated installs.
+// Fresh installs may use any account ID; server.New chooses the configured
+// default when present, otherwise this legacy ID when present, otherwise the
+// first loaded account.
 const DefaultAccountID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
@@ -68,21 +71,20 @@ const DefaultAccountID = "default"
 // The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
 // the default account in PR-1; multi-account HTTP routing is scoped to a
 // follow-up. Call StartChannels before ListenAndServe to activate messaging.
-func New(accounts []*AccountDeps, version string) *Server {
+func New(accounts []*AccountDeps, version string, configuredDefault ...string) *Server {
+	sc := core.TopLevelServerConfig{}
+	if len(configuredDefault) > 0 {
+		sc.DefaultAccount = configuredDefault[0]
+	}
+	return NewWithServerConfig(accounts, version, sc)
+}
+
+func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLevelServerConfig) *Server {
 	if len(accounts) == 0 {
 		panic("server.New: accounts slice must be non-empty")
 	}
 
-	// Identify the default account: explicit DefaultAccountID match wins; the
-	// first entry is the fallback so a single-account install with a non-
-	// "default" ID still boots.
-	defaultDeps := accounts[0]
-	for _, td := range accounts {
-		if td.Account.ID == DefaultAccountID {
-			defaultDeps = td
-			break
-		}
-	}
+	defaultDeps := SelectDefaultAccountDeps(accounts, sc.DefaultAccount)
 	cfg := defaultDeps.Account.Config
 
 	// eventCh MUST exist before Fanout construction — ChannelFanout retains
@@ -93,7 +95,7 @@ func New(accounts []*AccountDeps, version string) *Server {
 	// (the parent of each account's BaseDir) so Share.read and future
 	// listing operations have a consistent anchor.
 	accountsRoot := filepath.Dir(defaultDeps.Account.BaseDir)
-	registry := core.NewAccountRegistry(accountsRoot, DefaultAccountID)
+	registry := core.NewAccountRegistry(accountsRoot, defaultDeps.Account.ID)
 	accountList := make([]*core.Account, 0, len(accounts))
 	for _, td := range accounts {
 		registry.Register(td.Account)
@@ -122,12 +124,61 @@ func New(accounts []*AccountDeps, version string) *Server {
 		accountRegistry: registry,
 		eventCh:         eventCh,
 		accountDeps:     depsByID,
+		masterAPIKey:    sc.MasterAPIKey,
 		version:         version,
 		pkgManager:      defaultDeps.PkgMgr,
 		liveIndexer:     defaultDeps.LiveIndexer,
 	}
 	s.router = s.setupRoutes()
 	return s
+}
+
+func SelectDefaultAccountDeps(accounts []*AccountDeps, configuredDefault string) *AccountDeps {
+	if len(accounts) == 0 {
+		return nil
+	}
+	if configuredDefault != "" {
+		for _, td := range accounts {
+			if td.Account.ID == configuredDefault {
+				return td
+			}
+		}
+	}
+	for _, td := range accounts {
+		if td.Account.ID == DefaultAccountID {
+			return td
+		}
+	}
+	return accounts[0]
+}
+
+func (s *Server) defaultAccountID() string {
+	if s.accountRegistry != nil {
+		if id := s.accountRegistry.DefaultID(); id != "" {
+			return id
+		}
+	}
+	if s.session != nil && s.session.AccountID != "" {
+		return s.session.AccountID
+	}
+	for _, account := range s.accountList {
+		if account != nil && account.ID == DefaultAccountID {
+			return DefaultAccountID
+		}
+	}
+	if len(s.accountList) == 1 && s.accountList[0] != nil {
+		return s.accountList[0].ID
+	}
+	return DefaultAccountID
+}
+
+func (s *Server) effectiveAPIKey() string {
+	if s.masterAPIKey != "" {
+		return s.masterAPIKey
+	}
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.config.Server.APIKey
 }
 
 // setupRoutes builds the full route tree. API routes live under /api/v1 and
@@ -172,7 +223,7 @@ func (s *Server) setupRoutes() chi.Router {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		if s.config.Server.APIKey != "" {
+		if s.effectiveAPIKey() != "" {
 			r.Use(s.requireAPIKey)
 		}
 
