@@ -34,17 +34,18 @@ _split_body_code() {
     CODE=$(printf '%s' "$raw" | tail -n1)
 }
 
-# do_curl PATH → sets BODY + CODE. Auto-recovers from 429 by waiting one
-# full anon rate-limit window (60s + 1s margin) and retrying once.
+# do_curl URL [METHOD=GET] → sets BODY + CODE. Auto-recovers from 429 by
+# waiting one full anon rate-limit window (60s + 1s margin) and retrying once.
 do_curl() {
     local url="$1"
+    local method="${2:-GET}"
     local raw
-    raw=$(curl -sS -w $'\n%{http_code}' "$url" 2>/dev/null || printf '\n000')
+    raw=$(curl -sS -X "$method" -w $'\n%{http_code}' "$url" 2>/dev/null || printf '\n000')
     _split_body_code "$raw"
     if [[ "$CODE" == "429" ]]; then
         printf "${Y}⚠${N} 429 rate-limit hit — waiting 61s for window reset...\n" >&2
         sleep 61
-        raw=$(curl -sS -w $'\n%{http_code}' "$url" 2>/dev/null || printf '\n000')
+        raw=$(curl -sS -X "$method" -w $'\n%{http_code}' "$url" 2>/dev/null || printf '\n000')
         _split_body_code "$raw"
     fi
 }
@@ -53,7 +54,8 @@ check_status() {
     local path="$1"
     local expected="$2"
     local desc="${3:-$path}"
-    do_curl "${BASE}${path}"
+    local method="${4:-GET}"
+    do_curl "${BASE}${path}" "$method"
     if [[ "$CODE" == "$expected" ]]; then
         printf "${G}✓${N} %s [%s]\n" "$desc" "$CODE"
         PASS=$((PASS + 1))
@@ -138,6 +140,37 @@ check_geo() {
     sleep "$THROTTLE"
 }
 
+# Verify /discovery returns 200 + all expected non-empty string keys. Catches
+# contract drift (e.g. envvar typo, key rename without deploy sync) at the
+# layer integration tests can't see.
+check_discovery_keys() {
+    local raw
+    raw=$(curl -sS -w $'\n%{http_code}' "${BASE}/discovery" 2>/dev/null || printf '\n000')
+    _split_body_code "$raw"
+    if [[ "$CODE" != "200" ]]; then
+        printf "${R}✗${N} discovery [HTTP %s]\n" "$CODE"
+        FAIL=$((FAIL + 1))
+        FAIL_LIST+=("discovery")
+        sleep "$THROTTLE"
+        return
+    fi
+    local missing=()
+    for key in api_base_url skills_registry_url kakao_relay_url chat_relay_url; do
+        if ! printf '%s' "$BODY" | jq -e --arg k "$key" 'has($k) and (.[$k] | type == "string") and (.[$k] | length > 0)' >/dev/null 2>&1; then
+            missing+=("$key")
+        fi
+    done
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        printf "${G}✓${N} discovery [200 + 4 keys: api_base_url, skills_registry_url, kakao_relay_url, chat_relay_url]\n"
+        PASS=$((PASS + 1))
+    else
+        printf "${R}✗${N} discovery [200 but missing/empty: %s]\n" "${missing[*]}"
+        FAIL=$((FAIL + 1))
+        FAIL_LIST+=("discovery: ${missing[*]}")
+    fi
+    sleep "$THROTTLE"
+}
+
 if ! command -v jq >/dev/null 2>&1; then
     printf "${R}✗${N} jq not found — install with 'brew install jq' or 'apt install jq'\n"
     exit 1
@@ -148,7 +181,7 @@ echo "=== kittyapi smoke: ${BASE} ==="
 echo
 echo "--- Infrastructure ---"
 check_status "/health" "200"
-check_status "/discovery" "200"
+check_discovery_keys
 
 echo
 echo "--- Calendar (KASI SpcdeInfoService) ---"
@@ -179,6 +212,23 @@ check_envelope "/v1/air/airkorea/unhealthy" "air/airkorea/unhealthy"
 echo
 echo "--- Geo (places DB + addresses fallthrough) ---"
 check_geo "강남역" "geo/resolve (강남역)"
+
+# OAuth: endpoint-level GET smoke (routing/handler liveness).
+# Login 동작 자체는 별도 plan (Playwright/headless browser flow).
+# 302 = OAuth provider redirect (PKCE state 자동 생성).
+# 400 = missing required params — handler reachable + correct error path.
+# 401 = auth required without token — middleware reachable.
+echo
+echo "--- Auth (OAuth + CLI, endpoint liveness only) ---"
+check_status "/auth/google" "302" "auth/google (Google redirect)"
+check_status "/auth/github" "302" "auth/github (GitHub redirect)"
+check_status "/auth/me" "401" "auth/me (no token)"
+check_status "/auth/google/callback" "400" "auth/google/callback (no params)"
+check_status "/auth/github/callback" "400" "auth/github/callback (no params)"
+check_status "/auth/cli/google" "400" "auth/cli/google (no params)"
+check_status "/auth/cli/callback" "400" "auth/cli/callback (no params)"
+check_status "/auth/token/refresh" "400" "auth/token/refresh POST (no body)" "POST"
+check_status "/auth/cli/exchange" "400" "auth/cli/exchange POST (no body)" "POST"
 
 TOTAL=$((PASS + FAIL))
 echo
