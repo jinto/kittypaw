@@ -81,6 +81,11 @@ func resolveAPIKey(provider string, cfg *core.Config) string {
 		}
 		return os.Getenv("OPENAI_API_KEY")
 	case "gemini":
+		if cfg.LLM.Provider == "gemini" || cfg.LLM.Provider == "google" {
+			if cfg.LLM.APIKey != "" {
+				return cfg.LLM.APIKey
+			}
+		}
 		return os.Getenv("GEMINI_API_KEY")
 	}
 	return ""
@@ -98,6 +103,10 @@ func resolveVisionProvider(cfg *core.Config) (provider, apiKey string, err error
 	case "openai", "gpt":
 		if key := resolveAPIKey("openai", cfg); key != "" {
 			return "openai", key, nil
+		}
+	case "gemini", "google":
+		if key := resolveAPIKey("gemini", cfg); key != "" {
+			return "gemini", key, nil
 		}
 	}
 

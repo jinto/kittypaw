@@ -225,7 +225,7 @@ func newSetupCmd() *cobra.Command {
 			return runSetup(c, flags)
 		},
 	}
-	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openrouter|local)")
+	cmd.Flags().StringVar(&flags.provider, "provider", "", "LLM provider (anthropic|openai|gemini|openrouter|local)")
 	cmd.Flags().StringVar(&flags.accountID, "account", "", "local account id")
 	cmd.Flags().BoolVar(&flags.passwordStdin, "password-stdin", false, "read local Web UI password from stdin")
 	cmd.Flags().StringVar(&flags.apiKey, "api-key", "", "LLM API key")

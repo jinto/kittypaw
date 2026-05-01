@@ -100,12 +100,14 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Determine existing LLM provider from live config.
 	var existingProvider *string
-	if cfg.LLM.APIKey != "" && cfg.LLM.Provider != "" {
-		p := cfg.LLM.Provider
+	if cfg.LLM.BaseURL == core.OpenRouterBaseURL {
+		p := "openrouter"
 		existingProvider = &p
-	}
-	if existingProvider == nil && cfg.LLM.BaseURL != "" {
+	} else if cfg.LLM.BaseURL != "" {
 		p := "local"
+		existingProvider = &p
+	} else if cfg.LLM.APIKey != "" && cfg.LLM.Provider != "" {
+		p := cfg.LLM.Provider
 		existingProvider = &p
 	}
 
@@ -171,11 +173,23 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	providerChoice := strings.ToLower(body.Provider)
+
 	// Validate provider-specific requirements.
-	switch body.Provider {
+	switch providerChoice {
 	case "claude", "anthropic":
 		if body.APIKey == "" {
 			writeError(w, http.StatusBadRequest, "api_key is required for Claude")
+			return
+		}
+	case "openai", "gpt":
+		if body.APIKey == "" {
+			writeError(w, http.StatusBadRequest, "api_key is required for OpenAI")
+			return
+		}
+	case "gemini", "google":
+		if body.APIKey == "" {
+			writeError(w, http.StatusBadRequest, "api_key is required for Gemini")
 			return
 		}
 	case "openrouter":
@@ -193,9 +207,9 @@ func (s *Server) handleSetupLlm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider, model, baseURL := core.ResolveLLMConfig(body.Provider, body.LocalURL, body.LocalModel)
+	provider, model, baseURL := core.ResolveLLMConfig(providerChoice, body.LocalURL, body.LocalModel)
 	apiKey := body.APIKey
-	if body.Provider == "local" {
+	if providerChoice == "local" {
 		apiKey = ""
 	}
 

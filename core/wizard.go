@@ -12,12 +12,47 @@ import (
 
 // Provider defaults — used by both web and CLI wizards.
 const (
-	ClaudeDefaultModel     = "claude-sonnet-4-20250514"
+	ClaudeDefaultModel     = "claude-sonnet-4-6"
+	OpenAIDefaultModel     = "gpt-5.5"
+	GeminiDefaultModel     = "gemini-3.1-pro-preview"
 	OpenRouterBaseURL      = "https://openrouter.ai/api/v1/chat/completions"
 	OpenRouterDefaultModel = "qwen/qwen3-235b-a22b:free"
 	OllamaDefaultBaseURL   = "http://localhost:11434/v1"
 	DefaultAPIServerURL    = "https://portal.kittypaw.app"
 )
+
+var (
+	claudeModelChoices = []string{
+		ClaudeDefaultModel,
+		"claude-opus-4-7",
+		"claude-haiku-4-5-20251001",
+	}
+	openAIModelChoices = []string{
+		OpenAIDefaultModel,
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.4-nano",
+	}
+	geminiModelChoices = []string{
+		GeminiDefaultModel,
+		"gemini-3-flash-preview",
+		"gemini-3.1-flash-lite-preview",
+		"gemini-2.5-pro",
+		"gemini-2.5-flash",
+	}
+)
+
+func ClaudeModelChoices() []string {
+	return append([]string(nil), claudeModelChoices...)
+}
+
+func OpenAIModelChoices() []string {
+	return append([]string(nil), openAIModelChoices...)
+}
+
+func GeminiModelChoices() []string {
+	return append([]string(nil), geminiModelChoices...)
+}
 
 // DefaultWorkspacePath returns the account-scoped user workspace suggested
 // during onboarding. This is separate from ConfigDir: users should be able to
@@ -63,8 +98,8 @@ type WizardResult struct {
 
 // ResolveLLMConfig converts a user-facing provider choice into internal
 // config values (provider, model, baseURL). modelName overrides the default
-// for hosted providers (Claude) and is required for local/Ollama. localURL
-// is only consulted for local/Ollama.
+// for hosted providers and is required for local/Ollama. localURL is only
+// consulted for local/Ollama.
 func ResolveLLMConfig(provider, localURL, modelName string) (internalProvider, model, baseURL string) {
 	switch strings.ToLower(provider) {
 	case "claude", "anthropic":
@@ -73,6 +108,18 @@ func ResolveLLMConfig(provider, localURL, modelName string) (internalProvider, m
 			model = modelName
 		}
 		return "anthropic", model, ""
+	case "openai", "gpt":
+		model := OpenAIDefaultModel
+		if modelName != "" {
+			model = modelName
+		}
+		return "openai", model, ""
+	case "gemini", "google":
+		model := GeminiDefaultModel
+		if modelName != "" {
+			model = modelName
+		}
+		return "gemini", model, ""
 	case "openrouter":
 		return "openai", OpenRouterDefaultModel, OpenRouterBaseURL
 	case "local", "ollama":

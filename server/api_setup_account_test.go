@@ -67,6 +67,32 @@ func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
 	}
 }
 
+func TestSetupStatusReportsOpenRouterProvider(t *testing.T) {
+	cfg := core.DefaultConfig()
+	cfg.LLM.Provider = "openai"
+	cfg.LLM.APIKey = "or-key"
+	cfg.LLM.BaseURL = core.OpenRouterBaseURL
+	srv := newServerWithLocalUserAndConfig(t, "alice", "pw", &cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/setup/status", nil)
+	req.AddCookie(loginSessionCookie(t, srv, "alice", "pw"))
+	rr := httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		ExistingProvider *string `json:"existing_provider"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if body.ExistingProvider == nil || *body.ExistingProvider != "openrouter" {
+		t.Fatalf("existing_provider = %v, want openrouter", body.ExistingProvider)
+	}
+}
+
 func TestSetupWorkspaceCreatesDefaultAccountFolder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -117,6 +143,59 @@ func TestSetupRejectsUnauthenticatedWhenLocalUsersExist(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("setup llm unauthenticated code = %d, want 401; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupLlmAcceptsOpenAIAndGemini(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		provider string
+		model    string
+		baseURL  string
+		apiKey   string
+	}{
+		{
+			name:     "openai",
+			body:     `{"provider":"openai","api_key":"sk-openai"}`,
+			provider: "openai",
+			model:    core.OpenAIDefaultModel,
+			apiKey:   "sk-openai",
+		},
+		{
+			name:     "gemini",
+			body:     `{"provider":"gemini","api_key":"sk-gemini"}`,
+			provider: "gemini",
+			model:    core.GeminiDefaultModel,
+			apiKey:   "sk-gemini",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServerWithLocalUser(t, "alice", "pw")
+			req := httptest.NewRequest(http.MethodPost, "/api/setup/llm", strings.NewReader(tc.body))
+			req.RemoteAddr = "127.0.0.1:1234"
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(loginSessionCookie(t, srv, "alice", "pw"))
+			rr := httptest.NewRecorder()
+			srv.setupRoutes().ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("setup llm code = %d body=%s", rr.Code, rr.Body.String())
+			}
+			st := srv.accountDepsForID("alice").Store
+			for key, want := range map[string]string{
+				"setup:llm_provider": tc.provider,
+				"setup:llm_model":    tc.model,
+				"setup:llm_base_url": tc.baseURL,
+				"setup:llm_api_key":  tc.apiKey,
+			} {
+				got, ok, err := st.GetUserContext(key)
+				if err != nil || !ok || got != want {
+					t.Fatalf("%s = (%q, %v, %v), want %q true nil", key, got, ok, err, want)
+				}
+			}
+		})
 	}
 }
 

@@ -59,6 +59,9 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 		}
 		return NewOpenAI(apiKey, model, maxTokens, openaiOpts...), nil
 
+	case "gemini", "google":
+		return NewGemini(apiKey, model, maxTokens), nil
+
 	case "ollama":
 		baseURL := ollamaDefaultBaseURL
 		if o.baseURL != "" {
@@ -101,6 +104,8 @@ func envAPIKey(provider string) string {
 		return os.Getenv("ANTHROPIC_API_KEY")
 	case "openai", "gpt":
 		return os.Getenv("OPENAI_API_KEY")
+	case "gemini", "google":
+		return os.Getenv("GEMINI_API_KEY")
 	default:
 		return ""
 	}

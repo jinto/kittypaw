@@ -92,7 +92,7 @@ const Onboarding = {
   },
 
   _stepLlmExisting() {
-    const names = { anthropic: 'Claude API', claude: 'Claude API', openrouter: 'OpenRouter', openai: 'OpenAI', local: '\uB85C\uCEEC LLM' };
+    const names = { anthropic: 'Anthropic (Claude)', claude: 'Anthropic (Claude)', openrouter: 'OpenRouter', openai: 'OpenAI', gemini: 'Gemini', google: 'Gemini', local: '\uB85C\uCEEC LLM' };
     const name = names[this.status.existing_provider] || esc(this.status.existing_provider);
     const card = el('div', { className: 'card' });
     card.innerHTML = `
@@ -123,6 +123,50 @@ const Onboarding = {
     const card = el('div', { className: 'card' });
     card.innerHTML = `<h2 class="large">AI \uBAA8\uB378\uC744 \uC120\uD0DD\uD558\uC138\uC694</h2>`;
 
+    card.appendChild(this._llmCard('claude', 'Anthropic (Claude)', '\uACE0\uD488\uC9C8, API \uD0A4 \uD544\uC694', () => {
+      if (s.choice !== 'claude') return '';
+      return `<div class="mt-16">
+        <label>API \uD0A4</label>
+        <input class="input input--mono" type="password" placeholder="sk-ant-..." value="${esc(s.apiKey)}" data-field="apiKey">
+      </div>`;
+    }));
+
+    card.appendChild(el('div', { style: 'height:12px' }));
+
+    card.appendChild(this._llmCard('openai', 'OpenAI', 'GPT-5.5, API \uD0A4 \uD544\uC694', () => {
+      if (s.choice !== 'openai') return '';
+      return `<div class="mt-16">
+        <label>API \uD0A4</label>
+        <input class="input input--mono" type="password" placeholder="sk-..." value="${esc(s.apiKey)}" data-field="apiKey">
+      </div>`;
+    }));
+
+    card.appendChild(el('div', { style: 'height:12px' }));
+
+    card.appendChild(this._llmCard('gemini', 'Gemini', 'Gemini 3.1, API \uD0A4 \uD544\uC694', () => {
+      if (s.choice !== 'gemini') return '';
+      return `<div class="mt-16">
+        <label>API \uD0A4</label>
+        <input class="input input--mono" type="password" placeholder="AIza..." value="${esc(s.apiKey)}" data-field="apiKey">
+      </div>`;
+    }));
+
+    card.appendChild(el('div', { style: 'height:12px' }));
+
+    card.appendChild(this._llmCard('openrouter', 'OpenRouter', '\uC624\uD508 \uB77C\uC6B0\uD130 API \uD0A4 \uD544\uC694', () => {
+      if (s.choice !== 'openrouter') return '';
+      return `<div class="mt-16">
+        <label>API \uD0A4</label>
+        <input class="input input--mono" type="password" placeholder="sk-or-..." value="${esc(s.apiKey)}" data-field="apiKey">
+        <div class="hint mt-12" style="line-height:1.8">
+          1. <a href="https://openrouter.ai/settings/keys" style="color:var(--accent);text-decoration:underline">openrouter.ai</a> \uC5D0\uC11C API key \uBC1C\uAE09<br>
+          2. \uBC1C\uAE09\uB41C \uD0A4\uB97C \uC5EC\uAE30\uC5D0 \uBD99\uC5EC\uB123\uAE30
+        </div>
+      </div>`;
+    }));
+
+    card.appendChild(el('div', { style: 'height:12px' }));
+
     card.appendChild(this._llmCard('local', '\uB85C\uCEEC LLM (Ollama)', '\uBB34\uB8CC, \uB0B4 \uCEF4\uD4E8\uD130\uC5D0\uC11C \uC2E4\uD589', () => {
       if (s.choice !== 'local') return '';
       return `<div class="flex flex-col gap-10 mt-16">
@@ -131,33 +175,8 @@ const Onboarding = {
       </div>`;
     }));
 
-    card.appendChild(el('div', { style: 'height:12px' }));
-
-    card.appendChild(this._llmCard('openrouter', 'OpenRouter (\uBB34\uB8CC)', '\uBB34\uB8CC AI \uBAA8\uB378\uB85C \uBC14\uB85C \uC2DC\uC791\uD558\uC138\uC694', () => {
-      if (s.choice !== 'openrouter') return '';
-      return `<div class="mt-16">
-        <label>API \uD0A4</label>
-        <input class="input input--mono" type="password" placeholder="sk-or-..." value="${esc(s.apiKey)}" data-field="apiKey">
-        <div class="hint mt-12" style="line-height:1.8">
-          1. <a href="https://openrouter.ai/settings/keys" style="color:var(--accent);text-decoration:underline">openrouter.ai</a> \uC5D0\uC11C \uBB34\uB8CC \uAC00\uC785<br>
-          2. API Keys \u2192 Create Key<br>
-          3. \uBC1C\uAE09\uB41C \uD0A4\uB97C \uC5EC\uAE30\uC5D0 \uBD99\uC5EC\uB123\uAE30
-        </div>
-      </div>`;
-    }));
-
-    card.appendChild(el('div', { style: 'height:12px' }));
-
-    card.appendChild(this._llmCard('claude', 'Claude API', '\uACE0\uD488\uC9C8, API \uD0A4 \uD544\uC694', () => {
-      if (s.choice !== 'claude') return '';
-      return `<div class="mt-16">
-        <label>API \uD0A4</label>
-        <input class="input input--mono" type="password" placeholder="sk-ant-..." value="${esc(s.apiKey)}" data-field="apiKey">
-      </div>`;
-    }));
-
     const canProceed = s.choice === 'local' ? s.localUrl && s.localModel
-      : s.choice === 'openrouter' || s.choice === 'claude' ? s.apiKey
+      : s.choice === 'openrouter' || s.choice === 'claude' || s.choice === 'openai' || s.choice === 'gemini' ? s.apiKey
       : false;
 
     const actions = el('div', { className: 'flex justify-end mt-28' });

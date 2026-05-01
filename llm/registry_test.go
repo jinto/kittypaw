@@ -40,8 +40,18 @@ func TestNewProviderOllama(t *testing.T) {
 	}
 }
 
+func TestNewProviderGemini(t *testing.T) {
+	p, err := NewProvider("gemini", "test-key", "gemini-3.1-pro-preview", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(gemini) error: %v", err)
+	}
+	if _, ok := p.(*GeminiProvider); !ok {
+		t.Errorf("expected *GeminiProvider, got %T", p)
+	}
+}
+
 func TestNewProviderUnknown(t *testing.T) {
-	_, err := NewProvider("gemini", "key", "model", 1024)
+	_, err := NewProvider("unknown", "key", "model", 1024)
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}

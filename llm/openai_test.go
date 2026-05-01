@@ -60,7 +60,7 @@ func TestOpenAIJSONResponse(t *testing.T) {
 func TestOpenAIBuildRequestBodyShape(t *testing.T) {
 	// After Phase 13.3 the wire is plain non-streaming JSON. Pin
 	// that — no stream/stream_options keys leak into the body.
-	p := NewOpenAI("key", "gpt-4", 1024)
+	p := NewOpenAI("key", "gpt-4", 1024, WithBaseURL("http://example.com/v1/chat/completions"))
 	body := p.buildRequestBody([]core.LlmMessage{{Role: core.RoleUser, Content: "Hi"}})
 	if _, ok := body["stream"]; ok {
 		t.Error("stream key must not appear in non-streaming request")
@@ -73,6 +73,81 @@ func TestOpenAIBuildRequestBodyShape(t *testing.T) {
 	}
 	if body["max_tokens"] != 1024 {
 		t.Errorf("max_tokens = %v, want 1024", body["max_tokens"])
+	}
+}
+
+func TestOpenAIResponsesRequestBodyShape(t *testing.T) {
+	p := NewOpenAI("key", "gpt-5.5", 1024)
+	body := p.buildRequestBody([]core.LlmMessage{
+		{Role: core.RoleSystem, Content: "You are concise."},
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if _, ok := body["messages"]; ok {
+		t.Error("messages key must not appear in Responses API request")
+	}
+	if body["model"] != "gpt-5.5" {
+		t.Errorf("model = %v, want gpt-5.5", body["model"])
+	}
+	if body["max_output_tokens"] != 1024 {
+		t.Errorf("max_output_tokens = %v, want 1024", body["max_output_tokens"])
+	}
+	if body["instructions"] != "You are concise." {
+		t.Errorf("instructions = %v, want system text", body["instructions"])
+	}
+	input, ok := body["input"].([]openAIResponsesInput)
+	if !ok {
+		t.Fatalf("input = %T, want []openAIResponsesInput", body["input"])
+	}
+	if len(input) != 1 || input[0].Role != "user" {
+		t.Fatalf("input = %+v, want user role only", input)
+	}
+}
+
+func TestOpenAIResponsesJSONResponse(t *testing.T) {
+	body := `{
+		"output": [{
+			"type": "message",
+			"role": "assistant",
+			"content": [{"type": "output_text", "text": "Hello from Responses!"}]
+		}],
+		"usage": {"input_tokens": 12, "output_tokens": 3},
+		"model": "gpt-5.5"
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer test-key" {
+			t.Errorf("Authorization = %q, want %q", auth, "Bearer test-key")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAI("test-key", "gpt-5.5", 1024,
+		WithHTTPClient(srv.Client()),
+		WithResponsesBaseURL(srv.URL+"/v1/responses"),
+	)
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "Hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if resp.Content != "Hello from Responses!" {
+		t.Errorf("Content = %q, want %q", resp.Content, "Hello from Responses!")
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage is nil")
+	}
+	if resp.Usage.InputTokens != 12 {
+		t.Errorf("InputTokens = %d, want 12", resp.Usage.InputTokens)
+	}
+	if resp.Usage.OutputTokens != 3 {
+		t.Errorf("OutputTokens = %d, want 3", resp.Usage.OutputTokens)
 	}
 }
 
