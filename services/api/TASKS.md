@@ -238,7 +238,7 @@
 
 **Operational Checklist** (L1.A 머지 후):
 - [ ] **L2 plan trigger by 2026-05-16 (D7 SLA, L1.A=`3c28f6a` 2026-05-02 머지 + 14일)** — `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
-- [ ] **L3 별도 plan** — fab deploy 종결부에 `bash deploy/smoke.sh` 추가 (D4 (A) bash+curl+jq). prod URL `/health` + 핵심 endpoint 1-2개 envelope 검증.
+- [x] **L3 prod smoke ✅ (Plan 10)** — `deploy/smoke.sh` 신규. 17 endpoint cover (/health + /discovery + 14 외부 API + /v1/geo/resolve). `make smoke` / `fab smoke` / `fab deploy` 종결부 자동 호출. 첫 검증에서 routing 회귀 (Air `/v1/air/airkorea/...` prefix) 즉시 catch — integration test 가 못 잡는 layer 증명.
 - [ ] **T0 spike** — `data.go.kr` 5 service key 별 daily limit 확인 (HOLIDAY/WEATHER/AIRKOREA + KASI 음력/일출). 결과를 plan v2 §D3 표에 record. L2 plan prerequisite.
 - [x] **L1.B (airkorea 5 endpoint) + L1.C (weather UltraShort 2)** — Plan 9 ✅ (이번 세션). 외부 API 의존 endpoint cover 100%.
 - [ ] **L1.D (geo HTTP layer)** ⏸️ 별도 plan — DB+API hybrid 재설계 필요. plan v2 §D6 박제. 행안부 좌표 + PR-2 T2/T3 머지 후 trigger.
@@ -259,7 +259,26 @@
 **Operational Checklist (L1.B/C 머지 후)**:
 - [ ] **L1.D (Geo HTTP layer)** ⏸️ 별도 plan — Plan 8 v2 D6 ⚠ DB+API hybrid. 행안부 좌표 자료 도착 + PR-2 T2/T3 머지 후 trigger.
 - [ ] **OAuth integration (10 endpoint)** ⏸️ 별도 plan — browser flow (Playwright/headless). 사용자 영향 큼.
-- [ ] **/health + /discovery** ⏸️ L3 prod smoke 영역 (외부 API 의존 0, integration 부적합).
+- [x] **/health + /discovery** ✅ L3 smoke (Plan 10) cover.
+
+## Plan 10: L3 Prod Smoke — `deploy/smoke.sh` ✅
+
+> Spec: Plan 8 v2 §D4(A) bash + curl + jq 박제대로
+> Goal: prod URL (`api.kittypaw.app`) 대상 17 endpoint 자동 smoke
+> 직접 동기: integration test (in-process httptest) 가 routing/배포 회귀 못 catch — Plan 9 까지의 100% integration cover 도 prefix 잘못은 무방비
+
+- [x] **`deploy/smoke.sh` 신규** — 17 endpoint cover. HTTP 200 + envelope resultCode=00 (KASI/KMA/AirKorea) + lat/lon/name_matched (geo). anon 5rpm/IP rate-limit auto-retry (429 → 61s wait → retry once). KASI/KMA rate-limit (resultCode=22/99) = warn 처리.
+
+- [x] **Makefile `smoke` target** — `make smoke` 단독 호출.
+
+- [x] **fabfile.py 통합** — `fab deploy` 종결부 자동 smoke + 별도 `fab smoke` task.
+
+- [x] **검증** — 17/17 PASS against api.kittypaw.app. 첫 시도에서 Air prefix 회귀 catch (`/v1/air/airkorea/...`) — integration test layer 가 못 잡은 routing 회귀.
+
+**비범위**:
+- OAuth 10 endpoint — browser flow, 별도 plan
+- prod 자동 smoke 의 CI 통합 — L2 plan (D7 SLA 2026-05-16) 영역
+- Cloudflare 우회 / 운영자 IP 화이트리스트 — 운영 시 검토
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 

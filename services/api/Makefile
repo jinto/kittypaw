@@ -1,7 +1,7 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
 
-.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
+.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve smoke
 
 build:
 	go build -o $(BINARY) $(PKG)
@@ -78,3 +78,9 @@ test-integration:
 
 test-integration-down:
 	@docker-compose -f docker-compose.test.yml down -v
+
+# --- Prod smoke (Plan 8 v2 D4 / L3) -------------------------------------------
+# Verifies every external-API endpoint against prod (default) or a custom URL.
+# Throttled to stay under anon 5rpm/IP rate-limit. Requires `jq`.
+smoke:
+	@bash deploy/smoke.sh

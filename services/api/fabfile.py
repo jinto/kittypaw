@@ -70,7 +70,7 @@ def setup(ctx):
 
 @task
 def deploy(ctx):
-    """Build, upload binary, restart service."""
+    """Build, upload binary, restart service, then run prod smoke."""
     binary_path = _local_build()
 
     c = _conn()
@@ -84,9 +84,26 @@ def deploy(ctx):
 
     # Restart
     c.sudo(f"systemctl restart {SERVICE}")
-    c.run("sleep 1")
+    c.run("sleep 2")
     c.sudo(f"systemctl is-active {SERVICE}")
     print("Deployed.")
+
+    # Plan 8 v2 D4(A): post-deploy smoke verifies prod responds before
+    # declaring success. Failures here exit non-zero so CI/manual deploys
+    # surface regressions immediately.
+    smoke(ctx)
+
+
+@task
+def smoke(ctx):
+    """Run prod smoke against api.kittypaw.app (or BASE_URL override)."""
+    result = subprocess.run(
+        ["bash", str(LOCAL_ROOT / "deploy" / "smoke.sh")],
+        cwd=LOCAL_ROOT,
+    )
+    if result.returncode != 0:
+        print("Smoke failed — see above for the failing endpoints.")
+        sys.exit(result.returncode)
 
 
 @task
