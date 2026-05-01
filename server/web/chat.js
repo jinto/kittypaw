@@ -121,8 +121,7 @@ const Chat = {
 
       case 'done':
         if (this.currentBubble) {
-          const result = (msg.full_text || '').trim();
-          this.currentBubble.innerHTML = renderMarkdown(result);
+          this._renderAssistantDone(this.currentBubble, msg);
           this.currentBubble.classList.remove('streaming');
           this.currentBubble = null;
           this._scrollToBottom();
@@ -183,6 +182,24 @@ const Chat = {
     el.textContent = text;
     this.messagesEl.appendChild(el);
     this._scrollToBottom();
+  },
+
+  _renderAssistantDone(el, msg) {
+    const result = (msg.full_text || '').trim();
+    const image = msg.image;
+    if (!image || !image.url) {
+      el.innerHTML = renderMarkdown(result);
+      return;
+    }
+
+    const caption = (image.caption || '').trim();
+    el.innerHTML = caption ? renderMarkdown(caption) : '';
+    const img = document.createElement('img');
+    img.className = 'chat-image';
+    img.src = image.url;
+    img.alt = image.alt || '';
+    img.loading = 'lazy';
+    el.appendChild(img);
   },
 
   _scrollToBottom() {

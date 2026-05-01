@@ -608,7 +608,9 @@ func imageOpenAIWithURL(ctx context.Context, endpoint, prompt, apiKey string) (m
 
 	var apiResp struct {
 		Data []struct {
-			URL string `json:"url"`
+			URL          string `json:"url"`
+			B64JSON      string `json:"b64_json"`
+			OutputFormat string `json:"output_format"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -619,10 +621,16 @@ func imageOpenAIWithURL(ctx context.Context, endpoint, prompt, apiKey string) (m
 		return nil, fmt.Errorf("openai image: no images in response")
 	}
 
-	return map[string]any{
-		"url":   apiResp.Data[0].URL,
-		"model": dalleModel,
-	}, nil
+	img := apiResp.Data[0]
+	imageURL := strings.TrimSpace(img.URL)
+	if imageURL == "" && img.B64JSON != "" {
+		imageURL = fmt.Sprintf("data:%s;base64,%s", imageFormatMIME(img.OutputFormat), img.B64JSON)
+	}
+	if imageURL == "" {
+		return nil, fmt.Errorf("openai image: missing image payload in response")
+	}
+
+	return imageResult(imageURL, dalleModel), nil
 }
 
 func imageGemini(ctx context.Context, prompt, apiKey string) (map[string]any, error) {
@@ -673,13 +681,32 @@ func imageGeminiWithURL(ctx context.Context, endpoint, prompt, apiKey string) (m
 	}
 
 	pred := apiResp.Predictions[0]
+	if pred.BytesBase64Encoded == "" {
+		return nil, fmt.Errorf("gemini image: missing image payload in response")
+	}
 	mimeType := pred.MimeType
 	if mimeType == "" {
 		mimeType = "image/png"
 	}
 
+	return imageResult(fmt.Sprintf("data:%s;base64,%s", mimeType, pred.BytesBase64Encoded), imagenModel), nil
+}
+
+func imageResult(imageURL, model string) map[string]any {
 	return map[string]any{
-		"url":   fmt.Sprintf("data:%s;base64,%s", mimeType, pred.BytesBase64Encoded),
-		"model": imagenModel,
-	}, nil
+		"url":      imageURL,
+		"imageUrl": imageURL,
+		"model":    model,
+	}
+}
+
+func imageFormatMIME(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "jpeg", "jpg":
+		return "image/jpeg"
+	case "webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
 }

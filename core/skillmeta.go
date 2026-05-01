@@ -105,7 +105,7 @@ var SkillRegistry = []SkillMeta{
 		{Name: "speak", Signature: "Tts.speak(text) — returns {path}"},
 	}},
 	{Name: "Image", Methods: []SkillMethodMeta{
-		{Name: "generate", Signature: "Image.generate(prompt) — returns {url}"},
+		{Name: "generate", Signature: "Image.generate(prompt) — returns {url, imageUrl, model, error?}"},
 	}},
 	{Name: "Vision", Methods: []SkillMethodMeta{
 		{Name: "analyze", Signature: "Vision.analyze(imageUrl, prompt) — returns {text}"},

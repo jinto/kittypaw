@@ -17,13 +17,14 @@ type WsClientMsg struct {
 // WsServerMsg represents messages from the server to WebSocket clients.
 // Discriminated by the "type" field.
 type WsServerMsg struct {
-	Type        string `json:"type"`
-	ID          string `json:"id,omitempty"`          // for "session"
-	FullText    string `json:"full_text,omitempty"`   // for "done"
-	TokensUsed  *int64 `json:"tokens_used,omitempty"` // for "done"
-	Message     string `json:"message,omitempty"`     // for "error"
-	Description string `json:"description,omitempty"` // for "permission"
-	Resource    string `json:"resource,omitempty"`    // for "permission"
+	Type        string           `json:"type"`
+	ID          string           `json:"id,omitempty"`          // for "session"
+	FullText    string           `json:"full_text,omitempty"`   // for "done"
+	TokensUsed  *int64           `json:"tokens_used,omitempty"` // for "done"
+	Message     string           `json:"message,omitempty"`     // for "error"
+	Description string           `json:"description,omitempty"` // for "permission"
+	Resource    string           `json:"resource,omitempty"`    // for "permission"
+	Image       *ImageAttachment `json:"image,omitempty"`       // for "done"
 	// TurnID echoes back the client's WsClientMsg.TurnID on "done" /
 	// "error" so a future parallel-turn protocol can route responses;
 	// today's serial WS path doesn't strictly need it but the field is
@@ -56,10 +57,20 @@ func NewDoneMsg(fullText string, tokensUsed *int64) WsServerMsg {
 	return WsServerMsg{Type: WsMsgDone, FullText: fullText, TokensUsed: tokensUsed}
 }
 
+// NewDoneMsgFromOutbound creates a completion message from a rich outbound response.
+func NewDoneMsgFromOutbound(out OutboundResponse, tokensUsed *int64) WsServerMsg {
+	return WsServerMsg{Type: WsMsgDone, FullText: out.Text, TokensUsed: tokensUsed, Image: out.Image}
+}
+
 // NewDoneMsgForTurn creates a completion message that echoes the
 // turn_id back to the client.
 func NewDoneMsgForTurn(turnID, fullText string, tokensUsed *int64) WsServerMsg {
 	return WsServerMsg{Type: WsMsgDone, FullText: fullText, TokensUsed: tokensUsed, TurnID: turnID}
+}
+
+// NewDoneMsgForTurnWithOutbound creates a rich completion message tagged with turn_id.
+func NewDoneMsgForTurnWithOutbound(turnID string, out OutboundResponse, tokensUsed *int64) WsServerMsg {
+	return WsServerMsg{Type: WsMsgDone, FullText: out.Text, TokensUsed: tokensUsed, TurnID: turnID, Image: out.Image}
 }
 
 // NewErrorMsg creates an error message.

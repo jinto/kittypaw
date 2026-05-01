@@ -80,7 +80,20 @@ func (w *WebSocketChannel) SendResponse(ctx context.Context, chatID, response, _
 	if err != nil {
 		return err
 	}
+	return w.writeToClientOrBroadcast(ctx, chatID, data)
+}
 
+// SendRichResponse sends a structured response to WebSocket clients.
+func (w *WebSocketChannel) SendRichResponse(ctx context.Context, chatID string, response core.OutboundResponse, _ string) error {
+	msg := core.NewDoneMsgFromOutbound(response, nil)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return w.writeToClientOrBroadcast(ctx, chatID, data)
+}
+
+func (w *WebSocketChannel) writeToClientOrBroadcast(ctx context.Context, chatID string, data []byte) error {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
