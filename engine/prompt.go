@@ -107,6 +107,18 @@ If adequate → first-person synthesis. NEVER:
 
 If inadequate → honest acknowledgment + next-step proposal. Do NOT fabricate.
 Do NOT close with "검색 결과에 없습니다." style mechanical refusal.
+Do NOT hand the user a list of generic links and expect them to click through.
+If the search only found landing pages / converter pages / app pages but no
+answer-bearing value, say that directly and prefer a concrete next action
+(fetch a specific source, use/install a domain skill, or ask for the missing
+slot) over dumping URLs.
+Do not call search-result candidates confirmed sources. A search result says
+"I found pages that may contain the answer"; it does not mean you verified the
+facts inside those pages. Use labels like "검색에서 찾은 관련 페이지" / "웹 검색
+후보" unless you actually fetched or extracted answer-bearing content.
+Also avoid mechanical section labels like "다음 단계:" / "Next step:" in user
+answers. Phrase suggestions as your judgment: "제가 보기엔 ... 하는 편이
+낫습니다. ... 해볼까요?"
 
 The tool output is the assistant's own observation, not the user's input.
 Always first-person framing ("찾아본 결과로는…", "I checked and…"). Never frame
@@ -137,12 +149,15 @@ A bare "스킬 있어요. 설치할까요?" with no surrounding context feels li
 cold-pitching the user.
 
 The flow:
-1. Web.search → evidence body: name 2-3 sources you actually saw, honestly
-   admit if no live numbers came back, recommend 2-3 sites the user can
-   check directly.
-2. Skill.search → suffix. 1 hit → "참고로 ... 스킬이 있는데 설치를
-   도와드릴까요?". ≥2 hits → list with descriptions and ask which —
-   never auto-install the first match (different skills, user picks).
+1. Web.search → evidence body: name the source categories or concrete sources
+   you actually saw, honestly admit if no live values came back, and propose a
+   concrete next action. Do not dump generic links as the answer.
+2. Skill.search → suffix. Always explain 설치하면 무엇을 바로 할 수 있는지
+   before asking. 1 hit → "… 스킬을 설치하면 [capability]를 바로 할 수
+   있어요. 설치해서 지금 실행할까요?". ≥2 hits → list with descriptions
+   and ask which — never auto-install the first match (different skills,
+   user picks). Do not use a cold "참고로 ... 설치해드릴까요?" without a
+   concrete benefit.
 
 RIGHT — domain query → evidence body + skill suffix:
 const r = Web.search("USD JPY 실시간 환율");
@@ -155,7 +170,7 @@ const skillNote = hits.length === 0 ? ""
   : hits.length === 1 ? "\n\n[skill match] \"" + hits[0].name + "\" — " + hits[0].description
   : "\n\n[skill match — multiple, ask user which]\n" + hits.slice(0,3).map(s => "• " + s.name + ": " + s.description).join("\n");
 return Llm.generate(
-  "비서로서 한국어 1-3 문단. (1) 살펴본 소스 자연스럽게 언급. (2) 수치 부족 시 솔직 인정 + 사이트 2-3 추천. (3) [skill match] 1개 → 응답의 마지막 줄을 정확히 '참고로 [스킬명] 스킬을 설치해드릴까요?' yes/no 형태로 끝낸다. open-ended ('어떻게 도와드릴까요?') 금지. 여러 개 → 옵션 노출 + 사용자 선택 (자동 첫 번째 X). first-person.\n\n결과:\n" + top + skillNote
+  "비서로서 한국어 1-3 문단. (1) 살펴본 소스 자연스럽게 언급. (2) 수치 부족 시 솔직 인정. 일반 링크 나열 금지. (3) [skill match] 1개 → 마지막 줄에서 '[스킬명] 스킬을 설치하면 [무엇]을 바로 할 수 있어요. 설치해서 지금 실행할까요?' 형태로 가치+행동을 함께 묻는다. open-ended ('어떻게 도와드릴까요?') 금지. 여러 개 → 옵션 노출 + 사용자 선택 (자동 첫 번째 X). first-person.\n\n결과:\n" + top + skillNote
 ).text;
 
 Skill.search returns ` + "`{results: [{id, name, version, description, author}], error?}`" + ` —
@@ -371,13 +386,17 @@ func buildSkillsSection(baseDir string) string {
 		pm := core.NewPackageManagerFrom(baseDir, nil)
 		if packages, err := pm.ListInstalled(); err == nil {
 			for _, pkg := range packages {
-				runnable = append(runnable, fmt.Sprintf("- Skill.run(\"%s\") — %s", pkg.Meta.ID, pkg.Meta.Description))
+				line := fmt.Sprintf("- Skill.run(\"%s\"[, params]) — %s", pkg.Meta.ID, pkg.Meta.Description)
+				if params := formatInvocationInputs(pkg.Invocation.Inputs); params != "" {
+					line += " Params: " + params
+				}
+				runnable = append(runnable, line)
 			}
 		}
 
 		if len(runnable) > 0 {
-			lines = append(lines, "\n### Installed skills & packages (use Skill.run(id) to execute on demand)")
-			lines = append(lines, "**PRIORITY**: When a user request matches an installed package, call Skill.run(id) INSTEAD of Web.search. "+
+			lines = append(lines, "\n### Installed skills & packages (use Skill.run(id[, params]) to execute on demand)")
+			lines = append(lines, "**PRIORITY**: When a user request matches an installed package, call Skill.run(id[, params]) INSTEAD of Web.search. "+
 				"Packages produce higher-quality, structured results from dedicated APIs.")
 			lines = append(lines, "**OUTPUT**: Skill.run returns {success: true, output: \"<message>\"}. "+
 				"The output field already contains a complete, formatted message ready for the user. "+
@@ -404,6 +423,24 @@ func buildSkillsSection(baseDir string) string {
 		"second time — the prior turn's suffix was the only LLM-level confirm the user should see.")
 
 	return strings.Join(lines, "\n")
+}
+
+func formatInvocationInputs(inputs []core.InvocationInput) string {
+	if len(inputs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		if in.Key == "" || in.Path == "" {
+			continue
+		}
+		part := in.Key + " -> " + in.Path
+		if in.Resolver != "" {
+			part += " (" + in.Resolver + ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // BuildMCPToolsSection generates a prompt section listing MCP tools from all

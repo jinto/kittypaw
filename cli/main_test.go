@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
@@ -78,6 +79,20 @@ func TestIsTransportDropErr_RejectsServerSide(t *testing.T) {
 	}
 }
 
+func TestShouldPrintChatSendErrorSuppressesServerSideCallbackErrors(t *testing.T) {
+	err := fmt.Errorf("%w: 지금 답변을 만들지 못했어요", client.ErrServerSide)
+	if shouldPrintChatSendError(false, err) {
+		t.Fatal("server-side errors already shown by OnError should not be printed again")
+	}
+}
+
+func TestShouldPrintChatSendErrorPrintsTransportErrorsWithoutResult(t *testing.T) {
+	err := fmt.Errorf("read ws msg: EOF")
+	if !shouldPrintChatSendError(false, err) {
+		t.Fatal("transport errors without a result should be printed")
+	}
+}
+
 func TestIsTransportDropErr_NegativeCases(t *testing.T) {
 	cases := []string{
 		"daemon failed to start",
@@ -101,6 +116,10 @@ func TestIsTransportDropErr_NilSafe(t *testing.T) {
 }
 
 func TestResolveCLIAccountExplicit(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
 	got, err := resolveCLIAccount("alice")
 	if err != nil || got != "alice" {
 		t.Fatalf("resolveCLIAccount explicit = %q, %v; want alice nil", got, err)
@@ -111,6 +130,10 @@ func TestResolveCLIAccountExplicit(t *testing.T) {
 }
 
 func TestResolveCLIAccountEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
 	t.Setenv("KITTYPAW_ACCOUNT", "alice")
 	got, err := resolveCLIAccount("")
 	if err != nil || got != "alice" {
@@ -119,6 +142,23 @@ func TestResolveCLIAccountEnv(t *testing.T) {
 	t.Setenv("KITTYPAW_ACCOUNT", "../bad")
 	if _, err := resolveCLIAccount(""); err == nil {
 		t.Fatal("expected invalid env account error")
+	}
+}
+
+func TestResolveCLIAccountExplicitMissingAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	_, err := resolveCLIAccount("missing")
+	if err == nil {
+		t.Fatal("expected missing explicit account error")
+	}
+	for _, want := range []string{"missing", "alice"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
@@ -152,11 +192,93 @@ func TestResolveCLIAccountMultipleRequiresExplicit(t *testing.T) {
 	}
 }
 
+func TestResolveCLIAccountUsesServerDefaultAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
+	if err := os.WriteFile(filepath.Join(root, "server.toml"), []byte("default_account = \"bob\"\n"), 0o600); err != nil {
+		t.Fatalf("write server.toml: %v", err)
+	}
+
+	got, err := resolveCLIAccount("")
+	if err != nil || got != "bob" {
+		t.Fatalf("resolveCLIAccount = %q, %v; want bob nil", got, err)
+	}
+}
+
 func TestResolveCLIAccountNoAccounts(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
 	t.Setenv("KITTYPAW_ACCOUNT", "")
 	if _, err := resolveCLIAccount(""); err == nil {
 		t.Fatal("expected no accounts error")
+	}
+}
+
+func TestPrintAccountContext(t *testing.T) {
+	var b strings.Builder
+	printAccountContext(&b, "jinto", "kittypaw chat")
+	if got, want := b.String(), "Account: jinto\n"; got != want {
+		t.Fatalf("account context = %q, want %q", got, want)
+	}
+}
+
+func TestFormatChatHeaderUsesCompactAccountFirstShape(t *testing.T) {
+	got := formatChatHeader("dev-cli", "dev-server", "claude-test", "jinto", []string{"telegram"})
+	want := "KittyPaw chat · jinto · claude-test · telegram"
+	if got != want {
+		t.Fatalf("formatChatHeader = %q, want %q", got, want)
+	}
+}
+
+func TestSkillResetHintMessagePointsToRightCommands(t *testing.T) {
+	got := skillResetHintMessage()
+	for _, want := range []string{"kittypaw reset", "kittypaw skill uninstall <name>"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("skill reset hint %q missing %q", got, want)
+		}
+	}
+}
+
+func TestDefaultAccountBaseUsesResolvedAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	flagAccount = ""
+	if err := os.MkdirAll(filepath.Join(root, "accounts", "default"), 0o700); err != nil {
+		t.Fatalf("mkdir incomplete default account: %v", err)
+	}
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "jinto", "config.toml"))
+
+	got, err := defaultAccountBase()
+	if err != nil {
+		t.Fatalf("defaultAccountBase: %v", err)
+	}
+	want := filepath.Join(root, "accounts", "jinto")
+	if got != want {
+		t.Fatalf("defaultAccountBase = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStoreUsesResolvedAccountDB(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	flagAccount = ""
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "jinto", "config.toml"))
+
+	st, err := openStore()
+	if err != nil {
+		t.Fatalf("openStore: %v", err)
+	}
+	_ = st.Close()
+
+	if _, err := os.Stat(filepath.Join(root, "accounts", "jinto", "data", "kittypaw.db")); err != nil {
+		t.Fatalf("expected account db: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "data", "kittypaw.db")); !os.IsNotExist(err) {
+		t.Fatalf("legacy db should not be created; stat err = %v", err)
 	}
 }
 
@@ -209,6 +331,67 @@ func TestResolveServeBindFallsBackToSelectedAccount(t *testing.T) {
 	got := resolveServeBind(cmd, core.TopLevelServerConfig{MasterAPIKey: "server-key"}, deps)
 	if got != "127.0.0.1:4567" {
 		t.Fatalf("resolveServeBind = %q, want account bind", got)
+	}
+}
+
+func TestBootstrapBackfillsMissingAccountAPIKey(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("HOME", t.TempDir())
+
+	cfg := core.DefaultConfig()
+	cfg.LLM.Provider = "anthropic"
+	cfg.LLM.APIKey = "test-key"
+	cfg.LLM.Model = "claude-test"
+	cfg.Server.APIKey = ""
+	cfgPath := filepath.Join(root, "accounts", "alice", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o700); err != nil {
+		t.Fatalf("mkdir account dir: %v", err)
+	}
+	if err := core.WriteConfigAtomic(&cfg, cfgPath); err != nil {
+		t.Fatalf("write account config: %v", err)
+	}
+
+	deps, _, err := bootstrap()
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	for _, dep := range deps {
+		_ = dep.Close()
+	}
+
+	loaded, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("reload account config: %v", err)
+	}
+	if loaded.Server.APIKey == "" {
+		t.Fatal("bootstrap must backfill server.api_key for existing accounts")
+	}
+}
+
+func TestWaitForProcessExitPollsUntilProcessStops(t *testing.T) {
+	oldProcessRunning := processRunning
+	oldPollInterval := stopWaitPollInterval
+	defer func() {
+		processRunning = oldProcessRunning
+		stopWaitPollInterval = oldPollInterval
+	}()
+
+	calls := 0
+	processRunning = func(pid int) bool {
+		if pid != 123 {
+			t.Fatalf("pid = %d, want 123", pid)
+		}
+		calls++
+		return calls < 3
+	}
+	stopWaitPollInterval = time.Nanosecond
+
+	if !waitForProcessExit(123, time.Second) {
+		t.Fatal("waitForProcessExit returned false before process stopped")
+	}
+	if calls < 3 {
+		t.Fatalf("processRunning called %d times, want at least 3", calls)
 	}
 }
 

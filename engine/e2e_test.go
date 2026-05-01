@@ -118,6 +118,54 @@ func TestE2ESimpleReturn(t *testing.T) {
 	}
 }
 
+func TestE2EStripsMarkdownFenceBeforeExecution(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	sess := newTestSession(t, mockResp("```javascript\nreturn \"Hello from fenced code\";\n```"))
+	event := webChatEvent("say hello")
+
+	output, err := sess.Run(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if output != "Hello from fenced code" {
+		t.Errorf("output = %q, want %q", output, "Hello from fenced code")
+	}
+}
+
+func TestE2EWrapsPlainTextBeforeExecution(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	sess := newTestSession(t, mockResp("안녕하세요! 무엇을 도와드릴까요?"))
+	event := webChatEvent("say hello")
+
+	output, err := sess.Run(context.Background(), event, nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if output != "안녕하세요! 무엇을 도와드릴까요?" {
+		t.Errorf("output = %q, want plain text", output)
+	}
+}
+
+func TestE2ERecordsPendingClarification(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	sess := newTestSession(t, mockResp("환율 말씀이세요? 맞으면 지금 기준으로 찾아볼게요."))
+	event := webChatEvent("달러")
+
+	if _, err := sess.Run(context.Background(), event, nil); err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	pending, ok := sess.Pipeline.RecentPendingClarification()
+	if !ok {
+		t.Fatal("expected pending clarification")
+	}
+	if pending.Kind != "exchange_rate" || pending.Query != "달러" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
 func TestE2ESkillCall(t *testing.T) {
 	skipWithoutRuntime(t)
 
@@ -371,6 +419,168 @@ context = ["locale", "location"]
 	}
 	if mock.callIdx != 1 {
 		t.Errorf("expected 1 LLM call, got %d", mock.callIdx)
+	}
+}
+
+func TestE2EPackageParamsOverlayStructuredLocation(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify({
+  params: ctx.params && ctx.params.location,
+  user: ctx.user && ctx.user.location
+});
+`)
+
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Store:          st,
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+	}
+
+	raw, err := runSkillOrPackageWithParams(context.Background(), "weather-now", sess, map[string]any{
+		"location": map[string]any{
+			"label": "강남역",
+			"lat":   37.4979,
+			"lon":   127.0276,
+		},
+	})
+	if err != nil {
+		t.Fatalf("runSkillOrPackageWithParams() error: %v", err)
+	}
+	var wrapper struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapper); err != nil {
+		t.Fatalf("parse wrapper: %v (raw: %s)", err, raw)
+	}
+	var output struct {
+		Params struct {
+			Label string  `json:"label"`
+			Lat   float64 `json:"lat"`
+			Lon   float64 `json:"lon"`
+		} `json:"params"`
+		User struct {
+			City string  `json:"city"`
+			Lat  float64 `json:"lat"`
+			Lon  float64 `json:"lon"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal([]byte(wrapper.Output), &output); err != nil {
+		t.Fatalf("parse output: %v (output: %s)", err, wrapper.Output)
+	}
+	if output.Params.Label != "강남역" || output.Params.Lat != 37.4979 || output.Params.Lon != 127.0276 {
+		t.Fatalf("params.location = %+v, want structured 강남역", output.Params)
+	}
+	if output.User.City != "강남역" || output.User.Lat != 37.4979 || output.User.Lon != 127.0276 {
+		t.Fatalf("user.location overlay = %+v, want structured 강남역", output.User)
+	}
+}
+
+func TestE2ESkillRunPassesStructuredParams(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "echo-params"
+name = "Echo Params"
+version = "1.0.0"
+description = "Echoes structured params."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify({
+  params: ctx.params,
+  user: ctx.user
+});
+`)
+
+	st, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Store:          st,
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+	}
+
+	nameArg, _ := json.Marshal("echo-params")
+	paramsArg, _ := json.Marshal(map[string]any{
+		"location": map[string]any{
+			"label": "강남역",
+			"lat":   37.4979,
+			"lon":   127.0276,
+		},
+	})
+	raw, err := resolveSkillCall(context.Background(), core.SkillCall{
+		SkillName: "Skill",
+		Method:    "run",
+		Args:      []json.RawMessage{nameArg, paramsArg},
+	}, sess, nil)
+	if err != nil {
+		t.Fatalf("resolveSkillCall() error: %v", err)
+	}
+	var wrapper struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapper); err != nil {
+		t.Fatalf("parse wrapper: %v (raw: %s)", err, raw)
+	}
+	var got struct {
+		Params struct {
+			Location struct {
+				Label string  `json:"label"`
+				Lat   float64 `json:"lat"`
+				Lon   float64 `json:"lon"`
+			} `json:"location"`
+		} `json:"params"`
+		User struct {
+			Location struct {
+				City string  `json:"city"`
+				Lat  float64 `json:"lat"`
+				Lon  float64 `json:"lon"`
+			} `json:"location"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal([]byte(wrapper.Output), &got); err != nil {
+		t.Fatalf("parse output: %v (output: %s)", err, wrapper.Output)
+	}
+	if got.Params.Location.Label != "강남역" || got.Params.Location.Lat != 37.4979 || got.Params.Location.Lon != 127.0276 {
+		t.Fatalf("params.location = %+v, want structured 강남역", got.Params.Location)
+	}
+	if got.User.Location.City != "강남역" || got.User.Location.Lat != 37.4979 || got.User.Location.Lon != 127.0276 {
+		t.Fatalf("user.location overlay = %+v, want structured 강남역", got.User.Location)
 	}
 }
 

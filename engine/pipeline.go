@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,12 +20,16 @@ import (
 type IntentKind string
 
 const (
-	IntentChitchat            IntentKind = "chitchat"
-	IntentBrowse              IntentKind = "browse"
-	IntentInstallConsentReply IntentKind = "install_consent_reply"
-	IntentRunInstalledSkill   IntentKind = "run_installed_skill"
-	IntentModifierFollowup    IntentKind = "modifier_followup"
-	IntentLegacyFallback      IntentKind = "legacy_fallback"
+	IntentChitchat             IntentKind = "chitchat"
+	IntentBrowse               IntentKind = "browse"
+	IntentConfirmClarification IntentKind = "confirm_clarification"
+	IntentExchangeRateLookup   IntentKind = "exchange_rate_lookup"
+	IntentWeatherNowLookup     IntentKind = "weather_now_lookup"
+	IntentInstallConsentReply  IntentKind = "install_consent_reply"
+	IntentRunInstalledSkill    IntentKind = "run_installed_skill"
+	IntentModifierFollowup     IntentKind = "modifier_followup"
+	IntentAmbiguousFollowup    IntentKind = "ambiguous_followup"
+	IntentLegacyFallback       IntentKind = "legacy_fallback"
 )
 
 // Intent is the classifier's output. Params carry branch-specific state
@@ -64,8 +70,42 @@ func classifyIntent(text string, state *PipelineState, sess *Session) Intent {
 	if isBrowse(t) {
 		return Intent{Kind: IntentBrowse, Confidence: 1.0}
 	}
-	if state != nil && len(state.RecentSkillSearch()) > 0 && isInstallConsent(t) {
-		return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
+	if state != nil {
+		if pending, ok := state.RecentPendingClarification(); ok && isBareAffirmative(t) {
+			return Intent{
+				Kind: IntentConfirmClarification,
+				Params: map[string]any{
+					"kind":  pending.Kind,
+					"query": pending.Query,
+				},
+				Confidence: 1.0,
+			}
+		}
+		if pending, ok := state.RecentPendingClarification(); ok && pending.Kind == "weather_now_location" && looksLikeWeatherLocationReply(t) {
+			return Intent{
+				Kind: IntentConfirmClarification,
+				Params: map[string]any{
+					"kind":  pending.Kind,
+					"query": pending.Query,
+				},
+				Confidence: 1.0,
+			}
+		}
+		recentSkills := state.RecentSkillSearch()
+		if len(recentSkills) > 0 {
+			if selected, ok := selectRecentSkillCandidate(t, recentSkills); ok {
+				return Intent{
+					Kind: IntentInstallConsentReply,
+					Params: map[string]any{
+						"skill_id": selected.ID,
+					},
+					Confidence: 1.0,
+				}
+			}
+			if isInstallConsent(t) {
+				return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
+			}
+		}
 	}
 	// Modifier follow-up dispatch: short modifier-shaped query +
 	// recent skill output cached → mediation tool-use loop. The
@@ -79,9 +119,26 @@ func classifyIntent(text string, state *PipelineState, sess *Session) Intent {
 			Kind: IntentModifierFollowup,
 			Params: map[string]any{
 				"raw_output": state.RecentSkillOutput(),
+				"skill_id":   state.RecentSkillOutputSkillID(),
 			},
 			Confidence: 1.0,
 		}
+	}
+	if state != nil && state.RecentSkillOutputSkillID() == "weather-now" && looksLikeWeatherLocationFollowup(t) {
+		return Intent{
+			Kind: IntentAmbiguousFollowup,
+			Params: map[string]any{
+				"raw_output": state.RecentSkillOutput(),
+				"skill_id":   state.RecentSkillOutputSkillID(),
+			},
+			Confidence: 1.0,
+		}
+	}
+	if isExchangeRateLookupQuery(t) {
+		return Intent{Kind: IntentExchangeRateLookup, Confidence: 1.0}
+	}
+	if isWeatherNowLookupQuery(t) {
+		return Intent{Kind: IntentWeatherNowLookup, Confidence: 1.0}
 	}
 	// Installed-skill dispatch: when the query keyword appears in an
 	// already-installed package's name, run that skill directly. This
@@ -132,17 +189,93 @@ func matchInstalledSkill(text string, sess *Session) *core.SkillPackage {
 		return nil
 	}
 	lowered := strings.ToLower(text)
-	var matches []core.SkillPackage
+	type scoredPackage struct {
+		pkg   core.SkillPackage
+		score int
+	}
+	var matches []scoredPackage
 	for _, pkg := range packages {
-		if pkgKeywordMatches(lowered, pkg) {
-			matches = append(matches, pkg)
+		score := installedSkillMatchScore(lowered, pkg)
+		if score > 0 {
+			matches = append(matches, scoredPackage{pkg: pkg, score: score})
 		}
 	}
-	if len(matches) != 1 {
-		// 0 → no match, ≥2 → ambiguous (let legacy LLM resolve).
+	if len(matches) == 0 {
 		return nil
 	}
-	return &matches[0]
+	best := matches[0]
+	tie := false
+	for _, m := range matches[1:] {
+		if m.score > best.score {
+			best = m
+			tie = false
+			continue
+		}
+		if m.score == best.score {
+			tie = true
+		}
+	}
+	if tie {
+		// Ambiguous at the same relevance level — let the legacy LLM ask
+		// or use richer context rather than picking by package order.
+		return nil
+	}
+	return &best.pkg
+}
+
+func installedSkillMatchScore(loweredQuery string, pkg core.SkillPackage) int {
+	if !pkgKeywordMatches(loweredQuery, pkg) {
+		return 0
+	}
+
+	if isBriefingWeatherQuery(loweredQuery) && isScheduledWeatherPackage(pkg) {
+		return 100
+	}
+	if isCurrentWeatherQuery(loweredQuery) {
+		if isNowWeatherPackage(pkg) {
+			return 100
+		}
+		if isScheduledWeatherPackage(pkg) {
+			return 0
+		}
+	}
+
+	return 10
+}
+
+func isCurrentWeatherQuery(loweredQuery string) bool {
+	return containsAny(loweredQuery,
+		"현재", "지금", "방금", "막 ", "비오", "비 오", "비와", "비 와",
+		"몇 도", "기온", "날씨",
+	)
+}
+
+func isBriefingWeatherQuery(loweredQuery string) bool {
+	return containsAny(loweredQuery,
+		"매일", "아침", "브리핑", "요약", "알림", "텔레그램", "보내",
+	)
+}
+
+func isExchangeRateLookupQuery(loweredQuery string) bool {
+	return containsAny(loweredQuery, "환율", "usd/krw", "usd krw", "달러 환율", "원달러")
+}
+
+func isWeatherNowLookupQuery(loweredQuery string) bool {
+	if containsAny(loweredQuery, "내일", "모레", "주말", "다음", "오후", "저녁", "몇 시간", "1시간", "2시간", "3시간") {
+		return false
+	}
+	return isCurrentWeatherQuery(loweredQuery) && !isBriefingWeatherQuery(loweredQuery)
+}
+
+func isNowWeatherPackage(pkg core.SkillPackage) bool {
+	t := strings.ToLower(pkg.Meta.ID + " " + pkg.Meta.Name + " " + pkg.Meta.Description)
+	return containsAny(t, "weather-now", "현재 날씨", "지금 시점", "즉답", "비 여부")
+}
+
+func isScheduledWeatherPackage(pkg core.SkillPackage) bool {
+	t := strings.ToLower(pkg.Meta.ID + " " + pkg.Meta.Name + " " + pkg.Meta.Description)
+	return pkg.Meta.Cron != "" ||
+		containsAny(t, "weather-briefing", "매일", "아침", "브리핑", "알림", "텔레그램", "보내")
 }
 
 // queryHasModifier returns true when the user's query contains a
@@ -165,7 +298,7 @@ func queryHasModifier(query string) bool {
 		// Unit / currency conversion
 		"원화로", "원으로", "엔으로", "엔화로", "달러로", "유로로", "위안으로", "파운드로",
 		// Base reframe ("X 기준으로", "기준의")
-		"기준으로", "기준의",
+		"기준", "기준으로", "기준의",
 		// Verbosity / format
 		"간단히", "자세히", "짧게", "길게", "요약",
 		// Repeat / explicit recompute
@@ -242,6 +375,10 @@ func isInstallConsent(text string) bool {
 	if strings.Contains(text, "설치") {
 		return true
 	}
+	return isBareAffirmative(text)
+}
+
+func isBareAffirmative(text string) bool {
 	if runeCount(text) > 8 {
 		return false
 	}
@@ -259,6 +396,159 @@ func isInstallConsent(text string) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeWeatherLocationReply(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || isChitchat(text) {
+		return false
+	}
+	if isWeatherNowLookupQuery(text) {
+		return true
+	}
+	return runeCount(text) <= 24
+}
+
+func looksLikeWeatherLocationFollowup(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || runeCount(text) > 24 {
+		return false
+	}
+	if isChitchat(text) || isExchangeRateLookupQuery(text) || isBrowse(text) {
+		return false
+	}
+	loc := inferWeatherLocationFromText(text)
+	if loc != "" {
+		return true
+	}
+	normalized := normalizeLocationSlot(text)
+	return looksLikePlainLocationSlot(normalized)
+}
+
+func detectPendingClarification(userText, assistantText string) (PendingClarification, bool) {
+	userText = strings.TrimSpace(userText)
+	assistantText = strings.TrimSpace(assistantText)
+	if userText == "" || assistantText == "" {
+		return PendingClarification{}, false
+	}
+	if !looksLikeClarificationQuestion(assistantText) {
+		return PendingClarification{}, false
+	}
+	combined := strings.ToLower(userText + " " + assistantText)
+	if containsAny(combined, "환율", "달러", "usd", "원화", "krw") {
+		return PendingClarification{Kind: "exchange_rate", Query: userText}, true
+	}
+	if containsAny(combined, "날씨", "비오", "비 오", "비와", "비 와", "강수", "weather", "rain") {
+		return PendingClarification{Kind: "weather_now", Query: userText}, true
+	}
+	return PendingClarification{}, false
+}
+
+func looksLikeClarificationQuestion(text string) bool {
+	return containsAny(text,
+		"맞으면", "맞나요", "맞아요", "말씀이세요", "말인가요",
+		"찾아볼게요", "확인할까요", "조회할까요",
+	)
+}
+
+func exchangeRateRegistryEntry() core.RegistryEntry {
+	return core.RegistryEntry{
+		ID:          "exchange-rate",
+		Name:        "환율 조회",
+		Version:     "1.0.0",
+		Description: "키 없이 환율 표를 바로 조회합니다.",
+		Author:      "KittyPaw Team",
+	}
+}
+
+func weatherNowRegistryEntry() core.RegistryEntry {
+	return core.RegistryEntry{
+		ID:          "weather-now",
+		Name:        "현재 날씨",
+		Version:     "1.0.0",
+		Description: "wttr.in으로 현재 날씨와 비 여부를 즉답합니다.",
+		Author:      "KittyPaw Team",
+	}
+}
+
+func selectRecentSkillCandidate(text string, entries []core.RegistryEntry) (core.RegistryEntry, bool) {
+	q := strings.ToLower(strings.TrimSpace(text))
+	if q == "" || len(entries) == 0 {
+		return core.RegistryEntry{}, false
+	}
+
+	var best core.RegistryEntry
+	bestScore := 0
+	tie := false
+	for _, entry := range entries {
+		score := registryEntryIntentScore(q, entry)
+		if score > bestScore {
+			best = entry
+			bestScore = score
+			tie = false
+			continue
+		}
+		if score == bestScore && score > 0 {
+			tie = true
+		}
+	}
+	if bestScore == 0 || tie {
+		return core.RegistryEntry{}, false
+	}
+	return best, true
+}
+
+func registryEntryIntentScore(loweredQuery string, entry core.RegistryEntry) int {
+	id := strings.ToLower(entry.ID)
+	name := strings.ToLower(entry.Name)
+	desc := strings.ToLower(entry.Description)
+
+	switch {
+	case name != "" && strings.Contains(loweredQuery, name):
+		return 200
+	case id != "" && strings.Contains(loweredQuery, id):
+		return 190
+	}
+
+	score := 0
+	if isBriefingWeatherQuery(loweredQuery) && isScheduledWeatherEntry(entry) {
+		score += 100
+	}
+	if isCurrentWeatherQuery(loweredQuery) {
+		if isNowWeatherEntry(entry) {
+			score += 100
+		} else if isScheduledWeatherEntry(entry) {
+			score -= 100
+		}
+	}
+
+	for _, raw := range strings.Fields(id + " " + name) {
+		word := strings.Trim(raw, ".,()[]{}:;!?-_/\"'")
+		if runeCount(word) >= 2 && strings.Contains(loweredQuery, word) {
+			score += 20
+		}
+	}
+	for _, raw := range strings.Fields(desc) {
+		word := strings.Trim(raw, ".,()[]{}:;!?-_/\"'")
+		if runeCount(word) >= 2 && !pkgKeywordStopWord(word) && strings.Contains(loweredQuery, word) {
+			score += 5
+		}
+	}
+
+	if score <= 0 {
+		return 0
+	}
+	return score
+}
+
+func isNowWeatherEntry(entry core.RegistryEntry) bool {
+	t := strings.ToLower(entry.ID + " " + entry.Name + " " + entry.Description)
+	return containsAny(t, "weather-now", "현재 날씨", "지금 시점", "즉답", "비 여부")
+}
+
+func isScheduledWeatherEntry(entry core.RegistryEntry) bool {
+	t := strings.ToLower(entry.ID + " " + entry.Name + " " + entry.Description)
+	return containsAny(t, "weather-briefing", "매일", "아침", "브리핑", "알림", "텔레그램", "보내")
 }
 
 // isBrowse detects "show me what's available" queries — the user wants
@@ -347,12 +637,20 @@ func getBranch(kind IntentKind) Branch {
 		return &ChitchatBranch{}
 	case IntentBrowse:
 		return &BrowseBranch{}
+	case IntentConfirmClarification:
+		return &ConfirmClarificationBranch{}
+	case IntentExchangeRateLookup:
+		return &ExchangeRateLookupBranch{}
+	case IntentWeatherNowLookup:
+		return &WeatherNowLookupBranch{}
 	case IntentInstallConsentReply:
 		return &InstallConsentBranch{}
 	case IntentRunInstalledSkill:
 		return &RunInstalledSkillBranch{}
 	case IntentModifierFollowup:
 		return &ModifierFollowupBranch{}
+	case IntentAmbiguousFollowup:
+		return &AmbiguousFollowupBranch{}
 	}
 	return nil
 }
@@ -452,6 +750,527 @@ func categorize(name, desc string) string {
 	return "기타"
 }
 
+type ExchangeRateLookupBranch struct{}
+
+func (b *ExchangeRateLookupBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	if sess == nil || sess.Pipeline == nil {
+		return "", errBranchFallback
+	}
+	if pkg := matchInstalledSkill("환율", sess); pkg != nil {
+		params := exchangeRateParamsForText(FormatEvent(&event))
+		rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
+		output := extractOutputField(rawJSON)
+		if output == "" {
+			return "", errBranchFallback
+		}
+		if base := exchangeRateRequestedBase(params); base != "" && exchangeRateOutputBase(output) != base {
+			if rebased, ok := rebaseExchangeRateOutput(output, base); ok {
+				output = rebased
+			}
+		}
+		sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+		return output, nil
+	}
+	entry := exchangeRateRegistryEntry()
+	sess.Pipeline.RecordSkillSearch([]core.RegistryEntry{entry})
+	return formatExchangeRateLookupResponse(exchangeRateSearchResults(ctx, sess), entry), nil
+}
+
+type WeatherNowLookupBranch struct{}
+
+func (b *WeatherNowLookupBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	if sess == nil || sess.Pipeline == nil {
+		return "", errBranchFallback
+	}
+	if pkg := matchInstalledSkill("현재 날씨", sess); pkg != nil {
+		userText := FormatEvent(&event)
+		params, msg := weatherNowParamsForIntentOrText(ctx, sess, intent, userText)
+		if msg != "" {
+			sess.Pipeline.RecordPendingClarification(PendingClarification{
+				Kind:  "weather_now_location",
+				Query: userText,
+			})
+			return msg, nil
+		}
+		rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
+		output := extractOutputField(rawJSON)
+		if output == "" {
+			return "", errBranchFallback
+		}
+		sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+		return mediateSkillOutput(ctx, sess, pkg.Meta.ID, userText, output), nil
+	}
+	entry := weatherNowRegistryEntry()
+	sess.Pipeline.RecordSkillSearch([]core.RegistryEntry{entry})
+	if params, msg := weatherNowParamsForIntentOrText(ctx, sess, intent, FormatEvent(&event)); msg != "" {
+		sess.Pipeline.RecordPendingClarification(PendingClarification{
+			Kind:  "weather_now_location",
+			Query: FormatEvent(&event),
+		})
+		return msg, nil
+	} else if len(params) > 0 {
+		sess.Pipeline.RecordPendingSkillRun(entry.ID, params)
+	}
+	return "현재 날씨 스킬을 설치하면 방금 말한 위치의 현재 날씨와 비 여부를 바로 확인할 수 있어요. 설치해서 지금 실행할까요?", nil
+}
+
+func weatherNowParamsForIntentOrText(ctx context.Context, sess *Session, intent Intent, userText string) (map[string]any, string) {
+	if intent.Params != nil {
+		locationQuery, _ := intent.Params["location_query"].(string)
+		locationQuery = normalizeLocationSlot(locationQuery)
+		if locationQuery != "" {
+			loc, err := resolveStructuredLocation(ctx, sess, locationQuery)
+			if err != nil {
+				return nil, fmt.Sprintf("%s 위치를 확인하지 못했어요. 역 이름, 동 이름, 도시 이름처럼 조금 더 명확한 위치로 다시 말씀해 주세요.", locationQuery)
+			}
+			return weatherLocationParams(loc), ""
+		}
+	}
+	return weatherNowParamsForText(ctx, sess, userText)
+}
+
+func weatherNowParamsForText(ctx context.Context, sess *Session, userText string) (map[string]any, string) {
+	slots, err := extractWeatherNowSlots(ctx, sess, userText)
+	if err != nil {
+		return nil, "날씨를 확인하기 전에 말씀하신 위치를 정리하지 못했어요. 위치를 한 번만 더 구체적으로 말씀해 주세요."
+	}
+	if slots.LocationQuery == "" {
+		return nil, ""
+	}
+	loc, err := resolveStructuredLocation(ctx, sess, slots.LocationQuery)
+	if err != nil {
+		return nil, fmt.Sprintf("%s 위치를 확인하지 못했어요. 역 이름, 동 이름, 도시 이름처럼 조금 더 명확한 위치로 다시 말씀해 주세요.", slots.LocationQuery)
+	}
+	return weatherLocationParams(loc), ""
+}
+
+func exchangeRateSearchResults(ctx context.Context, sess *Session) []WebSearchResult {
+	if sess == nil || sess.Config == nil {
+		return nil
+	}
+	raw, err := webSearch(ctx, "USD KRW 환율 실시간", sess.Config)
+	if err != nil {
+		return nil
+	}
+	var payload struct {
+		Results []WebSearchResult `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	return payload.Results
+}
+
+func formatExchangeRateLookupResponse(results []WebSearchResult, entry core.RegistryEntry) string {
+	var sb strings.Builder
+	sources := summarizeExchangeRateSources(results)
+	if len(sources) == 0 {
+		sb.WriteString("웹 검색만으로는 바로 읽을 수 있는 현재 환율 숫자를 찾지 못했습니다.\n")
+	} else {
+		sb.WriteString("웹 검색에서 환율 관련 페이지를 찾았습니다:\n")
+		for _, source := range sources {
+			sb.WriteString("• ")
+			sb.WriteString(source)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n다만 이건 검색 결과 후보이고, 제목과 요약만으로는 현재 환율 숫자를 안전하게 확정하지 못했습니다.\n")
+	}
+	name := entry.Name
+	if name == "" {
+		name = "환율 조회"
+	}
+	sb.WriteString("\n제가 보기엔 ")
+	sb.WriteString(name)
+	sb.WriteString(" 스킬을 쓰는 편이 낫습니다. 이 스킬을 설치하면 키 없이 현재 환율표를 바로 확인할 수 있어요. 설치해서 지금 실행할까요?")
+	return strings.TrimSpace(sb.String())
+}
+
+func exchangeRateParamsForText(text string) map[string]any {
+	code := currencyCodeFromText(text)
+	if code == "" {
+		return nil
+	}
+	t := strings.ToLower(text)
+	if strings.Contains(t, "기준") || strings.Contains(t, "base") ||
+		strings.Contains(t, "기준으로") || strings.Contains(t, "기준의") ||
+		containsAny(t, "원화로", "원으로", "엔화로", "엔으로", "달러로", "유로로", "위안으로", "파운드로") {
+		return map[string]any{
+			"base":    code,
+			"symbols": defaultExchangeRateSymbols(code),
+		}
+	}
+	if containsAny(t, "만", "만요", "만.", "only") {
+		return map[string]any{
+			"symbols": []any{code},
+		}
+	}
+	return nil
+}
+
+func currencyCodeFromText(text string) string {
+	t := strings.ToLower(text)
+	currencies := []struct {
+		code    string
+		aliases []string
+	}{
+		{"KRW", []string{"krw", "원화", "원"}},
+		{"USD", []string{"usd", "달러", "미달러", "불"}},
+		{"JPY", []string{"jpy", "엔화", "엔"}},
+		{"EUR", []string{"eur", "유로"}},
+		{"CNY", []string{"cny", "위안", "위안화", "중국돈"}},
+		{"GBP", []string{"gbp", "파운드"}},
+	}
+	for _, c := range currencies {
+		if containsAny(t, c.aliases...) {
+			return c.code
+		}
+	}
+	return ""
+}
+
+func defaultExchangeRateSymbols(base string) []any {
+	codes := []string{"USD", "EUR", "JPY", "CNY", "GBP", "KRW"}
+	out := make([]any, 0, len(codes)-1)
+	for _, code := range codes {
+		if code != base {
+			out = append(out, code)
+		}
+	}
+	return out
+}
+
+func exchangeRateRequestedBase(params map[string]any) string {
+	base, _ := params["base"].(string)
+	return strings.ToUpper(strings.TrimSpace(base))
+}
+
+type exchangeRateParsedTable struct {
+	header string
+	source string
+	base   string
+	rates  map[string]float64
+	order  []string
+}
+
+var exchangeRateRowRe = regexp.MustCompile(`(?m)^\s*1\s+([A-Z]{3})\s*=\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s+([A-Z]{3})\s*$`)
+
+func exchangeRateOutputBase(output string) string {
+	table, ok := parseExchangeRateOutput(output)
+	if !ok {
+		return ""
+	}
+	return table.base
+}
+
+func rebaseExchangeRateOutput(output, newBase string) (string, bool) {
+	newBase = strings.ToUpper(strings.TrimSpace(newBase))
+	if newBase == "" {
+		return "", false
+	}
+	table, ok := parseExchangeRateOutput(output)
+	if !ok {
+		return "", false
+	}
+	if table.base == newBase {
+		return output, true
+	}
+	baseRate, ok := table.rates[newBase]
+	if !ok || baseRate == 0 {
+		return "", false
+	}
+
+	symbols := make([]string, 0, len(table.order))
+	seen := map[string]bool{newBase: true}
+	for _, v := range defaultExchangeRateSymbols(newBase) {
+		code, _ := v.(string)
+		if code == "" || seen[code] {
+			continue
+		}
+		if _, ok := table.rates[code]; ok {
+			symbols = append(symbols, code)
+			seen[code] = true
+		}
+	}
+	for _, code := range table.order {
+		if code == "" || seen[code] {
+			continue
+		}
+		if _, ok := table.rates[code]; ok {
+			symbols = append(symbols, code)
+			seen[code] = true
+		}
+	}
+	if len(symbols) == 0 {
+		return "", false
+	}
+
+	header := table.header
+	if header == "" {
+		header = "📈 환율"
+	}
+	var sb strings.Builder
+	sb.WriteString(header)
+	sb.WriteString("\n\n")
+	for i, code := range symbols {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		rate := table.rates[code] / baseRate
+		sb.WriteString("1 ")
+		sb.WriteString(newBase)
+		sb.WriteString(" = ")
+		sb.WriteString(formatExchangeRateNumber(rate))
+		sb.WriteString(" ")
+		sb.WriteString(code)
+	}
+	if table.source != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(table.source)
+	}
+	return sb.String(), true
+}
+
+func parseExchangeRateOutput(output string) (exchangeRateParsedTable, bool) {
+	table := exchangeRateParsedTable{rates: map[string]float64{}}
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if table.header == "" && strings.Contains(trimmed, "환율") && !exchangeRateRowRe.MatchString(trimmed) {
+			table.header = trimmed
+		}
+		if table.source == "" && strings.Contains(trimmed, "Source:") {
+			table.source = trimmed
+		}
+	}
+
+	matches := exchangeRateRowRe.FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
+		return table, false
+	}
+	seenTargets := map[string]bool{}
+	for _, m := range matches {
+		base := m[1]
+		target := m[3]
+		if table.base == "" {
+			table.base = base
+			table.rates[base] = 1
+		} else if table.base != base {
+			return table, false
+		}
+		value, err := strconv.ParseFloat(strings.ReplaceAll(m[2], ",", ""), 64)
+		if err != nil || value <= 0 {
+			return table, false
+		}
+		table.rates[target] = value
+		if !seenTargets[target] {
+			table.order = append(table.order, target)
+			seenTargets[target] = true
+		}
+	}
+	if table.base == "" || len(table.rates) < 2 {
+		return table, false
+	}
+	return table, true
+}
+
+func formatExchangeRateNumber(v float64) string {
+	precision := 8
+	switch {
+	case v >= 100:
+		precision = 2
+	case v >= 1:
+		precision = 4
+	case v >= 0.01:
+		precision = 6
+	}
+	out := strconv.FormatFloat(v, 'f', precision, 64)
+	out = strings.TrimRight(out, "0")
+	out = strings.TrimRight(out, ".")
+	if out == "" {
+		return "0"
+	}
+	return out
+}
+
+func summarizeExchangeRateSources(results []WebSearchResult) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, result := range results {
+		key, summary := exchangeRateSourceSummary(result)
+		if key == "" || summary == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, summary)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+func exchangeRateSourceSummary(result WebSearchResult) (string, string) {
+	text := strings.ToLower(result.Title + " " + result.Snippet + " " + result.URL)
+	host := normalizedHost(result.URL)
+	switch {
+	case strings.Contains(text, "investing.com") || strings.Contains(host, "investing.com"):
+		return "investing.com", "Investing.com - USD/KRW 실시간 환율과 차트 페이지"
+	case strings.Contains(text, "tradingview") || strings.Contains(host, "tradingview"):
+		return "tradingview.com", "TradingView - USD/KRW 차트와 시장 데이터 페이지"
+	case strings.Contains(text, "wise.com") || strings.Contains(host, "wise.com"):
+		return "wise.com", "Wise - 달러/원 환전 기준 환율 계산기"
+	case strings.Contains(text, "알파스퀘어") || strings.Contains(text, "alphasquare") || strings.Contains(host, "alphasquare"):
+		return "alphasquare", "알파스퀘어 - 달러/원 환율 페이지"
+	case strings.Contains(text, "yahoo") || strings.Contains(host, "yahoo"):
+		return "yahoo.com", "Yahoo Finance - USD/KRW 시장 데이터 페이지"
+	case strings.Contains(text, "naver") || strings.Contains(host, "naver"):
+		return "naver.com", "네이버 금융 - 환율 조회 페이지"
+	default:
+		label := cleanSearchSourceLabel(result)
+		if label == "" {
+			return "", ""
+		}
+		if host != "" {
+			return host, label + " - 환율 관련 페이지"
+		}
+		return label, label + " - 환율 관련 페이지"
+	}
+}
+
+func normalizedHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+}
+
+func cleanSearchSourceLabel(result WebSearchResult) string {
+	title := strings.TrimSpace(result.Title)
+	if title == "" {
+		return ""
+	}
+	for _, sep := range []string{" | ", " - ", " — ", " – "} {
+		if idx := strings.Index(title, sep); idx > 0 {
+			title = title[:idx]
+			break
+		}
+	}
+	return strings.TrimSpace(title)
+}
+
+type ConfirmClarificationBranch struct{}
+
+func (b *ConfirmClarificationBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	if sess == nil || sess.Pipeline == nil {
+		return "", errBranchFallback
+	}
+	pending, ok := sess.Pipeline.RecentPendingClarification()
+	if !ok {
+		return "", errBranchFallback
+	}
+	sess.Pipeline.ClearPendingClarification()
+
+	switch pending.Kind {
+	case "exchange_rate":
+		if pkg := matchInstalledSkill("환율", sess); pkg != nil {
+			rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, exchangeRateParamsForText(pending.Query))
+			output := extractOutputField(rawJSON)
+			if output == "" {
+				return "", errBranchFallback
+			}
+			sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+			return output, nil
+		}
+		entry := exchangeRateRegistryEntry()
+		sess.Pipeline.RecordSkillSearch([]core.RegistryEntry{entry})
+		return "환율 조회 스킬을 설치하면 키 없이 현재 환율표를 바로 가져올 수 있어요. 설치해서 지금 조회할까요?", nil
+	case "weather_now":
+		if pkg := matchInstalledSkill(pending.Query+" 현재 날씨", sess); pkg != nil {
+			params, msg := weatherNowParamsForText(ctx, sess, pending.Query)
+			if msg != "" {
+				return msg, nil
+			}
+			rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
+			output := extractOutputField(rawJSON)
+			if output == "" {
+				return "", errBranchFallback
+			}
+			sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+			return output, nil
+		}
+		entry := weatherNowRegistryEntry()
+		sess.Pipeline.RecordSkillSearch([]core.RegistryEntry{entry})
+		if params, msg := weatherNowParamsForText(ctx, sess, pending.Query); msg != "" {
+			return msg, nil
+		} else if len(params) > 0 {
+			sess.Pipeline.RecordPendingSkillRun(entry.ID, params)
+		}
+		return "현재 날씨 스킬을 설치하면 현재 날씨와 비 여부를 바로 확인할 수 있어요. 설치해서 지금 조회할까요?", nil
+	case "weather_now_location":
+		replyText := ""
+		if p, err := event.ParsePayload(); err == nil {
+			replyText = strings.TrimSpace(p.Text)
+		}
+		query := firstNonEmpty(replyText, pending.Query)
+		if pkg := matchInstalledSkill(query+" 현재 날씨", sess); pkg != nil {
+			params, msg := weatherNowParamsForLocationClarification(ctx, sess, replyText, pending.Query)
+			if msg != "" {
+				sess.Pipeline.RecordPendingClarification(pending)
+				return msg, nil
+			}
+			if len(params) == 0 {
+				sess.Pipeline.RecordPendingClarification(pending)
+				return "날씨를 확인하려면 위치가 필요해요. 역 이름, 동 이름, 도시 이름처럼 위치를 한 번만 더 말씀해 주세요.", nil
+			}
+			rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
+			output := extractOutputField(rawJSON)
+			if output == "" {
+				return "", errBranchFallback
+			}
+			sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+			return output, nil
+		}
+		entry := weatherNowRegistryEntry()
+		sess.Pipeline.RecordSkillSearch([]core.RegistryEntry{entry})
+		if params, msg := weatherNowParamsForLocationClarification(ctx, sess, replyText, pending.Query); msg != "" {
+			sess.Pipeline.RecordPendingClarification(pending)
+			return msg, nil
+		} else if len(params) > 0 {
+			sess.Pipeline.RecordPendingSkillRun(entry.ID, params)
+		}
+		return "현재 날씨 스킬을 설치하면 현재 날씨와 비 여부를 바로 확인할 수 있어요. 설치해서 지금 조회할까요?", nil
+	default:
+		return "", errBranchFallback
+	}
+}
+
+func weatherNowParamsForLocationClarification(ctx context.Context, sess *Session, replyText, pendingQuery string) (map[string]any, string) {
+	queries := make([]string, 0, 2)
+	replyText = strings.TrimSpace(replyText)
+	pendingQuery = strings.TrimSpace(pendingQuery)
+	if replyText != "" && !isBareAffirmative(replyText) {
+		queries = append(queries, replyText)
+	}
+	if pendingQuery != "" && pendingQuery != replyText {
+		queries = append(queries, pendingQuery)
+	}
+	var lastMsg string
+	for _, q := range queries {
+		params, msg := weatherNowParamsForText(ctx, sess, q)
+		if msg != "" {
+			lastMsg = msg
+			continue
+		}
+		if len(params) > 0 {
+			return params, ""
+		}
+	}
+	return nil, lastMsg
+}
+
 func containsAny(haystack string, needles ...string) bool {
 	for _, n := range needles {
 		if strings.Contains(haystack, n) {
@@ -473,12 +1292,30 @@ func containsAny(haystack string, needles ...string) bool {
 type InstallConsentBranch struct{}
 
 func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	if sess == nil || sess.Pipeline == nil {
+		return "", errBranchFallback
+	}
 	results := sess.Pipeline.RecentSkillSearch()
 	if len(results) == 0 {
 		// Should not happen — classifier gates on this — but be defensive.
 		return "", errBranchFallback
 	}
 	target := results[0]
+	if id, _ := intent.Params["skill_id"].(string); id != "" {
+		found := false
+		for _, result := range results {
+			if result.ID == id {
+				target = result
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "방금 제안한 스킬 목록에서 '" + id + "' 항목을 찾지 못했어요. 다시 선택해 주세요.", nil
+		}
+	} else if len(results) > 1 {
+		return formatSkillChoicePrompt(results), nil
+	}
 
 	// Guard: PackageManager must be wired (not in some bare test fixtures).
 	if sess.PackageManager == nil {
@@ -503,7 +1340,8 @@ func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event
 	sess.Pipeline.ClearSkillSearch()
 
 	// Run immediately — match the user vision of "agree → see result".
-	output, _ := runSkillOrPackage(ctx, pkg.Meta.ID, sess)
+	params, _ := sess.Pipeline.RecentPendingSkillRun(pkg.Meta.ID)
+	output, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
 	runOutput := extractOutputField(output)
 	if runOutput == "" {
 		runOutput = "방금 설치된 스킬을 한 번 실행해 보세요. 결과가 비어 있어요."
@@ -511,8 +1349,142 @@ func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event
 	// Cache the raw skill output (without the install ack) so a
 	// follow-up turn can augment its system prompt with it. See
 	// runAgentLoop's cross-turn augmentation block.
-	sess.Pipeline.RecordSkillOutput(runOutput)
+	sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, runOutput)
 	return "✅ '" + pkg.Meta.Name + "' 스킬을 설치했어요.\n\n" + runOutput, nil
+}
+
+func formatSkillChoicePrompt(entries []core.RegistryEntry) string {
+	var sb strings.Builder
+	sb.WriteString("어떤 스킬을 설치할까요?\n")
+	for i, entry := range entries {
+		if i >= 5 {
+			break
+		}
+		sb.WriteString("• ")
+		sb.WriteString(entry.Name)
+		if entry.Description != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(entry.Description)
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n원하시는 스킬 이름으로 답해주세요.")
+	return sb.String()
+}
+
+type AmbiguousFollowupBranch struct{}
+
+func (b *AmbiguousFollowupBranch) Execute(ctx context.Context, sess *Session, event core.Event, intent Intent) (string, error) {
+	if sess == nil || sess.Pipeline == nil || sess.Provider == nil {
+		return "", errBranchFallback
+	}
+	userText := ""
+	if p, err := event.ParsePayload(); err == nil {
+		userText = strings.TrimSpace(p.Text)
+	}
+	if userText == "" {
+		return "", errBranchFallback
+	}
+	skillID, _ := intent.Params["skill_id"].(string)
+	rawOutput, _ := intent.Params["raw_output"].(string)
+	if skillID == "" || rawOutput == "" {
+		return "", errBranchFallback
+	}
+	decision, err := classifyAmbiguousFollowup(ctx, sess, userText, skillID, rawOutput)
+	if err != nil {
+		return "", errBranchFallback
+	}
+	locationQuery := normalizeLocationSlot(decision.LocationQuery)
+	if locationQuery == "" {
+		locationQuery = inferWeatherLocationFromText(userText)
+	}
+	if locationQuery == "" {
+		candidate := normalizeLocationSlot(userText)
+		if looksLikePlainLocationSlot(candidate) {
+			locationQuery = candidate
+		}
+	}
+	if decision.Intent == "weather_now" {
+		if decision.Confidence >= 0.70 && locationQuery != "" {
+			return (&WeatherNowLookupBranch{}).Execute(ctx, sess, event, Intent{
+				Kind: IntentWeatherNowLookup,
+				Params: map[string]any{
+					"location_query": locationQuery,
+				},
+				Confidence: decision.Confidence,
+			})
+		}
+		if locationQuery != "" {
+			sess.Pipeline.RecordPendingClarification(PendingClarification{
+				Kind:  "weather_now_location",
+				Query: locationQuery,
+			})
+			return fmt.Sprintf("%s 현재 날씨를 말씀하시는 걸까요? 맞으면 \"네\"라고 답해주세요.", locationQuery), nil
+		}
+	}
+	return "", errBranchFallback
+}
+
+type ambiguousFollowupDecision struct {
+	Intent        string  `json:"intent"`
+	Confidence    float64 `json:"confidence"`
+	LocationQuery string  `json:"location_query"`
+}
+
+func classifyAmbiguousFollowup(ctx context.Context, sess *Session, userText, skillID, rawOutput string) (ambiguousFollowupDecision, error) {
+	var decision ambiguousFollowupDecision
+	prompt := buildAmbiguousFollowupPrompt(userText, skillID, rawOutput)
+	resp, err := sess.Provider.Generate(ctx, buildSubLLMMessages(prompt))
+	if err != nil || resp == nil {
+		return decision, err
+	}
+	raw := strings.TrimSpace(stripFences(resp.Content))
+	if start := strings.Index(raw, "{"); start >= 0 {
+		if end := strings.LastIndex(raw, "}"); end >= start {
+			raw = raw[start : end+1]
+		}
+	}
+	if err := json.Unmarshal([]byte(raw), &decision); err != nil {
+		return ambiguousFollowupDecision{}, err
+	}
+	decision.Intent = normalizeAmbiguousFollowupIntent(decision.Intent)
+	decision.LocationQuery = normalizeLocationSlot(decision.LocationQuery)
+	if decision.Confidence < 0 {
+		decision.Confidence = 0
+	}
+	if decision.Confidence > 1 {
+		decision.Confidence = 1
+	}
+	return decision, nil
+}
+
+func normalizeAmbiguousFollowupIntent(intent string) string {
+	intent = strings.ToLower(strings.TrimSpace(intent))
+	intent = strings.NewReplacer("-", "_", " ", "_").Replace(intent)
+	return intent
+}
+
+func buildAmbiguousFollowupPrompt(userText, skillID, rawOutput string) string {
+	if len(rawOutput) > 800 {
+		rawOutput = rawOutput[:800] + "\n…(truncated)"
+	}
+	var b strings.Builder
+	b.WriteString("Classify an ambiguous short follow-up in a chat with a local assistant.\n")
+	b.WriteString("Return exactly one JSON object and nothing else:\n")
+	b.WriteString(`{"intent":"weather_now|unknown","confidence":0.0,"location_query":""}`)
+	b.WriteString("\n\nRules:\n")
+	b.WriteString("- Decide what the user means from the current message and the previous skill result.\n")
+	b.WriteString("- Use weather_now only if the user is likely asking for the same current-weather question about a new location.\n")
+	b.WriteString("- Put the explicit new place in location_query. Do not geocode.\n")
+	b.WriteString("- If confidence is below 0.70, keep the best intent but lower confidence; the caller will ask for confirmation.\n")
+	b.WriteString("- If this is not a current-weather follow-up, use intent unknown.\n\n")
+	b.WriteString("Previous skill id: ")
+	b.WriteString(skillID)
+	b.WriteString("\nPrevious skill output:\n---\n")
+	b.WriteString(rawOutput)
+	b.WriteString("\n---\nCurrent user message:\n")
+	b.WriteString(userText)
+	return b.String()
 }
 
 // ModifierFollowupBranch handles a short, modifier-shaped follow-up
@@ -540,6 +1512,34 @@ func (b *ModifierFollowupBranch) Execute(ctx context.Context, sess *Session, eve
 	if userText == "" {
 		return "", errBranchFallback
 	}
+	skillID, _ := intent.Params["skill_id"].(string)
+	if skillID == "exchange-rate" {
+		if params := exchangeRateParamsForText(userText); len(params) > 0 {
+			requestedBase := exchangeRateRequestedBase(params)
+			rawJSON, _ := runSkillOrPackageWithParams(ctx, skillID, sess, params)
+			output := extractOutputField(rawJSON)
+			if requestedBase != "" {
+				if output != "" && exchangeRateOutputBase(output) == requestedBase {
+					sess.Pipeline.RecordSkillOutputForSkill(skillID, output)
+					return output, nil
+				}
+				if output != "" {
+					if rebased, ok := rebaseExchangeRateOutput(output, requestedBase); ok {
+						sess.Pipeline.RecordSkillOutputForSkill(skillID, rebased)
+						return rebased, nil
+					}
+				}
+				if rebased, ok := rebaseExchangeRateOutput(rawOutput, requestedBase); ok {
+					sess.Pipeline.RecordSkillOutputForSkill(skillID, rebased)
+					return rebased, nil
+				}
+			}
+			if output != "" {
+				sess.Pipeline.RecordSkillOutputForSkill(skillID, output)
+				return output, nil
+			}
+		}
+	}
 	out := mediateSkillOutputWithTools(ctx, sess, "modifier_followup", userText, rawOutput)
 	if out == "" {
 		return "", errBranchFallback
@@ -547,7 +1547,7 @@ func (b *ModifierFollowupBranch) Execute(ctx context.Context, sess *Session, eve
 	// Re-record the mediated output as the new "recent" raw so a
 	// chained follow-up ("그럼 EUR 만?") sees the latest table — the
 	// previous turn's result is the new source of truth.
-	sess.Pipeline.RecordSkillOutput(out)
+	sess.Pipeline.RecordSkillOutputForSkill(skillID, out)
 	return out, nil
 }
 
@@ -590,7 +1590,7 @@ func (b *RunInstalledSkillBranch) Execute(ctx context.Context, sess *Session, ev
 	// can augment its system prompt with the source of truth, not the
 	// LLM's reframed paraphrase. mediation may guard-fall-back to raw
 	// anyway, but caching pre-mediation keeps the augmentation honest.
-	sess.Pipeline.RecordSkillOutput(output)
+	sess.Pipeline.RecordSkillOutputForSkill(skillID, output)
 	return mediateSkillOutput(ctx, sess, skillID, userText, output), nil
 }
 
@@ -701,6 +1701,7 @@ func mediateSkillOutputWithTools(ctx context.Context, sess *Session, skillID, us
 	messages := buildSubLLMMessages(prompt)
 
 	var lastTextResp *llm.Response
+	var toolResults []string
 	for i := 0; i < mediateMaxToolIterations; i++ {
 		resp, err := sess.Provider.GenerateWithTools(ctx, messages, []llm.Tool{codeExecToolDef})
 		if err != nil || resp == nil {
@@ -734,6 +1735,7 @@ func mediateSkillOutputWithTools(ctx context.Context, sess *Session, skillID, us
 		for _, tu := range toolUseBlocks {
 			code, _ := tu.Input["code"].(string)
 			result := executeCodeForMediation(ctx, code)
+			toolResults = append(toolResults, result)
 			toolResultBlocks = append(toolResultBlocks, core.ContentBlock{
 				Type:      core.BlockTypeToolResult,
 				ToolUseID: tu.ID,
@@ -756,7 +1758,9 @@ func mediateSkillOutputWithTools(ctx context.Context, sess *Session, skillID, us
 		return rawOutput
 	}
 	if !mediationPreservesFacts(rawOutput, out) {
-		return rawOutput
+		if !mediationSharesNumber(strings.Join(toolResults, "\n"), out) {
+			return rawOutput
+		}
 	}
 	return out
 }
@@ -826,6 +1830,14 @@ func mediationPreservesFacts(raw, mediated string) bool {
 	rawNums := mediationNumberRe.FindAllString(raw, -1)
 	if len(rawNums) == 0 {
 		return true
+	}
+	return mediationSharesNumber(raw, mediated)
+}
+
+func mediationSharesNumber(raw, mediated string) bool {
+	rawNums := mediationNumberRe.FindAllString(raw, -1)
+	if len(rawNums) == 0 {
+		return false
 	}
 	medNums := mediationNumberRe.FindAllString(mediated, -1)
 	if len(medNums) == 0 {

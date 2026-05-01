@@ -264,6 +264,32 @@ func TestNewDaemonConn_ServerTomlDefaultAccountOnly(t *testing.T) {
 	}
 }
 
+func TestNewDaemonConnForAccount_UsesAccountAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
+
+	writeFile(t, filepath.Join(dir, "server.toml"),
+		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\ndefault_account = \"alice\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
+		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+
+	d, err := NewDaemonConnForAccount("", "bob")
+	if err != nil {
+		t.Fatalf("NewDaemonConnForAccount: %v", err)
+	}
+	if d.BaseURL != "http://127.0.0.1:3456" {
+		t.Errorf("BaseURL = %q, want server bind", d.BaseURL)
+	}
+	if d.APIKey != "bob-key" {
+		t.Errorf("APIKey = %q, want bob-key", d.APIKey)
+	}
+	if d.AccountID != "bob" {
+		t.Errorf("AccountID = %q, want bob", d.AccountID)
+	}
+}
+
 func TestNewDaemonConn_ServerTomlInvalidDefaultAccount(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)

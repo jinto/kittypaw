@@ -23,7 +23,9 @@ func newServerForAdminTest(t *testing.T, accountsRoot string, defaultCh []core.C
 	cfg := &core.Config{}
 	cfg.Channels = defaultCh
 	deps := buildAccountDeps(t, accountsRoot, DefaultAccountID, cfg)
-	return New([]*AccountDeps{deps}, "test-admin")
+	srv := New([]*AccountDeps{deps}, "test-admin")
+	srv.localAuth = core.NewLocalAuthStore(filepath.Join(accountsRoot, "auth.json"))
+	return srv
 }
 
 // stageAccountOnDisk writes a minimum-viable config.toml under accountsRoot/id

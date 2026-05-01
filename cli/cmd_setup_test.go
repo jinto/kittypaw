@@ -114,6 +114,8 @@ func TestSetupStrings_Golden(t *testing.T) {
 		{"daemon off", setupMsgDaemonOff, "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."},
 		{"reload failed", setupMsgReloadFailedFmt, "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."},
 		{"auto-chat blocked", setupMsgAutoChatBlocked, "자동 채팅 진입을 건너뜁니다 — 현재 데몬이 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."},
+		{"account credentials intro ko", accountCredentialsIntroKo, "KittyPaw 사용자 계정을 설정합니다.\n계정 ID와 비밀번호를 입력해주세요.\n계정 ID와 비밀번호 정보는 이 컴퓨터에만 저장됩니다."},
+		{"account credentials intro en", accountCredentialsIntroEn, "Set up a KittyPaw user account.\nEnter an account ID and password to continue.\nYour account ID and password data are stored only on this computer."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -122,6 +124,26 @@ func TestSetupStrings_Golden(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAccountCredentialsIntroLocalizedWithoutAccountID(t *testing.T) {
+	t.Run("korean", func(t *testing.T) {
+		t.Setenv("LC_ALL", "")
+		t.Setenv("LANG", "ko_KR.UTF-8")
+
+		if got := accountCredentialsIntroMessage(""); got != accountCredentialsIntroKo {
+			t.Fatalf("accountCredentialsIntroMessage() = %q, want %q", got, accountCredentialsIntroKo)
+		}
+	})
+
+	t.Run("english default", func(t *testing.T) {
+		t.Setenv("LC_ALL", "")
+		t.Setenv("LANG", "en_US.UTF-8")
+
+		if got := accountCredentialsIntroMessage(""); got != accountCredentialsIntroEn {
+			t.Fatalf("accountCredentialsIntroMessage() = %q, want %q", got, accountCredentialsIntroEn)
+		}
+	})
 }
 
 // fakeDaemon implements daemonSession for maybeReloadDaemon tests.
@@ -289,6 +311,9 @@ func TestSetupWritesNamedAccount(t *testing.T) {
 	}
 	if cfg.LLM.Provider != "openai" || cfg.LLM.Model != "llama3" || cfg.LLM.BaseURL != "http://localhost:11434/v1/chat/completions" {
 		t.Fatalf("LLM config = provider=%q model=%q base=%q", cfg.LLM.Provider, cfg.LLM.Model, cfg.LLM.BaseURL)
+	}
+	if cfg.Server.APIKey == "" {
+		t.Fatal("setup must write server.api_key so local CLI chat can authenticate to /ws")
 	}
 
 	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))

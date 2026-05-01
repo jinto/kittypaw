@@ -41,11 +41,12 @@ var version = "dev"
 
 // flags
 var (
-	flagRemote string // --remote: connect to daemon instead of running locally
-	flagBind   string // serve --bind
-	flagDryRun bool   // run --dry-run
-	flagSkill  string // log --skill
-	flagLimit  int    // log --limit
+	flagRemote  string // --remote: connect to daemon instead of running locally
+	flagAccount string // --account: local account for account-scoped CLI operations
+	flagBind    string // serve --bind
+	flagDryRun  bool   // run --dry-run
+	flagSkill   string // log --skill
+	flagLimit   int    // log --limit
 )
 
 func main() {
@@ -304,6 +305,9 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 
 	// Merge and write config.
 	merged := core.MergeWizardSettings(&base, result)
+	if _, err := core.EnsureServerAPIKey(merged); err != nil {
+		return err
+	}
 	if err := validateSetupConfig(cfgDir, accountID, merged); err != nil {
 		return err
 	}
@@ -476,6 +480,9 @@ func setupAccountExists(accounts []*core.Account, id string) bool {
 
 func promptSetupAccountID() (string, error) {
 	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println()
+	fmt.Println(accountCredentialsIntroMessage(""))
+	fmt.Println()
 	for {
 		id := promptLine(scanner, "  Account ID", "")
 		if id == "" {
@@ -583,20 +590,34 @@ func openBrowser(url string) error {
 // ---------------------------------------------------------------------------
 
 func newChatCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "chat [message]",
 		Short: "Interactive chat in terminal (or one-shot with argument)",
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runChat,
 	}
+	cmd.Flags().StringVar(&flagAccount, "account", "", "use this local account")
+	return cmd
 }
 
-func runChat(_ *cobra.Command, args []string) error {
+func runChat(cmd *cobra.Command, args []string) error {
 	oneShot := strings.Join(args, " ")
 
-	conn, err := client.NewDaemonConn(flagRemote)
+	accountID := ""
+	if flagRemote == "" {
+		var err error
+		accountID, err = resolveCLIAccount(flagAccount)
+		if err != nil {
+			return err
+		}
+	}
+
+	conn, err := client.NewDaemonConnForAccount(flagRemote, accountID)
 	if err != nil {
 		return err
+	}
+	if accountID == "" {
+		accountID = conn.AccountID
 	}
 
 	// Auto-start daemon if needed; it stays resident across chat
@@ -610,14 +631,10 @@ func runChat(_ *cobra.Command, args []string) error {
 	// Show server info.
 	cl := client.New(conn.BaseURL, conn.APIKey)
 	srvVer, model, channels, _ := cl.ServerInfo()
-	fmt.Printf("KittyPaw chat (cli %s · server %s · %s", version, srvVer, model)
-	if len(channels) > 0 {
-		fmt.Printf(" · %s", strings.Join(channels, ","))
-	}
-	fmt.Println(")")
+	fmt.Println(formatChatHeader(version, srvVer, model, accountID, channels))
 
-	if version != srvVer {
-		fmt.Println("  ⚠ CLI and server versions differ. Consider restarting: kittypaw stop && kittypaw serve")
+	if srvVer != "" && version != srvVer {
+		fmt.Printf("  ⚠ CLI/server versions differ (cli %s, server %s). Restart: kittypaw stop && kittypaw serve\n", version, srvVer)
 	}
 	fmt.Println()
 
@@ -739,7 +756,7 @@ func runChat(_ *cobra.Command, args []string) error {
 			}
 			gotResult, sendErr = sendOnce()
 		}
-		if sendErr != nil && !gotResult {
+		if shouldPrintChatSendError(gotResult, sendErr) {
 			fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
 		}
 	}
@@ -748,6 +765,31 @@ func runChat(_ *cobra.Command, args []string) error {
 	closeResources() // restore terminal before any post-chat output
 
 	return nil
+}
+
+func formatChatHeader(cliVersion, serverVersion, model, accountID string, channels []string) string {
+	parts := []string{"KittyPaw chat"}
+	if accountID != "" {
+		parts = append(parts, accountID)
+	}
+	if model != "" {
+		parts = append(parts, model)
+	}
+	if len(channels) > 0 {
+		parts = append(parts, strings.Join(channels, ","))
+	}
+	if len(parts) == 1 {
+		if serverVersion != "" {
+			parts = append(parts, "server "+serverVersion)
+		} else if cliVersion != "" {
+			parts = append(parts, "cli "+cliVersion)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func shouldPrintChatSendError(gotResult bool, sendErr error) bool {
+	return sendErr != nil && !gotResult && !errors.Is(sendErr, client.ErrServerSide)
 }
 
 // isTransportDropErr reports whether err is a transient WebSocket
@@ -820,11 +862,13 @@ func newSkillCmd() *cobra.Command {
 		Use:   "skill",
 		Short: "Manage skills",
 	}
+	cmd.PersistentFlags().StringVar(&flagAccount, "account", "", "use this local account")
 	cmd.AddCommand(
 		newSkillListCmd(),
 		newSkillSearchCmd(),
 		newSkillInstallCmd(),
 		newSkillUninstallCmd(),
+		newSkillResetHintCmd(),
 		newSkillInfoCmd(),
 		newSkillCreateCmd(),
 		newSkillEnableCmd(),
@@ -836,6 +880,25 @@ func newSkillCmd() *cobra.Command {
 	return cmd
 }
 
+func newSkillResetHintCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reset",
+		Short: "Show how to reset chat history or remove skills",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			fmt.Print(skillResetHintMessage())
+			return nil
+		},
+	}
+}
+
+func skillResetHintMessage() string {
+	return "kittypaw skill reset is not a separate command.\n\n" +
+		"To clear chat history:\n" +
+		"  kittypaw reset\n\n" +
+		"To remove an installed skill or package:\n" +
+		"  kittypaw skill uninstall <name>\n"
+}
+
 // --- skill list ---
 
 func newSkillListCmd() *cobra.Command {
@@ -843,7 +906,13 @@ func newSkillListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all skills",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			accountID, err := resolveCLIAccount(flagAccount)
+			if err != nil {
+				return err
+			}
+			printAccountContext(os.Stdout, accountID, cmd.CommandPath())
+
 			var skills []map[string]any
 			if filterType == "" || filterType == "skill" {
 				if cl, err := connectDaemon(); err == nil {
@@ -979,7 +1048,11 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			// Otherwise treat as a registry package ID.
-			secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+			accountID, err := resolveCLIAccount(flagAccount)
+			if err != nil {
+				return err
+			}
+			secrets, err := core.LoadAccountSecrets(accountID)
 			if err != nil {
 				return err
 			}
@@ -997,9 +1070,12 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			// Check for conflicting user skill before install.
-			cfgDir, _ := core.ConfigDir()
-			if cfgDir != "" {
-				if existingSkill, _, loadErr := core.LoadSkillFrom(cfgDir, entry.ID); loadErr == nil && existingSkill != nil {
+			skillBase, baseErr := accountBaseForID(accountID)
+			if baseErr != nil {
+				return fmt.Errorf("resolve account base: %w", baseErr)
+			}
+			if skillBase != "" {
+				if existingSkill, _, loadErr := core.LoadSkillFrom(skillBase, entry.ID); loadErr == nil && existingSkill != nil {
 					fmt.Println("⚠  같은 이름의 사용자 스킬이 이미 존재합니다.")
 					fmt.Println()
 					fmt.Printf("  [사용자 스킬]  %s\n", existingSkill.Name)
@@ -1021,10 +1097,6 @@ func newSkillInstallCmd() *cobra.Command {
 
 					switch choice {
 					case "A":
-						skillBase, baseErr := defaultAccountBase()
-						if baseErr != nil {
-							return fmt.Errorf("resolve account base: %w", baseErr)
-						}
 						if delErr := core.DeleteSkillFrom(skillBase, entry.ID); delErr != nil {
 							return fmt.Errorf("사용자 스킬 삭제 실패: %w", delErr)
 						}
@@ -1740,10 +1812,13 @@ func runDaemonStop(_ *cobra.Command, _ []string) error {
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		fmt.Printf("Could not signal process %d: %v\n", pid, err)
 	} else {
+		if !waitForProcessExit(pid, stopWaitTimeout) {
+			return fmt.Errorf("daemon did not stop within %s (pid %d)", stopWaitTimeout, pid)
+		}
 		fmt.Printf("Daemon stopped (pid %d).\n", pid)
 	}
 
-	os.Remove(pidPath)
+	removePidFileIfMatches(pidPath, pid)
 	return nil
 }
 
@@ -1796,10 +1871,17 @@ func newResetCmd() *cobra.Command {
 		Long:  "Clear conversation history for all agents, or a specific agent if specified.",
 		RunE:  runReset,
 	}
+	cmd.Flags().StringVar(&flagAccount, "account", "", "use this local account")
 	return cmd
 }
 
 func runReset(_ *cobra.Command, args []string) error {
+	accountID, err := resolveCLIAccount(flagAccount)
+	if err != nil {
+		return err
+	}
+	printAccountContext(os.Stdout, accountID, "kittypaw reset")
+
 	st, err := openStore()
 	if err != nil {
 		return err
@@ -1872,8 +1954,11 @@ func runStop(_ *cobra.Command, _ []string) error {
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("stop process %d: %w", pid, err)
 	}
+	if !waitForProcessExit(pid, stopWaitTimeout) {
+		return fmt.Errorf("KittyPaw did not stop within %s (pid %d)", stopWaitTimeout, pid)
+	}
 
-	os.Remove(pidPath)
+	removePidFileIfMatches(pidPath, pid)
 	fmt.Printf("Stopped (pid %d).\n", pid)
 	return nil
 }
@@ -1945,7 +2030,11 @@ func removePidFile() {
 		return
 	}
 	// Only remove if it's our PID (another instance may have overwritten it).
-	if pid, _, ok := client.ReadPidFile(pidPath); ok && pid == os.Getpid() {
+	removePidFileIfMatches(pidPath, os.Getpid())
+}
+
+func removePidFileIfMatches(pidPath string, pid int) {
+	if currentPID, _, ok := client.ReadPidFile(pidPath); ok && currentPID == pid {
 		os.Remove(pidPath)
 	}
 }
@@ -2242,23 +2331,32 @@ func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error 
 	return nil
 }
 
-// defaultAccountBase returns the base directory CLI commands should treat as
-// the default account: ~/.kittypaw/accounts/default/ when the multi-account
-// layout exists, falling back to ~/.kittypaw/ for fresh installs that have
-// not yet been migrated. Centralizing this probe keeps CLI helpers and the
-// daemon session looking at the same files — the daemon side has always
-// used Session.BaseDir, but multiple CLI helpers were hardcoded to the
-// legacy top-level path before this consolidation.
+// defaultAccountBase returns the resolved account base directory CLI commands
+// should use for local account-scoped files. A mere accounts/default/
+// directory is not enough — it must be the selected valid account, otherwise
+// stale dev folders make `skill list`, `reset`, and chat history point at a
+// different account than the daemon.
 func defaultAccountBase() (string, error) {
+	accountID, err := resolveCLIAccount(flagAccount)
+	if err != nil {
+		return "", err
+	}
+	return accountBaseForID(accountID)
+}
+
+func printAccountContext(w io.Writer, accountID, commandPath string) {
+	fmt.Fprintf(w, "Account: %s\n", accountID)
+}
+
+func accountBaseForID(accountID string) (string, error) {
+	if err := core.ValidateAccountID(accountID); err != nil {
+		return "", err
+	}
 	cfgDir, err := core.ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	accountBase := filepath.Join(cfgDir, "accounts", "default")
-	if info, statErr := os.Stat(accountBase); statErr == nil && info.IsDir() {
-		return accountBase, nil
-	}
-	return cfgDir, nil
+	return filepath.Join(cfgDir, "accounts", accountID), nil
 }
 
 // localPackageManager returns a PackageManager bound to the default account's
@@ -2268,11 +2366,15 @@ func defaultAccountBase() (string, error) {
 // and only finds packages at the legacy path, which has been wrong since
 // the multi-account migration.
 func localPackageManager() (*core.PackageManager, error) {
-	secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+	accountID, err := resolveCLIAccount(flagAccount)
 	if err != nil {
 		return nil, err
 	}
-	base, err := defaultAccountBase()
+	secrets, err := core.LoadAccountSecrets(accountID)
+	if err != nil {
+		return nil, err
+	}
+	base, err := accountBaseForID(accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -2675,6 +2777,15 @@ func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 	}
 
 	for _, t := range accounts {
+		if changed, err := core.EnsureServerAPIKey(t.Config); err != nil {
+			closeOnErr()
+			return nil, core.TopLevelServerConfig{}, err
+		} else if changed {
+			if err := core.WriteConfigAtomic(t.Config, filepath.Join(t.BaseDir, "config.toml")); err != nil {
+				closeOnErr()
+				return nil, core.TopLevelServerConfig{}, fmt.Errorf("backfill server api key for %s: %w", t.ID, err)
+			}
+		}
 		td, err := server.OpenAccountDeps(t)
 		if err != nil {
 			closeOnErr()
@@ -2686,21 +2797,15 @@ func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 }
 
 func resolveCLIAccount(explicit string) (string, error) {
-	if explicit != "" {
-		if err := core.ValidateAccountID(explicit); err != nil {
-			return "", err
-		}
-		return explicit, nil
-	}
-	if env := strings.TrimSpace(os.Getenv("KITTYPAW_ACCOUNT")); env != "" {
-		if err := core.ValidateAccountID(env); err != nil {
-			return "", err
-		}
-		return env, nil
-	}
 	cfgDir, err := core.ConfigDir()
 	if err != nil {
 		return "", err
+	}
+	if explicit != "" {
+		return resolveNamedCLIAccount(cfgDir, explicit)
+	}
+	if env := strings.TrimSpace(os.Getenv("KITTYPAW_ACCOUNT")); env != "" {
+		return resolveNamedCLIAccount(cfgDir, env)
 	}
 	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
 	if err != nil {
@@ -2712,30 +2817,55 @@ func resolveCLIAccount(explicit string) (string, error) {
 	if len(accounts) == 0 {
 		return "", errors.New("no accounts found; run kittypaw setup first")
 	}
+	if scPath, err := core.ServerConfigPath(); err == nil {
+		if sc, err := core.LoadServerConfig(scPath); err == nil && sc.DefaultAccount != "" {
+			for _, account := range accounts {
+				if account.ID == sc.DefaultAccount {
+					return sc.DefaultAccount, nil
+				}
+			}
+			return "", fmt.Errorf("server.toml default_account %q not found under %s", sc.DefaultAccount, filepath.Join(cfgDir, "accounts"))
+		}
+	}
 	ids := make([]string, 0, len(accounts))
 	for _, a := range accounts {
 		ids = append(ids, a.ID)
 	}
 	sort.Strings(ids)
-	return "", fmt.Errorf("multiple accounts found (%s); pass --account or set KITTYPAW_ACCOUNT", strings.Join(ids, ", "))
+	return "", fmt.Errorf("multiple accounts found (%s); pass --account, set KITTYPAW_ACCOUNT, or set default_account in server.toml", strings.Join(ids, ", "))
 }
 
-// openStore opens the SQLite store at the default path.
+func resolveNamedCLIAccount(cfgDir, id string) (string, error) {
+	if err := core.ValidateAccountID(id); err != nil {
+		return "", err
+	}
+	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
+	if err != nil {
+		return "", err
+	}
+	for _, account := range accounts {
+		if account.ID == id {
+			return id, nil
+		}
+	}
+	ids := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return "", fmt.Errorf("account %q not found; run kittypaw setup first", id)
+	}
+	return "", fmt.Errorf("account %q not found (available: %s)", id, strings.Join(ids, ", "))
+}
+
+// openStore opens the SQLite store for the resolved local account.
 func openStore() (*store.Store, error) {
-	dir, err := core.ConfigDir()
+	accountID, err := resolveCLIAccount(flagAccount)
 	if err != nil {
 		return nil, err
 	}
-	dbDir := filepath.Join(dir, "data")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
-		return nil, err
-	}
-	dbPath := filepath.Join(dbDir, "kittypaw.db")
-	st, err := store.Open(dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open store %s: %w", dbPath, err)
-	}
-	return st, nil
+	return openStoreForAccount(accountID)
 }
 
 func openStoreForAccount(accountID string) (*store.Store, error) {
@@ -2770,8 +2900,32 @@ func daemonPidPath() (string, error) {
 	return filepath.Join(dir, "daemon.pid"), nil
 }
 
+var (
+	stopWaitTimeout      = 10 * time.Second
+	stopWaitPollInterval = 50 * time.Millisecond
+)
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	ticker := time.NewTicker(stopWaitPollInterval)
+	defer ticker.Stop()
+
+	for {
+		if !processRunning(pid) {
+			return true
+		}
+		select {
+		case <-deadline.C:
+			return !processRunning(pid)
+		case <-ticker.C:
+		}
+	}
+}
+
 // processRunning checks whether a pid corresponds to a live process.
-func processRunning(pid int) bool {
+var processRunning = func(pid int) bool {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
@@ -2783,8 +2937,6 @@ func processRunning(pid int) bool {
 // ---------------------------------------------------------------------------
 // spinner
 // ---------------------------------------------------------------------------
-
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type spinner struct {
 	prefix string
@@ -2803,12 +2955,13 @@ func newSpinner(prefix string) *spinner {
 func (s *spinner) Start() {
 	go func() {
 		defer close(s.done)
+		frames := []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+		ticker := time.NewTicker(180 * time.Millisecond)
+		defer ticker.Stop()
 		fmt.Print("\033[?25l") // hide cursor
 		i := 0
-		ticker := time.NewTicker(80 * time.Millisecond)
-		defer ticker.Stop()
 		for {
-			fmt.Printf("\r%s%s", s.prefix, spinnerFrames[i%len(spinnerFrames)])
+			fmt.Printf("\r\033[K%s%c", s.prefix, frames[i%len(frames)])
 			i++
 			select {
 			case <-s.stop:

@@ -82,6 +82,28 @@ func TestNewAccountAddCmd_RegistersPasswordStdinFlag(t *testing.T) {
 	}
 }
 
+func TestAccountCredentialsIntroLocalizedWithAccountID(t *testing.T) {
+	t.Run("korean with account id", func(t *testing.T) {
+		t.Setenv("LC_ALL", "")
+		t.Setenv("LANG", "ko_KR.UTF-8")
+
+		want := "KittyPaw 사용자 계정을 설정합니다: alice\n이 계정의 비밀번호를 입력해주세요.\n계정 ID와 비밀번호 정보는 이 컴퓨터에만 저장됩니다."
+		if got := accountCredentialsIntroMessage("alice"); got != want {
+			t.Fatalf("accountCredentialsIntroMessage() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("english default with account id", func(t *testing.T) {
+		t.Setenv("LC_ALL", "")
+		t.Setenv("LANG", "en_US.UTF-8")
+
+		want := "Set up a KittyPaw user account: alice\nEnter a password for this account.\nYour account ID and password data are stored only on this computer."
+		if got := accountCredentialsIntroMessage("alice"); got != want {
+			t.Fatalf("accountCredentialsIntroMessage() = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestAccountAddCreatesAuthUser(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
@@ -101,6 +123,13 @@ func TestAccountAddCreatesAuthUser(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
 		t.Fatalf("account config missing: %v", err)
+	}
+	cfg, err := core.LoadConfig(filepath.Join(root, "accounts", "alice", "config.toml"))
+	if err != nil {
+		t.Fatalf("load account config: %v", err)
+	}
+	if cfg.Server.APIKey == "" {
+		t.Fatal("account add must write server.api_key so local CLI chat can authenticate to /ws")
 	}
 }
 

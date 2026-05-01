@@ -70,7 +70,11 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		return nil, err
 	}
 
-	cfg := buildAccountConfig(opts)
+	cfg, err := buildAccountConfig(opts)
+	if err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return nil, err
+	}
 	if err := WriteConfigAtomic(cfg, filepath.Join(stagingDir, "config.toml")); err != nil {
 		_ = os.RemoveAll(stagingDir)
 		return nil, fmt.Errorf("write config: %w", err)
@@ -104,7 +108,7 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 }
 
 // buildAccountConfig shares defaults with the TTY wizard via MergeWizardSettings.
-func buildAccountConfig(opts AccountOpts) *Config {
+func buildAccountConfig(opts AccountOpts) (*Config, error) {
 	w := WizardResult{
 		LLMProvider:      opts.LLMProvider,
 		LLMAPIKey:        opts.LLMAPIKey,
@@ -115,5 +119,8 @@ func buildAccountConfig(opts AccountOpts) *Config {
 	base := DefaultConfig()
 	cfg := MergeWizardSettings(&base, w)
 	cfg.IsFamily = opts.IsFamily
-	return cfg
+	if _, err := EnsureServerAPIKey(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }

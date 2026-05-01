@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -249,6 +251,26 @@ type ServerConfig struct {
 	Bind           string   `toml:"bind"`
 	APIKey         string   `toml:"api_key"`
 	AllowedOrigins []string `toml:"allowed_origins"`
+}
+
+func NewServerAPIKey() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate server api key: %w", err)
+	}
+	return "kp_" + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func EnsureServerAPIKey(cfg *Config) (bool, error) {
+	if cfg == nil || cfg.Server.APIKey != "" {
+		return false, nil
+	}
+	key, err := NewServerAPIKey()
+	if err != nil {
+		return false, err
+	}
+	cfg.Server.APIKey = key
+	return true, nil
 }
 
 // BindOrDefault returns the configured bind address, defaulting to ":3000".
