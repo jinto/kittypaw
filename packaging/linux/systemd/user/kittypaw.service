@@ -1,6 +1,6 @@
 [Unit]
 Description=KittyPaw AI agent daemon (user)
-Documentation=https://github.com/jinto/kittypaw
+Documentation=https://github.com/kittypaw-app/kittypaw
 After=network-online.target
 Wants=network-online.target
 
