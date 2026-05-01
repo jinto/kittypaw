@@ -141,7 +141,7 @@
 - [ ] **PR-2 EPSG 라이브러리 PoC 스파이크** — `go-proj` 등 후보 1개 확정 (PR-2 첫 태스크)
 - [ ] **down.sql 위험성 강화** — `migrate down 003`이 운영 데이터 즉시 삭제. maintenance.md 경고 강화 (Security #6)
 
-### PR-2 ← 다음 (Plan 8 머지 후 복귀, build target — 8 태스크 TDD 사이클)
+### PR-2 ← 현재 (build target — 8 태스크 TDD 사이클)
 
 > 의사결정 4건 (geo-address-coords.md §15):
 > - **D1**: EPSG:5179 → WGS84 = pure-Go LCC + datum-shift 무시 (CGO 0)
@@ -153,9 +153,9 @@
       RED: `migrations/005_create_addresses.up.sql` + `down.sql`. `make migrate` → addresses 테이블 + 인덱스 생성. `SELECT 1 FROM addresses LIMIT 0` 통합 테스트.
       GREEN: 스키마 (`pnu UNIQUE`, `road_address_normalized`, `region_sido/sigungu`). gin_trgm_ops on normalized + building. region (sido, sigungu) 복합 인덱스.
 
-- [ ] **T2: internal/geo/epsg5179.go — LCC inverse** —
-      RED: `internal/geo/epsg5179_test.go` 6 case (서울/부산/대구/인천/제주/대전 시청 알려진 EPSG:5179 좌표 → WGS84, ±5m 게이트). bbox 외 → ErrOutOfKorea.
-      GREEN: LCC inverse (EPSG:5179 파라미터: lat_0=38, lon_0=127.5, lat_1=30, lat_2=60, x_0=1000000, y_0=2000000, GRS80 a=6378137 b=6356752.3141). datum-shift 생략 (Korea 2000 ≈ WGS84 within 1m).
+- [ ] **T2: internal/geo/epsg5179.go — LCC inverse** ⏸️ 보류 — 행안부 "제공하는 주소 (도형, 좌표)" 자료 도착 후 재개. **이유**: tmp/ 사물주소.zip 의 좌표 (광양 X=224711, 강릉 X=73807) 가 EPSG:5179 X 범위 (80K~1.4M) 와 불일치 → plan v9 의 EPSG:5179 가정 자체 검증 필요. 별도 신청 자료의 좌표계 (EPSG:5179 / 5181 / 5186) 결정 후 LCC 파라미터 확정.
+      RED: `internal/geo/epsg5179_test.go` 6 case (서울/부산/대구/인천/제주/대전 시청 알려진 좌표 → WGS84, ±5m 게이트). bbox 외 → ErrOutOfKorea.
+      GREEN: LCC inverse (EPSG:5179 가정 파라미터: lat_0=38, lon_0=127.5, lat_1=30, lat_2=60, x_0=1000000, y_0=2000000, GRS80 a=6378137 b=6356752.3141). 좌표계 확정 후 파라미터 교체.
 
 - [ ] **T3: internal/model/address.go (5 함수 + integration test)** —
       RED: `address_integration_test.go` (`//go:build integration`) — FindByRoadExact / FindByRoadFuzzy / FindByBuilding / FindByPNU / Upsert. fixture INSERT + truncate isolation.
@@ -210,7 +210,7 @@
 - [ ] (P1 follow-up) **D4 — KASI helper 통합 refactor** — Phase B (KMA UV) 추가 시점에 holiday/almanac/weather/UV 4개 ServiceName 11 endpoint 를 한 번에 통합. plan v2 박제: `.claude/plans/d4-kasi-helper-refactor.md`. 3 reviewer (Architect/Critic/CEO) Phase 2 ITERATE — 옵션 3 (UV 동시 통합) 채택. **재개 트리거**: Phase B UV endpoint production 추가 시점.
 - [x] **holiday.go envelope 검증** — `parseKMAError` 재사용으로 `resultCode != "00"` 응답이 24h 캐시되지 않도록 fix. `fetch()` 의 200 OK 분기에서 검증 → fetch error → stale fallback → 502.
 
-## Plan 8: Smoke 3-Layer L1.A — Holiday Integration Test ← 현재 (build target)
+## Plan 8: Smoke 3-Layer L1.A — Holiday Integration Test ✅ (`3c28f6a` push to main)
 
 > Spec: `.claude/plans/smoke-3-layer.md` (v2, Architect/Critic 14 finding ITERATE 후 재작성. CEO 메타 비판 dispatch — 사용자 명시 결정)
 > Goal: `internal/proxy/holiday_integration_test.go` 신규 + `Makefile` 분리 (DB 의존 vs API 의존 build tag split)
@@ -232,16 +232,12 @@
 - envelope `resultCode=22/99/SERVICETIME_OUT` (limit hit) → `t.Skipf("daily limit reached")` + CI annotation
 - envelope `resultCode=03` (NO_DATA) → endpoint-specific. holidays = `t.Fatalf`, anniversaries = `t.Skipf` 허용
 
-- [ ] **T1: `internal/proxy/holiday_integration_test.go` 신규 (3 sub-test + AC1~AC5 + 골든)** —
-      RED: 파일 신규 + 3 sub-test (`TestIntegrationHolidays`/`Anniversaries`/`SolarTerms`). `//go:build calendar_integration` build tag. fresh `cache.New()` per sub-test (helper `newHolidayHandler`). retry 정책 + Skipf 분기 구현. 처음엔 잘못된 골든으로 작성하거나 envelope 검증 누락 → 의도된 fail.
-      GREEN: env 주입 후 3 sub-test pass. holidays 골든 (AC4) `1월1일` 정확 매칭. anniversaries/solar-terms 는 AC1~AC3 + AC5.
+- [x] **T1: `internal/proxy/holiday_integration_test.go` 신규 (3 sub-test + AC1~AC5 + 골든)** — Holidays/Anniversaries/SolarTerms 3 sub-test all PASS. `fmt.Sprint(float64)` 지수 표기 micro-bug RED 발견 → `%.0f` 수정. retry closure + rate-limit Skipf 분기.
 
-- [ ] **T2: `Makefile` 분리 + build tag migration** —
-      RED: `test-integration` 단일 target → `test-integration-all` (alias, 회귀 방지) + `test-integration-model` (DB 의존, 기존 model/* integration test) + `test-integration-calendar` (신규 holiday_integration_test.go). 기존 model integration test 의 build tag `integration` → `model_integration` 으로 migrate (필수 — 옵션 아님). 기존 `make test-integration` 호출자 silently 0 test 실행 위험 차단.
-      GREEN: `make test-integration-calendar` → 1 파일만 실행. `make test-integration-model` → 기존 model integration. `make test-integration-all` → 둘 다 실행. 검증.
+- [x] **T2: `Makefile` 분리 + build tag 격리** — 신규 `test-integration-calendar` target + `test-integration-all` umbrella alias. plan v2 D1 1단계 충실 — 기존 `integration` 태그는 model+weather+almanac 통합 유지 (L1.B/C/D 시점 분리). `make build / make lint (0 issues)` 회귀 0.
 
 **Operational Checklist** (L1.A 머지 후):
-- [ ] **L2 plan trigger by 14d (D7 SLA)** — L1.A merge 후 14일 내 `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
+- [ ] **L2 plan trigger by 2026-05-16 (D7 SLA, L1.A=`3c28f6a` 2026-05-02 머지 + 14일)** — `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
 - [ ] **L3 별도 plan** — fab deploy 종결부에 `bash deploy/smoke.sh` 추가 (D4 (A) bash+curl+jq). prod URL `/health` + 핵심 endpoint 1-2개 envelope 검증.
 - [ ] **T0 spike** — `data.go.kr` 5 service key 별 daily limit 확인 (HOLIDAY/WEATHER/AIRKOREA + KASI 음력/일출). 결과를 plan v2 §D3 표에 record. L2 plan prerequisite.
 - [ ] **L1.B/C/D sibling plan** — airkorea (5 endpoint) / weather 보강 (UltraShortNowcast/Forecast) / geo HTTP layer. **L1.D 주의**: DB+API hybrid 라 build tag 재설계 필요 — L1.A template 가 깨지는 점 plan v2 §D6 박제.
