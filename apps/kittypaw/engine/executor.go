@@ -502,15 +502,11 @@ func executeFile(ctx context.Context, call core.SkillCall, s *Session) (string, 
 	}
 
 	// Resolve the path once and use it for both validation and all file operations.
-	// This eliminates the TOCTOU race between validation and filesystem access.
-	absPath, err := filepath.Abs(rawPath)
+	// Relative paths are interpreted inside the account's default workspace, not
+	// the daemon's current working directory.
+	resolvedPath, err := resolveFileToolPath(rawPath, s.AllowedPaths())
 	if err != nil {
-		return "", fmt.Errorf("path not allowed")
-	}
-	resolvedPath := resolveForValidation(absPath)
-
-	if !isPathAllowedResolved(resolvedPath, s.AllowedPaths()) {
-		return "", fmt.Errorf("path not allowed")
+		return "", err
 	}
 
 	switch call.Method {
@@ -712,13 +708,9 @@ func executeFileSummary(ctx context.Context, call core.SkillCall, s *Session) (s
 		return "", fmt.Errorf("invalid path argument")
 	}
 
-	absPath, err := filepath.Abs(rawPath)
+	resolvedPath, err := resolveFileToolPath(rawPath, s.AllowedPaths())
 	if err != nil {
-		return "", fmt.Errorf("path not allowed")
-	}
-	resolvedPath := resolveForValidation(absPath)
-	if !isPathAllowedResolved(resolvedPath, s.AllowedPaths()) {
-		return "", fmt.Errorf("path not allowed")
+		return "", err
 	}
 
 	// Parse optional second arg {model, force_refresh}.
@@ -802,6 +794,26 @@ func resolveWorkspaceID(s *Session, resolvedPath string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("workspace not found for path")
+}
+
+func resolveFileToolPath(rawPath string, allowedPaths []string) (string, error) {
+	targetPath := rawPath
+	if !filepath.IsAbs(targetPath) {
+		if len(allowedPaths) == 0 {
+			return "", fmt.Errorf("path not allowed")
+		}
+		targetPath = filepath.Join(allowedPaths[0], targetPath)
+	}
+
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("path not allowed")
+	}
+	resolvedPath := resolveForValidation(absPath)
+	if !isPathAllowedResolved(resolvedPath, allowedPaths) {
+		return "", fmt.Errorf("path not allowed")
+	}
+	return resolvedPath, nil
 }
 
 // --- Storage ---

@@ -116,7 +116,7 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 				if resolver != nil {
 					resp, err := resolver(ctx, sc)
 					if err != nil {
-						panic(vm.ToValue(err.Error()))
+						panic(vm.NewGoError(err))
 					}
 					if resp != "" {
 						if opts.rawResolverResults {
