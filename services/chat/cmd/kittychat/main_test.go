@@ -57,7 +57,7 @@ func TestNewServerUsesJWTVerifierWhenConfigured(t *testing.T) {
 		t.Fatalf("newRouter() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/accounts/alice/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer "+signTestJWT(t, cfg.JWTSecret, "user_1"))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)

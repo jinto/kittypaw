@@ -78,9 +78,7 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 	}
 	if cfg.JWTSecret != "" {
 		jwtVerifier, err := identity.NewJWTCredentialVerifier(identity.JWTVerifierConfig{
-			Secret:           cfg.JWTSecret,
-			DefaultDeviceID:  cfg.DeviceID,
-			DefaultAccountID: cfg.LocalAccountID,
+			Secret: cfg.JWTSecret,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("jwt verifier: %w", err)

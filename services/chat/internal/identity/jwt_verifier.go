@@ -9,15 +9,11 @@ import (
 )
 
 type JWTVerifierConfig struct {
-	Secret           string
-	DefaultDeviceID  string
-	DefaultAccountID string
+	Secret string
 }
 
 type JWTCredentialVerifier struct {
-	secret           []byte
-	defaultDeviceID  string
-	defaultAccountID string
+	secret []byte
 }
 
 type jwtCredentialClaims struct {
@@ -35,9 +31,7 @@ func NewJWTCredentialVerifier(cfg JWTVerifierConfig) (*JWTCredentialVerifier, er
 		return nil, fmt.Errorf("jwt secret is required")
 	}
 	return &JWTCredentialVerifier{
-		secret:           []byte(cfg.Secret),
-		defaultDeviceID:  cfg.DefaultDeviceID,
-		defaultAccountID: cfg.DefaultAccountID,
+		secret: []byte(cfg.Secret),
 	}, nil
 }
 
@@ -57,10 +51,10 @@ func (v *JWTCredentialVerifier) VerifyAPIClient(ctx context.Context, token strin
 		Version:   claims.Version,
 		Scopes:    scopes,
 		UserID:    claims.Subject,
-		DeviceID:  firstNonEmpty(claims.DeviceID, v.defaultDeviceID),
-		AccountID: firstNonEmpty(claims.AccountID, v.defaultAccountID),
+		DeviceID:  claims.DeviceID,
+		AccountID: claims.AccountID,
 	}
-	if err := validateAPIClientClaims(apiClaims); err != nil {
+	if err := validateUserScopedAPIClientClaims(apiClaims); err != nil {
 		return APIClientClaims{}, ErrUnauthorized
 	}
 	if !hasScope(scopes, ScopeChatRelay) && !hasScope(scopes, ScopeModelsRead) {
@@ -138,11 +132,12 @@ func hasScope(scopes []Scope, want Scope) bool {
 	return slices.Contains(scopes, want)
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
+func validateUserScopedAPIClientClaims(claims APIClientClaims) error {
+	if err := validateCommonClaims(claims.Subject, claims.Audiences, claims.Version, claims.Scopes); err != nil {
+		return err
 	}
-	return ""
+	if claims.UserID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	return nil
 }

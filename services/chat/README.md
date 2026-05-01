@@ -11,8 +11,11 @@ This repository currently contains the relay core:
 
 - `GET /health`
 - `GET /daemon/connect` for local daemon outbound WebSocket connections
-- `GET /nodes/{device_id}/v1/models`
-- `POST /nodes/{device_id}/v1/chat/completions`
+- `GET /nodes/{device_id}/accounts/{account_id}/v1/models`
+- `POST /nodes/{device_id}/accounts/{account_id}/v1/chat/completions`
+- legacy MVP fallback routes without `{account_id}`:
+  - `GET /nodes/{device_id}/v1/models`
+  - `POST /nodes/{device_id}/v1/chat/completions`
 - JSON relay frames over WebSocket
 - in-memory single-instance device broker
 - API-issued JWT verifier for web chat and OpenAI-compatible clients
@@ -69,6 +72,12 @@ API client tokens are expected to use the kittyapi wire format:
 }
 ```
 
+These API client tokens are user-scoped. They do not need `device_id` or
+`account_id`; the account-scoped HTTP route selects the target device and local
+account, and the broker verifies that the selected route belongs to the token's
+`sub` user. If a future token includes `device_id`, kittychat treats it as an
+additional restriction.
+
 ## Routing Semantics
 
 Daemon WebSocket connections are scoped by verified identity, not by local
@@ -86,6 +95,18 @@ verified user_id + verified device_id + request account_id
 This means `alice` on two devices, or under two API users, is not the same route.
 Capabilities work the same way: a request is sent to a daemon connection only
 when the connection's hello advertised the matching operation capability.
+
+OpenAI-compatible clients should use the account-scoped routes when they need a
+specific local account:
+
+```text
+/nodes/{device_id}/accounts/{account_id}/v1/models
+/nodes/{device_id}/accounts/{account_id}/v1/chat/completions
+```
+
+The older `/nodes/{device_id}/v1/...` routes remain as an MVP fallback and use
+the authenticated principal's default account. User-scoped JWTs without a
+default account should use the account-scoped routes.
 
 ## Next Steps
 

@@ -15,11 +15,7 @@ import (
 const testJWTSecret = "test-jwt-secret-with-at-least-32-bytes"
 
 func TestJWTCredentialVerifierVerifiesAPIClientToken(t *testing.T) {
-	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{
-		Secret:           testJWTSecret,
-		DefaultDeviceID:  "dev_1",
-		DefaultAccountID: "alice",
-	})
+	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 	if err != nil {
 		t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
 	}
@@ -40,19 +36,15 @@ func TestJWTCredentialVerifierVerifiesAPIClientToken(t *testing.T) {
 	if got.Subject != "user_1" || got.UserID != "user_1" {
 		t.Fatalf("user claims = %+v, want user_1 subject/user_id", got)
 	}
-	if got.DeviceID != "dev_1" || got.AccountID != "alice" {
-		t.Fatalf("routing defaults = %+v, want dev_1/alice", got)
+	if got.DeviceID != "" || got.AccountID != "" {
+		t.Fatalf("routing claims = %+v, want user-scoped token without device/account defaults", got)
 	}
 	assertStringSlice(t, got.Audiences, []string{"kittyapi", AudienceKittyChat})
 	assertScopes(t, got.Scopes, []Scope{ScopeChatRelay, ScopeModelsRead})
 }
 
 func TestJWTCredentialVerifierIgnoresUnknownScopes(t *testing.T) {
-	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{
-		Secret:           testJWTSecret,
-		DefaultDeviceID:  "dev_1",
-		DefaultAccountID: "alice",
-	})
+	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 	if err != nil {
 		t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
 	}
@@ -74,11 +66,7 @@ func TestJWTCredentialVerifierIgnoresUnknownScopes(t *testing.T) {
 }
 
 func TestJWTCredentialVerifierRejectsLegacyUIDOnlyToken(t *testing.T) {
-	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{
-		Secret:           testJWTSecret,
-		DefaultDeviceID:  "dev_1",
-		DefaultAccountID: "alice",
-	})
+	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 	if err != nil {
 		t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
 	}
@@ -139,11 +127,7 @@ func TestJWTCredentialVerifierRejectsInvalidAPIClientClaims(t *testing.T) {
 			if _, ok := tt.claims["exp"]; !ok {
 				tt.claims["exp"] = time.Now().Add(time.Hour).Unix()
 			}
-			verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{
-				Secret:           testJWTSecret,
-				DefaultDeviceID:  "dev_1",
-				DefaultAccountID: "alice",
-			})
+			verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 			if err != nil {
 				t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
 			}

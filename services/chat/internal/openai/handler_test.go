@@ -84,6 +84,53 @@ func TestModelsRelaysThroughBroker(t *testing.T) {
 	}
 }
 
+func TestAccountScopedModelsRouteUsesURLAccount(t *testing.T) {
+	fb := &fakeBroker{frames: []protocol.Frame{
+		{Type: protocol.FrameResponseHeaders, ID: "req_1", Status: http.StatusOK},
+		{Type: protocol.FrameResponseEnd, ID: "req_1"},
+	}}
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
+	}}, fb)
+
+	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/accounts/bob/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.req.UserID != "user_1" || fb.req.DeviceID != "dev_1" || fb.req.AccountID != "bob" {
+		t.Fatalf("broker request = %+v, want account bob", fb.req)
+	}
+	if fb.req.Operation != protocol.OperationOpenAIModels {
+		t.Fatalf("operation = %s, want %s", fb.req.Operation, protocol.OperationOpenAIModels)
+	}
+}
+
+func TestAccountScopedRouteAllowsUserScopedPrincipal(t *testing.T) {
+	fb := &fakeBroker{frames: []protocol.Frame{
+		{Type: protocol.FrameResponseHeaders, ID: "req_1", Status: http.StatusOK},
+		{Type: protocol.FrameResponseEnd, ID: "req_1"},
+	}}
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", Scopes: []string{"models:read"},
+	}}, fb)
+
+	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_2/accounts/bob/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.req.UserID != "user_1" || fb.req.DeviceID != "dev_2" || fb.req.AccountID != "bob" {
+		t.Fatalf("broker request = %+v, want user_1/dev_2/bob", fb.req)
+	}
+}
+
 func TestChatCompletionsStreamingRelaysSSE(t *testing.T) {
 	body := map[string]any{
 		"model":  "kittypaw",
@@ -125,6 +172,38 @@ func TestChatCompletionsStreamingRelaysSSE(t *testing.T) {
 	}
 }
 
+func TestAccountScopedChatCompletionsRouteUsesURLAccount(t *testing.T) {
+	body := map[string]any{
+		"model": "kittypaw",
+		"messages": []map[string]string{
+			{"role": "user", "content": "hello"},
+		},
+	}
+	raw, _ := json.Marshal(body)
+	fb := &fakeBroker{frames: []protocol.Frame{
+		{Type: protocol.FrameResponseHeaders, ID: "req_1", Status: http.StatusOK},
+		{Type: protocol.FrameResponseEnd, ID: "req_1"},
+	}}
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"chat:relay"},
+	}}, fb)
+
+	req := httptest.NewRequest(http.MethodPost, "/nodes/dev_1/accounts/bob/v1/chat/completions", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.req.UserID != "user_1" || fb.req.DeviceID != "dev_1" || fb.req.AccountID != "bob" {
+		t.Fatalf("broker request = %+v, want account bob", fb.req)
+	}
+	if fb.req.Operation != protocol.OperationOpenAIChatCompletions || string(fb.req.Body) != string(raw) {
+		t.Fatalf("broker request = %+v, body=%s", fb.req, fb.req.Body)
+	}
+}
+
 func TestHandlerReturnsOfflineWhenBrokerHasNoDevice(t *testing.T) {
 	h := NewHandler(staticAuth{principal: Principal{
 		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
@@ -152,6 +231,21 @@ func TestHandlerRejectsAPIKeyForAnotherDevice(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+}
+
+func TestLegacyRouteRequiresPrincipalDefaultAccount(t *testing.T) {
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", Scopes: []string{"models:read"},
+	}}, &fakeBroker{})
+	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

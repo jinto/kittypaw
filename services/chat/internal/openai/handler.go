@@ -44,6 +44,8 @@ func NewHandler(auth Authenticator, b Broker) *Handler {
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Get("/nodes/{device_id}/accounts/{account_id}/v1/models", h.handleModels)
+	r.Post("/nodes/{device_id}/accounts/{account_id}/v1/chat/completions", h.handleChatCompletions)
 	r.Get("/nodes/{device_id}/v1/models", h.handleModels)
 	r.Post("/nodes/{device_id}/v1/chat/completions", h.handleChatCompletions)
 	return r
@@ -73,7 +75,7 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protoc
 		return
 	}
 	deviceID := chi.URLParam(r, "device_id")
-	if principal.DeviceID != deviceID {
+	if principal.DeviceID != "" && principal.DeviceID != deviceID {
 		writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -85,11 +87,19 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protoc
 		writeJSONError(w, http.StatusServiceUnavailable, "relay broker unavailable")
 		return
 	}
+	accountID := chi.URLParam(r, "account_id")
+	if accountID == "" {
+		accountID = principal.AccountID
+	}
+	if accountID == "" {
+		writeJSONError(w, http.StatusBadRequest, "account_id is required")
+		return
+	}
 
 	stream, err := h.broker.Request(r.Context(), broker.Request{
 		UserID:    principal.UserID,
 		DeviceID:  deviceID,
-		AccountID: principal.AccountID,
+		AccountID: accountID,
 		Operation: operation,
 		Method:    method,
 		Path:      path,
