@@ -45,6 +45,10 @@ func serviceInstall(stdout, stderr io.Writer, f *serviceFlags) error {
 	// enable --now cycle doesn't race against a live listener.
 	_ = run(io.Discard, io.Discard, "systemctl", "--user", "stop", linuxUnitName)
 
+	if err := preflightPort(f.bindHost, f.bindPort); err != nil {
+		return err
+	}
+
 	unit := renderUnit(packaging.LinuxSystemdUnit, binPath, f.bindHost, f.bindPort)
 	destDir := userSystemdDir()
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
