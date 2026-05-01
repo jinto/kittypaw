@@ -75,7 +75,7 @@ func (h *HolidayHandler) endpoint(path string, required, allowed []string) http.
 			}
 		}
 		upstream.Set("serviceKey", h.APIKey)
-		upstream.Set("returnType", "json")
+		upstream.Set("_type", "json")
 
 		key := holidayCacheKey(path, upstream)
 

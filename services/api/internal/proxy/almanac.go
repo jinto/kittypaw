@@ -30,8 +30,10 @@ const (
 //   - RiseSetInfoService — getLCRiseSetInfo (by coord), getAreaRiseSetInfo (by region)
 //
 // Two patterns diverge from holiday.go (also a KASI proxy):
-//   - `_type=json`, NOT `returnType=json` (KASI quirk: SpcdeInfoService uses
-//     `returnType`, every other B090041 service uses `_type`).
+//   - `_type=json`. Every B090041 service — including SpcdeInfoService —
+//     accepts `_type=json` and silently ignores `returnType=json`, falling
+//     back to XML. holiday.go originally used `returnType` and shipped
+//     broken; both proxies now use `_type`.
 //   - fetch() propagates request context + suppresses URL leaks in errors,
 //     matching weather.go. holiday.go predates these patterns.
 //
@@ -158,7 +160,8 @@ func (h *AlmanacHandler) endpoint(serviceName, path string, required, allowed []
 			}
 		}
 		upstream.Set("serviceKey", h.APIKey)
-		// KASI 음력/일출일몰 uses `_type` (not `returnType` like SpcdeInfoService).
+		// KASI B090041 services accept `_type=json` and silently ignore
+		// `returnType=json` — see package comment for the production incident.
 		upstream.Set("_type", "json")
 
 		key := AlmanacCacheKey(serviceName, path, upstream)

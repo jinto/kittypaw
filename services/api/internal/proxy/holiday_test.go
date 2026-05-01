@@ -135,7 +135,7 @@ func TestHolidayUpstreamFailureWithStaleCache(t *testing.T) {
 	defer c.Close()
 
 	// Pre-populate with stale data (TTL=1ns → immediately stale).
-	c.Set("holiday:/getHoliDeInfo:returnType=json:solYear=2026", []byte(`{"stale":true}`), 1)
+	c.Set("holiday:/getHoliDeInfo:_type=json:solYear=2026", []byte(`{"stale":true}`), 1)
 
 	upstream := failingUpstream()
 	defer upstream.Close()
@@ -172,6 +172,33 @@ func TestHolidayUpstreamFailureNoCache(t *testing.T) {
 
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", w.Code)
+	}
+}
+
+// TestHolidayUsesUnderscoreType pins the outbound query parameter name.
+// KASI's SpcdeInfoService accepts `_type=json` and silently ignores
+// `returnType=json`, returning XML by default — which broke the JSON
+// envelope parser in production. Regression guard.
+func TestHolidayUsesUnderscoreType(t *testing.T) {
+	var receivedURL string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"00"}}}`))
+	}))
+	defer upstream.Close()
+
+	h, c := newHolidayHandler(upstream.URL)
+	defer c.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/calendar/holidays?solYear=2026", nil)
+	w := httptest.NewRecorder()
+	h.Holidays().ServeHTTP(w, req)
+
+	if !contains(receivedURL, "_type=json") {
+		t.Fatalf("expected _type=json in upstream URL, got: %s", receivedURL)
+	}
+	if contains(receivedURL, "returnType=json") {
+		t.Fatalf("returnType=json must NOT be added (KASI SpcdeInfoService uses _type), got: %s", receivedURL)
 	}
 }
 
