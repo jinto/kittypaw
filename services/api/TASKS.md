@@ -200,7 +200,7 @@
 - [x] **T3+T4: Sun (좌표/지역 통합) + 한반도 가드 (D9)** — 9 sub-test (OutOfPeninsula + DnYnSilentlyDropped + InvalidCoords 포함) all pass. `/sun` 단일 endpoint, `latitude+longitude` vs `location` 분기.
 - [x] **T5: 라우트 등록 + router-level rate limit test** — `TestAlmanacRouteWiredWithRateLimit` (anon 5+1=429) pass. main.go 에 `/v1/almanac/{lunar-date,solar-date,sun}` 3 라우트 등록.
 - [x] **T6: Integration test + build/lint/test** — `TestAlmanac_LiveKASI` 3 골든 케이스 pass (양력 2026-05-01 ↔ 음력 2026-03-15 평달 / 서울 sunrise=0537 sunset=1922 / round-trip). `make build / make lint (0 issues) / make test` 모두 pass.
-- [ ] **T7: Conventional Commit (사용자 허락 대기)** — `feat(almanac): 음력 변환 + 일출/일몰 (KASI)` 메시지로 atomic single commit. **🚨 사용자 명시 허락 후만 진행.**
+- [x] **T7: Conventional Commit** — `09fa12b feat(almanac): 음력 변환 + 일출/일몰 (KASI)` push to main. Smoke test 7/7 통과 (port 28080).
 
 **Operational Checklist**:
 - [x] data.go.kr 활용 신청 (LrsrCldInfoService + RiseSetInfoService) — 2026-05-01 자동 승인 완료
@@ -208,4 +208,4 @@
 - [ ] **Phase C 키 신청 발의** (서울교통공사 OpenAPI) — 1~3일 리드타임. 본 plan 진행과 병렬 발의 권장 (상위 로드맵 명시 결정).
 - [ ] (P1 follow-up) D10 — 입력범위(1391~2050) 검증 — 별도 issue.
 - [ ] (P1 follow-up) D4 — `holiday.go` 와 `almanac.go` 의 endpoint() helper 통합 — 현 시점 KASI endpoint 4개 < trigger 5개라 보류.
-- [ ] (P1 follow-up) **holiday.go envelope 검증** — almanac.go 처럼 `parseKMAError` 호출하여 `resultCode != "00"` 응답을 24h 캐시하지 않게. 현재 holiday.go 는 KASI 가 200+에러를 보내면 캐시에 저장 → service key 만료/QPS 초과 시 잘못된 응답 24h 지속 위험.
+- [x] **holiday.go envelope 검증** — `parseKMAError` 재사용으로 `resultCode != "00"` 응답이 24h 캐시되지 않도록 fix. `fetch()` 의 200 OK 분기에서 검증 → fetch error → stale fallback → 502.

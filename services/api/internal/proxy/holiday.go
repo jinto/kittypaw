@@ -114,11 +114,25 @@ func (h *HolidayHandler) fetch(path string, params url.Values) ([]byte, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
-		return nil, fmt.Errorf("response %d: %s", resp.StatusCode, body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBody))
+		return nil, fmt.Errorf("response status %d from %s", resp.StatusCode, path)
 	}
 
-	return io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	if err != nil {
+		return nil, err
+	}
+
+	// KASI returns HTTP 200 + non-"00" resultCode for upstream errors
+	// (expired key, invalid params, NO_DATA). Treating as fetch error means:
+	// don't cache the bad payload (24h TTL would freeze a transient error),
+	// fall back to stale cache, and surface 502 if no stale exists. Same
+	// envelope shape as KMA, so we reuse parseKMAError from weather.go.
+	if resultCode, msg, isErr := parseKMAError(body); isErr {
+		return nil, fmt.Errorf("kasi resultCode=%s msg=%s", resultCode, msg)
+	}
+
+	return body, nil
 }
 
 func holidayCacheKey(path string, params url.Values) string {

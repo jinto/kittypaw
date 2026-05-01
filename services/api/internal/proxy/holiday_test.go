@@ -101,7 +101,7 @@ func TestHolidayCacheHit(t *testing.T) {
 	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		upstreamCalled = true
-		_, _ = w.Write([]byte(`{"cached":true}`))
+		_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"00"}}}`))
 	}))
 	defer upstream.Close()
 
@@ -179,7 +179,7 @@ func TestHolidayParamsNotLeaked(t *testing.T) {
 	var receivedURL string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedURL = r.URL.String()
-		_, _ = w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"00"}}}`))
 	}))
 	defer upstream.Close()
 
