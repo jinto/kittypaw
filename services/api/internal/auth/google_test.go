@@ -209,8 +209,8 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 	if got, _ := raw["sub"].(string); got != "user-google-g-user-1" {
 		t.Fatalf(`wire-format regression in issueTokenPair: sub = %v, want "user-google-g-user-1"`, raw["sub"])
 	}
-	if got, _ := raw["iss"].(string); got != "kittyapi" {
-		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "kittyapi"`, raw["iss"])
+	if got, _ := raw["iss"].(string); got != "https://api.kittypaw.app/auth" {
+		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "https://api.kittypaw.app/auth"`, raw["iss"])
 	}
 	if v, _ := raw["v"].(float64); v != 1 {
 		t.Fatalf("wire-format regression in issueTokenPair: v = %v, want 1", raw["v"])
@@ -219,8 +219,8 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 		t.Fatalf(`wire-format regression in issueTokenPair: legacy "uid" key must not appear, got: %v`, raw)
 	}
 	auds, _ := raw["aud"].([]any)
-	if len(auds) != 2 || auds[0] != "kittyapi" || auds[1] != "kittychat" {
-		t.Fatalf(`wire-format regression in issueTokenPair: aud = %v, want ["kittyapi","kittychat"]`, raw["aud"])
+	if len(auds) != 2 || auds[0] != "https://api.kittypaw.app" || auds[1] != "https://chat.kittypaw.app" {
+		t.Fatalf(`wire-format regression in issueTokenPair: aud = %v, want ["https://api.kittypaw.app","https://chat.kittypaw.app"]`, raw["aud"])
 	}
 	scopes, _ := raw["scope"].([]any)
 	if len(scopes) != 2 || scopes[0] != "chat:relay" || scopes[1] != "models:read" {

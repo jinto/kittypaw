@@ -67,7 +67,7 @@ func TestVerifyMalformed(t *testing.T) {
 func TestSignForAudiences_RoundTrip(t *testing.T) {
 	token, err := auth.SignForAudiences(
 		"user-abc",
-		[]string{"kittyapi", "kittychat"},
+		[]string{"https://api.kittypaw.app", "https://chat.kittypaw.app"},
 		[]string{"chat:relay", "models:read"},
 		testSecret,
 		15*time.Minute,
@@ -82,8 +82,8 @@ func TestSignForAudiences_RoundTrip(t *testing.T) {
 	if claims.UserID != "user-abc" {
 		t.Fatalf("UserID = %q", claims.UserID)
 	}
-	if got := []string(claims.Audience); len(got) != 2 || got[0] != "kittyapi" || got[1] != "kittychat" {
-		t.Fatalf("Audience = %v, want [kittyapi kittychat]", got)
+	if got := []string(claims.Audience); len(got) != 2 || got[0] != "https://api.kittypaw.app" || got[1] != "https://chat.kittypaw.app" {
+		t.Fatalf("Audience = %v, want [https://api.kittypaw.app https://chat.kittypaw.app] (Plan 13 URL form)", got)
 	}
 	if len(claims.Scope) != 2 || claims.Scope[0] != "chat:relay" || claims.Scope[1] != "models:read" {
 		t.Fatalf("Scope = %v, want [chat:relay models:read]", claims.Scope)
@@ -91,8 +91,8 @@ func TestSignForAudiences_RoundTrip(t *testing.T) {
 	if claims.V != 1 {
 		t.Fatalf("V = %d, want 1", claims.V)
 	}
-	if claims.Issuer != "kittyapi" {
-		t.Fatalf("Issuer = %q, want kittyapi (RFC 7519 iss)", claims.Issuer)
+	if claims.Issuer != "https://api.kittypaw.app/auth" {
+		t.Fatalf("Issuer = %q, want https://api.kittypaw.app/auth (RFC 7519 iss, Plan 13 URL form)", claims.Issuer)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestSignForAudiences_RoundTrip(t *testing.T) {
 func TestClaimsJSONUsesSubField(t *testing.T) {
 	token, err := auth.SignForAudiences(
 		"user-xyz",
-		[]string{"kittyapi"},
+		[]string{"https://api.kittypaw.app"},
 		nil,
 		testSecret,
 		15*time.Minute,
@@ -129,8 +129,8 @@ func TestClaimsJSONUsesSubField(t *testing.T) {
 	if _, ok := raw["uid"]; ok {
 		t.Fatalf(`payload must not contain legacy "uid" key, got: %v`, raw)
 	}
-	if got, ok := raw["iss"].(string); !ok || got != "kittyapi" {
-		t.Fatalf(`payload "iss" = %v, want "kittyapi"`, raw["iss"])
+	if got, ok := raw["iss"].(string); !ok || got != "https://api.kittypaw.app/auth" {
+		t.Fatalf(`payload "iss" = %v, want "https://api.kittypaw.app/auth"`, raw["iss"])
 	}
 }
 

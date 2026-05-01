@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -115,8 +116,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	}
 
 	// Service discovery — SDK reads this once on startup.
+	// auth_base_url is derived from BaseURL because /auth/* is currently
+	// hosted under the api host; future host split (auth.kittypaw.app)
+	// only requires changing this single line.
 	discovery := map[string]string{
 		"api_base_url":        cfg.APIBaseURL,
+		"auth_base_url":       strings.TrimRight(cfg.BaseURL, "/") + "/auth",
 		"skills_registry_url": cfg.SkillsRegistryURL,
 	}
 	if cfg.KakaoRelayURL != "" {

@@ -38,9 +38,9 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 **API client (web/CLI 사용자)**:
 ```json
 {
-  "iss": "kittyapi",
+  "iss": "https://api.kittypaw.app/auth",
   "sub": "user_<id>",
-  "aud": ["kittyapi", "kittychat"],
+  "aud": ["https://api.kittypaw.app", "https://chat.kittypaw.app"],
   "scope": ["chat:relay", "models:read"],
   "v": 1,
   "device_id": "<optional, set when device-scoped>",
@@ -53,9 +53,9 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 **daemon (device-scoped, 다음 slice)**:
 ```json
 {
-  "iss": "kittyapi",
+  "iss": "https://api.kittypaw.app/auth",
   "sub": "device:<device_id>",
-  "aud": ["kittychat"],
+  "aud": ["https://chat.kittypaw.app"],
   "scope": ["daemon:connect"],
   "v": 1,
   "user_id": "user_<id>",
@@ -68,7 +68,8 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 
 **Wire-format 박제 (검증자 측 주의)**:
 - `sub` 는 RFC 7519 standard. **`uid` 는 사용 안 함** — 초기 박제 시 `uid` 박제됐던 것을 2026-05-02 정정. 검증자가 *uid 우선 + sub fallback* hack 박제 불필요.
-- `iss="kittyapi"` 박제 — issuer mismatch 시 reject 권장.
+- `iss="https://api.kittypaw.app/auth"` 박제 (Plan 13 사용자 결정 — path-based) — issuer mismatch 시 reject 권장. 미래 host 분리 (D8) 시 dual-accept 기간.
+- `aud` URL form (`["https://api.kittypaw.app", "https://chat.kittypaw.app"]`) — RFC 7519 / OIDC pattern. resource server URL 일치 (Auth0/Okta/AWS Cognito 같은 표준).
 
 ### D3. scope vocabulary (확장 가능, additive only)
 
@@ -108,6 +109,31 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 | JWKS public endpoint | RS256 마이그레이션 후. kittychat 이 introspection mode 시작 시 안 만들어도 됨 |
 | pairing flow (registration code) | UI/UX 영역, daemon 측 진행과 묶음 |
 | scope 검증 middleware | 발급자 측 (우리)가 *발급* 만 박제 후 검증자 측 (kittychat) 이 enforce |
+
+### D8. auth authority vs resource server (Plan 13, 사용자 결정 2026-05-02)
+
+**배경**: "API 가 인증한다" 는 명명 혼란. *auth authority* 와 *resource server* 는 *논리적으로 다른 책임*. 코드는 이미 옳은 방향 (kittypaw-api 가 발급, kittychat 이 검증), 단 *이름/식별자* 가 따라가지 못함.
+
+**결정**:
+- **issuer (path-based)**: `iss = "https://api.kittypaw.app/auth"`. *현재* 의 사실 (실 host 박제) 일치. `/auth/*` namespace 가 *auth authority endpoint*, `/v1/*` 가 *api resource server endpoint*.
+- **audience (URL form)**: `aud = ["https://api.kittypaw.app", "https://chat.kittypaw.app"]`. RFC 7519 / OIDC standard. resource server URL.
+- **discovery `auth_base_url`**: `https://api.kittypaw.app/auth` 박제 (server 가 `BaseURL + "/auth"` derive). 미래 host 분리 시 *값만 변경* (`https://auth.kittypaw.app`).
+
+**미래 host 분리 trigger condition** (Plan 13 R7 박제):
+- `auth.kittypaw.app` 별 traffic 박제 시점, 또는
+- 별 process 운영 burden 발생 시점, 또는
+- JWKS / RS256 마이그레이션 시점 (D5 의 다음 slice).
+
+분리 plan trigger 시점에 **dual-accept 기간** (구 issuer `https://api.kittypaw.app/auth` + 신 issuer `https://auth.kittypaw.app` 둘 다 한동안 인정) 박제 필수. AccessTokenTTL=15min + refresh rotation 활용 시 *자동 새 shape 전환* 가능.
+
+**책임 분리 명시**:
+| 역할 | host (지금) | path | 책임 |
+|---|---|---|---|
+| auth authority | `api.kittypaw.app` | `/auth/*` | OAuth login, refresh, /me, JWT 발급 |
+| api resource server | `api.kittypaw.app` | `/v1/*` | 데이터 프록시 (검증만) |
+| chat resource server | `chat.kittypaw.app` | `/*` | relay (검증만) |
+
+지금은 *auth authority + api resource server* 가 한 process 박제 (kittyapi). 미래 분리 시 *값만 변경* — code/spec 갱신 비용 작음.
 
 ## Plan 17 — TDD 태스크 분해 (kickoff 시 ina:plan)
 

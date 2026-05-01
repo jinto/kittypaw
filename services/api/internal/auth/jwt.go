@@ -36,7 +36,7 @@ func SignForAudiences(userID string, audiences []string, scopes []string, secret
 		UserID: userID,
 		Scope:  scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    IssuerKittyAPI,
+			Issuer:    Issuer,
 			Audience:  jwt.ClaimStrings(audiences),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),

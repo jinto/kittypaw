@@ -93,6 +93,33 @@ func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 	}
 }
 
+// TestDiscoveryReturnsAuthBaseURL pins Plan 13's auth_base_url derive logic.
+// auth_base_url = BaseURL + "/auth" (trailing slash on BaseURL must be
+// trimmed — Plan 13 R6). This is the only key whose value is *derived*
+// from server config rather than a separate env var, so changes to the
+// derive logic must surface here.
+func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.JWTSecret = "test-secret"
+	cfg.BaseURL = "http://localhost:8080/" // trailing slash — TrimRight defends
+	r := NewRouter(cfg, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["auth_base_url"]; got != "http://localhost:8080/auth" {
+		t.Fatalf("expected auth_base_url=http://localhost:8080/auth (no double slash), got %q", got)
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	r := testRouter()
 
