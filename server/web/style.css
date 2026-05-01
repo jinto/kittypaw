@@ -635,6 +635,17 @@ th {
   border-color: var(--accent);
 }
 
+.chat-image {
+  display: block;
+  max-width: min(100%, 420px);
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  margin-top: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
+}
+
 .chat-bubble--system {
   align-self: center;
   background: var(--bg);
