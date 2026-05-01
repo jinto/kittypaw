@@ -50,6 +50,36 @@ func TestNotFound(t *testing.T) {
 	}
 }
 
+// TestAlmanacRouteWiredWithRateLimit confirms the new /v1/almanac/... route
+// is registered and inherits the global rate limiter (anon = 5/min).
+func TestAlmanacRouteWiredWithRateLimit(t *testing.T) {
+	r := testRouter()
+
+	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
+	const peer = "192.0.2.43:1234"
+
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = peer
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d unexpectedly throttled: %d", i+1, w.Code)
+		}
+		if w.Code == http.StatusNotFound {
+			t.Fatalf("call #%d hit 404 — almanac route not wired", i+1)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.RemoteAddr = peer
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th call, got %d", w.Code)
+	}
+}
+
 // TestWeatherRouteWiredWithRateLimit confirms the new /v1/weather/kma/...
 // route is registered and inherits the global rate limiter (anon = 5/min).
 // The handler will return 502 (no upstream/key) for the first calls — what

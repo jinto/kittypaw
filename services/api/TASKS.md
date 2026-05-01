@@ -82,15 +82,15 @@
 - [ ] 운영 서버 환경변수 `WEATHER_API_KEY` 등록
 - [ ] 프로덕션 smoke: 서울 좌표 1회 curl → 200
 
-## Plan 6: Places DB + /v1/geo/resolve ← 현재
+## Plan 6: Places DB + /v1/geo/resolve
 
-> Spec: `.claude/plans/geo-address-coords.md` (v8, Phase 1+2 합의 통과)
+> Spec: `.claude/plans/geo-address-coords.md` (v9, PR-2 의사결정 박제)
 > Goal: 자체 통합 places DB로 LLM 자연어 위치 입력 → 좌표 변환. **외부 API 의존 0**
 > 데이터: Wikidata(CC0) + 서울교통공사 1~8호선(제한없음) + 별칭 50 + 행안부 도로명주소(PR-2, 제한없음)
-> PR-1: Wikidata + 서울교통공사 + 별칭 + 벤치마크 (이번)
-> PR-2: 행안부 도로명주소 (별도 PR, EPSG 변환 + 별도 addresses 테이블)
+> PR-1: Wikidata + 서울교통공사 + 별칭 + 벤치마크 ✅
+> PR-2: 행안부 도로명주소 (EPSG:5179 → WGS84 pure-Go 변환 + 별도 addresses 테이블) ← 진행 중 (별도 트랙)
 
-### PR-1 (8 태스크 — TDD 사이클)
+### PR-1 ✅ (8 태스크 — TDD 사이클)
 
 - [x] **T1: migration** —
       RED: `migrations/00X_create_places.up.sql` + `down.sql`. `make migrate` → places + alias_overrides + pg_trgm + 인덱스 생성. `SELECT 1 FROM places LIMIT 0` 통합 테스트.
@@ -141,8 +141,71 @@
 - [ ] **PR-2 EPSG 라이브러리 PoC 스파이크** — `go-proj` 등 후보 1개 확정 (PR-2 첫 태스크)
 - [ ] **down.sql 위험성 강화** — `migrate down 003`이 운영 데이터 즉시 삭제. maintenance.md 경고 강화 (Security #6)
 
-### PR-2 (PR-1 머지 후 — 별도 PR)
-- 행안부 도로명주소 DB 임포트 (수백만 row, EPSG:5179→WGS84 변환)
-- 별도 `addresses` 테이블 (places 과적재 방지)
-- 일간 cron + 차분 갱신
-- handler chain에 addresses fallthrough
+### PR-2 ← 진행 중 (8 태스크 — TDD 사이클)
+
+> 의사결정 4건 (geo-address-coords.md §15):
+> - **D1**: EPSG:5179 → WGS84 = pure-Go LCC + datum-shift 무시 (CGO 0)
+> - **D2**: 데이터 소스 = 행안부 도로명주소 전체 DB txt
+> - **D3**: cron 주기 = 매월 5일 KST 03:00 (월간)
+> - **D4**: 부분 주소 = 422 + format hint (보수적)
+
+- [ ] **T1: migration 005 — addresses 테이블** —
+      RED: `migrations/005_create_addresses.up.sql` + `down.sql`. `make migrate` → addresses 테이블 + 인덱스 생성. `SELECT 1 FROM addresses LIMIT 0` 통합 테스트.
+      GREEN: 스키마 (`pnu UNIQUE`, `road_address_normalized`, `region_sido/sigungu`). gin_trgm_ops on normalized + building. region (sido, sigungu) 복합 인덱스.
+
+- [ ] **T2: internal/geo/epsg5179.go — LCC inverse** —
+      RED: `internal/geo/epsg5179_test.go` 6 case (서울/부산/대구/인천/제주/대전 시청 알려진 EPSG:5179 좌표 → WGS84, ±5m 게이트). bbox 외 → ErrOutOfKorea.
+      GREEN: LCC inverse (EPSG:5179 파라미터: lat_0=38, lon_0=127.5, lat_1=30, lat_2=60, x_0=1000000, y_0=2000000, GRS80 a=6378137 b=6356752.3141). datum-shift 생략 (Korea 2000 ≈ WGS84 within 1m).
+
+- [ ] **T3: internal/model/address.go (5 함수 + integration test)** —
+      RED: `address_integration_test.go` (`//go:build integration`) — FindByRoadExact / FindByRoadFuzzy / FindByBuilding / FindByPNU / Upsert. fixture INSERT + truncate isolation.
+      GREEN: pgx raw SQL 5 함수. ORDER BY similarity DESC, region_sido ASC, id ASC. road_address_normalized = NFC + 시도 약어 통일 (서울특별시 ↔ 서울).
+
+- [ ] **T4: cmd/seed-juso — 행안부 txt parser + EPSG + COPY FROM** —
+      RED: `cmd/seed-juso/main_test.go` mini fixture (10 row pipe-delimited txt) → addresses INSERT 정확 검증. EPSG 변환 후 좌표 ±5m.
+      GREEN: 시도별 분할 입력 (17 파일), per-시도 transactional swap, 청크 단위 COPY FROM 10k row, 체크포인트 `.juso_import_state.json`. NULLIF 빈 문자열 → NULL.
+
+- [ ] **T5: internal/proxy/places.go 확장 — addresses fallthrough** —
+      RED: golden case 추가 — "서울 강남구 테헤란로 152" → 200 (source="juso") / "테헤란로 152" → 422 (부분 주소) / "역삼동 825-22" → 200 (지번).
+      GREEN: `isAddressLikely(q)` 패턴 (시도 토큰 + 도로명/번지 정규식). chain 5단계로 추가 (alias_override → exact → alias → fuzzy → addresses → 422).
+
+- [ ] **T6: docs/maintenance.md PR-2 갱신** —
+      juso.go.kr 회원가입 + 다운로드 절차 (24h URL 만료 명시) + 매월 5일 KST 03:00 운영자 수동 다운로드 + `make seed-juso` 실행 + 실패 rollback 절차.
+
+- [ ] **T7: testdata 확장 + benchmark 갱신** —
+      RED: `testdata/korean_corpus.json` 100 → 130건 (도로명 20 + 지번 10). `cmd/benchmark-resolve` 측정.
+      GREEN: corpus 작성 + **precision ≥ 0.85 게이트 유지**. 미달 시 alias 보강 또는 normalize 패턴 추가.
+
+- [ ] **T8: 라우트 확장 + Makefile + atomic commit** —
+      RED: `cmd/server/main.go` integration test ("서울 강남구 테헤란로 152" → 200 + 좌표). `make build/lint/test` pass.
+      GREEN: Makefile `seed-juso` 타겟 1줄 + Conventional Commits — `feat(geo): 행안부 도로명주소 (EPSG:5179 pure-Go 변환)`. **사용자 명시 허락 후** atomic commit.
+
+**Operational Checklist** (PR-2 머지 후):
+- [ ] juso.go.kr 회원가입 + 다운로드 권한 신청
+- [ ] 첫 다운로드 + `make seed-juso` (~30분-1시간, ~1천만 row)
+- [ ] 백업 사이즈 측정 (addresses 인덱스 포함 ~3-5GB)
+- [ ] cron 등록 (매월 5일 KST 03:00)
+- [ ] production smoke: `curl '/v1/geo/resolve?q=서울 강남구 테헤란로 152'` → 200
+
+## Plan 7: Almanac (KASI) — Phase A ← 현재 (build target)
+
+> Spec: `.claude/plans/almanac-kasi-phase-a.md` (v3, T0 검증 + 3-reviewer 다관점 검증 통과)
+> 상위 로드맵: `~/.claude/plans/majestic-percolating-cray.md`
+> Goal: `/v1/almanac/lunar-date` (양→음) + `/v1/almanac/solar-date` (음→양) + `/v1/almanac/sun` (좌표/지역)
+> Reuse: `holiday.go` 패턴 미러 (단 `_type=json`, `serviceName` 동적). `kma.ErrOutOfKoreaPeninsula` 가드 재사용
+> Atomic single commit (사용자 명시 허락 후)
+
+- [x] **T1: AlmanacHandler scaffold + LunarDate (양→음)** — 7 sub-test (plan v3 6 + `_type=json` 검증 1) all pass.
+- [x] **T2: SolarDate (음→양) + stale/502 대칭 보강** — 7 sub-test (윤달 passthrough 포함) all pass.
+- [x] **T3+T4: Sun (좌표/지역 통합) + 한반도 가드 (D9)** — 9 sub-test (OutOfPeninsula + DnYnSilentlyDropped + InvalidCoords 포함) all pass. `/sun` 단일 endpoint, `latitude+longitude` vs `location` 분기.
+- [x] **T5: 라우트 등록 + router-level rate limit test** — `TestAlmanacRouteWiredWithRateLimit` (anon 5+1=429) pass. main.go 에 `/v1/almanac/{lunar-date,solar-date,sun}` 3 라우트 등록.
+- [x] **T6: Integration test + build/lint/test** — `TestAlmanac_LiveKASI` 3 골든 케이스 pass (양력 2026-05-01 ↔ 음력 2026-03-15 평달 / 서울 sunrise=0537 sunset=1922 / round-trip). `make build / make lint (0 issues) / make test` 모두 pass.
+- [ ] **T7: Conventional Commit (사용자 허락 대기)** — `feat(almanac): 음력 변환 + 일출/일몰 (KASI)` 메시지로 atomic single commit. **🚨 사용자 명시 허락 후만 진행.**
+
+**Operational Checklist**:
+- [x] data.go.kr 활용 신청 (LrsrCldInfoService + RiseSetInfoService) — 2026-05-01 자동 승인 완료
+- [ ] **L4 — kittypaw 스킬 패키지 측 통합 (별도 PR, 별도 레포 `../skills/packages/`)** — Plan 5 T6 선례. 본 PR 머지 ≠ 사용자 도달. 본 PR 끝난 후 별도 진행.
+- [ ] **Phase C 키 신청 발의** (서울교통공사 OpenAPI) — 1~3일 리드타임. 본 plan 진행과 병렬 발의 권장 (상위 로드맵 명시 결정).
+- [ ] (P1 follow-up) D10 — 입력범위(1391~2050) 검증 — 별도 issue.
+- [ ] (P1 follow-up) D4 — `holiday.go` 와 `almanac.go` 의 endpoint() helper 통합 — 현 시점 KASI endpoint 4개 < trigger 5개라 보류.
+- [ ] (P1 follow-up) **holiday.go envelope 검증** — almanac.go 처럼 `parseKMAError` 호출하여 `resultCode != "00"` 응답을 24h 캐시하지 않게. 현재 holiday.go 는 KASI 가 200+에러를 보내면 캐시에 저장 → service key 만료/QPS 초과 시 잘못된 응답 24h 지속 위험.

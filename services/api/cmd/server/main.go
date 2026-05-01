@@ -105,6 +105,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		HTTPClient: &http.Client{Timeout: 15 * time.Second},
 		APIKey:     cfg.WeatherAPIKey,
 	}
+	almanac := &proxy.AlmanacHandler{
+		Cache:      dataCache,
+		HTTPClient: &http.Client{Timeout: 15 * time.Second},
+		APIKey:     cfg.HolidayAPIKey,
+	}
 	places := &proxy.PlacesHandler{
 		Store: placeStore,
 	}
@@ -165,6 +170,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/village-fcst", weather.VillageForecast())
 		r.Get("/ultra-srt-ncst", weather.UltraShortNowcast())
 		r.Get("/ultra-srt-fcst", weather.UltraShortForecast())
+	})
+
+	r.Route("/v1/almanac", func(r chi.Router) {
+		r.Get("/lunar-date", almanac.LunarDate())
+		r.Get("/solar-date", almanac.SolarDate())
+		r.Get("/sun", almanac.Sun())
 	})
 
 	r.Route("/v1/geo", func(r chi.Router) {
