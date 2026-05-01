@@ -11,6 +11,7 @@ This repository currently contains the relay core:
 
 - `GET /health`
 - `GET /daemon/connect` for local daemon outbound WebSocket connections
+- `GET /v1/routes` for authenticated online daemon/account discovery
 - `GET /nodes/{device_id}/accounts/{account_id}/v1/models`
 - `POST /nodes/{device_id}/accounts/{account_id}/v1/chat/completions`
 - legacy MVP fallback routes without `{account_id}`:
@@ -65,9 +66,9 @@ API client tokens are expected to use the kittyapi wire format:
 
 ```json
 {
-  "iss": "kittyapi",
+  "iss": "https://api.kittypaw.app/auth",
   "sub": "user_<id>",
-  "aud": ["kittyapi", "kittychat"],
+  "aud": ["https://api.kittypaw.app", "https://chat.kittypaw.app"],
   "scope": ["chat:relay", "models:read"],
   "v": 1
 }
@@ -83,9 +84,9 @@ Daemon device credentials are also accepted as kittyapi JWTs:
 
 ```json
 {
-  "iss": "kittyapi",
+  "iss": "https://api.kittypaw.app/auth",
   "sub": "device:dev_1",
-  "aud": ["kittychat"],
+  "aud": ["https://chat.kittypaw.app"],
   "scope": ["daemon:connect"],
   "v": 1,
   "user_id": "user_<id>",
@@ -114,6 +115,32 @@ verified user_id + verified device_id + request account_id
 This means `alice` on two devices, or under two API users, is not the same route.
 Capabilities work the same way: a request is sent to a daemon connection only
 when the connection's hello advertised the matching operation capability.
+
+Clients can discover currently online routes with:
+
+```text
+GET /v1/routes
+```
+
+The endpoint requires a valid API client credential with either `models:read` or
+`chat:relay`. It returns only routes for the authenticated `sub` user. If the
+credential includes `device_id` or `account_id`, those claims are treated as
+additional restrictions and the route list is filtered accordingly.
+
+Example response:
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "device_id": "dev_1",
+      "local_accounts": ["alice", "bob"],
+      "capabilities": ["openai.models", "openai.chat_completions"]
+    }
+  ]
+}
+```
 
 OpenAI-compatible clients should use the account-scoped routes when they need a
 specific local account:

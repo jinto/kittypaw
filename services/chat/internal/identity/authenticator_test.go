@@ -95,7 +95,7 @@ func seededVerifier(t *testing.T) *MemoryCredentialVerifier {
 	verifier := NewMemoryCredentialVerifier()
 	if err := verifier.AddAPIClient("api_secret", APIClientClaims{
 		Subject:   "user_1",
-		Audiences: []string{"kittyapi", AudienceKittyChat},
+		Audiences: []string{AudienceKittyAPI, AudienceKittyChat},
 		Version:   CredentialVersion1,
 		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
 		UserID:    "user_1",

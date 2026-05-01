@@ -96,7 +96,7 @@ func TestMemoryCredentialVerifierValidatesAPIClientSeeds(t *testing.T) {
 		claims APIClientClaims
 	}{
 		{name: "empty token", token: "", claims: valid},
-		{name: "missing kittychat audience", token: "api_secret", claims: withAPIAudiences(valid, []string{"kittyapi"})},
+		{name: "missing kittychat audience", token: "api_secret", claims: withAPIAudiences(valid, []string{AudienceKittyAPI})},
 		{name: "wrong version", token: "api_secret", claims: withAPIVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "api_secret", claims: withAPIScopes(valid, nil)},
 		{name: "unknown scope", token: "api_secret", claims: withAPIScopes(valid, []Scope{"unknown"})},
@@ -128,7 +128,7 @@ func TestMemoryCredentialVerifierValidatesDeviceSeeds(t *testing.T) {
 		claims DeviceClaims
 	}{
 		{name: "empty token", token: "", claims: valid},
-		{name: "missing kittychat audience", token: "dev_secret", claims: withDeviceAudiences(valid, []string{"kittyapi"})},
+		{name: "missing kittychat audience", token: "dev_secret", claims: withDeviceAudiences(valid, []string{AudienceKittyAPI})},
 		{name: "wrong version", token: "dev_secret", claims: withDeviceVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "dev_secret", claims: withDeviceScopes(valid, nil)},
 		{name: "unknown scope", token: "dev_secret", claims: withDeviceScopes(valid, []Scope{"unknown"})},
@@ -204,7 +204,7 @@ func TestMemoryCredentialVerifierAcceptsMultiAudienceClaims(t *testing.T) {
 	verifier := NewMemoryCredentialVerifier()
 	claims := APIClientClaims{
 		Subject:   "user_1",
-		Audiences: []string{"kittyapi", AudienceKittyChat},
+		Audiences: []string{AudienceKittyAPI, AudienceKittyChat},
 		Version:   CredentialVersion1,
 		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
 		UserID:    "user_1",

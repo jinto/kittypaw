@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -26,6 +27,12 @@ type Config struct {
 
 type DevicePrincipal struct {
 	UserID          string
+	DeviceID        string
+	LocalAccountIDs []string
+	Capabilities    []protocol.Operation
+}
+
+type Route struct {
 	DeviceID        string
 	LocalAccountIDs []string
 	Capabilities    []protocol.Operation
@@ -162,6 +169,41 @@ func (b *Broker) IsOnline(userID, deviceID string) bool {
 	defer b.mu.Unlock()
 	_, ok := b.devices[keyFor(userID, deviceID)]
 	return ok
+}
+
+func (b *Broker) Routes(userID string) []Route {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	routes := make([]Route, 0)
+	for key, state := range b.devices {
+		if key.userID != userID {
+			continue
+		}
+		accounts := make([]string, 0, len(state.accounts))
+		for accountID := range state.accounts {
+			accounts = append(accounts, accountID)
+		}
+		sort.Strings(accounts)
+
+		capabilities := make([]protocol.Operation, 0, len(state.capabilities))
+		for capability := range state.capabilities {
+			capabilities = append(capabilities, capability)
+		}
+		sort.Slice(capabilities, func(i, j int) bool {
+			return capabilities[i] < capabilities[j]
+		})
+
+		routes = append(routes, Route{
+			DeviceID:        key.deviceID,
+			LocalAccountIDs: accounts,
+			Capabilities:    capabilities,
+		})
+	}
+	sort.Slice(routes, func(i, j int) bool {
+		return routes[i].DeviceID < routes[j].DeviceID
+	})
+	return routes
 }
 
 func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Frame, error) {

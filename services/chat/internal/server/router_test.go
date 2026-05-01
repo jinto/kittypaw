@@ -40,3 +40,7 @@ type nilBroker struct{}
 func (nilBroker) Request(context.Context, broker.Request) (<-chan protocol.Frame, error) {
 	return nil, broker.ErrDeviceOffline
 }
+
+func (nilBroker) Routes(string) []broker.Route {
+	return nil
+}

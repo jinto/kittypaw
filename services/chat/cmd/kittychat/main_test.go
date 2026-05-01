@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kittypaw-app/kittychat/internal/config"
+	"github.com/kittypaw-app/kittychat/internal/identity"
 	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
@@ -207,9 +208,9 @@ func signTestJWT(t *testing.T, secret, userID string) string {
 	t.Helper()
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"iss":   "kittyapi",
+		"iss":   identity.IssuerKittyAPI,
 		"sub":   userID,
-		"aud":   []string{"kittyapi", "kittychat"},
+		"aud":   []string{identity.AudienceKittyAPI, identity.AudienceKittyChat},
 		"scope": []string{"chat:relay", "models:read"},
 		"v":     1,
 		"iat":   now.Unix(),
@@ -231,9 +232,9 @@ func signTestDeviceJWTWithSubject(t *testing.T, secret, subject, userID, deviceI
 	t.Helper()
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"iss":            "kittyapi",
+		"iss":            identity.IssuerKittyAPI,
 		"sub":            subject,
-		"aud":            []string{"kittychat"},
+		"aud":            []string{identity.AudienceKittyChat},
 		"scope":          []string{"daemon:connect"},
 		"v":              1,
 		"user_id":        userID,

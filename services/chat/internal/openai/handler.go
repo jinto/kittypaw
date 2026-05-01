@@ -31,6 +31,7 @@ type Authenticator interface {
 
 type Broker interface {
 	Request(ctx context.Context, req broker.Request) (<-chan protocol.Frame, error)
+	Routes(userID string) []broker.Route
 }
 
 type Handler struct {
@@ -44,11 +45,50 @@ func NewHandler(auth Authenticator, b Broker) *Handler {
 
 func (h *Handler) Routes() http.Handler {
 	r := chi.NewRouter()
+	r.Get("/v1/routes", h.handleRoutes)
 	r.Get("/nodes/{device_id}/accounts/{account_id}/v1/models", h.handleModels)
 	r.Post("/nodes/{device_id}/accounts/{account_id}/v1/chat/completions", h.handleChatCompletions)
 	r.Get("/nodes/{device_id}/v1/models", h.handleModels)
 	r.Post("/nodes/{device_id}/v1/chat/completions", h.handleChatCompletions)
 	return r
+}
+
+type routeListResponse struct {
+	Object string          `json:"object"`
+	Data   []routeResponse `json:"data"`
+}
+
+type routeResponse struct {
+	DeviceID      string               `json:"device_id"`
+	LocalAccounts []string             `json:"local_accounts"`
+	Capabilities  []protocol.Operation `json:"capabilities"`
+}
+
+func (h *Handler) handleRoutes(w http.ResponseWriter, r *http.Request) {
+	if h.auth == nil {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	principal, err := h.auth.Authenticate(r)
+	if err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !principal.HasScope("models:read") && !principal.HasScope("chat:relay") {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if h.broker == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "relay broker unavailable")
+		return
+	}
+
+	response := routeListResponse{
+		Object: "list",
+		Data:   routesForPrincipal(h.broker.Routes(principal.UserID), principal),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -239,4 +279,35 @@ func requiredScope(operation protocol.Operation) string {
 	default:
 		return ""
 	}
+}
+
+func routesForPrincipal(routes []broker.Route, principal Principal) []routeResponse {
+	response := make([]routeResponse, 0, len(routes))
+	for _, route := range routes {
+		if principal.DeviceID != "" && route.DeviceID != principal.DeviceID {
+			continue
+		}
+		accounts := append([]string(nil), route.LocalAccountIDs...)
+		if principal.AccountID != "" {
+			if !containsString(accounts, principal.AccountID) {
+				continue
+			}
+			accounts = []string{principal.AccountID}
+		}
+		response = append(response, routeResponse{
+			DeviceID:      route.DeviceID,
+			LocalAccounts: accounts,
+			Capabilities:  append([]protocol.Operation(nil), route.Capabilities...),
+		})
+	}
+	return response
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

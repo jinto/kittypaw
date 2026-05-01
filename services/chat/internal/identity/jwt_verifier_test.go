@@ -22,7 +22,7 @@ func TestJWTCredentialVerifierVerifiesAPIClientToken(t *testing.T) {
 	token := signTestJWT(t, map[string]any{
 		"sub":   "user_1",
 		"iss":   IssuerKittyAPI,
-		"aud":   []string{"kittyapi", AudienceKittyChat},
+		"aud":   []string{AudienceKittyAPI, AudienceKittyChat},
 		"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)},
 		"v":     CredentialVersion1,
 		"iat":   time.Now().Unix(),
@@ -39,7 +39,7 @@ func TestJWTCredentialVerifierVerifiesAPIClientToken(t *testing.T) {
 	if got.DeviceID != "" || got.AccountID != "" {
 		t.Fatalf("routing claims = %+v, want user-scoped token without device/account defaults", got)
 	}
-	assertStringSlice(t, got.Audiences, []string{"kittyapi", AudienceKittyChat})
+	assertStringSlice(t, got.Audiences, []string{AudienceKittyAPI, AudienceKittyChat})
 	assertScopes(t, got.Scopes, []Scope{ScopeChatRelay, ScopeModelsRead})
 }
 
@@ -51,7 +51,7 @@ func TestJWTCredentialVerifierIgnoresUnknownScopes(t *testing.T) {
 	token := signTestJWT(t, map[string]any{
 		"sub":   "user_1",
 		"iss":   IssuerKittyAPI,
-		"aud":   []string{"kittyapi", AudienceKittyChat},
+		"aud":   []string{AudienceKittyAPI, AudienceKittyChat},
 		"scope": []string{string(ScopeModelsRead), "future:scope"},
 		"v":     CredentialVersion1,
 		"iat":   time.Now().Unix(),
@@ -65,6 +65,30 @@ func TestJWTCredentialVerifierIgnoresUnknownScopes(t *testing.T) {
 	assertScopes(t, got.Scopes, []Scope{ScopeModelsRead})
 }
 
+func TestJWTCredentialVerifierAcceptsLegacyIssuerAudienceDuringMigration(t *testing.T) {
+	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
+	if err != nil {
+		t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
+	}
+	token := signTestJWT(t, map[string]any{
+		"sub":   "user_1",
+		"iss":   LegacyIssuerKittyAPI,
+		"aud":   []string{LegacyAudienceKittyAPI, LegacyAudienceKittyChat},
+		"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)},
+		"v":     CredentialVersion1,
+		"iat":   time.Now().Unix(),
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	})
+
+	got, err := verifier.VerifyAPIClient(context.Background(), token)
+	if err != nil {
+		t.Fatalf("VerifyAPIClient() legacy token error = %v", err)
+	}
+	if got.Subject != "user_1" {
+		t.Fatalf("Subject = %q, want user_1", got.Subject)
+	}
+}
+
 func TestJWTCredentialVerifierRejectsLegacyUIDOnlyToken(t *testing.T) {
 	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 	if err != nil {
@@ -73,7 +97,7 @@ func TestJWTCredentialVerifierRejectsLegacyUIDOnlyToken(t *testing.T) {
 	token := signTestJWT(t, map[string]any{
 		"uid":   "user_1",
 		"iss":   IssuerKittyAPI,
-		"aud":   []string{"kittyapi", AudienceKittyChat},
+		"aud":   []string{AudienceKittyAPI, AudienceKittyChat},
 		"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)},
 		"v":     CredentialVersion1,
 		"iat":   time.Now().Unix(),
@@ -94,28 +118,28 @@ func TestJWTCredentialVerifierRejectsInvalidAPIClientClaims(t *testing.T) {
 		{
 			name: "missing issuer",
 			claims: map[string]any{
-				"sub": "user_1", "aud": []string{"kittyapi", AudienceKittyChat},
+				"sub": "user_1", "aud": []string{AudienceKittyAPI, AudienceKittyChat},
 				"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)}, "v": CredentialVersion1,
 			},
 		},
 		{
 			name: "missing kittychat audience",
 			claims: map[string]any{
-				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{"kittyapi"},
+				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{AudienceKittyAPI},
 				"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)}, "v": CredentialVersion1,
 			},
 		},
 		{
 			name: "missing api scope",
 			claims: map[string]any{
-				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{"kittyapi", AudienceKittyChat},
+				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{AudienceKittyAPI, AudienceKittyChat},
 				"scope": []string{string(ScopeDaemonConnect)}, "v": CredentialVersion1,
 			},
 		},
 		{
 			name: "expired",
 			claims: map[string]any{
-				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{"kittyapi", AudienceKittyChat},
+				"sub": "user_1", "iss": IssuerKittyAPI, "aud": []string{AudienceKittyAPI, AudienceKittyChat},
 				"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)}, "v": CredentialVersion1,
 				"exp": time.Now().Add(-time.Minute).Unix(),
 			},

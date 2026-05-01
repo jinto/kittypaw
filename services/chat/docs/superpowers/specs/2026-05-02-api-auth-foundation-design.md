@@ -53,8 +53,12 @@ to the package-specific principals used by the relay:
 
 Claims include the fields that `api.kittypaw.app` will own:
 
-- `audiences`: must include `kittychat`. API server JWTs can use
-  `["kittyapi", "kittychat"]` for backwards-compatible multi-audience tokens.
+- `issuer`: canonical value is `https://api.kittypaw.app/auth`. The legacy
+  value `kittyapi` is accepted only during migration.
+- `audiences`: must include canonical `https://chat.kittypaw.app`. API server
+  JWTs can use `["https://api.kittypaw.app", "https://chat.kittypaw.app"]`
+  for multi-audience tokens. The legacy resource audience `kittychat` is
+  accepted only during migration.
 - `version`: must be `1` for this slice.
 - `scopes`: must contain known scope strings.
 - API client claims: `subject`, `user_id`, `device_id`, `account_id`.
@@ -161,13 +165,13 @@ moving the production boundary into one place.
 
 The env-seeded API client claims use:
 
-- `audiences`: `["kittychat"]`
+- `audiences`: `["https://chat.kittypaw.app"]`
 - `version`: `1`
 - `scopes`: `chat:relay`, `models:read`
 
 The env-seeded device claims use:
 
-- `audiences`: `["kittychat"]`
+- `audiences`: `["https://chat.kittypaw.app"]`
 - `version`: `1`
 - `scopes`: `daemon:connect`
 

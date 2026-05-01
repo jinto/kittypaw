@@ -28,6 +28,8 @@ type fakeBroker struct {
 	req    broker.Request
 	frames []protocol.Frame
 	err    error
+	userID string
+	routes []broker.Route
 }
 
 func (b *fakeBroker) Request(_ context.Context, req broker.Request) (<-chan protocol.Frame, error) {
@@ -41,6 +43,11 @@ func (b *fakeBroker) Request(_ context.Context, req broker.Request) (<-chan prot
 	}
 	close(ch)
 	return ch, nil
+}
+
+func (b *fakeBroker) Routes(userID string) []broker.Route {
+	b.userID = userID
+	return append([]broker.Route(nil), b.routes...)
 }
 
 func TestHandlerReturnsUnauthorizedWithoutAPIKey(t *testing.T) {
@@ -276,6 +283,113 @@ func TestHandlerRejectsMissingOperationScope(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRoutesReturnsOnlineRoutesForAuthenticatedUser(t *testing.T) {
+	fb := &fakeBroker{routes: []broker.Route{
+		{
+			DeviceID:        "dev_1",
+			LocalAccountIDs: []string{"alice", "bob"},
+			Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels, protocol.OperationOpenAIChatCompletions},
+		},
+		{
+			DeviceID:        "dev_2",
+			LocalAccountIDs: []string{"work"},
+			Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+		},
+	}}
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", Scopes: []string{"models:read"},
+	}}, fb)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if fb.userID != "user_1" {
+		t.Fatalf("broker Routes userID = %q, want user_1", fb.userID)
+	}
+	var body routeListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+	}
+	if body.Object != "list" || len(body.Data) != 2 {
+		t.Fatalf("body = %+v, want list with 2 routes", body)
+	}
+	if body.Data[0].DeviceID != "dev_1" || len(body.Data[0].LocalAccounts) != 2 || body.Data[0].LocalAccounts[0] != "alice" || body.Data[0].Capabilities[1] != protocol.OperationOpenAIChatCompletions {
+		t.Fatalf("first route = %+v", body.Data[0])
+	}
+	if body.Data[1].DeviceID != "dev_2" || len(body.Data[1].LocalAccounts) != 1 || body.Data[1].LocalAccounts[0] != "work" {
+		t.Fatalf("second route = %+v", body.Data[1])
+	}
+}
+
+func TestRoutesFiltersPrincipalDeviceAndAccountRestrictions(t *testing.T) {
+	fb := &fakeBroker{routes: []broker.Route{
+		{
+			DeviceID:        "dev_1",
+			LocalAccountIDs: []string{"alice", "bob"},
+			Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+		},
+		{
+			DeviceID:        "dev_2",
+			LocalAccountIDs: []string{"bob"},
+			Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+		},
+	}}
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "bob", Scopes: []string{"chat:relay"},
+	}}, fb)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var body routeListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+	}
+	if len(body.Data) != 1 {
+		t.Fatalf("routes = %+v, want one filtered route", body.Data)
+	}
+	if body.Data[0].DeviceID != "dev_1" || len(body.Data[0].LocalAccounts) != 1 || body.Data[0].LocalAccounts[0] != "bob" {
+		t.Fatalf("filtered route = %+v, want dev_1/bob", body.Data[0])
+	}
+}
+
+func TestRoutesRejectsMissingRouteDiscoveryScope(t *testing.T) {
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", Scopes: []string{"daemon:connect"},
+	}}, &fakeBroker{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/routes", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRoutesReturnsUnauthorizedWithoutCredential(t *testing.T) {
+	h := NewHandler(staticAuth{err: ErrUnauthorized}, &fakeBroker{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/routes", nil)
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

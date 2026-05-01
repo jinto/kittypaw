@@ -250,3 +250,94 @@ func TestBrokerRejectsUnsupportedCapability(t *testing.T) {
 	default:
 	}
 }
+
+func TestBrokerRoutesReturnsUserScopedSortedSnapshot(t *testing.T) {
+	b := New(Config{RequestTimeout: time.Second, MaxInflightPerDevice: 2})
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_b",
+		LocalAccountIDs: []string{"bob", "alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIChatCompletions, protocol.OperationOpenAIModels},
+	}, newFakeConn()); err != nil {
+		t.Fatalf("register user1 dev_b: %v", err)
+	}
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_a",
+		LocalAccountIDs: []string{"carol"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, newFakeConn()); err != nil {
+		t.Fatalf("register user1 dev_a: %v", err)
+	}
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_2",
+		DeviceID:        "dev_other",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, newFakeConn()); err != nil {
+		t.Fatalf("register user2: %v", err)
+	}
+
+	routes := b.Routes("user_1")
+	if len(routes) != 2 {
+		t.Fatalf("routes length = %d, want 2: %+v", len(routes), routes)
+	}
+	if routes[0].DeviceID != "dev_a" || routes[1].DeviceID != "dev_b" {
+		t.Fatalf("device order = %+v, want dev_a then dev_b", routes)
+	}
+	assertStringSlice(t, routes[0].LocalAccountIDs, []string{"carol"})
+	assertOperations(t, routes[0].Capabilities, []protocol.Operation{protocol.OperationOpenAIModels})
+	assertStringSlice(t, routes[1].LocalAccountIDs, []string{"alice", "bob"})
+	assertOperations(t, routes[1].Capabilities, []protocol.Operation{protocol.OperationOpenAIChatCompletions, protocol.OperationOpenAIModels})
+}
+
+func TestBrokerRoutesReturnsDefensiveCopies(t *testing.T) {
+	b := New(Config{RequestTimeout: time.Second, MaxInflightPerDevice: 2})
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_1",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, newFakeConn()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	routes := b.Routes("user_1")
+	routes[0].DeviceID = "mutated"
+	routes[0].LocalAccountIDs[0] = "mutated"
+	routes[0].Capabilities[0] = protocol.OperationOpenAIChatCompletions
+
+	again := b.Routes("user_1")
+	if len(again) != 1 {
+		t.Fatalf("routes length = %d, want 1", len(again))
+	}
+	if again[0].DeviceID != "dev_1" {
+		t.Fatalf("DeviceID = %q, want dev_1", again[0].DeviceID)
+	}
+	assertStringSlice(t, again[0].LocalAccountIDs, []string{"alice"})
+	assertOperations(t, again[0].Capabilities, []protocol.Operation{protocol.OperationOpenAIModels})
+}
+
+func assertStringSlice(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("slice length = %d, want %d: got=%v want=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("slice[%d] = %q, want %q: got=%v want=%v", i, got[i], want[i], got, want)
+		}
+	}
+}
+
+func assertOperations(t *testing.T, got, want []protocol.Operation) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("operations length = %d, want %d: got=%v want=%v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("operations[%d] = %q, want %q: got=%v want=%v", i, got[i], want[i], got, want)
+		}
+	}
+}
