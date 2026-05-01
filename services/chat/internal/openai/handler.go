@@ -88,6 +88,10 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protoc
 		return
 	}
 	accountID := chi.URLParam(r, "account_id")
+	if accountID != "" && principal.AccountID != "" && principal.AccountID != accountID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if accountID == "" {
 		accountID = principal.AccountID
 	}

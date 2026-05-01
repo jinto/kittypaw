@@ -90,7 +90,7 @@ func TestAccountScopedModelsRouteUsesURLAccount(t *testing.T) {
 		{Type: protocol.FrameResponseEnd, ID: "req_1"},
 	}}
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
+		UserID: "user_1", DeviceID: "dev_1", Scopes: []string{"models:read"},
 	}}, fb)
 
 	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/accounts/bob/v1/models", nil)
@@ -106,6 +106,21 @@ func TestAccountScopedModelsRouteUsesURLAccount(t *testing.T) {
 	}
 	if fb.req.Operation != protocol.OperationOpenAIModels {
 		t.Fatalf("operation = %s, want %s", fb.req.Operation, protocol.OperationOpenAIModels)
+	}
+}
+
+func TestAccountScopedRouteRejectsPrincipalAccountMismatch(t *testing.T) {
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
+	}}, &fakeBroker{})
+
+	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/accounts/bob/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -185,7 +200,7 @@ func TestAccountScopedChatCompletionsRouteUsesURLAccount(t *testing.T) {
 		{Type: protocol.FrameResponseEnd, ID: "req_1"},
 	}}
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"chat:relay"},
+		UserID: "user_1", DeviceID: "dev_1", Scopes: []string{"chat:relay"},
 	}}, fb)
 
 	req := httptest.NewRequest(http.MethodPost, "/nodes/dev_1/accounts/bob/v1/chat/completions", bytes.NewReader(raw))
