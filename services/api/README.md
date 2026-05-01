@@ -20,7 +20,7 @@ KittyPaw Client ──► KittyAPI ──► Public Data APIs (AirKorea, etc.)
 - **CLI login** — `kittypaw login` via HTTP callback or one-time code paste
 - **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection
 - **Rate limiting** — per-IP anonymous (5/min) + per-user authenticated (60/min), daily 10K cap
-- **Service discovery** — `GET /discovery` returns relay, API, and skills registry URLs
+- **Service discovery** — `GET /discovery` returns Kakao relay, API, and skills registry URLs
 - **Stale-while-revalidate** — serves stale cached data when upstream is down
 
 ## Quick Start
@@ -47,7 +47,7 @@ make run
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check |
-| `GET` | `/discovery` | Service URLs (relay, API base, skills registry) |
+| `GET` | `/discovery` | Service URLs (Kakao relay, API base, skills registry) |
 
 ### Auth
 
@@ -108,7 +108,7 @@ All configuration is via environment variables:
 | `GITHUB_CLIENT_SECRET` | | GitHub OAuth client secret |
 | `CORS_ORIGINS` | `BASE_URL` | Comma-separated allowed origins |
 | `AIRKOREA_API_KEY` | | AirKorea public data API key |
-| `RELAY_URL` | | Messaging relay server URL |
+| `KAKAO_RELAY_URL` | | KakaoTalk relay server URL |
 | `API_BASE_URL` | | API base URL (for /discovery) |
 | `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | Skills package registry |
 

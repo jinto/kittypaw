@@ -37,6 +37,36 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+// TestDiscoveryReturnsKakaoRelayURL pins the new discovery contract:
+// the /discovery endpoint must return the Kakao relay URL under the
+// "kakao_relay_url" key (renamed from "relay_url"), and the legacy key
+// must NOT appear. The kittypaw daemon now reads kakao_relay_url only.
+func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.JWTSecret = "test-secret"
+	cfg.KakaoRelayURL = "https://kakao.kittypaw.app"
+	r := NewRouter(cfg, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["kakao_relay_url"]; got != "https://kakao.kittypaw.app" {
+		t.Fatalf("expected kakao_relay_url=https://kakao.kittypaw.app, got %q", got)
+	}
+	if _, ok := body["relay_url"]; ok {
+		t.Fatalf("legacy relay_url key must not be present in discovery response: %v", body)
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	r := testRouter()
 
