@@ -18,6 +18,7 @@ type emittingStub struct {
 	name      string
 	accountID string
 	fire      chan core.Event
+	responses chan sentResponse
 }
 
 func newEmittingStub(name, accountID string) *emittingStub {
@@ -25,7 +26,14 @@ func newEmittingStub(name, accountID string) *emittingStub {
 		name:      name,
 		accountID: accountID,
 		fire:      make(chan core.Event, 1),
+		responses: make(chan sentResponse, 4),
 	}
+}
+
+type sentResponse struct {
+	chatID           string
+	response         string
+	replyToMessageID string
 }
 
 func (e *emittingStub) Start(ctx context.Context, eventCh chan<- core.Event) error {
@@ -43,8 +51,15 @@ func (e *emittingStub) Start(ctx context.Context, eventCh chan<- core.Event) err
 	}
 }
 
-func (e *emittingStub) SendResponse(_ context.Context, _, _, _ string) error { return nil }
-func (e *emittingStub) Name() string                                         { return e.name }
+func (e *emittingStub) SendResponse(ctx context.Context, chatID, response, replyToMessageID string) error {
+	select {
+	case e.responses <- sentResponse{chatID: chatID, response: response, replyToMessageID: replyToMessageID}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (e *emittingStub) Name() string { return e.name }
 
 // emit tells the stub to produce an Event tagged with the stub's accountID.
 func (e *emittingStub) emit(text string) {
@@ -253,6 +268,69 @@ func TestDispatchLoop_ChatIDMatch_NoMismatch(t *testing.T) {
 	}
 	if got := srv.accounts.MismatchCount("alice"); got != 0 {
 		t.Errorf("MismatchCount(alice) = %d, want 0 on legitimate traffic", got)
+	}
+}
+
+// TestDispatchLoop_KakaoActionIDSkipsAdminChatOwnershipCheck is the Kakao
+// counterpart to AC-T7. Kakao ChatID is the relay callback action id used for
+// SendResponse, not a stable owner chat id. The account boundary is the
+// per-account relay token that stamped Event.AccountID, so Telegram-style
+// AdminChatIDs matching must not drop a legitimate Kakao action id.
+func TestDispatchLoop_KakaoActionIDSkipsAdminChatOwnershipCheck(t *testing.T) {
+	root := t.TempDir()
+	deps := buildAccountDeps(t, root, "jinto", &core.Config{
+		AdminChatIDs: []string{"telegram-chat-id"},
+	})
+	provider := &chatRelayMockProvider{content: "kakao reply"}
+	deps.Provider = provider
+
+	srv := New([]*AccountDeps{deps}, "test")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
+	defer srv.spawner.StopAll()
+
+	kakao := newEmittingStub(string(core.EventKakaoTalk), "jinto")
+	if err := srv.spawner.TrySpawn("jinto", kakao, core.ChannelConfig{
+		ChannelType: core.ChannelKakaoTalk,
+	}); err != nil {
+		t.Fatalf("spawn kakao: %v", err)
+	}
+
+	go srv.dispatchLoop(ctx)
+
+	payload, err := json.Marshal(core.ChatPayload{
+		ChatID:    "kakao-action-id",
+		Text:      "hello from kakao",
+		SessionID: "kakao-user-id",
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	srv.eventCh <- core.Event{
+		Type:      core.EventKakaoTalk,
+		AccountID: "jinto",
+		Payload:   payload,
+	}
+
+	select {
+	case got := <-kakao.responses:
+		if got.chatID != "kakao-action-id" {
+			t.Fatalf("response chatID = %q, want relay action id", got.chatID)
+		}
+		if got.response != "kakao reply" {
+			t.Fatalf("response = %q", got.response)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Kakao response; event was likely dropped")
+	}
+
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
+	}
+	if got := srv.accounts.MismatchCount("jinto"); got != 0 {
+		t.Fatalf("MismatchCount(jinto) = %d, want 0 for Kakao action id", got)
 	}
 }
 

@@ -591,7 +591,12 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			// under alice's store — a privacy breach the AccountID check
 			// alone cannot catch. Permissive when AdminChatIDs is empty
 			// (legacy single-account installs, web_chat-only accounts).
-			if !core.ChatBelongsToAccount(session.Config, payload.ChatID) {
+			//
+			// Kakao is different: payload.ChatID is the relay callback action id
+			// used by SendResponse, not a stable user/chat identity. Kakao account
+			// ownership is established by the per-account relay token that stamped
+			// Event.AccountID before this dispatch path.
+			if event.Type != core.EventKakaoTalk && !core.ChatBelongsToAccount(session.Config, payload.ChatID) {
 				s.accounts.RecordMismatch(event.AccountID)
 				slog.Warn("account_routing_mismatch",
 					"account", event.AccountID,
