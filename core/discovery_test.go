@@ -16,6 +16,7 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app",
+  "chat_relay_url": "https://chat.kittypaw.app",
   "kakao_relay_url": "https://kakao.kittypaw.app",
   "skills_registry_url": "https://github.com/kittypaw-app/skills"
 }`)
@@ -29,6 +30,9 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 	if got.APIBaseURL != "https://api.kittypaw.app" {
 		t.Errorf("APIBaseURL = %q", got.APIBaseURL)
 	}
+	if got.ChatRelayURL != "https://chat.kittypaw.app" {
+		t.Errorf("ChatRelayURL = %q", got.ChatRelayURL)
+	}
 	if got.KakaoRelayURL != "https://kakao.kittypaw.app" {
 		t.Errorf("KakaoRelayURL = %q", got.KakaoRelayURL)
 	}
@@ -41,6 +45,7 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app/",
+  "chat_relay_url": "https://chat.kittypaw.app///",
   "kakao_relay_url": "https://kakao.kittypaw.app///",
   "skills_registry_url": "https://github.com/kittypaw-app/skills/"
 }`)
@@ -53,6 +58,9 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 	}
 	if got.APIBaseURL != "https://api.kittypaw.app" {
 		t.Errorf("APIBaseURL trailing slash not trimmed: %q", got.APIBaseURL)
+	}
+	if got.ChatRelayURL != "https://chat.kittypaw.app" {
+		t.Errorf("ChatRelayURL trailing slashes not trimmed: %q", got.ChatRelayURL)
 	}
 	if got.KakaoRelayURL != "https://kakao.kittypaw.app" {
 		t.Errorf("KakaoRelayURL trailing slashes not trimmed: %q", got.KakaoRelayURL)
@@ -79,9 +87,9 @@ func TestFetchDiscovery_TrimsTrailingSlashOnBase(t *testing.T) {
 }
 
 func TestFetchDiscovery_EmptyRelayOK(t *testing.T) {
-	// Empty kakao_relay_url/skills_registry_url are valid; only api_base_url is required.
+	// Empty chat_relay_url/kakao_relay_url/skills_registry_url are valid; only api_base_url is required.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"api_base_url":"https://api.x","kakao_relay_url":"","skills_registry_url":""}`)
+		fmt.Fprint(w, `{"api_base_url":"https://api.x","chat_relay_url":"","kakao_relay_url":"","skills_registry_url":""}`)
 	}))
 	defer ts.Close()
 
@@ -89,8 +97,8 @@ func TestFetchDiscovery_EmptyRelayOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchDiscovery: %v", err)
 	}
-	if got.KakaoRelayURL != "" || got.SkillsRegistryURL != "" {
-		t.Errorf("expected empty relay/skills, got %+v", got)
+	if got.ChatRelayURL != "" || got.KakaoRelayURL != "" || got.SkillsRegistryURL != "" {
+		t.Errorf("expected empty chat/relay/skills, got %+v", got)
 	}
 }
 

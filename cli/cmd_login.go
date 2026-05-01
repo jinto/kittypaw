@@ -54,7 +54,7 @@ func newLoginCmd() *cobra.Command {
 	return cmd
 }
 
-// applyDiscovery fetches GET {apiURL}/discovery and persists the three service
+// applyDiscovery fetches GET {apiURL}/discovery and persists service
 // URLs under the portal host's secrets namespace. Never returns an error:
 // degraded discovery logs a warning and returns apiURL as the effective
 // api_base_url so login continues to work for collapsed deployments.
@@ -71,6 +71,9 @@ func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
 	}
 	if err := mgr.SaveAPIBaseURL(apiURL, d.APIBaseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save api_base_url: %v\n", err)
+	}
+	if err := mgr.SaveChatRelayURL(apiURL, d.ChatRelayURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save chat_relay_url: %v\n", err)
 	}
 	if err := mgr.SaveKakaoRelayBaseURL(apiURL, d.KakaoRelayURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save kakao_relay_url: %v\n", err)

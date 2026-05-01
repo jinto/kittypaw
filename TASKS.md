@@ -162,7 +162,7 @@ KittyPaw 의 weather-now skill 이 KR 좌표에서 KittyAPI KMA primary 호출�
 ### 2026-04-18 이전 (주제별)
 
 - **Package Context Declaration** — Package 에 Context 필드 + UserConfig + event-in-context + locale. `18cac99` + `fd71ab0`
-- **Discovery Endpoint Migration** — `/discovery` 로 api_base_url/kakao_relay_url/skills_registry_url 3 개 topology 동적 해석.
+- **Discovery Endpoint Migration** — `/discovery` 로 api_base_url/chat_relay_url/kakao_relay_url/skills_registry_url topology 동적 해석.
 - **Relay Rust Rewrite** — KakaoTalk relay TS→Rust (axum + SQLite, self-hosted single binary).
 - **Plan 24** — Web Tool Quality (HTML→Markdown, SearchBackend DDG/Tavily) + Agent Observe Loop.
 - **Plan 23** — Prompt Quality: SystemPrompt 블록 분리 + QualityBlock + channelHint + 토큰 예산.

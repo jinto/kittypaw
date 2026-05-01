@@ -235,6 +235,35 @@ func TestAPITokenManager_SaveKakaoRelayBaseURL_EmptyDeletes(t *testing.T) {
 	}
 }
 
+func TestAPITokenManager_SaveChatRelayURL_EmptyDeletes(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "http://localhost:8080"
+	ns := NamespaceForURL(apiURL)
+
+	if err := mgr.SaveChatRelayURL(apiURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadChatRelayURL(apiURL)
+	if !ok || got != "https://chat.kittypaw.app" {
+		t.Fatalf("LoadChatRelayURL = (%q, %v), want chat relay URL", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "chat_relay_url"); !ok || stored != "https://chat.kittypaw.app" {
+		t.Fatalf("SaveChatRelayURL stored key = (%q, %v), want chat_relay_url", stored, ok)
+	}
+
+	if err := mgr.SaveChatRelayURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadChatRelayURL(apiURL)
+	if ok || got != "" {
+		t.Errorf("after empty save, LoadChatRelayURL = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
+
 func TestAPITokenManager_LoadKakaoRelayBaseURL_ReadsKakaoRelayURLSecret(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",

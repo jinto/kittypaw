@@ -16,10 +16,11 @@ const discoveryBodyLimit = 64 * 1024
 
 // DiscoveryResponse is the JSON body returned by GET {apiURL}/discovery.
 // The endpoint is unauthenticated and replaces URL fields previously embedded
-// in OAuth TokenResponse. Only api_base_url is required; kakao_relay_url and
-// skills_registry_url may be empty.
+// in OAuth TokenResponse. Only api_base_url is required; chat_relay_url,
+// kakao_relay_url, and skills_registry_url may be empty.
 type DiscoveryResponse struct {
 	APIBaseURL        string `json:"api_base_url"`
+	ChatRelayURL      string `json:"chat_relay_url"`
 	KakaoRelayURL     string `json:"kakao_relay_url"`
 	SkillsRegistryURL string `json:"skills_registry_url"`
 }
@@ -56,6 +57,7 @@ func FetchDiscovery(base string) (*DiscoveryResponse, error) {
 		return nil, fmt.Errorf("decode discovery response: %w", err)
 	}
 	d.APIBaseURL = strings.TrimRight(d.APIBaseURL, "/")
+	d.ChatRelayURL = strings.TrimRight(d.ChatRelayURL, "/")
 	d.KakaoRelayURL = strings.TrimRight(d.KakaoRelayURL, "/")
 	d.SkillsRegistryURL = strings.TrimRight(d.SkillsRegistryURL, "/")
 	if d.APIBaseURL == "" {

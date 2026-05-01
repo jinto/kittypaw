@@ -104,9 +104,21 @@ func (m *APITokenManager) saveOrDelete(ns, key, value string) error {
 }
 
 const (
+	chatRelayURLKey    = "chat_relay_url"
 	kakaoRelayURLKey   = "kakao_relay_url"
 	kakaoRelayWSURLKey = "kakao_relay_ws_url"
 )
+
+// SaveChatRelayURL stores the chat relay server base URL from GET /discovery.
+// Empty value deletes the key so stale URLs don't survive relay migrations.
+func (m *APITokenManager) SaveChatRelayURL(apiURL, chatRelayURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), chatRelayURLKey, chatRelayURL)
+}
+
+// LoadChatRelayURL returns the stored chat relay server base URL.
+func (m *APITokenManager) LoadChatRelayURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), chatRelayURLKey)
+}
 
 // SaveKakaoRelayBaseURL stores the KakaoTalk relay server base URL from GET /discovery.
 // Empty value deletes the key so stale URLs don't survive relay migrations.
