@@ -122,6 +122,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	if cfg.KakaoRelayURL != "" {
 		discovery["kakao_relay_url"] = cfg.KakaoRelayURL
 	}
+	if cfg.ChatRelayURL != "" {
+		discovery["chat_relay_url"] = cfg.ChatRelayURL
+	}
 
 	// Routes.
 	r.Get("/health", handleHealth)

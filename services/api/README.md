@@ -109,6 +109,7 @@ All configuration is via environment variables:
 | `CORS_ORIGINS` | `BASE_URL` | Comma-separated allowed origins |
 | `AIRKOREA_API_KEY` | | AirKorea public data API key |
 | `KAKAO_RELAY_URL` | | KakaoTalk relay server URL |
+| `CHAT_RELAY_URL` | | Chat remote relay control plane URL |
 | `API_BASE_URL` | | API base URL (for /discovery) |
 | `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | Skills package registry |
 

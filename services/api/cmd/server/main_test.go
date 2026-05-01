@@ -67,6 +67,32 @@ func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 	}
 }
 
+// TestDiscoveryReturnsChatRelayURL pins the chat_relay_url discovery key.
+// Same daemon-outbound-WSS pattern as kakao_relay_url — chat.kittypaw.app
+// is the remote relay control plane (per kittypaw spec
+// 2026-04-30-remote-relay-control-plane-design.md).
+func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.JWTSecret = "test-secret"
+	cfg.ChatRelayURL = "https://chat.kittypaw.app"
+	r := NewRouter(cfg, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["chat_relay_url"]; got != "https://chat.kittypaw.app" {
+		t.Fatalf("expected chat_relay_url=https://chat.kittypaw.app, got %q", got)
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	r := testRouter()
 

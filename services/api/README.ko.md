@@ -85,6 +85,7 @@ make run
 | `CORS_ORIGINS` | `BASE_URL` | 허용 오리진 (쉼표 구분) |
 | `AIRKOREA_API_KEY` | | 에어코리아 공공데이터 API 키 |
 | `KAKAO_RELAY_URL` | | 카카오톡 릴레이 서버 URL |
+| `CHAT_RELAY_URL` | | Chat 원격 릴레이 컨트롤 플레인 URL |
 | `API_BASE_URL` | | API 베이스 URL (/discovery용) |
 | `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | 스킬 패키지 레지스트리 |
 
