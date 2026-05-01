@@ -477,10 +477,11 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 
 	if hasExisting {
 		fmt.Println("  ✓ Already enabled")
-		return nil
-	}
-
-	if !promptYesNo(scanner, "  > Enable?", false) {
+		if !promptYesNo(scanner, "  > Reconfigure?", false) {
+			fmt.Println("  (keeping existing KakaoTalk connection)")
+			return nil
+		}
+	} else if !promptYesNo(scanner, "  > Enable?", false) {
 		return nil
 	}
 
