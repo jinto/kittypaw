@@ -22,6 +22,7 @@ type Principal struct {
 	UserID    string
 	DeviceID  string
 	AccountID string
+	Scopes    []string
 }
 
 type Authenticator interface {
@@ -73,6 +74,10 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protoc
 	}
 	deviceID := chi.URLParam(r, "device_id")
 	if principal.DeviceID != deviceID {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if scope := requiredScope(operation); scope != "" && !principal.HasScope(scope) {
 		writeJSONError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -198,4 +203,24 @@ func (p Principal) Validate() error {
 		return fmt.Errorf("account_id is required")
 	}
 	return nil
+}
+
+func (p Principal) HasScope(want string) bool {
+	for _, scope := range p.Scopes {
+		if scope == want {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredScope(operation protocol.Operation) string {
+	switch operation {
+	case protocol.OperationOpenAIModels:
+		return "models:read"
+	case protocol.OperationOpenAIChatCompletions:
+		return "chat:relay"
+	default:
+		return ""
+	}
 }

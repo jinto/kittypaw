@@ -9,6 +9,7 @@ type Config struct {
 	BindAddr       string
 	APIToken       string
 	DeviceToken    string
+	JWTSecret      string
 	UserID         string
 	DeviceID       string
 	LocalAccountID string
@@ -20,6 +21,7 @@ func Load() (Config, error) {
 		BindAddr:       bindAddr(),
 		APIToken:       os.Getenv("KITTYCHAT_API_TOKEN"),
 		DeviceToken:    os.Getenv("KITTYCHAT_DEVICE_TOKEN"),
+		JWTSecret:      env("KITTYCHAT_JWT_SECRET", os.Getenv("JWT_SECRET")),
 		UserID:         os.Getenv("KITTYCHAT_USER_ID"),
 		DeviceID:       os.Getenv("KITTYCHAT_DEVICE_ID"),
 		LocalAccountID: os.Getenv("KITTYCHAT_LOCAL_ACCOUNT_ID"),
@@ -27,16 +29,21 @@ func Load() (Config, error) {
 	}
 
 	required := map[string]string{
-		"KITTYCHAT_API_TOKEN":        cfg.APIToken,
 		"KITTYCHAT_DEVICE_TOKEN":     cfg.DeviceToken,
 		"KITTYCHAT_USER_ID":          cfg.UserID,
 		"KITTYCHAT_DEVICE_ID":        cfg.DeviceID,
 		"KITTYCHAT_LOCAL_ACCOUNT_ID": cfg.LocalAccountID,
 	}
+	if cfg.JWTSecret == "" {
+		required["KITTYCHAT_API_TOKEN"] = cfg.APIToken
+	}
 	for name, value := range required {
 		if value == "" {
 			return Config{}, fmt.Errorf("%s is required", name)
 		}
+	}
+	if cfg.JWTSecret != "" && len(cfg.JWTSecret) < 32 {
+		return Config{}, fmt.Errorf("KITTYCHAT_JWT_SECRET must be at least 32 characters")
 	}
 	return cfg, nil
 }

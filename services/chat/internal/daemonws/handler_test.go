@@ -40,6 +40,7 @@ func TestDaemonWebSocketRelaysOpenAIRequestToDaemon(t *testing.T) {
 			UserID:    "user_1",
 			DeviceID:  "dev_1",
 			AccountID: "alice",
+			Scopes:    []string{"models:read"},
 		},
 	}, b).Routes())
 

@@ -62,7 +62,7 @@ func TestModelsRelaysThroughBroker(t *testing.T) {
 		{Type: protocol.FrameResponseEnd, ID: "req_1"},
 	}}
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice",
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
 	}}, fb)
 
 	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
@@ -100,7 +100,7 @@ func TestChatCompletionsStreamingRelaysSSE(t *testing.T) {
 		{Type: protocol.FrameResponseEnd, ID: "req_1"},
 	}}
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice",
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"chat:relay"},
 	}}, fb)
 
 	req := httptest.NewRequest(http.MethodPost, "/nodes/dev_1/v1/chat/completions", bytes.NewReader(raw))
@@ -127,7 +127,7 @@ func TestChatCompletionsStreamingRelaysSSE(t *testing.T) {
 
 func TestHandlerReturnsOfflineWhenBrokerHasNoDevice(t *testing.T) {
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice",
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
 	}}, &fakeBroker{err: broker.ErrDeviceOffline})
 	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer kp_test")
@@ -142,7 +142,7 @@ func TestHandlerReturnsOfflineWhenBrokerHasNoDevice(t *testing.T) {
 
 func TestHandlerRejectsAPIKeyForAnotherDevice(t *testing.T) {
 	h := NewHandler(staticAuth{principal: Principal{
-		UserID: "user_1", DeviceID: "dev_allowed", AccountID: "alice",
+		UserID: "user_1", DeviceID: "dev_allowed", AccountID: "alice", Scopes: []string{"models:read"},
 	}}, &fakeBroker{})
 	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_other/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer kp_test")
@@ -152,6 +152,21 @@ func TestHandlerRejectsAPIKeyForAnotherDevice(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+}
+
+func TestHandlerRejectsMissingOperationScope(t *testing.T) {
+	h := NewHandler(staticAuth{principal: Principal{
+		UserID: "user_1", DeviceID: "dev_1", AccountID: "alice", Scopes: []string{"models:read"},
+	}}, &fakeBroker{})
+	req := httptest.NewRequest(http.MethodPost, "/nodes/dev_1/v1/chat/completions", strings.NewReader(`{"messages":[]}`))
+	req.Header.Set("Authorization", "Bearer kp_test")
+	rr := httptest.NewRecorder()
+
+	h.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

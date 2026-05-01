@@ -11,7 +11,9 @@ import (
 )
 
 const (
+	AudienceKittyAPI   = "kittyapi"
 	AudienceKittyChat  = "kittychat"
+	IssuerKittyAPI     = "kittyapi"
 	CredentialVersion1 = 1
 )
 
@@ -40,6 +42,7 @@ func (c APIClientClaims) Principal() openai.Principal {
 		UserID:    c.UserID,
 		DeviceID:  c.DeviceID,
 		AccountID: c.AccountID,
+		Scopes:    scopeStrings(c.Scopes),
 	}
 }
 
@@ -64,6 +67,25 @@ func (c DeviceClaims) Principal() broker.DevicePrincipal {
 type CredentialVerifier interface {
 	VerifyAPIClient(ctx context.Context, token string) (APIClientClaims, error)
 	VerifyDevice(ctx context.Context, token string) (DeviceClaims, error)
+}
+
+type SplitCredentialVerifier struct {
+	API    CredentialVerifier
+	Device CredentialVerifier
+}
+
+func (v SplitCredentialVerifier) VerifyAPIClient(ctx context.Context, token string) (APIClientClaims, error) {
+	if v.API == nil {
+		return APIClientClaims{}, ErrUnauthorized
+	}
+	return v.API.VerifyAPIClient(ctx, token)
+}
+
+func (v SplitCredentialVerifier) VerifyDevice(ctx context.Context, token string) (DeviceClaims, error) {
+	if v.Device == nil {
+		return DeviceClaims{}, ErrUnauthorized
+	}
+	return v.Device.VerifyDevice(ctx, token)
 }
 
 type MemoryCredentialVerifier struct {
@@ -224,4 +246,12 @@ func cloneDeviceClaims(claims DeviceClaims) DeviceClaims {
 	claims.Scopes = append([]Scope(nil), claims.Scopes...)
 	claims.LocalAccountIDs = append([]string(nil), claims.LocalAccountIDs...)
 	return claims
+}
+
+func scopeStrings(scopes []Scope) []string {
+	values := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		values = append(values, string(scope))
+	}
+	return values
 }

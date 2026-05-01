@@ -7,6 +7,8 @@ import (
 func TestLoadRequiresStaticMVPSecrets(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
 	t.Setenv("KITTYCHAT_USER_ID", "")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
@@ -20,6 +22,8 @@ func TestLoadRequiresStaticMVPSecrets(t *testing.T) {
 func TestLoadUsesEnvAndDefaults(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "api_secret")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -44,6 +48,8 @@ func TestLoadUsesEnvAndDefaults(t *testing.T) {
 func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "api_secret")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -56,5 +62,37 @@ func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {
 	}
 	if cfg.BindAddr != "127.0.0.1:7777" {
 		t.Fatalf("BindAddr = %q, want explicit bind addr", cfg.BindAddr)
+	}
+}
+
+func TestLoadUsesJWTSecretInsteadOfStaticAPIToken(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_USER_ID", "user_1")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.JWTSecret != "test-jwt-secret-with-at-least-32-bytes" {
+		t.Fatalf("JWTSecret = %q", cfg.JWTSecret)
+	}
+}
+
+func TestLoadRejectsShortJWTSecret(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "short")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_USER_ID", "user_1")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want short JWT secret error")
 	}
 }

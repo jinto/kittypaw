@@ -47,18 +47,23 @@ func newRouter(cfg config.Config) (http.Handler, error) {
 	}), nil
 }
 
-func newCredentialVerifier(cfg config.Config) (*identity.MemoryCredentialVerifier, error) {
+func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, error) {
 	verifier := identity.NewMemoryCredentialVerifier()
-	if err := verifier.AddAPIClient(cfg.APIToken, identity.APIClientClaims{
-		Subject:   cfg.UserID,
-		Audiences: []string{identity.AudienceKittyChat},
-		Version:   identity.CredentialVersion1,
-		Scopes:    []identity.Scope{identity.ScopeChatRelay, identity.ScopeModelsRead},
-		UserID:    cfg.UserID,
-		DeviceID:  cfg.DeviceID,
-		AccountID: cfg.LocalAccountID,
-	}); err != nil {
-		return nil, fmt.Errorf("seed api client: %w", err)
+	if cfg.APIToken == "" && cfg.JWTSecret == "" {
+		return nil, fmt.Errorf("api token or jwt secret is required")
+	}
+	if cfg.APIToken != "" {
+		if err := verifier.AddAPIClient(cfg.APIToken, identity.APIClientClaims{
+			Subject:   cfg.UserID,
+			Audiences: []string{identity.AudienceKittyChat},
+			Version:   identity.CredentialVersion1,
+			Scopes:    []identity.Scope{identity.ScopeChatRelay, identity.ScopeModelsRead},
+			UserID:    cfg.UserID,
+			DeviceID:  cfg.DeviceID,
+			AccountID: cfg.LocalAccountID,
+		}); err != nil {
+			return nil, fmt.Errorf("seed api client: %w", err)
+		}
 	}
 	if err := verifier.AddDevice(cfg.DeviceToken, identity.DeviceClaims{
 		Subject:         "device:" + cfg.DeviceID,
@@ -70,6 +75,20 @@ func newCredentialVerifier(cfg config.Config) (*identity.MemoryCredentialVerifie
 		LocalAccountIDs: []string{cfg.LocalAccountID},
 	}); err != nil {
 		return nil, fmt.Errorf("seed device: %w", err)
+	}
+	if cfg.JWTSecret != "" {
+		jwtVerifier, err := identity.NewJWTCredentialVerifier(identity.JWTVerifierConfig{
+			Secret:           cfg.JWTSecret,
+			DefaultDeviceID:  cfg.DeviceID,
+			DefaultAccountID: cfg.LocalAccountID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("jwt verifier: %w", err)
+		}
+		return identity.SplitCredentialVerifier{
+			API:    jwtVerifier,
+			Device: verifier,
+		}, nil
 	}
 	return verifier, nil
 }
