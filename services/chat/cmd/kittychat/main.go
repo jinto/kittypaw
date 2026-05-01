@@ -52,6 +52,7 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 	if cfg.APIToken == "" && cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("api token or jwt secret is required")
 	}
+	hasStaticSeed := false
 	if cfg.APIToken != "" {
 		if err := verifier.AddAPIClient(cfg.APIToken, identity.APIClientClaims{
 			Subject:   cfg.UserID,
@@ -64,17 +65,21 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 		}); err != nil {
 			return nil, fmt.Errorf("seed api client: %w", err)
 		}
+		hasStaticSeed = true
 	}
-	if err := verifier.AddDevice(cfg.DeviceToken, identity.DeviceClaims{
-		Subject:         "device:" + cfg.DeviceID,
-		Audiences:       []string{identity.AudienceKittyChat},
-		Version:         identity.CredentialVersion1,
-		Scopes:          []identity.Scope{identity.ScopeDaemonConnect},
-		UserID:          cfg.UserID,
-		DeviceID:        cfg.DeviceID,
-		LocalAccountIDs: []string{cfg.LocalAccountID},
-	}); err != nil {
-		return nil, fmt.Errorf("seed device: %w", err)
+	if cfg.DeviceToken != "" {
+		if err := verifier.AddDevice(cfg.DeviceToken, identity.DeviceClaims{
+			Subject:         "device:" + cfg.DeviceID,
+			Audiences:       []string{identity.AudienceKittyChat},
+			Version:         identity.CredentialVersion1,
+			Scopes:          []identity.Scope{identity.ScopeDaemonConnect},
+			UserID:          cfg.UserID,
+			DeviceID:        cfg.DeviceID,
+			LocalAccountIDs: []string{cfg.LocalAccountID},
+		}); err != nil {
+			return nil, fmt.Errorf("seed device: %w", err)
+		}
+		hasStaticSeed = true
 	}
 	if cfg.JWTSecret != "" {
 		jwtVerifier, err := identity.NewJWTCredentialVerifier(identity.JWTVerifierConfig{
@@ -83,10 +88,12 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 		if err != nil {
 			return nil, fmt.Errorf("jwt verifier: %w", err)
 		}
-		return identity.SplitCredentialVerifier{
-			API:    jwtVerifier,
-			Device: verifier,
-		}, nil
+		if hasStaticSeed {
+			return identity.ChainCredentialVerifier{
+				Verifiers: []identity.CredentialVerifier{jwtVerifier, verifier},
+			}, nil
+		}
+		return jwtVerifier, nil
 	}
 	return verifier, nil
 }

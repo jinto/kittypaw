@@ -88,6 +88,42 @@ func (v SplitCredentialVerifier) VerifyDevice(ctx context.Context, token string)
 	return v.Device.VerifyDevice(ctx, token)
 }
 
+type ChainCredentialVerifier struct {
+	Verifiers []CredentialVerifier
+}
+
+func (v ChainCredentialVerifier) VerifyAPIClient(ctx context.Context, token string) (APIClientClaims, error) {
+	for _, verifier := range v.Verifiers {
+		if verifier == nil {
+			continue
+		}
+		claims, err := verifier.VerifyAPIClient(ctx, token)
+		if err == nil {
+			return claims, nil
+		}
+		if !errors.Is(err, ErrUnauthorized) {
+			return APIClientClaims{}, err
+		}
+	}
+	return APIClientClaims{}, ErrUnauthorized
+}
+
+func (v ChainCredentialVerifier) VerifyDevice(ctx context.Context, token string) (DeviceClaims, error) {
+	for _, verifier := range v.Verifiers {
+		if verifier == nil {
+			continue
+		}
+		claims, err := verifier.VerifyDevice(ctx, token)
+		if err == nil {
+			return claims, nil
+		}
+		if !errors.Is(err, ErrUnauthorized) {
+			return DeviceClaims{}, err
+		}
+	}
+	return DeviceClaims{}, ErrUnauthorized
+}
+
 type MemoryCredentialVerifier struct {
 	mu      sync.RWMutex
 	api     map[string]APIClientClaims

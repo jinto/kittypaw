@@ -11,9 +11,10 @@ one does not already exist.
 
 For production auth, set `KITTYCHAT_JWT_SECRET` in `/home/jinto/kittychat/.env`
 to the same value as kittyapi's `JWT_SECRET`. That enables verification of
-API-issued access tokens with `iss="kittyapi"`, `aud` containing `kittychat`,
-`scope`, and `v=1`. The static `KITTYCHAT_API_TOKEN` remains only as an MVP
-fallback when `KITTYCHAT_JWT_SECRET` is unset.
+API-issued access tokens and daemon device credentials with `iss="kittyapi"`,
+`aud` containing `kittychat`, `scope`, and `v=1`. Static
+`KITTYCHAT_API_TOKEN`/`KITTYCHAT_DEVICE_TOKEN` values remain only as MVP
+fallbacks while issuance and pairing flows are being rolled out.
 
 ## Deploy
 

@@ -83,6 +83,38 @@ func TestLoadUsesJWTSecretInsteadOfStaticAPIToken(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsJWTOnlyCredentials(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_USER_ID", "")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.JWTSecret != "test-jwt-secret-with-at-least-32-bytes" {
+		t.Fatalf("JWTSecret = %q", cfg.JWTSecret)
+	}
+}
+
+func TestLoadRequiresStaticPrincipalWhenStaticTokenConfigured(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_USER_ID", "")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() error = nil, want missing static principal error")
+	}
+}
+
 func TestLoadRejectsShortJWTSecret(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")

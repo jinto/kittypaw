@@ -28,14 +28,15 @@ func Load() (Config, error) {
 		Version:        env("KITTYCHAT_VERSION", "dev"),
 	}
 
-	required := map[string]string{
-		"KITTYCHAT_DEVICE_TOKEN":     cfg.DeviceToken,
-		"KITTYCHAT_USER_ID":          cfg.UserID,
-		"KITTYCHAT_DEVICE_ID":        cfg.DeviceID,
-		"KITTYCHAT_LOCAL_ACCOUNT_ID": cfg.LocalAccountID,
-	}
+	required := map[string]string{}
 	if cfg.JWTSecret == "" {
 		required["KITTYCHAT_API_TOKEN"] = cfg.APIToken
+		required["KITTYCHAT_DEVICE_TOKEN"] = cfg.DeviceToken
+	}
+	if cfg.JWTSecret == "" || cfg.APIToken != "" || cfg.DeviceToken != "" {
+		required["KITTYCHAT_USER_ID"] = cfg.UserID
+		required["KITTYCHAT_DEVICE_ID"] = cfg.DeviceID
+		required["KITTYCHAT_LOCAL_ACCOUNT_ID"] = cfg.LocalAccountID
 	}
 	for name, value := range required {
 		if value == "" {

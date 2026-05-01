@@ -66,9 +66,11 @@ The initial scope vocabulary is:
 - `models:read`
 - `daemon:connect`
 
-The MVP env variables seed one API credential and one device credential into an
-in-memory store. Later, the same interfaces can be backed by API-server-issued
-JWT/JWKS verification, API-key introspection, or Postgres-backed records.
+The MVP env variables can seed static API and device credentials into an
+in-memory fallback store. API-server-issued HS256 JWTs are accepted for both API
+clients and daemon device credentials when `KITTYCHAT_JWT_SECRET` is configured.
+Later, the same interfaces can be backed by JWKS verification, API-key
+introspection, or Postgres-backed records.
 
 ## Components
 
@@ -80,7 +82,11 @@ Add a small identity package with:
 - `APIClientClaims` and `DeviceClaims` types that mirror the agreed API-server
   credential contract.
 - Scope constants for `chat:relay`, `models:read`, and `daemon:connect`.
-- `MemoryCredentialVerifier` implementation seeded at process startup.
+- `MemoryCredentialVerifier` implementation optionally seeded at process startup.
+- `JWTCredentialVerifier` implementation for API-issued access tokens and daemon
+  device credentials.
+- `ChainCredentialVerifier` implementation that tries JWT first and static
+  fallback second during rollout.
 - Token hashing is not implemented in this slice because the MVP keeps parity
   with the existing static-token behavior. The interface must not leak
   that implementation detail.
@@ -139,7 +145,7 @@ rejected in this MVP so incompatible daemon builds fail fast.
 
 ### Config Seeding
 
-Keep the current environment variables:
+Keep the current static fallback environment variables:
 
 - `KITTYCHAT_API_TOKEN`
 - `KITTYCHAT_DEVICE_TOKEN`
@@ -147,9 +153,11 @@ Keep the current environment variables:
 - `KITTYCHAT_DEVICE_ID`
 - `KITTYCHAT_LOCAL_ACCOUNT_ID`
 
-`cmd/kittychat` seeds an in-memory verifier from this config and passes
-store-backed authenticators to the handlers. This keeps local development and
-existing tests working while moving the production boundary into one place.
+`cmd/kittychat` seeds an in-memory verifier from this config only when a static
+token is present. If `KITTYCHAT_JWT_SECRET` is set, the router accepts API-issued
+JWTs for both API clients and daemon devices; static tokens remain a fallback
+when configured. This keeps local development and existing tests working while
+moving the production boundary into one place.
 
 The env-seeded API client claims use:
 
