@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -336,6 +337,368 @@ func TestRunUsesDefaultCapabilitiesForRequestValidation(t *testing.T) {
 	}
 }
 
+func TestRunDispatchesRequestAndWritesResponseFrames(t *testing.T) {
+	errCh := make(chan error, 1)
+	framesCh := make(chan []json.RawMessage, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			errCh <- err
+			return
+		}
+		req := RequestFrame{
+			Type:      FrameRequest,
+			ID:        "req_dispatch",
+			Operation: OperationOpenAIModels,
+			AccountID: "alice",
+		}
+		raw, err := json.Marshal(req)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, raw); err != nil {
+			errCh <- err
+			return
+		}
+
+		var frames []json.RawMessage
+		for range 3 {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				errCh <- err
+				return
+			}
+			frames = append(frames, append([]byte(nil), data...))
+		}
+		framesCh <- frames
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connector := &Connector{
+		Config: ConnectorConfig{
+			RelayURL:      ts.URL,
+			Credential:    "device-token-1",
+			DeviceID:      "dev_1",
+			LocalAccounts: []string{"alice"},
+			DaemonVersion: "0.1.5",
+		},
+		Dispatcher: dispatchFunc(func(_ context.Context, req RequestFrame) (DispatchResult, error) {
+			if req.ID != "req_dispatch" || req.Operation != OperationOpenAIModels || req.AccountID != "alice" {
+				t.Fatalf("dispatch req = %#v", req)
+			}
+			return DispatchResult{
+				Status:  200,
+				Headers: map[string]string{"content-type": "application/json"},
+				Body:    []byte(`{"object":"list","data":[]}`),
+			}, nil
+		}),
+	}
+	go connector.Run(ctx, RunOptions{
+		RetryInitialDelay: time.Millisecond,
+		RetryMaxDelay:     time.Millisecond,
+	})
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("relay server: %v", err)
+	case frames := <-framesCh:
+		var headers ResponseHeadersFrame
+		if err := json.Unmarshal(frames[0], &headers); err != nil {
+			t.Fatal(err)
+		}
+		if headers.Type != FrameResponseHeaders || headers.ID != "req_dispatch" || headers.Status != 200 {
+			t.Fatalf("headers frame = %#v", headers)
+		}
+		if headers.Headers["content-type"] != "application/json" {
+			t.Fatalf("headers = %#v", headers.Headers)
+		}
+		var chunk ResponseChunkFrame
+		if err := json.Unmarshal(frames[1], &chunk); err != nil {
+			t.Fatal(err)
+		}
+		if chunk.Type != FrameResponseChunk || chunk.ID != "req_dispatch" || chunk.Data != `{"object":"list","data":[]}` {
+			t.Fatalf("chunk frame = %#v", chunk)
+		}
+		var end ResponseEndFrame
+		if err := json.Unmarshal(frames[2], &end); err != nil {
+			t.Fatal(err)
+		}
+		if end.Type != FrameResponseEnd || end.ID != "req_dispatch" {
+			t.Fatalf("end frame = %#v", end)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for dispatch response frames")
+	}
+}
+
+func TestRunDispatchesRequestsWithoutHeadOfLineBlocking(t *testing.T) {
+	errCh := make(chan error, 1)
+	fastHeaderCh := make(chan ResponseHeadersFrame, 1)
+	releaseSlow := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseSlow) })
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			errCh <- err
+			return
+		}
+		for _, req := range []RequestFrame{
+			{Type: FrameRequest, ID: "slow", Operation: OperationOpenAIChatCompletions, AccountID: "alice"},
+			{Type: FrameRequest, ID: "fast", Operation: OperationOpenAIModels, AccountID: "alice"},
+		} {
+			raw, err := json.Marshal(req)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if err := conn.Write(r.Context(), websocket.MessageText, raw); err != nil {
+				errCh <- err
+				return
+			}
+		}
+
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				errCh <- err
+				return
+			}
+			var header ResponseHeadersFrame
+			if err := json.Unmarshal(data, &header); err != nil {
+				continue
+			}
+			if header.Type == FrameResponseHeaders && header.ID == "fast" {
+				fastHeaderCh <- header
+				releaseOnce.Do(func() { close(releaseSlow) })
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connector := &Connector{
+		Config: ConnectorConfig{
+			RelayURL:      ts.URL,
+			Credential:    "device-token-1",
+			DeviceID:      "dev_1",
+			LocalAccounts: []string{"alice"},
+			DaemonVersion: "0.1.5",
+		},
+		Dispatcher: dispatchFunc(func(ctx context.Context, req RequestFrame) (DispatchResult, error) {
+			if req.ID == "slow" {
+				select {
+				case <-releaseSlow:
+				case <-ctx.Done():
+					return DispatchResult{}, ctx.Err()
+				}
+			}
+			return DispatchResult{
+				Status:  200,
+				Headers: map[string]string{"content-type": "application/json"},
+				Body:    []byte(`{"ok":true}`),
+			}, nil
+		}),
+	}
+	go connector.Run(ctx, RunOptions{
+		RetryInitialDelay: time.Millisecond,
+		RetryMaxDelay:     time.Millisecond,
+	})
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("relay server: %v", err)
+	case header := <-fastHeaderCh:
+		if header.Status != 200 {
+			t.Fatalf("fast status = %d", header.Status)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("fast request was blocked behind slow request on same connection")
+	}
+}
+
+func TestRunClosesConnectionForOversizedInboundFrame(t *testing.T) {
+	errCh := make(chan error, 1)
+	closedCh := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			errCh <- err
+			return
+		}
+		oversizedBody, err := json.Marshal(map[string]string{
+			"payload": strings.Repeat("x", 2*1024*1024),
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		raw, err := json.Marshal(RequestFrame{
+			Type:      FrameRequest,
+			ID:        "too_big",
+			Operation: OperationOpenAIModels,
+			AccountID: "alice",
+			Body:      oversizedBody,
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, raw); err != nil {
+			closedCh <- struct{}{}
+			return
+		}
+		_, data, err := conn.Read(r.Context())
+		if err == nil {
+			errCh <- errUnexpectedFrame(data)
+			return
+		}
+		closedCh <- struct{}{}
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connector := &Connector{
+		Config: ConnectorConfig{
+			RelayURL:      ts.URL,
+			Credential:    "device-token-1",
+			DeviceID:      "dev_1",
+			LocalAccounts: []string{"alice"},
+			DaemonVersion: "0.1.5",
+		},
+		Dispatcher: dispatchFunc(func(context.Context, RequestFrame) (DispatchResult, error) {
+			return DispatchResult{
+				Status:  200,
+				Headers: map[string]string{"content-type": "application/json"},
+				Body:    []byte(`{"unexpected":true}`),
+			}, nil
+		}),
+	}
+	go connector.Run(ctx, RunOptions{
+		RetryInitialDelay: time.Hour,
+		RetryMaxDelay:     time.Hour,
+	})
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("relay server: %v", err)
+	case <-closedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for oversized frame connection close")
+	}
+}
+
+func TestRunAcceptsLargeButBoundedInboundFrame(t *testing.T) {
+	errCh := make(chan error, 1)
+	headerCh := make(chan ResponseHeadersFrame, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			errCh <- err
+			return
+		}
+		boundedBody, err := json.Marshal(map[string]string{
+			"payload": strings.Repeat("x", 128*1024),
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		raw, err := json.Marshal(RequestFrame{
+			Type:      FrameRequest,
+			ID:        "large_but_ok",
+			Operation: OperationOpenAIModels,
+			AccountID: "alice",
+			Body:      boundedBody,
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, raw); err != nil {
+			errCh <- err
+			return
+		}
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			errCh <- err
+			return
+		}
+		var header ResponseHeadersFrame
+		if err := json.Unmarshal(data, &header); err != nil {
+			errCh <- err
+			return
+		}
+		headerCh <- header
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connector := &Connector{
+		Config: ConnectorConfig{
+			RelayURL:      ts.URL,
+			Credential:    "device-token-1",
+			DeviceID:      "dev_1",
+			LocalAccounts: []string{"alice"},
+			DaemonVersion: "0.1.5",
+		},
+		Dispatcher: dispatchFunc(func(context.Context, RequestFrame) (DispatchResult, error) {
+			return DispatchResult{
+				Status:  200,
+				Headers: map[string]string{"content-type": "application/json"},
+				Body:    []byte(`{"ok":true}`),
+			}, nil
+		}),
+	}
+	go connector.Run(ctx, RunOptions{
+		RetryInitialDelay: time.Millisecond,
+		RetryMaxDelay:     time.Millisecond,
+	})
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("relay server: %v", err)
+	case header := <-headerCh:
+		if header.ID != "large_but_ok" || header.Status != 200 {
+			t.Fatalf("headers = %#v", header)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for bounded large frame response")
+	}
+}
+
 func TestRunRejectsRequestForInactiveAccount(t *testing.T) {
 	errCh := make(chan error, 1)
 	errorFrameCh := make(chan ErrorFrame, 1)
@@ -405,4 +768,16 @@ func TestRunRejectsRequestForInactiveAccount(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for request rejection")
 	}
+}
+
+type dispatchFunc func(context.Context, RequestFrame) (DispatchResult, error)
+
+func (f dispatchFunc) Dispatch(ctx context.Context, req RequestFrame) (DispatchResult, error) {
+	return f(ctx, req)
+}
+
+type errUnexpectedFrame []byte
+
+func (e errUnexpectedFrame) Error() string {
+	return "unexpected response frame for oversized request: " + string(e)
 }
