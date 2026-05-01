@@ -25,3 +25,6 @@ vendor/
 # State
 .state/
 .ina/
+
+# Local data dumps (juso DB downloads, etc — never commit, ~1GB)
+tmp/

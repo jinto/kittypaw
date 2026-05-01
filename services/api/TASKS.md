@@ -88,7 +88,7 @@
 > Goal: 자체 통합 places DB로 LLM 자연어 위치 입력 → 좌표 변환. **외부 API 의존 0**
 > 데이터: Wikidata(CC0) + 서울교통공사 1~8호선(제한없음) + 별칭 50 + 행안부 도로명주소(PR-2, 제한없음)
 > PR-1: Wikidata + 서울교통공사 + 별칭 + 벤치마크 ✅
-> PR-2: 행안부 도로명주소 (EPSG:5179 → WGS84 pure-Go 변환 + 별도 addresses 테이블) ← 진행 중 (별도 트랙)
+> PR-2: 행안부 도로명주소 (EPSG:5179 → WGS84 pure-Go 변환 + 별도 addresses 테이블) ← **현재 (build target)**
 
 ### PR-1 ✅ (8 태스크 — TDD 사이클)
 
@@ -141,7 +141,7 @@
 - [ ] **PR-2 EPSG 라이브러리 PoC 스파이크** — `go-proj` 등 후보 1개 확정 (PR-2 첫 태스크)
 - [ ] **down.sql 위험성 강화** — `migrate down 003`이 운영 데이터 즉시 삭제. maintenance.md 경고 강화 (Security #6)
 
-### PR-2 ← 진행 중 (8 태스크 — TDD 사이클)
+### PR-2 ← 현재 (build target — 8 태스크 TDD 사이클)
 
 > 의사결정 4건 (geo-address-coords.md §15):
 > - **D1**: EPSG:5179 → WGS84 = pure-Go LCC + datum-shift 무시 (CGO 0)
@@ -187,7 +187,7 @@
 - [ ] cron 등록 (매월 5일 KST 03:00)
 - [ ] production smoke: `curl '/v1/geo/resolve?q=서울 강남구 테헤란로 152'` → 200
 
-## Plan 7: Almanac (KASI) — Phase A ← 현재 (build target)
+## Plan 7: Almanac (KASI) — Phase A ✅ (`09fa12b` + `1c509c6` push to main)
 
 > Spec: `.claude/plans/almanac-kasi-phase-a.md` (v3, T0 검증 + 3-reviewer 다관점 검증 통과)
 > 상위 로드맵: `~/.claude/plans/majestic-percolating-cray.md`
@@ -207,5 +207,12 @@
 - [ ] **L4 — kittypaw 스킬 패키지 측 통합 (별도 PR, 별도 레포 `../skills/packages/`)** — Plan 5 T6 선례. 본 PR 머지 ≠ 사용자 도달. 본 PR 끝난 후 별도 진행.
 - [ ] **Phase C 키 신청 발의** (서울교통공사 OpenAPI) — 1~3일 리드타임. 본 plan 진행과 병렬 발의 권장 (상위 로드맵 명시 결정).
 - [ ] (P1 follow-up) D10 — 입력범위(1391~2050) 검증 — 별도 issue.
-- [ ] (P1 follow-up) D4 — `holiday.go` 와 `almanac.go` 의 endpoint() helper 통합 — 현 시점 KASI endpoint 4개 < trigger 5개라 보류.
+- [ ] (P1 follow-up) **D4 — KASI helper 통합 refactor** — Phase B (KMA UV) 추가 시점에 holiday/almanac/weather/UV 4개 ServiceName 11 endpoint 를 한 번에 통합. plan v2 박제: `.claude/plans/d4-kasi-helper-refactor.md`. 3 reviewer (Architect/Critic/CEO) Phase 2 ITERATE — 옵션 3 (UV 동시 통합) 채택. **재개 트리거**: Phase B UV endpoint production 추가 시점.
 - [x] **holiday.go envelope 검증** — `parseKMAError` 재사용으로 `resultCode != "00"` 응답이 24h 캐시되지 않도록 fix. `fetch()` 의 200 OK 분기에서 검증 → fetch error → stale fallback → 502.
+
+## Follow-up 일감 (별도 PR / 별도 plan 권장)
+
+- [ ] **L4 — 신규 kittypaw skill 작성** (`../skills/packages/`) — 음력 변환 + 일출/일몰. spec 7가지 (묶음 단위 / trigger / config / 응답 포맷 / 에러 / 인증 / allowed_hosts) 결정 필요. `ina:think` → `ina:plan` 워크플로우 권장. Plan 5 T6 (weather-briefing → KMA fallback) 선례 참고.
+- [ ] **Phase C — 서울교통공사 OpenAPI 활용 신청** (사용자 직접 작업) — data.go.kr 카탈로그에서 "지하철 실시간 도착정보" 검색 → 활용신청 → 자동/수동 승인 (1~3일) → `.env` `SEOUL_METRO_API_KEY` 등록. Phase B(KMA 확장) 작업과 병행 발의 권장.
+- [ ] **D4 trigger 발동 — KASI helper 통합 refactor** — KASI endpoint 7개 (>5 trigger) 도달. `internal/proxy/kasi/endpoint.go` 공통 helper 추출 + `holiday.go` / `almanac.go` thin wrapper 화. 별도 `refactor(proxy):` PR. 회귀 검증 위해 기존 unit test 전부 그대로 통과해야 함.
+- [ ] **Phase B 첫 endpoint — KMA 자외선 (UV)** — plan v1 박제 (`.claude/plans/kma-uv-index.md`). 3 reviewer Phase 2 ITERATE — **옵션 2 (PR-2 우선, UV 보류)** 채택. 재개 트리거: PR-2 머지 + KMA UV 키 활성화. 그 시점에 plan v2 박제 (Phase 2 ITERATE 항목 must-fix 5 + should-fix 5 반영) → ina:build.
