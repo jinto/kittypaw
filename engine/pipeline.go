@@ -20,16 +20,17 @@ import (
 type IntentKind string
 
 const (
-	IntentChitchat             IntentKind = "chitchat"
-	IntentBrowse               IntentKind = "browse"
-	IntentConfirmClarification IntentKind = "confirm_clarification"
-	IntentExchangeRateLookup   IntentKind = "exchange_rate_lookup"
-	IntentWeatherNowLookup     IntentKind = "weather_now_lookup"
-	IntentInstallConsentReply  IntentKind = "install_consent_reply"
-	IntentRunInstalledSkill    IntentKind = "run_installed_skill"
-	IntentModifierFollowup     IntentKind = "modifier_followup"
-	IntentAmbiguousFollowup    IntentKind = "ambiguous_followup"
-	IntentLegacyFallback       IntentKind = "legacy_fallback"
+	IntentChitchat               IntentKind = "chitchat"
+	IntentBrowse                 IntentKind = "browse"
+	IntentConfirmClarification   IntentKind = "confirm_clarification"
+	IntentExchangeRateLookup     IntentKind = "exchange_rate_lookup"
+	IntentWeatherNowLookup       IntentKind = "weather_now_lookup"
+	IntentInstallConsentReply    IntentKind = "install_consent_reply"
+	IntentPreferenceConfirmation IntentKind = "preference_confirmation"
+	IntentRunInstalledSkill      IntentKind = "run_installed_skill"
+	IntentModifierFollowup       IntentKind = "modifier_followup"
+	IntentAmbiguousFollowup      IntentKind = "ambiguous_followup"
+	IntentLegacyFallback         IntentKind = "legacy_fallback"
 )
 
 // Intent is the classifier's output. Params carry branch-specific state
@@ -105,6 +106,15 @@ func classifyIntent(text string, state *PipelineState, sess *Session) Intent {
 			if isInstallConsent(t) {
 				return Intent{Kind: IntentInstallConsentReply, Confidence: 1.0}
 			}
+		}
+	}
+	if pending, ok := loadPendingPreferenceConfirmation(sess); ok && (isBareAffirmative(t) || isBareNegative(t)) {
+		return Intent{
+			Kind: IntentPreferenceConfirmation,
+			Params: map[string]any{
+				"key": pending.Key,
+			},
+			Confidence: 1.0,
 		}
 	}
 	// Modifier follow-up dispatch: short modifier-shaped query +
@@ -386,12 +396,30 @@ func isBareAffirmative(text string) bool {
 	// Strip a trailing punctuation set used in casual Korean replies.
 	trimmed := strings.TrimRight(lowered, ".,!?~ ")
 	bareAffirmatives := []string{
-		"네", "넵", "응", "어", "그래", "그래요",
+		"네", "네네", "넵", "응", "어", "그래", "그래요", "좋아", "좋아요",
 		"ㅇ", "ㅇㅇ", "ㅇㅋ", "오케이", "예",
 		"yes", "y", "ok", "okay", "sure", "yep", "yeah",
 	}
 	for _, a := range bareAffirmatives {
 		if trimmed == a {
+			return true
+		}
+	}
+	return false
+}
+
+func isBareNegative(text string) bool {
+	if runeCount(text) > 12 {
+		return false
+	}
+	lowered := strings.ToLower(text)
+	trimmed := strings.TrimRight(lowered, ".,!?~ ")
+	bareNegatives := []string{
+		"아니", "아니요", "아뇨", "ㄴㄴ", "싫어", "괜찮아", "괜찮아요",
+		"no", "n", "nope", "nah",
+	}
+	for _, n := range bareNegatives {
+		if trimmed == n {
 			return true
 		}
 	}
@@ -645,6 +673,8 @@ func getBranch(kind IntentKind) Branch {
 		return &WeatherNowLookupBranch{}
 	case IntentInstallConsentReply:
 		return &InstallConsentBranch{}
+	case IntentPreferenceConfirmation:
+		return &PreferenceConfirmationBranch{}
 	case IntentRunInstalledSkill:
 		return &RunInstalledSkillBranch{}
 	case IntentModifierFollowup:
@@ -757,18 +787,24 @@ func (b *ExchangeRateLookupBranch) Execute(ctx context.Context, sess *Session, e
 		return "", errBranchFallback
 	}
 	if pkg := matchInstalledSkill("환율", sess); pkg != nil {
-		params := exchangeRateParamsForText(FormatEvent(&event))
+		userText := FormatEvent(&event)
+		params := exchangeRateParamsForText(userText)
+		explicitParams := len(params) > 0
+		if !explicitParams {
+			if pref, ok := loadExchangeRateDisplayPreference(sess); ok {
+				params = exchangeRatePreferenceParams(pref)
+			}
+		}
 		rawJSON, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
 		output := extractOutputField(rawJSON)
 		if output == "" {
 			return "", errBranchFallback
 		}
-		if base := exchangeRateRequestedBase(params); base != "" && exchangeRateOutputBase(output) != base {
-			if rebased, ok := rebaseExchangeRateOutput(output, base); ok {
-				output = rebased
-			}
-		}
+		output = applyExchangeRateDisplayParams(output, params)
 		sess.Pipeline.RecordSkillOutputForSkill(pkg.Meta.ID, output)
+		if !explicitParams {
+			output = maybeAppendExchangeRatePreferenceConfirmation(sess, output)
+		}
 		return output, nil
 	}
 	entry := exchangeRateRegistryEntry()
@@ -894,10 +930,14 @@ func exchangeRateParamsForText(text string) map[string]any {
 	if strings.Contains(t, "기준") || strings.Contains(t, "base") ||
 		strings.Contains(t, "기준으로") || strings.Contains(t, "기준의") ||
 		containsAny(t, "원화로", "원으로", "엔화로", "엔으로", "달러로", "유로로", "위안으로", "파운드로") {
-		return map[string]any{
+		params := map[string]any{
 			"base":    code,
 			"symbols": defaultExchangeRateSymbols(code),
 		}
+		if unit := exchangeRateDisplayUnitForText(text); unit > 1 {
+			params["unit"] = unit
+		}
+		return params
 	}
 	if containsAny(t, "만", "만요", "만.", "only") {
 		return map[string]any{
@@ -1518,18 +1558,19 @@ func (b *ModifierFollowupBranch) Execute(ctx context.Context, sess *Session, eve
 			requestedBase := exchangeRateRequestedBase(params)
 			rawJSON, _ := runSkillOrPackageWithParams(ctx, skillID, sess, params)
 			output := extractOutputField(rawJSON)
+			output = applyExchangeRateDisplayParams(output, params)
 			if requestedBase != "" {
 				if output != "" && exchangeRateOutputBase(output) == requestedBase {
 					sess.Pipeline.RecordSkillOutputForSkill(skillID, output)
 					return output, nil
 				}
 				if output != "" {
-					if rebased, ok := rebaseExchangeRateOutput(output, requestedBase); ok {
+					if rebased := applyExchangeRateDisplayParams(output, params); rebased != "" {
 						sess.Pipeline.RecordSkillOutputForSkill(skillID, rebased)
 						return rebased, nil
 					}
 				}
-				if rebased, ok := rebaseExchangeRateOutput(rawOutput, requestedBase); ok {
+				if rebased := applyExchangeRateDisplayParams(rawOutput, params); rebased != rawOutput || exchangeRateOutputBase(rawOutput) == requestedBase {
 					sess.Pipeline.RecordSkillOutputForSkill(skillID, rebased)
 					return rebased, nil
 				}
