@@ -4,11 +4,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kittypaw-app/kittychat/internal/config"
+	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
 func TestNewServerBuildsRunnableRouter(t *testing.T) {
@@ -109,6 +113,65 @@ func TestNewCredentialVerifierUsesJWTForDeviceCredentials(t *testing.T) {
 	}
 }
 
+func TestNewServerAcceptsJWTDeviceCredentialOnDaemonConnect(t *testing.T) {
+	cfg := config.Config{
+		JWTSecret: "test-jwt-secret-with-at-least-32-bytes",
+		Version:   "test",
+	}
+	router, err := newRouter(cfg)
+	if err != nil {
+		t.Fatalf("newRouter() error = %v", err)
+	}
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsURL(srv.URL), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + signTestDeviceJWT(t, cfg.JWTSecret, "user_1", "dev_1", []string{"alice"})}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket with JWT device credential: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+}
+
+func TestNewServerRejectsMismatchedDeviceJWTOnDaemonConnect(t *testing.T) {
+	cfg := config.Config{
+		JWTSecret: "test-jwt-secret-with-at-least-32-bytes",
+		Version:   "test",
+	}
+	router, err := newRouter(cfg)
+	if err != nil {
+		t.Fatalf("newRouter() error = %v", err)
+	}
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, wsURL(srv.URL), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + signTestDeviceJWTWithSubject(t, cfg.JWTSecret, "device:other", "user_1", "dev_1", []string{"alice"})}},
+	})
+	if err == nil {
+		t.Fatal("dial succeeded with mismatched device JWT subject")
+	}
+	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %v, want 401", responseStatus(resp))
+	}
+}
+
 func TestNewServerRejectsInvalidCredentialSeed(t *testing.T) {
 	cfg := testConfig()
 	cfg.APIToken = ""
@@ -161,10 +224,15 @@ func signTestJWT(t *testing.T, secret, userID string) string {
 
 func signTestDeviceJWT(t *testing.T, secret, userID, deviceID string, accounts []string) string {
 	t.Helper()
+	return signTestDeviceJWTWithSubject(t, secret, "device:"+deviceID, userID, deviceID, accounts)
+}
+
+func signTestDeviceJWTWithSubject(t *testing.T, secret, subject, userID, deviceID string, accounts []string) string {
+	t.Helper()
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"iss":            "kittyapi",
-		"sub":            "device:" + deviceID,
+		"sub":            subject,
 		"aud":            []string{"kittychat"},
 		"scope":          []string{"daemon:connect"},
 		"v":              1,
@@ -179,4 +247,15 @@ func signTestDeviceJWT(t *testing.T, secret, userID, deviceID string, accounts [
 		t.Fatalf("sign device jwt: %v", err)
 	}
 	return signed
+}
+
+func wsURL(serverURL string) string {
+	return "ws" + strings.TrimPrefix(serverURL, "http") + "/daemon/connect"
+}
+
+func responseStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
 }

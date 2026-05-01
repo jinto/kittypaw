@@ -221,6 +221,9 @@ func validateDeviceClaims(claims DeviceClaims) error {
 	if claims.DeviceID == "" {
 		return fmt.Errorf("device_id is required")
 	}
+	if claims.Subject != "device:"+claims.DeviceID {
+		return fmt.Errorf("device subject must match device_id")
+	}
 	if len(claims.LocalAccountIDs) == 0 {
 		return fmt.Errorf("at least one local account is required")
 	}

@@ -169,6 +169,41 @@ func TestJWTCredentialVerifierVerifiesDeviceToken(t *testing.T) {
 	assertScopes(t, got.Scopes, []Scope{ScopeDaemonConnect})
 }
 
+func TestJWTCredentialVerifierRejectsDeviceSubjectMismatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+	}{
+		{name: "user subject", subject: "user_1"},
+		{name: "other device subject", subject: "device:dev_2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
+			if err != nil {
+				t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
+			}
+			token := signTestJWT(t, map[string]any{
+				"sub":            tt.subject,
+				"iss":            IssuerKittyAPI,
+				"aud":            []string{AudienceKittyChat},
+				"scope":          []string{string(ScopeDaemonConnect)},
+				"v":              CredentialVersion1,
+				"user_id":        "user_1",
+				"device_id":      "dev_1",
+				"local_accounts": []string{"alice"},
+				"iat":            time.Now().Unix(),
+				"exp":            time.Now().Add(time.Hour).Unix(),
+			})
+
+			_, err = verifier.VerifyDevice(context.Background(), token)
+			if !errors.Is(err, ErrUnauthorized) {
+				t.Fatalf("VerifyDevice() error = %v, want ErrUnauthorized", err)
+			}
+		})
+	}
+}
+
 func signTestJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	header := map[string]any{"alg": "HS256", "typ": "JWT"}
