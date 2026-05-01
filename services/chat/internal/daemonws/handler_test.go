@@ -59,10 +59,12 @@ func TestDaemonWebSocketRelaysOpenAIRequestToDaemon(t *testing.T) {
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
 
 	if err := wsjson.Write(ctx, conn, protocol.Frame{
-		Type:          protocol.FrameHello,
-		DeviceID:      "dev_1",
-		LocalAccounts: []string{"alice"},
-		Version:       "test",
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels, protocol.OperationOpenAIChatCompletions},
 	}); err != nil {
 		t.Fatalf("write hello: %v", err)
 	}
@@ -74,7 +76,7 @@ func TestDaemonWebSocketRelaysOpenAIRequestToDaemon(t *testing.T) {
 			errCh <- err
 			return
 		}
-		if reqFrame.Type != protocol.FrameRequest || reqFrame.Path != "/v1/models" {
+		if reqFrame.Type != protocol.FrameRequest || reqFrame.Operation != protocol.OperationOpenAIModels || reqFrame.Path != "/v1/models" {
 			errCh <- &unexpectedFrameError{frame: reqFrame}
 			return
 		}

@@ -27,7 +27,7 @@ var ErrUnauthorized = errors.New("unauthorized")
 
 type APIClientClaims struct {
 	Subject   string
-	Audience  string
+	Audiences []string
 	Version   int
 	Scopes    []Scope
 	UserID    string
@@ -45,7 +45,7 @@ func (c APIClientClaims) Principal() openai.Principal {
 
 type DeviceClaims struct {
 	Subject         string
-	Audience        string
+	Audiences       []string
 	Version         int
 	Scopes          []Scope
 	UserID          string
@@ -138,7 +138,7 @@ func (v *MemoryCredentialVerifier) VerifyDevice(ctx context.Context, token strin
 }
 
 func validateAPIClientClaims(claims APIClientClaims) error {
-	if err := validateCommonClaims(claims.Subject, claims.Audience, claims.Version, claims.Scopes); err != nil {
+	if err := validateCommonClaims(claims.Subject, claims.Audiences, claims.Version, claims.Scopes); err != nil {
 		return err
 	}
 	if claims.UserID == "" {
@@ -154,7 +154,7 @@ func validateAPIClientClaims(claims APIClientClaims) error {
 }
 
 func validateDeviceClaims(claims DeviceClaims) error {
-	if err := validateCommonClaims(claims.Subject, claims.Audience, claims.Version, claims.Scopes); err != nil {
+	if err := validateCommonClaims(claims.Subject, claims.Audiences, claims.Version, claims.Scopes); err != nil {
 		return err
 	}
 	if claims.UserID == "" {
@@ -174,12 +174,12 @@ func validateDeviceClaims(claims DeviceClaims) error {
 	return nil
 }
 
-func validateCommonClaims(subject, audience string, version int, scopes []Scope) error {
+func validateCommonClaims(subject string, audiences []string, version int, scopes []Scope) error {
 	if subject == "" {
 		return fmt.Errorf("subject is required")
 	}
-	if audience != AudienceKittyChat {
-		return fmt.Errorf("audience must be %q", AudienceKittyChat)
+	if !hasAudience(audiences, AudienceKittyChat) {
+		return fmt.Errorf("audience must include %q", AudienceKittyChat)
 	}
 	if version != CredentialVersion1 {
 		return fmt.Errorf("credential version must be %d", CredentialVersion1)
@@ -195,6 +195,15 @@ func validateCommonClaims(subject, audience string, version int, scopes []Scope)
 	return nil
 }
 
+func hasAudience(audiences []string, want string) bool {
+	for _, audience := range audiences {
+		if audience == want {
+			return true
+		}
+	}
+	return false
+}
+
 func knownScope(scope Scope) bool {
 	switch scope {
 	case ScopeChatRelay, ScopeModelsRead, ScopeDaemonConnect:
@@ -205,11 +214,13 @@ func knownScope(scope Scope) bool {
 }
 
 func cloneAPIClientClaims(claims APIClientClaims) APIClientClaims {
+	claims.Audiences = append([]string(nil), claims.Audiences...)
 	claims.Scopes = append([]Scope(nil), claims.Scopes...)
 	return claims
 }
 
 func cloneDeviceClaims(claims DeviceClaims) DeviceClaims {
+	claims.Audiences = append([]string(nil), claims.Audiences...)
 	claims.Scopes = append([]Scope(nil), claims.Scopes...)
 	claims.LocalAccountIDs = append([]string(nil), claims.LocalAccountIDs...)
 	return claims

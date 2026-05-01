@@ -49,7 +49,7 @@ func (h *Handler) Routes() http.Handler {
 }
 
 func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
-	h.relay(w, r, http.MethodGet, "/v1/models", nil)
+	h.relay(w, r, protocol.OperationOpenAIModels, http.MethodGet, "/v1/models", nil)
 }
 
 func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -58,10 +58,10 @@ func (h *Handler) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return
 	}
-	h.relay(w, r, http.MethodPost, "/v1/chat/completions", body)
+	h.relay(w, r, protocol.OperationOpenAIChatCompletions, http.MethodPost, "/v1/chat/completions", body)
 }
 
-func (h *Handler) relay(w http.ResponseWriter, r *http.Request, method, path string, body []byte) {
+func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protocol.Operation, method, path string, body []byte) {
 	if h.auth == nil {
 		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -85,6 +85,7 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, method, path str
 		UserID:    principal.UserID,
 		DeviceID:  deviceID,
 		AccountID: principal.AccountID,
+		Operation: operation,
 		Method:    method,
 		Path:      path,
 		Body:      body,

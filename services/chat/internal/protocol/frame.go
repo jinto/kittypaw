@@ -9,6 +9,7 @@ import (
 const MaxIDLength = 128
 
 type FrameType string
+type Operation string
 
 const (
 	FrameHello           FrameType = "hello"
@@ -21,21 +22,32 @@ const (
 	FramePong            FrameType = "pong"
 )
 
+const (
+	OperationOpenAIModels          Operation = "openai.models"
+	OperationOpenAIChatCompletions Operation = "openai.chat_completions"
+
+	ProtocolVersion1 = "1"
+)
+
 type Frame struct {
-	Type          FrameType         `json:"type"`
-	ID            string            `json:"id,omitempty"`
-	DeviceID      string            `json:"device_id,omitempty"`
-	AccountID     string            `json:"account_id,omitempty"`
-	LocalAccounts []string          `json:"local_accounts,omitempty"`
-	Version       string            `json:"version,omitempty"`
-	Method        string            `json:"method,omitempty"`
-	Path          string            `json:"path,omitempty"`
-	Status        int               `json:"status,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Body          json.RawMessage   `json:"body,omitempty"`
-	Data          string            `json:"data,omitempty"`
-	Code          string            `json:"code,omitempty"`
-	Message       string            `json:"message,omitempty"`
+	Type            FrameType         `json:"type"`
+	ID              string            `json:"id,omitempty"`
+	DeviceID        string            `json:"device_id,omitempty"`
+	AccountID       string            `json:"account_id,omitempty"`
+	LocalAccounts   []string          `json:"local_accounts,omitempty"`
+	DaemonVersion   string            `json:"daemon_version,omitempty"`
+	ProtocolVersion string            `json:"protocol_version,omitempty"`
+	Capabilities    []Operation       `json:"capabilities,omitempty"`
+	Version         string            `json:"version,omitempty"`
+	Operation       Operation         `json:"operation,omitempty"`
+	Method          string            `json:"method,omitempty"`
+	Path            string            `json:"path,omitempty"`
+	Status          int               `json:"status,omitempty"`
+	Headers         map[string]string `json:"headers,omitempty"`
+	Body            json.RawMessage   `json:"body,omitempty"`
+	Data            string            `json:"data,omitempty"`
+	Code            string            `json:"code,omitempty"`
+	Message         string            `json:"message,omitempty"`
 }
 
 func (f Frame) Validate() error {
@@ -59,6 +71,17 @@ func (f Frame) Validate() error {
 				return fmt.Errorf("local account id is required")
 			}
 		}
+		if f.ProtocolVersion != ProtocolVersion1 {
+			return fmt.Errorf("protocol_version must be 1")
+		}
+		if len(f.Capabilities) == 0 {
+			return fmt.Errorf("at least one capability is required")
+		}
+		for _, capability := range f.Capabilities {
+			if !AllowedOperation(capability) {
+				return fmt.Errorf("capability is not supported")
+			}
+		}
 	case FrameRequest:
 		if f.ID == "" {
 			return fmt.Errorf("id is required")
@@ -66,11 +89,14 @@ func (f Frame) Validate() error {
 		if f.AccountID == "" {
 			return fmt.Errorf("account_id is required")
 		}
-		if f.Method != http.MethodGet && f.Method != http.MethodPost {
-			return fmt.Errorf("method is not relayable")
+		if !AllowedOperation(f.Operation) {
+			return fmt.Errorf("operation is not supported")
 		}
-		if !AllowedRelayPath(f.Path) {
-			return fmt.Errorf("path is not relayable")
+		if f.Method != "" || f.Path != "" {
+			method, path, ok := HTTPForOperation(f.Operation)
+			if !ok || f.Method != method || f.Path != path {
+				return fmt.Errorf("method/path do not match operation")
+			}
 		}
 	case FrameResponseHeaders:
 		if f.ID == "" {
@@ -91,9 +117,29 @@ func (f Frame) Validate() error {
 	return nil
 }
 
+func AllowedOperation(operation Operation) bool {
+	switch operation {
+	case OperationOpenAIModels, OperationOpenAIChatCompletions:
+		return true
+	default:
+		return false
+	}
+}
+
+func HTTPForOperation(operation Operation) (method string, path string, ok bool) {
+	switch operation {
+	case OperationOpenAIModels:
+		return http.MethodGet, "/v1/models", true
+	case OperationOpenAIChatCompletions:
+		return http.MethodPost, "/v1/chat/completions", true
+	default:
+		return "", "", false
+	}
+}
+
 func AllowedRelayPath(path string) bool {
 	switch path {
-	case "/health", "/v1/models", "/v1/chat/completions":
+	case "/v1/models", "/v1/chat/completions":
 		return true
 	default:
 		return false

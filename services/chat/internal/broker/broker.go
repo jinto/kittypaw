@@ -38,6 +38,7 @@ type Request struct {
 	UserID    string
 	DeviceID  string
 	AccountID string
+	Operation protocol.Operation
 	Method    string
 	Path      string
 	Body      []byte
@@ -143,6 +144,7 @@ func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Fram
 		Type:      protocol.FrameRequest,
 		ID:        "req_" + uuid.NewString(),
 		AccountID: req.AccountID,
+		Operation: req.Operation,
 		Method:    req.Method,
 		Path:      req.Path,
 		Body:      json.RawMessage(req.Body),

@@ -76,8 +76,8 @@ func TestModelsRelaysThroughBroker(t *testing.T) {
 	if fb.req.UserID != "user_1" || fb.req.DeviceID != "dev_1" || fb.req.AccountID != "alice" {
 		t.Fatalf("broker request = %+v", fb.req)
 	}
-	if fb.req.Method != http.MethodGet || fb.req.Path != "/v1/models" {
-		t.Fatalf("broker method/path = %s %s", fb.req.Method, fb.req.Path)
+	if fb.req.Operation != protocol.OperationOpenAIModels || fb.req.Method != http.MethodGet || fb.req.Path != "/v1/models" {
+		t.Fatalf("broker operation/method/path = %s %s %s", fb.req.Operation, fb.req.Method, fb.req.Path)
 	}
 	if strings.TrimSpace(rr.Body.String()) != `{"object":"list","data":[]}` {
 		t.Fatalf("body = %q", rr.Body.String())
@@ -117,8 +117,8 @@ func TestChatCompletionsStreamingRelaysSSE(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "data: [DONE]") {
 		t.Fatalf("body = %q, want SSE done frame", rr.Body.String())
 	}
-	if fb.req.Method != http.MethodPost || fb.req.Path != "/v1/chat/completions" {
-		t.Fatalf("broker method/path = %s %s", fb.req.Method, fb.req.Path)
+	if fb.req.Operation != protocol.OperationOpenAIChatCompletions || fb.req.Method != http.MethodPost || fb.req.Path != "/v1/chat/completions" {
+		t.Fatalf("broker operation/method/path = %s %s %s", fb.req.Operation, fb.req.Method, fb.req.Path)
 	}
 	if string(fb.req.Body) != string(raw) {
 		t.Fatalf("broker body = %s, want %s", fb.req.Body, raw)

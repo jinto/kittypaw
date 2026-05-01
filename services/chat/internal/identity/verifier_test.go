@@ -10,7 +10,7 @@ func TestMemoryCredentialVerifierVerifiesSeededAPIClient(t *testing.T) {
 	verifier := NewMemoryCredentialVerifier()
 	want := APIClientClaims{
 		Subject:   "user_1",
-		Audience:  AudienceKittyChat,
+		Audiences: []string{AudienceKittyChat},
 		Version:   CredentialVersion1,
 		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
 		UserID:    "user_1",
@@ -25,7 +25,7 @@ func TestMemoryCredentialVerifierVerifiesSeededAPIClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyAPIClient() error = %v", err)
 	}
-	if got.Subject != want.Subject || got.Audience != want.Audience || got.Version != want.Version {
+	if got.Subject != want.Subject || !sameStrings(got.Audiences, want.Audiences) || got.Version != want.Version {
 		t.Fatalf("claims = %+v, want %+v", got, want)
 	}
 	if got.UserID != want.UserID || got.DeviceID != want.DeviceID || got.AccountID != want.AccountID {
@@ -38,7 +38,7 @@ func TestMemoryCredentialVerifierVerifiesSeededDevice(t *testing.T) {
 	verifier := NewMemoryCredentialVerifier()
 	want := DeviceClaims{
 		Subject:         "device:dev_1",
-		Audience:        AudienceKittyChat,
+		Audiences:       []string{AudienceKittyChat},
 		Version:         CredentialVersion1,
 		Scopes:          []Scope{ScopeDaemonConnect},
 		UserID:          "user_1",
@@ -53,7 +53,7 @@ func TestMemoryCredentialVerifierVerifiesSeededDevice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyDevice() error = %v", err)
 	}
-	if got.Subject != want.Subject || got.Audience != want.Audience || got.Version != want.Version {
+	if got.Subject != want.Subject || !sameStrings(got.Audiences, want.Audiences) || got.Version != want.Version {
 		t.Fatalf("claims = %+v, want %+v", got, want)
 	}
 	if got.UserID != want.UserID || got.DeviceID != want.DeviceID {
@@ -83,7 +83,7 @@ func TestMemoryCredentialVerifierRejectsUnknownTokens(t *testing.T) {
 func TestMemoryCredentialVerifierValidatesAPIClientSeeds(t *testing.T) {
 	valid := APIClientClaims{
 		Subject:   "user_1",
-		Audience:  AudienceKittyChat,
+		Audiences: []string{AudienceKittyChat},
 		Version:   CredentialVersion1,
 		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
 		UserID:    "user_1",
@@ -96,7 +96,7 @@ func TestMemoryCredentialVerifierValidatesAPIClientSeeds(t *testing.T) {
 		claims APIClientClaims
 	}{
 		{name: "empty token", token: "", claims: valid},
-		{name: "wrong audience", token: "api_secret", claims: withAPIAudience(valid, "other")},
+		{name: "missing kittychat audience", token: "api_secret", claims: withAPIAudiences(valid, []string{"kittyapi"})},
 		{name: "wrong version", token: "api_secret", claims: withAPIVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "api_secret", claims: withAPIScopes(valid, nil)},
 		{name: "unknown scope", token: "api_secret", claims: withAPIScopes(valid, []Scope{"unknown"})},
@@ -115,7 +115,7 @@ func TestMemoryCredentialVerifierValidatesAPIClientSeeds(t *testing.T) {
 func TestMemoryCredentialVerifierValidatesDeviceSeeds(t *testing.T) {
 	valid := DeviceClaims{
 		Subject:         "device:dev_1",
-		Audience:        AudienceKittyChat,
+		Audiences:       []string{AudienceKittyChat},
 		Version:         CredentialVersion1,
 		Scopes:          []Scope{ScopeDaemonConnect},
 		UserID:          "user_1",
@@ -128,7 +128,7 @@ func TestMemoryCredentialVerifierValidatesDeviceSeeds(t *testing.T) {
 		claims DeviceClaims
 	}{
 		{name: "empty token", token: "", claims: valid},
-		{name: "wrong audience", token: "dev_secret", claims: withDeviceAudience(valid, "other")},
+		{name: "missing kittychat audience", token: "dev_secret", claims: withDeviceAudiences(valid, []string{"kittyapi"})},
 		{name: "wrong version", token: "dev_secret", claims: withDeviceVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "dev_secret", claims: withDeviceScopes(valid, nil)},
 		{name: "unknown scope", token: "dev_secret", claims: withDeviceScopes(valid, []Scope{"unknown"})},
@@ -148,7 +148,7 @@ func TestMemoryCredentialVerifierReturnsDefensiveCopies(t *testing.T) {
 	verifier := NewMemoryCredentialVerifier()
 	apiClaims := APIClientClaims{
 		Subject:   "user_1",
-		Audience:  AudienceKittyChat,
+		Audiences: []string{AudienceKittyChat},
 		Version:   CredentialVersion1,
 		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
 		UserID:    "user_1",
@@ -160,7 +160,7 @@ func TestMemoryCredentialVerifierReturnsDefensiveCopies(t *testing.T) {
 	}
 	deviceClaims := DeviceClaims{
 		Subject:         "device:dev_1",
-		Audience:        AudienceKittyChat,
+		Audiences:       []string{AudienceKittyChat},
 		Version:         CredentialVersion1,
 		Scopes:          []Scope{ScopeDaemonConnect},
 		UserID:          "user_1",
@@ -176,24 +176,49 @@ func TestMemoryCredentialVerifierReturnsDefensiveCopies(t *testing.T) {
 		t.Fatalf("VerifyAPIClient() error = %v", err)
 	}
 	apiGot.Scopes[0] = "mutated"
+	apiGot.Audiences[0] = "mutated"
 	apiAgain, err := verifier.VerifyAPIClient(context.Background(), "api_secret")
 	if err != nil {
 		t.Fatalf("VerifyAPIClient() again error = %v", err)
 	}
 	assertScopes(t, apiAgain.Scopes, apiClaims.Scopes)
+	assertStringSlice(t, apiAgain.Audiences, apiClaims.Audiences)
 
 	deviceGot, err := verifier.VerifyDevice(context.Background(), "dev_secret")
 	if err != nil {
 		t.Fatalf("VerifyDevice() error = %v", err)
 	}
 	deviceGot.Scopes[0] = "mutated"
+	deviceGot.Audiences[0] = "mutated"
 	deviceGot.LocalAccountIDs[0] = "mutated"
 	deviceAgain, err := verifier.VerifyDevice(context.Background(), "dev_secret")
 	if err != nil {
 		t.Fatalf("VerifyDevice() again error = %v", err)
 	}
 	assertScopes(t, deviceAgain.Scopes, deviceClaims.Scopes)
+	assertStringSlice(t, deviceAgain.Audiences, deviceClaims.Audiences)
 	assertStringSlice(t, deviceAgain.LocalAccountIDs, deviceClaims.LocalAccountIDs)
+}
+
+func TestMemoryCredentialVerifierAcceptsMultiAudienceClaims(t *testing.T) {
+	verifier := NewMemoryCredentialVerifier()
+	claims := APIClientClaims{
+		Subject:   "user_1",
+		Audiences: []string{"kittyapi", AudienceKittyChat},
+		Version:   CredentialVersion1,
+		Scopes:    []Scope{ScopeChatRelay, ScopeModelsRead},
+		UserID:    "user_1",
+		DeviceID:  "dev_1",
+		AccountID: "alice",
+	}
+	if err := verifier.AddAPIClient("api_secret", claims); err != nil {
+		t.Fatalf("AddAPIClient() error = %v", err)
+	}
+	got, err := verifier.VerifyAPIClient(context.Background(), "api_secret")
+	if err != nil {
+		t.Fatalf("VerifyAPIClient() error = %v", err)
+	}
+	assertStringSlice(t, got.Audiences, claims.Audiences)
 }
 
 func assertScopes(t *testing.T, got, want []Scope) {
@@ -220,8 +245,8 @@ func assertStringSlice(t *testing.T, got, want []string) {
 	}
 }
 
-func withAPIAudience(claims APIClientClaims, audience string) APIClientClaims {
-	claims.Audience = audience
+func withAPIAudiences(claims APIClientClaims, audiences []string) APIClientClaims {
+	claims.Audiences = audiences
 	return claims
 }
 
@@ -240,9 +265,21 @@ func withAPIAccount(claims APIClientClaims, accountID string) APIClientClaims {
 	return claims
 }
 
-func withDeviceAudience(claims DeviceClaims, audience string) DeviceClaims {
-	claims.Audience = audience
+func withDeviceAudiences(claims DeviceClaims, audiences []string) DeviceClaims {
+	claims.Audiences = audiences
 	return claims
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func withDeviceVersion(claims DeviceClaims, version int) DeviceClaims {

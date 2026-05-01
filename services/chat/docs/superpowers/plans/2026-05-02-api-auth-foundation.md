@@ -4,7 +4,7 @@
 
 **Goal:** Gate KittyChat relay access through an API-issued credential verifier boundary and stabilize daemon requests around versioned operations.
 
-**Architecture:** Add `internal/identity` as the verifier layer. The first verifier is env-seeded memory data, but the public interface is `CredentialVerifier` returning claims with `audience`, `version`, and `scopes` so JWT/JWKS or introspection can replace it later. Add protocol v1 `operation`, `protocol_version`, and `capabilities` fields so daemon contracts are not coupled only to HTTP paths.
+**Architecture:** Add `internal/identity` as the verifier layer. The first verifier is env-seeded memory data, but the public interface is `CredentialVerifier` returning claims with `audiences`, `version`, and `scopes` so JWT/JWKS or introspection can replace it later. Add protocol v1 `operation`, `protocol_version`, and `capabilities` fields so daemon contracts are not coupled only to HTTP paths.
 
 **Tech Stack:** Go 1.25, chi, coder/websocket, existing `broker`, `openai`, and `daemonws` packages.
 
@@ -38,19 +38,19 @@ Create `internal/identity/verifier_test.go` with tests that cover:
 
 - `NewMemoryCredentialVerifier().AddAPIClient("api_secret", claims)` then `VerifyAPIClient(..., "api_secret")` returns claims containing:
   - `Subject: "user_1"`
-  - `Audience: AudienceKittyChat`
+  - `Audiences: []string{AudienceKittyChat}`
   - `Version: CredentialVersion1`
   - `Scopes: []Scope{ScopeChatRelay, ScopeModelsRead}`
   - `UserID: "user_1"`, `DeviceID: "dev_1"`, `AccountID: "alice"`
 - `AddDevice("dev_secret", claims)` then `VerifyDevice(..., "dev_secret")` returns claims containing:
   - `Subject: "device:dev_1"`
-  - `Audience: AudienceKittyChat`
+  - `Audiences: []string{AudienceKittyChat}`
   - `Version: CredentialVersion1`
   - `Scopes: []Scope{ScopeDaemonConnect}`
   - `UserID: "user_1"`, `DeviceID: "dev_1"`, `LocalAccountIDs: []string{"alice", "bob"}`
 - missing/unknown API and device tokens return `ErrUnauthorized`.
-- invalid API claims are rejected for empty token, wrong audience, wrong version, missing scope, unknown scope, and missing account id.
-- invalid device claims are rejected for empty token, wrong audience, wrong version, missing scope, unknown scope, and missing local accounts.
+- invalid API claims are rejected for empty token, missing kittychat audience, wrong version, missing scope, unknown scope, and missing account id.
+- invalid device claims are rejected for empty token, missing kittychat audience, wrong version, missing scope, unknown scope, and missing local accounts.
 - returned device claims cannot mutate stored local accounts or scopes.
 
 - [ ] **Step 2: Run test and verify RED**
@@ -72,13 +72,13 @@ Create `internal/identity/verifier.go` with:
 - `type Scope string`
 - `ScopeChatRelay`, `ScopeModelsRead`, `ScopeDaemonConnect`
 - `var ErrUnauthorized = errors.New("unauthorized")`
-- `type APIClientClaims struct { Subject, Audience, UserID, DeviceID, AccountID string; Scopes []Scope; Version int }`
-- `type DeviceClaims struct { Subject, Audience, UserID, DeviceID string; LocalAccountIDs []string; Scopes []Scope; Version int }`
+- `type APIClientClaims struct { Subject, UserID, DeviceID, AccountID string; Audiences []string; Scopes []Scope; Version int }`
+- `type DeviceClaims struct { Subject, UserID, DeviceID string; Audiences []string; LocalAccountIDs []string; Scopes []Scope; Version int }`
 - `type CredentialVerifier interface { VerifyAPIClient(context.Context, string) (APIClientClaims, error); VerifyDevice(context.Context, string) (DeviceClaims, error) }`
 - `type MemoryCredentialVerifier` with `AddAPIClient`, `AddDevice`, `VerifyAPIClient`, and `VerifyDevice`.
 - `func (c APIClientClaims) Principal() openai.Principal`.
 - `func (c DeviceClaims) Principal() broker.DevicePrincipal`.
-- validation that requires `audience == "kittychat"`, `version == 1`, non-empty subject/user/device/account fields, non-empty local accounts for device claims, and only known scope values.
+- validation that requires audiences include `kittychat`, `version == 1`, non-empty subject/user/device/account fields, non-empty local accounts for device claims, and only known scope values.
 - defensive copying for all slices on insert and return.
 
 - [ ] **Step 4: Run test and verify GREEN**
@@ -267,13 +267,13 @@ Modify `cmd/kittychat/main.go` so:
   - `openai.NewHandler(identity.APIAuthenticator{Verifier: verifier}, b)`
 - API seed claims:
   - `Subject: cfg.UserID`
-  - `Audience: identity.AudienceKittyChat`
+  - `Audiences: []string{identity.AudienceKittyChat}`
   - `Version: identity.CredentialVersion1`
   - `Scopes: []identity.Scope{identity.ScopeChatRelay, identity.ScopeModelsRead}`
   - `UserID`, `DeviceID`, `AccountID` from config
 - Device seed claims:
   - `Subject: "device:" + cfg.DeviceID`
-  - `Audience: identity.AudienceKittyChat`
+  - `Audiences: []string{identity.AudienceKittyChat}`
   - `Version: identity.CredentialVersion1`
   - `Scopes: []identity.Scope{identity.ScopeDaemonConnect}`
   - `UserID`, `DeviceID`, `LocalAccountIDs` from config

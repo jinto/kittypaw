@@ -55,6 +55,7 @@ func TestBrokerRequestForwardsToRegisteredDevice(t *testing.T) {
 		UserID:    "user_1",
 		DeviceID:  "dev_1",
 		AccountID: "alice",
+		Operation: protocol.OperationOpenAIModels,
 		Method:    "GET",
 		Path:      "/v1/models",
 	})
@@ -68,7 +69,7 @@ func TestBrokerRequestForwardsToRegisteredDevice(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for request frame")
 	}
-	if sent.Type != protocol.FrameRequest || sent.ID == "" || sent.Path != "/v1/models" {
+	if sent.Type != protocol.FrameRequest || sent.ID == "" || sent.Operation != protocol.OperationOpenAIModels || sent.Path != "/v1/models" {
 		t.Fatalf("sent frame = %+v", sent)
 	}
 
@@ -89,8 +90,7 @@ func TestBrokerOfflineDeviceReturnsError(t *testing.T) {
 		UserID:    "user_1",
 		DeviceID:  "missing",
 		AccountID: "alice",
-		Method:    "GET",
-		Path:      "/health",
+		Operation: protocol.OperationOpenAIModels,
 	})
 	if !errors.Is(err, ErrDeviceOffline) {
 		t.Fatalf("Request() error = %v, want ErrDeviceOffline", err)
@@ -112,8 +112,7 @@ func TestBrokerRejectsWrongUserAndAccount(t *testing.T) {
 		UserID:    "user_2",
 		DeviceID:  "dev_1",
 		AccountID: "alice",
-		Method:    "GET",
-		Path:      "/health",
+		Operation: protocol.OperationOpenAIModels,
 	})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("wrong user error = %v, want ErrForbidden", err)
@@ -123,8 +122,7 @@ func TestBrokerRejectsWrongUserAndAccount(t *testing.T) {
 		UserID:    "user_1",
 		DeviceID:  "dev_1",
 		AccountID: "bob",
-		Method:    "GET",
-		Path:      "/health",
+		Operation: protocol.OperationOpenAIModels,
 	})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("wrong account error = %v, want ErrForbidden", err)

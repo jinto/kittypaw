@@ -53,7 +53,8 @@ to the package-specific principals used by the relay:
 
 Claims include the fields that `api.kittypaw.app` will own:
 
-- `audience`: must be `kittychat`.
+- `audiences`: must include `kittychat`. API server JWTs can use
+  `["kittyapi", "kittychat"]` for backwards-compatible multi-audience tokens.
 - `version`: must be `1` for this slice.
 - `scopes`: must contain known scope strings.
 - API client claims: `subject`, `user_id`, `device_id`, `account_id`.
@@ -152,13 +153,13 @@ existing tests working while moving the production boundary into one place.
 
 The env-seeded API client claims use:
 
-- `audience`: `kittychat`
+- `audiences`: `["kittychat"]`
 - `version`: `1`
 - `scopes`: `chat:relay`, `models:read`
 
 The env-seeded device claims use:
 
-- `audience`: `kittychat`
+- `audiences`: `["kittychat"]`
 - `version`: `1`
 - `scopes`: `daemon:connect`
 
