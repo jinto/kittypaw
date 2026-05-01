@@ -69,6 +69,24 @@ API client tokens are expected to use the kittyapi wire format:
 }
 ```
 
+## Routing Semantics
+
+Daemon WebSocket connections are scoped by verified identity, not by local
+account names alone. `hello.local_accounts` is the set of local account ids that
+the current daemon process is actively serving on that connection. The relay
+checks that every advertised account is within the daemon credential's
+`local_accounts` claim, then registers only the advertised active accounts.
+
+Effective routing key:
+
+```text
+verified user_id + verified device_id + request account_id
+```
+
+This means `alice` on two devices, or under two API users, is not the same route.
+Capabilities work the same way: a request is sent to a daemon connection only
+when the connection's hello advertised the matching operation capability.
+
 ## Next Steps
 
 - Replace env-seeded credentials with API-server-issued sessions, API keys,

@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrDeviceOffline = errors.New("device offline")
-	ErrForbidden     = errors.New("forbidden")
-	ErrBackpressure  = errors.New("too many in-flight requests")
+	ErrDeviceOffline        = errors.New("device offline")
+	ErrForbidden            = errors.New("forbidden")
+	ErrBackpressure         = errors.New("too many in-flight requests")
+	ErrUnsupportedOperation = errors.New("operation unsupported by device")
 )
 
 type Config struct {
@@ -27,6 +28,7 @@ type DevicePrincipal struct {
 	UserID          string
 	DeviceID        string
 	LocalAccountIDs []string
+	Capabilities    []protocol.Operation
 }
 
 type DeviceConn interface {
@@ -47,14 +49,20 @@ type Request struct {
 type Broker struct {
 	mu      sync.Mutex
 	cfg     Config
-	devices map[string]*deviceState
+	devices map[deviceKey]*deviceState
+}
+
+type deviceKey struct {
+	userID   string
+	deviceID string
 }
 
 type deviceState struct {
-	principal DevicePrincipal
-	accounts  map[string]struct{}
-	conn      DeviceConn
-	pending   map[string]chan protocol.Frame
+	principal    DevicePrincipal
+	accounts     map[string]struct{}
+	capabilities map[protocol.Operation]struct{}
+	conn         DeviceConn
+	pending      map[string]chan protocol.Frame
 }
 
 func New(cfg Config) *Broker {
@@ -66,7 +74,7 @@ func New(cfg Config) *Broker {
 	}
 	return &Broker{
 		cfg:     cfg,
-		devices: make(map[string]*deviceState),
+		devices: make(map[deviceKey]*deviceState),
 	}
 }
 
@@ -87,17 +95,29 @@ func (b *Broker) Register(ctx context.Context, principal DevicePrincipal, conn D
 		}
 		accounts[accountID] = struct{}{}
 	}
+	if len(principal.Capabilities) == 0 {
+		return fmt.Errorf("at least one capability is required")
+	}
+	capabilities := make(map[protocol.Operation]struct{}, len(principal.Capabilities))
+	for _, capability := range principal.Capabilities {
+		if !protocol.AllowedOperation(capability) {
+			return fmt.Errorf("capability is not supported")
+		}
+		capabilities[capability] = struct{}{}
+	}
 	if conn == nil {
 		return fmt.Errorf("device connection is required")
 	}
 
+	key := keyFor(principal.UserID, principal.DeviceID)
 	b.mu.Lock()
-	old := b.devices[principal.DeviceID]
-	b.devices[principal.DeviceID] = &deviceState{
-		principal: principal,
-		accounts:  accounts,
-		conn:      conn,
-		pending:   make(map[string]chan protocol.Frame),
+	old := b.devices[key]
+	b.devices[key] = &deviceState{
+		principal:    principal,
+		accounts:     accounts,
+		capabilities: capabilities,
+		conn:         conn,
+		pending:      make(map[string]chan protocol.Frame),
 	}
 	b.mu.Unlock()
 
@@ -117,10 +137,15 @@ func (b *Broker) Register(ctx context.Context, principal DevicePrincipal, conn D
 	}
 }
 
-func (b *Broker) Unregister(deviceID string) {
+func (b *Broker) Unregister(userID, deviceID string, conn DeviceConn) {
+	key := keyFor(userID, deviceID)
 	b.mu.Lock()
-	state := b.devices[deviceID]
-	delete(b.devices, deviceID)
+	state := b.devices[key]
+	if state != nil && state.conn == conn {
+		delete(b.devices, key)
+	} else {
+		state = nil
+	}
 	b.mu.Unlock()
 	if state == nil {
 		return
@@ -132,10 +157,10 @@ func (b *Broker) Unregister(deviceID string) {
 	}
 }
 
-func (b *Broker) IsOnline(deviceID string) bool {
+func (b *Broker) IsOnline(userID, deviceID string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_, ok := b.devices[deviceID]
+	_, ok := b.devices[keyFor(userID, deviceID)]
 	return ok
 }
 
@@ -154,18 +179,19 @@ func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Fram
 	}
 
 	b.mu.Lock()
-	state := b.devices[req.DeviceID]
+	key := keyFor(req.UserID, req.DeviceID)
+	state := b.devices[key]
 	if state == nil {
 		b.mu.Unlock()
 		return nil, ErrDeviceOffline
 	}
-	if state.principal.UserID != req.UserID {
-		b.mu.Unlock()
-		return nil, ErrForbidden
-	}
 	if _, ok := state.accounts[req.AccountID]; !ok {
 		b.mu.Unlock()
 		return nil, ErrForbidden
+	}
+	if _, ok := state.capabilities[req.Operation]; !ok {
+		b.mu.Unlock()
+		return nil, ErrUnsupportedOperation
 	}
 	if len(state.pending) >= b.cfg.MaxInflightPerDevice {
 		b.mu.Unlock()
@@ -179,7 +205,7 @@ func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Fram
 	b.mu.Unlock()
 
 	if err := conn.Send(ctx, frame); err != nil {
-		b.finish(req.DeviceID, frame.ID, protocol.Frame{
+		b.finish(key, frame.ID, protocol.Frame{
 			Type:    protocol.FrameError,
 			ID:      frame.ID,
 			Code:    "send_failed",
@@ -193,14 +219,14 @@ func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Fram
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			b.finish(req.DeviceID, frame.ID, protocol.Frame{
+			b.finish(key, frame.ID, protocol.Frame{
 				Type:    protocol.FrameError,
 				ID:      frame.ID,
 				Code:    "canceled",
 				Message: ctx.Err().Error(),
 			})
 		case <-timer.C:
-			b.finish(req.DeviceID, frame.ID, protocol.Frame{
+			b.finish(key, frame.ID, protocol.Frame{
 				Type:    protocol.FrameError,
 				ID:      frame.ID,
 				Code:    "timeout",
@@ -212,14 +238,15 @@ func (b *Broker) Request(ctx context.Context, req Request) (<-chan protocol.Fram
 	return stream, nil
 }
 
-func (b *Broker) Deliver(deviceID string, frame protocol.Frame) {
+func (b *Broker) Deliver(userID, deviceID string, frame protocol.Frame) {
+	key := keyFor(userID, deviceID)
 	if frame.Type == protocol.FrameResponseEnd || frame.Type == protocol.FrameError {
-		b.finish(deviceID, frame.ID, frame)
+		b.finish(key, frame.ID, frame)
 		return
 	}
 
 	b.mu.Lock()
-	state := b.devices[deviceID]
+	state := b.devices[key]
 	var ch chan protocol.Frame
 	if state != nil {
 		ch = state.pending[frame.ID]
@@ -232,9 +259,9 @@ func (b *Broker) Deliver(deviceID string, frame protocol.Frame) {
 	ch <- frame
 }
 
-func (b *Broker) finish(deviceID, requestID string, frame protocol.Frame) {
+func (b *Broker) finish(key deviceKey, requestID string, frame protocol.Frame) {
 	b.mu.Lock()
-	state := b.devices[deviceID]
+	state := b.devices[key]
 	var ch chan protocol.Frame
 	if state != nil {
 		ch = state.pending[requestID]
@@ -247,4 +274,8 @@ func (b *Broker) finish(deviceID, requestID string, frame protocol.Frame) {
 	}
 	ch <- frame
 	close(ch)
+}
+
+func keyFor(userID, deviceID string) deviceKey {
+	return deviceKey{userID: userID, deviceID: deviceID}
 }

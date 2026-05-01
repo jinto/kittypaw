@@ -168,6 +168,75 @@ func TestDaemonWebSocketRejectsBadToken(t *testing.T) {
 	}
 }
 
+func TestDaemonWebSocketRegistersOnlyHelloAdvertisedAccounts(t *testing.T) {
+	fb := &captureBroker{registered: make(chan broker.DevicePrincipal, 1)}
+	r := chi.NewRouter()
+	r.Mount("/daemon", NewHandler(StaticTokenAuthenticator{
+		Token: "dev_secret",
+		Principal: broker.DevicePrincipal{
+			UserID:          "user_1",
+			DeviceID:        "dev_1",
+			LocalAccountIDs: []string{"alice", "bob"},
+		},
+	}, fb).Routes())
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/daemon/connect"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer dev_secret"}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	select {
+	case got := <-fb.registered:
+		if got.UserID != "user_1" || got.DeviceID != "dev_1" {
+			t.Fatalf("registered identity = %+v", got)
+		}
+		if len(got.LocalAccountIDs) != 1 || got.LocalAccountIDs[0] != "alice" {
+			t.Fatalf("registered accounts = %+v, want [alice]", got.LocalAccountIDs)
+		}
+		if len(got.Capabilities) != 1 || got.Capabilities[0] != protocol.OperationOpenAIModels {
+			t.Fatalf("registered capabilities = %+v, want [openai.models]", got.Capabilities)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for broker registration")
+	}
+}
+
+type captureBroker struct {
+	registered chan broker.DevicePrincipal
+}
+
+func (b *captureBroker) Register(ctx context.Context, principal broker.DevicePrincipal, _ broker.DeviceConn) error {
+	select {
+	case b.registered <- principal:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (b *captureBroker) Deliver(string, string, protocol.Frame) {}
+
+func (b *captureBroker) Unregister(string, string, broker.DeviceConn) {}
+
 type unexpectedFrameError struct {
 	frame protocol.Frame
 }

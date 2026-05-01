@@ -46,6 +46,7 @@ func TestBrokerRequestForwardsToRegisteredDevice(t *testing.T) {
 		UserID:          "user_1",
 		DeviceID:        "dev_1",
 		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
 	}
 	if err := b.Register(context.Background(), principal, conn); err != nil {
 		t.Fatalf("Register() error = %v", err)
@@ -73,7 +74,7 @@ func TestBrokerRequestForwardsToRegisteredDevice(t *testing.T) {
 		t.Fatalf("sent frame = %+v", sent)
 	}
 
-	b.Deliver("dev_1", protocol.Frame{Type: protocol.FrameResponseEnd, ID: sent.ID})
+	b.Deliver("user_1", "dev_1", protocol.Frame{Type: protocol.FrameResponseEnd, ID: sent.ID})
 	select {
 	case got := <-stream:
 		if got.Type != protocol.FrameResponseEnd || got.ID != sent.ID {
@@ -104,6 +105,7 @@ func TestBrokerRejectsWrongUserAndAccount(t *testing.T) {
 		UserID:          "user_1",
 		DeviceID:        "dev_1",
 		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
 	}, conn); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -114,8 +116,8 @@ func TestBrokerRejectsWrongUserAndAccount(t *testing.T) {
 		AccountID: "alice",
 		Operation: protocol.OperationOpenAIModels,
 	})
-	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("wrong user error = %v, want ErrForbidden", err)
+	if !errors.Is(err, ErrDeviceOffline) {
+		t.Fatalf("wrong user error = %v, want ErrDeviceOffline", err)
 	}
 
 	_, err = b.Request(context.Background(), Request{
@@ -133,7 +135,12 @@ func TestBrokerDuplicateConnectionClosesOldConnection(t *testing.T) {
 	b := New(Config{RequestTimeout: time.Second, MaxInflightPerDevice: 2})
 	oldConn := newFakeConn()
 	newConn := newFakeConn()
-	principal := DevicePrincipal{UserID: "user_1", DeviceID: "dev_1", LocalAccountIDs: []string{"alice"}}
+	principal := DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_1",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}
 	if err := b.Register(context.Background(), principal, oldConn); err != nil {
 		t.Fatalf("register old: %v", err)
 	}
@@ -145,5 +152,101 @@ func TestBrokerDuplicateConnectionClosesOldConnection(t *testing.T) {
 	case <-oldConn.closed:
 	case <-time.After(time.Second):
 		t.Fatal("old connection was not closed")
+	}
+
+	b.Unregister("user_1", "dev_1", oldConn)
+	if _, err := b.Request(context.Background(), Request{
+		UserID:    "user_1",
+		DeviceID:  "dev_1",
+		AccountID: "alice",
+		Operation: protocol.OperationOpenAIModels,
+		Method:    "GET",
+		Path:      "/v1/models",
+	}); err != nil {
+		t.Fatalf("request after old unregister = %v, want new connection still registered", err)
+	}
+	select {
+	case <-newConn.requests:
+	case <-time.After(time.Second):
+		t.Fatal("new connection did not receive request after old unregister")
+	}
+}
+
+func TestBrokerSeparatesConnectionsByUserAndDevice(t *testing.T) {
+	b := New(Config{RequestTimeout: time.Second, MaxInflightPerDevice: 2})
+	user1Conn := newFakeConn()
+	user2Conn := newFakeConn()
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_shared",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, user1Conn); err != nil {
+		t.Fatalf("register user1: %v", err)
+	}
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_2",
+		DeviceID:        "dev_shared",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, user2Conn); err != nil {
+		t.Fatalf("register user2: %v", err)
+	}
+
+	if _, err := b.Request(context.Background(), Request{
+		UserID:    "user_1",
+		DeviceID:  "dev_shared",
+		AccountID: "alice",
+		Operation: protocol.OperationOpenAIModels,
+		Method:    "GET",
+		Path:      "/v1/models",
+	}); err != nil {
+		t.Fatalf("user1 request: %v", err)
+	}
+
+	select {
+	case <-user1Conn.requests:
+	case <-time.After(time.Second):
+		t.Fatal("user1 request was not sent to user1 connection")
+	}
+	select {
+	case frame := <-user2Conn.requests:
+		t.Fatalf("user2 connection received user1 request: %+v", frame)
+	default:
+	}
+	select {
+	case <-user1Conn.closed:
+		t.Fatal("registering same device id for user2 closed user1 connection")
+	default:
+	}
+}
+
+func TestBrokerRejectsUnsupportedCapability(t *testing.T) {
+	b := New(Config{RequestTimeout: time.Second, MaxInflightPerDevice: 2})
+	conn := newFakeConn()
+	if err := b.Register(context.Background(), DevicePrincipal{
+		UserID:          "user_1",
+		DeviceID:        "dev_1",
+		LocalAccountIDs: []string{"alice"},
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}, conn); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	_, err := b.Request(context.Background(), Request{
+		UserID:    "user_1",
+		DeviceID:  "dev_1",
+		AccountID: "alice",
+		Operation: protocol.OperationOpenAIChatCompletions,
+		Method:    "POST",
+		Path:      "/v1/chat/completions",
+	})
+	if !errors.Is(err, ErrUnsupportedOperation) {
+		t.Fatalf("Request() error = %v, want ErrUnsupportedOperation", err)
+	}
+	select {
+	case frame := <-conn.requests:
+		t.Fatalf("unsupported request was sent to daemon: %+v", frame)
+	default:
 	}
 }

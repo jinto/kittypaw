@@ -28,8 +28,8 @@ type DeviceAuthenticator interface {
 
 type Broker interface {
 	Register(ctx context.Context, principal broker.DevicePrincipal, conn broker.DeviceConn) error
-	Deliver(deviceID string, frame protocol.Frame)
-	Unregister(deviceID string)
+	Deliver(userID, deviceID string, frame protocol.Frame)
+	Unregister(userID, deviceID string, conn broker.DeviceConn)
 }
 
 type Handler struct {
@@ -79,17 +79,18 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
-	if err := ensureHelloMatchesPrincipal(hello, principal); err != nil {
+	activePrincipal, err := principalForHello(hello, principal)
+	if err != nil {
 		_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 		return
 	}
 
 	wsConn := &deviceConn{conn: conn}
-	if err := h.broker.Register(ctx, principal, wsConn); err != nil {
+	if err := h.broker.Register(ctx, activePrincipal, wsConn); err != nil {
 		_ = conn.Close(websocket.StatusInternalError, err.Error())
 		return
 	}
-	defer h.broker.Unregister(principal.DeviceID)
+	defer h.broker.Unregister(activePrincipal.UserID, activePrincipal.DeviceID, wsConn)
 	defer func() { _ = conn.CloseNow() }()
 
 	for {
@@ -104,13 +105,13 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 			return
 		}
-		h.broker.Deliver(principal.DeviceID, frame)
+		h.broker.Deliver(activePrincipal.UserID, activePrincipal.DeviceID, frame)
 	}
 }
 
-func ensureHelloMatchesPrincipal(hello protocol.Frame, principal broker.DevicePrincipal) error {
+func principalForHello(hello protocol.Frame, principal broker.DevicePrincipal) (broker.DevicePrincipal, error) {
 	if hello.DeviceID != principal.DeviceID {
-		return fmt.Errorf("hello device_id does not match credential")
+		return broker.DevicePrincipal{}, fmt.Errorf("hello device_id does not match credential")
 	}
 	allowed := make(map[string]struct{}, len(principal.LocalAccountIDs))
 	for _, accountID := range principal.LocalAccountIDs {
@@ -118,10 +119,15 @@ func ensureHelloMatchesPrincipal(hello protocol.Frame, principal broker.DevicePr
 	}
 	for _, accountID := range hello.LocalAccounts {
 		if _, ok := allowed[accountID]; !ok {
-			return fmt.Errorf("hello local account does not match credential")
+			return broker.DevicePrincipal{}, fmt.Errorf("hello local account does not match credential")
 		}
 	}
-	return nil
+	return broker.DevicePrincipal{
+		UserID:          principal.UserID,
+		DeviceID:        principal.DeviceID,
+		LocalAccountIDs: append([]string(nil), hello.LocalAccounts...),
+		Capabilities:    append([]protocol.Operation(nil), hello.Capabilities...),
+	}, nil
 }
 
 type deviceConn struct {

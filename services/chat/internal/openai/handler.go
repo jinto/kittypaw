@@ -103,6 +103,8 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request, operation protoc
 			writeJSONError(w, http.StatusForbidden, "forbidden")
 		case errors.Is(err, broker.ErrBackpressure):
 			writeJSONError(w, http.StatusTooManyRequests, "too many in-flight requests")
+		case errors.Is(err, broker.ErrUnsupportedOperation):
+			writeJSONError(w, http.StatusBadGateway, "operation unsupported by device")
 		default:
 			writeJSONError(w, http.StatusBadGateway, err.Error())
 		}
