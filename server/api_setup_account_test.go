@@ -77,8 +77,8 @@ func TestBootstrapAllowsLoggedInNonDefaultAccount(t *testing.T) {
 		"alice": "alice-pw",
 		"bob":   "bob-pw",
 	}, map[string]*core.Config{
-		"alice": &core.Config{},
-		"bob":   &core.Config{},
+		"alice": {},
+		"bob":   {},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
@@ -113,8 +113,8 @@ func TestSetupKakaoRegisterUsesLoggedInAccountSecrets(t *testing.T) {
 		"alice": "alice-pw",
 		"bob":   "bob-pw",
 	}, map[string]*core.Config{
-		"alice": &core.Config{},
-		"bob":   &core.Config{},
+		"alice": {},
+		"bob":   {},
 	})
 	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/register" {

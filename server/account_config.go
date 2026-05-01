@@ -12,18 +12,10 @@ import (
 	"github.com/jinto/kittypaw/sandbox"
 )
 
-func (s *Server) validateAccountConfigUpdate(accountID string, cfg *core.Config) error {
-	return s.validateAccountConfigUpdateWithKakaoAPIURL(accountID, cfg, "")
-}
-
 func (s *Server) validateAccountConfigUpdateWithKakaoAPIURL(accountID string, cfg *core.Config, apiURL string) error {
 	s.accountMu.Lock()
 	defer s.accountMu.Unlock()
 	return s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, cfg, apiURL)
-}
-
-func (s *Server) validateAccountConfigUpdateLocked(accountID string, cfg *core.Config) error {
-	return s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, cfg, "")
 }
 
 func (s *Server) validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID string, cfg *core.Config, apiURL string) error {

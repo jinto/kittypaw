@@ -632,11 +632,6 @@ func maskValue(v string) string {
 	return "***" + v[len(v)-4:]
 }
 
-// wizardResultFromStore reads setup:* keys from the store into a WizardResult.
-func (s *Server) wizardResultFromStore() core.WizardResult {
-	return wizardResultFromStore(s.store)
-}
-
 func wizardResultFromStore(st *store.Store) core.WizardResult {
 	var w core.WizardResult
 	if v, ok, _ := st.GetUserContext("setup:llm_provider"); ok {
@@ -670,27 +665,6 @@ func wizardResultFromStore(st *store.Store) core.WizardResult {
 		w.KakaoEnabled = true
 	}
 	return w
-}
-
-// generateConfig merges wizard settings into the existing config.toml.
-func (s *Server) generateConfig() error {
-	return s.generateConfigFor(s.defaultAccountID(), s.store)
-}
-
-func (s *Server) generateConfigFor(accountID string, st *store.Store) error {
-	merged, cfgPath, wizard, err := s.mergedSetupConfigFor(accountID, st)
-	if err != nil {
-		return err
-	}
-
-	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
-		return err
-	}
-	if wizard.APIServerURL != "" {
-		s.saveSetupAPIServerURL(accountID, wizard.APIServerURL)
-	}
-
-	return nil
 }
 
 func (s *Server) mergedSetupConfigFor(accountID string, st *store.Store) (*core.Config, string, core.WizardResult, error) {

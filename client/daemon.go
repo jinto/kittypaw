@@ -74,11 +74,6 @@ func NewDaemonConnForAccount(remoteURL, accountID string) (*DaemonConn, error) {
 // This mirrors the read-side of the designed multi-account contract while
 // leaving the write-side unchanged: whoever ends up implementing
 // WriteServerConfigAtomic later flips tier 1 on with zero client edits.
-func resolveDaemonEndpoint() (bind, apiKey string, err error) {
-	bind, apiKey, _, err = resolveDaemonEndpointForAccount("")
-	return bind, apiKey, err
-}
-
 func resolveDaemonEndpointForAccount(accountID string) (bind, apiKey, resolvedAccountID string, err error) {
 	var tried []string
 	var serverCfg *core.TopLevelServerConfig
