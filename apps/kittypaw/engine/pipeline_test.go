@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
+	"github.com/jinto/kittypaw/sandbox"
 )
 
 // mediateMockProvider is a minimal llm.Provider used to drive
@@ -317,21 +320,21 @@ func TestRecordPipelineTurn_StripsAckBeforeStoring(t *testing.T) {
 func TestMediateWithTools_CodeExecLoop(t *testing.T) {
 	// Provider scripts: 1) tool_use with arithmetic on raw, 2) final text.
 	// Asserts the loop forwards the LLM-issued code through executeCode
-	// and the final response (which preserves a raw number) reaches the
-	// caller.
+	// and the final response reaches the caller even when the final computed
+	// number does not overlap with the raw input numbers.
 	p := &toolUseScriptedProvider{
 		toolUses: []map[string]any{
 			{"code": "const u=1477.04, e=0.85383; (u/e).toFixed(2)"},
 		},
-		finalText: "1 EUR = 1730.20 KRW (raw 1477.04 보존)",
+		finalText: "EUR/KRW = 1729.90",
 	}
 	sess := &Session{Provider: p}
 	out := mediateSkillOutputWithTools(context.Background(), sess, "exchange-rate", "원화로 환율", "1 USD = 1477.04 KRW, 1 USD = 0.85383 EUR")
-	if !strings.Contains(out, "1730.20") {
+	if !strings.Contains(out, "1729.90") {
 		t.Fatalf("final text not delivered, got: %q", out)
 	}
-	if !strings.Contains(out, "1477.04") {
-		t.Errorf("raw number not preserved in final text: %q", out)
+	if strings.Contains(out, "1477.04") || strings.Contains(out, "0.85383") {
+		t.Errorf("final answer should not need to preserve raw numbers after tool arithmetic: %q", out)
 	}
 	if p.calls != 2 {
 		t.Errorf("expected 2 GenerateWithTools calls (tool_use + final), got %d", p.calls)
@@ -379,7 +382,7 @@ func TestClassifyIntent_ModifierFollowupRouting(t *testing.T) {
 	// queryHasModifier=true + RecentSkillOutput populated + short →
 	// IntentModifierFollowup with cached raw in Params.
 	state := NewPipelineState()
-	state.RecordSkillOutput("1 USD = 1477.04 KRW")
+	state.RecordSkillOutputForSkill("exchange-rate", "1 USD = 1477.04 KRW")
 	intent := classifyIntent("원화로 환율", state, nil)
 	if intent.Kind != IntentModifierFollowup {
 		t.Fatalf("expected IntentModifierFollowup, got %v", intent.Kind)
@@ -387,6 +390,9 @@ func TestClassifyIntent_ModifierFollowupRouting(t *testing.T) {
 	raw, _ := intent.Params["raw_output"].(string)
 	if raw == "" {
 		t.Errorf("raw_output not propagated to intent.Params")
+	}
+	if got, _ := intent.Params["skill_id"].(string); got != "exchange-rate" {
+		t.Errorf("skill_id = %q, want exchange-rate", got)
 	}
 }
 
@@ -402,6 +408,20 @@ func TestClassifyIntent_ModifierFollowup_NoCacheBypasses(t *testing.T) {
 	}
 }
 
+func TestClassifyIntent_RecentWeatherLocationFollowupRoutesToAmbiguousFollowup(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordSkillOutputForSkill("weather-now", "강남역 현재 날씨\n1시간 강수: 없음")
+
+	intent := classifyIntent("장안동은?", state, &Session{})
+
+	if intent.Kind != IntentAmbiguousFollowup {
+		t.Fatalf("expected IntentAmbiguousFollowup, got %v", intent.Kind)
+	}
+	if got, _ := intent.Params["skill_id"].(string); got != "weather-now" {
+		t.Fatalf("skill_id = %q, want weather-now", got)
+	}
+}
+
 func TestClassifyIntent_LongModifierBypassesFollowup(t *testing.T) {
 	// Modifier in a long sentence is a fresh request, not a follow-up.
 	state := NewPipelineState()
@@ -410,6 +430,1034 @@ func TestClassifyIntent_LongModifierBypassesFollowup(t *testing.T) {
 	intent := classifyIntent(long, state, nil)
 	if intent.Kind == IntentModifierFollowup {
 		t.Fatalf("long modifier query should not route to ModifierFollowup, got %+v", intent)
+	}
+}
+
+func TestExchangeRateParamsForText_KRWBase(t *testing.T) {
+	params := exchangeRateParamsForText("원화기준... 으로요..")
+	if params == nil {
+		t.Fatal("expected exchange-rate params")
+	}
+	if got := params["base"]; got != "KRW" {
+		t.Fatalf("base = %v, want KRW", got)
+	}
+	symbols, ok := params["symbols"].([]any)
+	if !ok || len(symbols) == 0 {
+		t.Fatalf("symbols missing: %+v", params)
+	}
+	for _, s := range symbols {
+		if s == "KRW" {
+			t.Fatalf("symbols must exclude base KRW: %+v", symbols)
+		}
+	}
+}
+
+func TestModifierFollowupBranch_ExchangeRateRerunsWithStructuredBase(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	state.RecordSkillOutputForSkill("exchange-rate", "1 USD = 1477 KRW")
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `
+const ctx = JSON.parse(__context__);
+return "1 " + ctx.params.base + " = 0.00068 USD";
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+	intent := classifyIntent("원화기준... 으로요..", state, sess)
+	if intent.Kind != IntentModifierFollowup {
+		t.Fatalf("intent = %v, want modifier followup", intent.Kind)
+	}
+
+	out, err := (&ModifierFollowupBranch{}).Execute(context.Background(), sess, webChatEvent("원화기준... 으로요.."), intent)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "1 KRW = 0.00068 USD") {
+		t.Fatalf("out = %q, want KRW-base package output", out)
+	}
+}
+
+func TestModifierFollowupBranch_ExchangeRateRebasesOldPackageOutput(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	raw := "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 USD = 1477 KRW\n\n_Source: Frankfurter (ECB) · Powered by KittyPaw_"
+	state.RecordSkillOutputForSkill("exchange-rate", raw)
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `
+// Simulates the already-installed 1.0.0 package that ignores ctx.params.
+return "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 USD = 1477 KRW\n\n_Source: Frankfurter (ECB) · Powered by KittyPaw_";
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+	intent := classifyIntent("원화기준으로 다시", state, sess)
+
+	out, err := (&ModifierFollowupBranch{}).Execute(context.Background(), sess, webChatEvent("원화기준으로 다시"), intent)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "1 KRW =") || !strings.Contains(out, "USD") || !strings.Contains(out, "JPY") {
+		t.Fatalf("expected KRW-base rebased table, got:\n%s", out)
+	}
+	if strings.Contains(out, "1 USD = 1477 KRW") {
+		t.Fatalf("must not repeat USD-base raw output:\n%s", out)
+	}
+}
+
+func TestSelectRecentSkillCandidate_CurrentWeather(t *testing.T) {
+	entries := []core.RegistryEntry{
+		{ID: "weather-briefing", Name: "아침 날씨 요약", Description: "매일 아침 날씨를 확인하고 텔레그램으로 보내줍니다."},
+		{ID: "weather-now", Name: "현재 날씨", Description: "wttr.in으로 현재 날씨를 즉답합니다."},
+	}
+	got, ok := selectRecentSkillCandidate("스킬. 현재 날씨.", entries)
+	if !ok {
+		t.Fatal("expected candidate selection")
+	}
+	if got.ID != "weather-now" {
+		t.Fatalf("got %s, want weather-now", got.ID)
+	}
+}
+
+func TestClassifyIntent_CandidateNameReplyRoutesToInstallConsent(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordSkillSearch([]core.RegistryEntry{
+		{ID: "weather-briefing", Name: "아침 날씨 요약", Description: "매일 아침 날씨를 확인하고 텔레그램으로 보내줍니다."},
+		{ID: "weather-now", Name: "현재 날씨", Description: "wttr.in으로 현재 날씨를 즉답합니다."},
+	})
+
+	intent := classifyIntent("스킬. 현재 날씨.", state, nil)
+	if intent.Kind != IntentInstallConsentReply {
+		t.Fatalf("expected install consent route, got %v", intent.Kind)
+	}
+	if got, _ := intent.Params["skill_id"].(string); got != "weather-now" {
+		t.Fatalf("skill_id = %q, want weather-now", got)
+	}
+}
+
+func TestClassifyIntent_AffirmativeConfirmsPendingClarification(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "exchange_rate",
+		Query: "달러",
+	})
+
+	intent := classifyIntent("ㅇㅇ", state, nil)
+	if intent.Kind != IntentConfirmClarification {
+		t.Fatalf("expected IntentConfirmClarification, got %v", intent.Kind)
+	}
+	if got, _ := intent.Params["kind"].(string); got != "exchange_rate" {
+		t.Fatalf("kind = %q, want exchange_rate", got)
+	}
+}
+
+func TestClassifyIntent_ExchangeRateQueryUsesDeterministicBranch(t *testing.T) {
+	intent := classifyIntent("환율.", NewPipelineState(), &Session{})
+	if intent.Kind != IntentExchangeRateLookup {
+		t.Fatalf("expected IntentExchangeRateLookup, got %v", intent.Kind)
+	}
+}
+
+func TestClassifyIntent_WeatherNowQueryUsesDeterministicBranch(t *testing.T) {
+	intent := classifyIntent("강남역에 비오나? 지금?", NewPipelineState(), &Session{})
+	if intent.Kind != IntentWeatherNowLookup {
+		t.Fatalf("expected IntentWeatherNowLookup, got %v", intent.Kind)
+	}
+}
+
+func TestClassifyIntent_LocationReplyConfirmsPendingWeatherLocation(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "weather_now_location",
+		Query: "강남역이 비오나? 지금?",
+	})
+
+	intent := classifyIntent("강남역이요.", state, &Session{})
+	if intent.Kind != IntentConfirmClarification {
+		t.Fatalf("expected IntentConfirmClarification, got %v", intent.Kind)
+	}
+	if got, _ := intent.Params["kind"].(string); got != "weather_now_location" {
+		t.Fatalf("kind = %q, want weather_now_location", got)
+	}
+}
+
+func TestExchangeRateLookupResponseFramesSearchHitsAsCandidates(t *testing.T) {
+	results := []WebSearchResult{
+		{Title: "USD KRW | 미달러 원 환율 - Investing.com - USD/KRW", URL: "https://kr.investing.com/currencies/usd-krw", Snippet: "USD/KRW"},
+		{Title: "USD/KRW — 환율 — TradingView - 실시간", URL: "https://kr.tradingview.com/symbols/USDKRW/", Snippet: "실시간"},
+		{Title: "실시간 달러 환율 (Usd/Krw) | 알파스퀘어 - 엔비디아 NVDA 가상화폐 비트코인 KRW", URL: "https://alphasquare.co.kr/exchange/usd-krw", Snippet: "엔비디아 NVDA 가상화폐 비트코인 KRW"},
+	}
+
+	out := formatExchangeRateLookupResponse(results, exchangeRateRegistryEntry())
+
+	for _, want := range []string{"웹 검색에서 환율 관련 페이지를 찾았습니다:", "제가 보기엔", "Investing.com", "TradingView", "알파스퀘어", "설치하면", "바로"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("response missing %q:\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{"확인한 출처:", "다음 단계:"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("response should not use mechanical/overclaimed label %q:\n%s", banned, out)
+		}
+	}
+	if strings.Contains(out, "엔비디아 NVDA 가상화폐 비트코인") {
+		t.Fatalf("response leaked noisy raw snippet:\n%s", out)
+	}
+	if strings.Contains(out, "USD KRW | 미달러 원 환율 - Investing.com - USD/KRW") {
+		t.Fatalf("response leaked raw title:\n%s", out)
+	}
+	if strings.Index(out, "웹 검색에서") > strings.Index(out, "제가 보기엔") {
+		t.Fatalf("search-candidate section must come before suggestion:\n%s", out)
+	}
+}
+
+func TestExchangeRateLookupBranchCachesActionableSkillOffer(t *testing.T) {
+	state := NewPipelineState()
+	sess := &Session{Pipeline: state}
+
+	out, err := (&ExchangeRateLookupBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentExchangeRateLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	for _, want := range []string{"제가 보기엔", "환율 조회", "설치하면", "바로"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("response missing %q:\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{"확인한 출처:", "다음 단계:"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("response should not use mechanical/overclaimed label %q:\n%s", banned, out)
+		}
+	}
+	if got := state.RecentSkillSearch(); len(got) != 1 || got[0].ID != "exchange-rate" {
+		t.Fatalf("expected exchange-rate candidate cached, got %+v", got)
+	}
+}
+
+func TestWeatherNowLookupBranchCachesOnlyCurrentWeatherOffer(t *testing.T) {
+	state := NewPipelineState()
+	sess := &Session{Pipeline: state}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	for _, want := range []string{"현재 날씨", "비 여부", "설치하면", "바로"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("response missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "아침 날씨") {
+		t.Fatalf("response must not suggest scheduled briefing for current weather:\n%s", out)
+	}
+	if got := state.RecentSkillSearch(); len(got) != 1 || got[0].ID != "weather-now" {
+		t.Fatalf("expected weather-now candidate cached, got %+v", got)
+	}
+}
+
+func TestWeatherNowLookupBranchResolvesLocationBeforeInstalledPackage(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/geo/resolve" {
+			t.Fatalf("unexpected geo path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("q"); got != "강남역" {
+			t.Fatalf("geo query = %q, want 강남역", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":"강남역"}`)}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       NewPipelineState(),
+	}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("강남역에 비오나? 지금?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse package output: %v (out: %s)", err, out)
+	}
+	if loc.City != "강남역" || loc.Lat != 37.4979 || loc.Lon != 127.0276 {
+		t.Fatalf("location = %+v, want structured 강남역", loc)
+	}
+}
+
+func TestWeatherNowLookupBranchUsesLocationFollowupText(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "장안동" {
+			t.Fatalf("geo query = %q, want 장안동", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.5681,"lon":127.0719,"name_matched":"장안동"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp("장안동")}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       NewPipelineState(),
+	}
+	sess.Pipeline.RecordSkillOutputForSkill("weather-now", "강남역 현재 날씨\n1시간 강수: 없음")
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("장안동은?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse package output: %v (out: %s)", err, out)
+	}
+	if loc.City != "장안동" || loc.Lat != 37.5681 || loc.Lon != 127.0719 {
+		t.Fatalf("location = %+v, want structured 장안동", loc)
+	}
+}
+
+func TestAmbiguousFollowupBranchWeatherNowHighConfidenceRuns(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "장안동" {
+			t.Fatalf("geo query = %q, want 장안동", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.5681,"lon":127.0719,"name_matched":"장안동"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+
+	cfg := core.DefaultConfig()
+	state := NewPipelineState()
+	state.RecordSkillOutputForSkill("weather-now", "강남역 현재 날씨\n1시간 강수: 없음")
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"intent":"weather_now","confidence":0.91,"location_query":"장안동"}`)}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       state,
+	}
+
+	out, err := (&AmbiguousFollowupBranch{}).Execute(context.Background(), sess, webChatEvent("장안동은?"), Intent{
+		Kind: IntentAmbiguousFollowup,
+		Params: map[string]any{
+			"skill_id":   "weather-now",
+			"raw_output": state.RecentSkillOutput(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse package output: %v (out: %s)", err, out)
+	}
+	if loc.City != "장안동" || loc.Lat != 37.5681 || loc.Lon != 127.0719 {
+		t.Fatalf("location = %+v, want structured 장안동", loc)
+	}
+}
+
+func TestAmbiguousFollowupBranchNormalizesIntentCase(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "장안동" {
+			t.Fatalf("geo query = %q, want 장안동", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.5681,"lon":127.0719,"name_matched":"장안동"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+
+	cfg := core.DefaultConfig()
+	state := NewPipelineState()
+	state.RecordSkillOutputForSkill("weather-now", "강남역 현재 날씨\n1시간 강수: 없음")
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"intent":"Weather-Now","confidence":0.91,"location_query":"장안동"}`)}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       state,
+	}
+
+	out, err := (&AmbiguousFollowupBranch{}).Execute(context.Background(), sess, webChatEvent("장안동은?"), Intent{
+		Kind: IntentAmbiguousFollowup,
+		Params: map[string]any{
+			"skill_id":   "weather-now",
+			"raw_output": state.RecentSkillOutput(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "장안동") {
+		t.Fatalf("expected weather-now output for normalized intent, got %q", out)
+	}
+}
+
+func TestAmbiguousFollowupBranchLowConfidenceAsksConfirmation(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordSkillOutputForSkill("weather-now", "강남역 현재 날씨\n1시간 강수: 없음")
+	sess := &Session{
+		Provider: &mockProvider{responses: []*llm.Response{mockResp(`{"intent":"weather_now","confidence":0.42,"location_query":"장안동"}`)}},
+		Pipeline: state,
+	}
+
+	out, err := (&AmbiguousFollowupBranch{}).Execute(context.Background(), sess, webChatEvent("장안동은?"), Intent{
+		Kind: IntentAmbiguousFollowup,
+		Params: map[string]any{
+			"skill_id":   "weather-now",
+			"raw_output": state.RecentSkillOutput(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	for _, want := range []string{"장안동", "날씨"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("confirmation missing %q: %q", want, out)
+		}
+	}
+	pending, ok := state.RecentPendingClarification()
+	if !ok {
+		t.Fatal("expected pending clarification")
+	}
+	if pending.Kind != "weather_now_location" || pending.Query != "장안동" {
+		t.Fatalf("pending = %+v, want weather_now_location 장안동", pending)
+	}
+}
+
+func TestWeatherNowLookupBranchRecoversLocationWhenSlotLLMReturnsProse(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/geo/resolve" {
+			t.Fatalf("unexpected geo path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("q"); got != "강남역" {
+			t.Fatalf("geo query = %q, want 강남역", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp("사용자의 질문을 확인해보니 강남역의 현재 날씨를 문의하신 것 같습니다.")}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       NewPipelineState(),
+	}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("강남역이 비오나? 지금?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse package output: %v (out: %s)", err, out)
+	}
+	if loc.City != "강남역" || loc.Lat != 37.4979 || loc.Lon != 127.0276 {
+		t.Fatalf("location = %+v, want structured 강남역", loc)
+	}
+}
+
+func TestWeatherNowLookupBranchDoesNotRunDefaultWhenExplicitLocationResolutionFails(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "geo down", http.StatusBadGateway)
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `
+[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+`, `
+return "SHOULD_NOT_RUN";
+`)
+
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":"강남역"}`)}},
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+		PackageManager: pm,
+		BaseDir:        baseDir,
+		Pipeline:       NewPipelineState(),
+	}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("강남역에 비오나? 지금?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if strings.Contains(out, "SHOULD_NOT_RUN") {
+		t.Fatalf("package default must not run after explicit location resolution failure: %s", out)
+	}
+	for _, want := range []string{"강남역", "위치", "확인"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("response missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestWeatherNowLookupBranchRecordsPendingLocationWhenSlotExtractionFails(t *testing.T) {
+	state := NewPipelineState()
+	sess := &Session{
+		Provider: &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":`)}},
+		Pipeline: state,
+	}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("강남역이 비오나? 지금?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "위치") {
+		t.Fatalf("expected location clarification, got %q", out)
+	}
+	pending, ok := state.RecentPendingClarification()
+	if !ok {
+		t.Fatal("expected pending weather location clarification")
+	}
+	if pending.Kind != "weather_now_location" || pending.Query != "강남역이 비오나? 지금?" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
+func TestConfirmClarificationBranchWeatherLocationReplyRunsInstalledSkill(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "weather_now_location",
+		Query: "강남역이 비오나? 지금?",
+	})
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":"강남역"}`)}},
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, webChatEvent("강남역이요."), Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "weather_now_location",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse output: %v (out: %s)", err, out)
+	}
+	if loc.City != "강남역" || loc.Lat != 37.4979 || loc.Lon != 127.0276 {
+		t.Fatalf("location = %+v, want structured 강남역", loc)
+	}
+}
+
+func TestConfirmClarificationBranchWeatherLocationReplyFallsBackToPendingQuery(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "강남역" {
+			t.Fatalf("geo query = %q, want 강남역", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "weather_now_location",
+		Query: "강남역이 비오나? 지금?",
+	})
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider: &mockProvider{responses: []*llm.Response{
+			mockResp(`{"location_query":""}`),
+			mockResp(`{"location_query":"강남역"}`),
+		}},
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, webChatEvent("비오냐고 지금"), Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "weather_now_location",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse output: %v (out: %s)", err, out)
+	}
+	if loc.City != "강남역" || loc.Lat != 37.4979 || loc.Lon != 127.0276 {
+		t.Fatalf("location = %+v, want structured 강남역", loc)
+	}
+}
+
+func TestWeatherNowLookupBranchCachesPendingStructuredParamsForInstall(t *testing.T) {
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	state := NewPipelineState()
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider: &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":"강남역"}`)}},
+		Config:   &cfg,
+		Pipeline: state,
+	}
+
+	out, err := (&WeatherNowLookupBranch{}).Execute(context.Background(), sess, webChatEvent("강남역에 비오나? 지금?"), Intent{
+		Kind: IntentWeatherNowLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "설치") {
+		t.Fatalf("expected install offer, got %q", out)
+	}
+	params, ok := state.RecentPendingSkillRun("weather-now")
+	if !ok {
+		t.Fatal("expected pending weather-now params")
+	}
+	loc, ok := params["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("location params missing: %+v", params)
+	}
+	if loc["label"] != "강남역" || loc["lat"] != 37.4979 || loc["lon"] != 127.0276 {
+		t.Fatalf("location params = %+v, want 강남역 coords", loc)
+	}
+}
+
+func TestConfirmClarificationBranchWeatherNowRunsInstalledWithStructuredParams(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	}))
+	defer geo.Close()
+	oldBaseURL := kittypawAPIBaseURL
+	kittypawAPIBaseURL = geo.URL
+	t.Cleanup(func() { kittypawAPIBaseURL = oldBaseURL })
+
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "weather_now",
+		Query: "강남역에 비오나",
+	})
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+primitives = []
+context = ["location"]
+`, `
+const ctx = JSON.parse(__context__);
+return JSON.stringify(ctx.user && ctx.user.location);
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Provider:       &mockProvider{responses: []*llm.Response{mockResp(`{"location_query":"강남역"}`)}},
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "weather_now",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	var loc struct {
+		City string  `json:"city"`
+		Lat  float64 `json:"lat"`
+		Lon  float64 `json:"lon"`
+	}
+	if err := json.Unmarshal([]byte(out), &loc); err != nil {
+		t.Fatalf("parse output: %v (out: %s)", err, out)
+	}
+	if loc.City != "강남역" || loc.Lat != 37.4979 || loc.Lon != 127.0276 {
+		t.Fatalf("location = %+v, want structured 강남역", loc)
+	}
+}
+
+func TestDetectPendingClarification_ExchangeRate(t *testing.T) {
+	pending, ok := detectPendingClarification("달러", "환율 말씀이세요? 맞으면 지금 기준으로 찾아볼게요.")
+	if !ok {
+		t.Fatal("expected pending clarification")
+	}
+	if pending.Kind != "exchange_rate" || pending.Query != "달러" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
+func TestDetectPendingClarification_WeatherNow(t *testing.T) {
+	pending, ok := detectPendingClarification("장한평역에 비오나", "날씨 말씀이세요? 맞으면 지금 기준으로 확인할까요?")
+	if !ok {
+		t.Fatal("expected pending clarification")
+	}
+	if pending.Kind != "weather_now" || pending.Query != "장한평역에 비오나" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
+func TestConfirmClarificationBranch_ExchangeRateOffersActionableSkill(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "exchange_rate",
+		Query: "달러",
+	})
+	sess := &Session{Pipeline: state}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "exchange_rate",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	for _, want := range []string{"환율 조회", "설치하면", "바로", "조회"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("offer missing %q: %q", want, out)
+		}
+	}
+	if got := state.RecentSkillSearch(); len(got) != 1 || got[0].ID != "exchange-rate" {
+		t.Fatalf("expected exchange-rate candidate cached, got %+v", got)
+	}
+}
+
+func TestConfirmClarificationBranch_WeatherNowOffersActionableSkill(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "weather_now",
+		Query: "장한평역에 비오나",
+	})
+	sess := &Session{Pipeline: state}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "weather_now",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	for _, want := range []string{"현재 날씨", "설치하면", "비 여부", "바로"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("offer missing %q: %q", want, out)
+		}
+	}
+	if got := state.RecentSkillSearch(); len(got) != 1 || got[0].ID != "weather-now" {
+		t.Fatalf("expected weather-now candidate cached, got %+v", got)
+	}
+}
+
+func TestConfirmClarificationBranch_ExchangeRateRunsInstalledSkill(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	state.RecordPendingClarification(PendingClarification{
+		Kind:  "exchange_rate",
+		Query: "달러",
+	})
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `return "1 USD = 1477 KRW";`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ConfirmClarificationBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{
+		Kind: IntentConfirmClarification,
+		Params: map[string]any{
+			"kind": "exchange_rate",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if out != "1 USD = 1477 KRW" {
+		t.Fatalf("out = %q, want skill output", out)
+	}
+}
+
+func TestInstallConsentBranch_BareAffirmativeWithMultipleCandidatesAsksChoice(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordSkillSearch([]core.RegistryEntry{
+		{ID: "weather-briefing", Name: "아침 날씨 요약", Description: "매일 아침 날씨를 확인하고 텔레그램으로 보내줍니다."},
+		{ID: "weather-now", Name: "현재 날씨", Description: "wttr.in으로 현재 날씨를 즉답합니다."},
+	})
+	sess := &Session{Pipeline: state}
+
+	out, err := (&InstallConsentBranch{}).Execute(context.Background(), sess, core.Event{}, Intent{Kind: IntentInstallConsentReply})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "현재 날씨") || !strings.Contains(out, "아침 날씨 요약") {
+		t.Fatalf("choice prompt should list candidates, got %q", out)
+	}
+	if strings.Contains(out, "환경이 준비") {
+		t.Fatalf("must ask for a candidate before checking installer environment, got %q", out)
 	}
 }
 
@@ -444,6 +1492,7 @@ func TestQueryHasModifier_PositiveCases(t *testing.T) {
 		"다시 계산",
 		"환산해줘",
 		"USD에서 KRW로 변환",
+		"원화기준... 으로요..",
 	}
 	for _, q := range cases {
 		t.Run(q, func(t *testing.T) {
@@ -469,6 +1518,68 @@ func TestQueryHasModifier_NegativeCases(t *testing.T) {
 				t.Errorf("unexpected modifier detection for %q (would deflect a fresh-retrieval query)", q)
 			}
 		})
+	}
+}
+
+func TestMatchInstalledSkill_CurrentWeatherDoesNotRunScheduledBriefing(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-briefing"
+name = "매일 아침 날씨 브리핑"
+version = "1.0.0"
+description = "매일 아침 설정한 도시의 날씨 예보를 텔레그램으로 보내줍니다."
+cron = "0 7 * * *"
+`, `return "briefing";`)
+	sess := &Session{PackageManager: pm}
+
+	if got := matchInstalledSkill("현재 날씨", sess); got != nil {
+		t.Fatalf("current weather query must not run scheduled briefing, got %s", got.Meta.ID)
+	}
+}
+
+func TestMatchInstalledSkill_CurrentWeatherPrefersNowSkill(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-briefing"
+name = "매일 아침 날씨 브리핑"
+version = "1.0.0"
+description = "매일 아침 설정한 도시의 날씨 예보를 텔레그램으로 보내줍니다."
+cron = "0 7 * * *"
+`, `return "briefing";`)
+	installTestPackage(t, baseDir, `[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "지금 시점 현재 날씨와 비 여부를 즉답합니다."
+`, `return "now";`)
+	sess := &Session{PackageManager: pm}
+
+	got := matchInstalledSkill("지금 강남역에 비오나? 현재 날씨", sess)
+	if got == nil {
+		t.Fatal("expected current weather query to match weather-now")
+	}
+	if got.Meta.ID != "weather-now" {
+		t.Fatalf("got %s, want weather-now", got.Meta.ID)
+	}
+}
+
+func TestMatchInstalledSkill_BriefingQueryMatchesScheduledBriefing(t *testing.T) {
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "weather-briefing"
+name = "매일 아침 날씨 브리핑"
+version = "1.0.0"
+description = "매일 아침 설정한 도시의 날씨 예보를 텔레그램으로 보내줍니다."
+cron = "0 7 * * *"
+`, `return "briefing";`)
+	sess := &Session{PackageManager: pm}
+
+	got := matchInstalledSkill("매일 아침 날씨 브리핑", sess)
+	if got == nil {
+		t.Fatal("expected briefing query to match weather-briefing")
+	}
+	if got.Meta.ID != "weather-briefing" {
+		t.Fatalf("got %s, want weather-briefing", got.Meta.ID)
 	}
 }
 

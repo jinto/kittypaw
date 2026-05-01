@@ -180,6 +180,11 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	if token != "" && !core.ValidateTelegramToken(token) {
 		return errors.New("invalid telegram bot token format")
 	}
+	if !f.passwordStdin && isatty.IsTerminal(os.Stdin.Fd()) {
+		_, _ = fmt.Fprintln(stdout)
+		_, _ = fmt.Fprintln(stdout, accountCredentialsIntroMessage(name))
+		_, _ = fmt.Fprintln(stdout)
+	}
 	password, err := resolveAccountPassword(f, stdin)
 	if err != nil {
 		return err

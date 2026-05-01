@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -915,5 +916,12 @@ func (s *Server) ListenAndServe(addr string) error {
 	}()
 
 	slog.Info("server listening", "addr", addr)
-	return srv.ListenAndServe()
+	return normalizeListenAndServeError(srv.ListenAndServe())
+}
+
+func normalizeListenAndServeError(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }

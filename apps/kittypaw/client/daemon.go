@@ -15,9 +15,10 @@ import (
 
 // DaemonConn manages daemon discovery and auto-start.
 type DaemonConn struct {
-	BaseURL  string
-	APIKey   string
-	bindAddr string
+	BaseURL   string
+	APIKey    string
+	AccountID string
+	bindAddr  string
 }
 
 // NewDaemonConn creates a DaemonConn. If remoteURL is non-empty, connects
@@ -25,19 +26,33 @@ type DaemonConn struct {
 // API key from disk using a three-tier fallback — see resolveDaemonEndpoint
 // for why three tiers are needed.
 func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
+	return NewDaemonConnForAccount(remoteURL, "")
+}
+
+// NewDaemonConnForAccount creates a DaemonConn pinned to a local account when
+// accountID is non-empty. For local chat this matters: WebSocket auth maps
+// per-account API keys to per-account sessions, while a server-wide master key
+// cannot disambiguate multiple active accounts.
+func NewDaemonConnForAccount(remoteURL, accountID string) (*DaemonConn, error) {
+	if accountID != "" {
+		if err := core.ValidateAccountID(accountID); err != nil {
+			return nil, err
+		}
+	}
 	if remoteURL != "" {
-		return &DaemonConn{BaseURL: remoteURL}, nil
+		return &DaemonConn{BaseURL: remoteURL, AccountID: accountID}, nil
 	}
 
-	bind, apiKey, err := resolveDaemonEndpoint()
+	bind, apiKey, resolvedAccountID, err := resolveDaemonEndpointForAccount(accountID)
 	if err != nil {
 		return nil, err
 	}
 	host, port := parseBindAddr(bind)
 	return &DaemonConn{
-		BaseURL:  fmt.Sprintf("http://%s:%s", host, port),
-		APIKey:   apiKey,
-		bindAddr: bind,
+		BaseURL:   fmt.Sprintf("http://%s:%s", host, port),
+		APIKey:    apiKey,
+		AccountID: resolvedAccountID,
+		bindAddr:  bind,
 	}, nil
 }
 
@@ -60,6 +75,11 @@ func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
 // leaving the write-side unchanged: whoever ends up implementing
 // WriteServerConfigAtomic later flips tier 1 on with zero client edits.
 func resolveDaemonEndpoint() (bind, apiKey string, err error) {
+	bind, apiKey, _, err = resolveDaemonEndpointForAccount("")
+	return bind, apiKey, err
+}
+
+func resolveDaemonEndpointForAccount(accountID string) (bind, apiKey, resolvedAccountID string, err error) {
 	var tried []string
 	var serverCfg *core.TopLevelServerConfig
 
@@ -72,21 +92,39 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 
 	dir, derr := core.ConfigDir()
 	if derr != nil {
-		return "", "", fmt.Errorf("config dir: %w", derr)
+		return "", "", "", fmt.Errorf("config dir: %w", derr)
 	}
 
 	accountsRoot := filepath.Join(dir, "accounts")
 	tried = append(tried, accountsRoot)
 	accounts, aerr := core.DiscoverAccounts(accountsRoot)
 	if aerr != nil {
-		return "", "", fmt.Errorf("discover accounts: %w", aerr)
+		return "", "", "", fmt.Errorf("discover accounts: %w", aerr)
+	}
+	if accountID != "" {
+		account, err := findDaemonEndpointAccount(accounts, accountID)
+		if err != nil {
+			return "", "", "", err
+		}
+		bind := account.Config.Server.BindOrDefault()
+		if serverCfg != nil && serverCfg.Bind != "" {
+			bind = serverCfg.Bind
+		}
+		apiKey := account.Config.Server.APIKey
+		if apiKey == "" && serverCfg != nil {
+			apiKey = serverCfg.MasterAPIKey
+		}
+		if apiKey == "" {
+			return "", "", "", fmt.Errorf("account %q has no API key; run `kittypaw setup` or restart the daemon once", accountID)
+		}
+		return bind, apiKey, account.ID, nil
 	}
 	if serverCfg != nil && (serverCfg.Bind != "" || serverCfg.MasterAPIKey != "" || serverCfg.DefaultAccount != "") {
 		return resolveFromServerConfig(*serverCfg, accounts, dir)
 	}
 	switch len(accounts) {
 	case 1:
-		return accounts[0].Config.Server.BindOrDefault(), accounts[0].Config.Server.APIKey, nil
+		return accounts[0].Config.Server.BindOrDefault(), accounts[0].Config.Server.APIKey, accounts[0].ID, nil
 	case 0:
 		// Fall through to the legacy top-level path below.
 	default:
@@ -95,7 +133,7 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 			ids = append(ids, account.ID)
 		}
 		sort.Strings(ids)
-		return "", "", fmt.Errorf(
+		return "", "", "", fmt.Errorf(
 			"multiple accounts found (%s); create %s with bind and master_api_key, or pass --remote",
 			strings.Join(ids, ", "), filepath.Join(dir, "server.toml"))
 	}
@@ -103,33 +141,38 @@ func resolveDaemonEndpoint() (bind, apiKey string, err error) {
 	legacyPath := filepath.Join(dir, "config.toml")
 	tried = append(tried, legacyPath)
 	if cfg, lerr := core.LoadConfig(legacyPath); lerr == nil {
-		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, nil
+		return cfg.Server.BindOrDefault(), cfg.Server.APIKey, "", nil
 	}
 
-	return "", "", fmt.Errorf(
+	return "", "", "", fmt.Errorf(
 		"no daemon config found — run `kittypaw setup` first (checked: %s)",
 		strings.Join(tried, ", "))
 }
 
-func resolveFromServerConfig(sc core.TopLevelServerConfig, accounts []*core.Account, dir string) (string, string, error) {
+func resolveFromServerConfig(sc core.TopLevelServerConfig, accounts []*core.Account, dir string) (string, string, string, error) {
 	bind := sc.Bind
 	apiKey := sc.MasterAPIKey
+	var resolvedAccountID string
 	if sc.DefaultAccount != "" {
-		if _, err := selectDaemonEndpointAccount(accounts, sc.DefaultAccount); err != nil {
-			return "", "", err
+		account, err := selectDaemonEndpointAccount(accounts, sc.DefaultAccount)
+		if err != nil {
+			return "", "", "", err
+		}
+		if account != nil {
+			resolvedAccountID = account.ID
 		}
 	}
 
 	if bind == "" || apiKey == "" {
 		account, err := selectDaemonEndpointAccount(accounts, sc.DefaultAccount)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		if account == nil {
 			legacyPath := filepath.Join(dir, "config.toml")
 			cfg, lerr := core.LoadConfig(legacyPath)
 			if lerr != nil {
-				return "", "", fmt.Errorf("server.toml is missing bind or master_api_key and no account config exists")
+				return "", "", "", fmt.Errorf("server.toml is missing bind or master_api_key and no account config exists")
 			}
 			if bind == "" {
 				bind = cfg.Server.BindOrDefault()
@@ -137,8 +180,9 @@ func resolveFromServerConfig(sc core.TopLevelServerConfig, accounts []*core.Acco
 			if apiKey == "" {
 				apiKey = cfg.Server.APIKey
 			}
-			return bind, apiKey, nil
+			return bind, apiKey, "", nil
 		}
+		resolvedAccountID = account.ID
 		if bind == "" {
 			bind = account.Config.Server.BindOrDefault()
 		}
@@ -146,7 +190,24 @@ func resolveFromServerConfig(sc core.TopLevelServerConfig, accounts []*core.Acco
 			apiKey = account.Config.Server.APIKey
 		}
 	}
-	return bind, apiKey, nil
+	return bind, apiKey, resolvedAccountID, nil
+}
+
+func findDaemonEndpointAccount(accounts []*core.Account, accountID string) (*core.Account, error) {
+	for _, account := range accounts {
+		if account.ID == accountID {
+			return account, nil
+		}
+	}
+	ids := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("account %q not found; run `kittypaw setup` first", accountID)
+	}
+	return nil, fmt.Errorf("account %q not found (available: %s)", accountID, strings.Join(ids, ", "))
 }
 
 func selectDaemonEndpointAccount(accounts []*core.Account, configuredDefault string) (*core.Account, error) {

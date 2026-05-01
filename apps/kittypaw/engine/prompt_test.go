@@ -210,6 +210,28 @@ func TestBlockConstants_KeyPhrases(t *testing.T) {
 	}
 }
 
+func TestQualityBlock_InstallOfferMustExplainValue(t *testing.T) {
+	for _, phrase := range []string{"설치하면 무엇을 바로 할 수 있는지", "설치해서 지금 실행할까요"} {
+		if !strings.Contains(QualityBlock, phrase) {
+			t.Fatalf("QualityBlock missing install-offer value rule %q", phrase)
+		}
+	}
+}
+
+func TestQualityBlock_DiscouragesRawLinkDump(t *testing.T) {
+	if !strings.Contains(QualityBlock, "Do NOT hand the user a list of generic links") {
+		t.Fatal("QualityBlock must discourage raw link dumps")
+	}
+}
+
+func TestQualityBlock_FramesSearchCandidatesWithoutOverclaiming(t *testing.T) {
+	for _, phrase := range []string{"Do not call search-result candidates confirmed sources", "avoid mechanical section labels"} {
+		if !strings.Contains(QualityBlock, phrase) {
+			t.Fatalf("QualityBlock missing search-result framing rule %q", phrase)
+		}
+	}
+}
+
 // --- channelHint ---
 
 func TestChannelHint_KnownChannels(t *testing.T) {

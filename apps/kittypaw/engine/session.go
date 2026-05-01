@@ -237,6 +237,7 @@ func (s *Session) runTurnOwner(ctx context.Context, turnID string, state *turnSt
 func (s *Session) Run(ctx context.Context, event core.Event, opts *RunOptions) (string, error) {
 	// Fast path: slash commands
 	eventText := FormatEvent(&event)
+	ctx = ContextWithEvent(ctx, &event)
 	if response, handled := tryHandleCommand(ctx, eventText, s); handled {
 		return response, nil
 	}
@@ -809,7 +810,7 @@ observeLoop:
 				return "", fmt.Errorf("지금 답변을 만들지 못했어요. 잠시 후 다시 한 번 말씀해 주시겠어요?")
 			}
 
-			code := resp.Content
+			code := normalizeGeneratedCode(resp.Content)
 			slog.Info("code generated",
 				"phase", core.PhaseGenerate,
 				"agent_id", agentID,
@@ -905,6 +906,11 @@ observeLoop:
 				// next deterministic skill dispatch records output.
 				if s.Pipeline != nil {
 					s.Pipeline.ClearSkillOutput()
+					if pending, ok := detectPendingClarification(eventText, output); ok {
+						s.Pipeline.RecordPendingClarification(pending)
+					} else {
+						s.Pipeline.ClearPendingClarification()
+					}
 				}
 
 				return output, nil

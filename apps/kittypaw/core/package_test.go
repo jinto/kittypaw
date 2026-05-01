@@ -182,6 +182,101 @@ context = ["locale", "location"]
 	}
 }
 
+func TestLoadPackageToml_InvocationContract(t *testing.T) {
+	dir := t.TempDir()
+	tomlContent := `
+[package]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.2.1"
+description = "현재 날씨"
+
+[discovery]
+time_scope = "now"
+trigger_examples = ["강남역에 비오나? 지금?"]
+anti_examples = ["내일 날씨"]
+
+[discovery.delegates_to]
+future = "weather-briefing"
+
+[capabilities.location]
+accepts = ["coord", "natural_poi", "city"]
+resolution = "engine"
+
+[invocation]
+execution_model = "deterministic"
+caller_responsibilities = [
+  "Extract explicit location mentions before calling this package.",
+]
+missing_slot_policy = "Use configured location only when the user did not explicitly name a place."
+postprocess = "Rephrase package output only; do not invent weather facts."
+
+[[invocation.inputs]]
+key = "location"
+path = "ctx.params.location"
+type = "object"
+required = false
+resolver = "engine"
+fields = ["label", "lat", "lon"]
+description = "Resolved place for the weather question."
+
+[attribution]
+policy = "required-only"
+
+[[attribution.providers]]
+id = "kma"
+name = "KMA"
+label = "Weather data by KMA"
+url = "https://apihub.kma.go.kr"
+required = false
+
+[permissions]
+primitives = ["Http"]
+context = ["location"]
+`
+	path := filepath.Join(dir, "package.toml")
+	if err := os.WriteFile(path, []byte(tomlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := LoadPackageToml(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Discovery.TimeScope != "now" {
+		t.Fatalf("Discovery.TimeScope = %q, want now", pkg.Discovery.TimeScope)
+	}
+	if pkg.Discovery.DelegatesTo["future"] != "weather-briefing" {
+		t.Fatalf("Discovery.DelegatesTo = %+v", pkg.Discovery.DelegatesTo)
+	}
+	if pkg.Capabilities.Location.Resolution != "engine" {
+		t.Fatalf("Location resolution = %q, want engine", pkg.Capabilities.Location.Resolution)
+	}
+	if pkg.Invocation.ExecutionModel != "deterministic" {
+		t.Fatalf("Invocation.ExecutionModel = %q", pkg.Invocation.ExecutionModel)
+	}
+	if len(pkg.Invocation.Inputs) != 1 {
+		t.Fatalf("Invocation.Inputs len = %d, want 1", len(pkg.Invocation.Inputs))
+	}
+	input := pkg.Invocation.Inputs[0]
+	if input.Key != "location" || input.Path != "ctx.params.location" || input.Resolver != "engine" {
+		t.Fatalf("Invocation input = %+v", input)
+	}
+	if len(input.Fields) != 3 || input.Fields[0] != "label" || input.Fields[1] != "lat" || input.Fields[2] != "lon" {
+		t.Fatalf("Invocation input fields = %+v", input.Fields)
+	}
+	if pkg.Attribution.Policy != "required-only" {
+		t.Fatalf("Attribution.Policy = %q, want required-only", pkg.Attribution.Policy)
+	}
+	if len(pkg.Attribution.Providers) != 1 {
+		t.Fatalf("Attribution.Providers len = %d, want 1", len(pkg.Attribution.Providers))
+	}
+	provider := pkg.Attribution.Providers[0]
+	if provider.ID != "kma" || provider.Label != "Weather data by KMA" || provider.Required {
+		t.Fatalf("Attribution provider = %+v", provider)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Install / Uninstall / List (PackageManager)
 // ---------------------------------------------------------------------------

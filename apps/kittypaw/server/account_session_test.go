@@ -123,6 +123,7 @@ func TestServerNewUsesMasterAPIKey(t *testing.T) {
 	srv := NewWithServerConfig([]*AccountDeps{aliceDeps}, "test", core.TopLevelServerConfig{
 		MasterAPIKey: "master-key",
 	})
+	srv.localAuth = core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
 	if got := srv.effectiveAPIKey(); got != "master-key" {
 		t.Fatalf("effectiveAPIKey = %q, want master-key", got)
 	}

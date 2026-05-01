@@ -27,6 +27,7 @@ type contextKey string
 
 const ctxKeyAgentID contextKey = "agentID"
 const ctxKeyEvent contextKey = "event"
+const ctxKeyPackageParams contextKey = "packageParams"
 
 // ContextWithAgentID stores the agent ID in context for use by skill handlers.
 func ContextWithAgentID(ctx context.Context, agentID string) context.Context {
@@ -50,6 +51,20 @@ func ContextWithEvent(ctx context.Context, event *core.Event) context.Context {
 // EventFromContext retrieves the event from context. Returns nil for scheduler paths.
 func EventFromContext(ctx context.Context) *core.Event {
 	if v, ok := ctx.Value(ctxKeyEvent).(*core.Event); ok {
+		return v
+	}
+	return nil
+}
+
+// ContextWithPackageParams stores structured, engine-resolved package inputs.
+// Official packages may consume these values through __context__.params; raw
+// natural-language parsing stays in the engine/LLM layer.
+func ContextWithPackageParams(ctx context.Context, params map[string]any) context.Context {
+	return context.WithValue(ctx, ctxKeyPackageParams, params)
+}
+
+func PackageParamsFromContext(ctx context.Context) map[string]any {
+	if v, ok := ctx.Value(ctxKeyPackageParams).(map[string]any); ok {
 		return v
 	}
 	return nil
@@ -1262,7 +1277,13 @@ func executeSkillMgmt(ctx context.Context, call core.SkillCall, s *Session) (str
 		}
 		var name string
 		_ = json.Unmarshal(call.Args[0], &name)
-		return runSkillOrPackage(ctx, name, s)
+		var params map[string]any
+		if len(call.Args) > 1 && len(call.Args[1]) > 0 && string(call.Args[1]) != "null" {
+			if err := json.Unmarshal(call.Args[1], &params); err != nil {
+				return jsonResult(map[string]any{"error": fmt.Sprintf("Skill.run params must be an object: %v", err)})
+			}
+		}
+		return runSkillOrPackageWithParams(ctx, name, s, params)
 
 	case "create":
 		if len(call.Args) < 3 {
@@ -1448,6 +1469,13 @@ func newRegistryClient(cfg *core.Config) (*core.RegistryClient, error) {
 // runSkillOrPackage executes a user-created skill or installed package by name.
 // User skills take priority over packages with the same name.
 func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, error) {
+	return runSkillOrPackageWithParams(ctx, name, s, nil)
+}
+
+func runSkillOrPackageWithParams(ctx context.Context, name string, s *Session, params map[string]any) (string, error) {
+	if len(params) > 0 {
+		ctx = ContextWithPackageParams(ctx, params)
+	}
 	// Try user-created skill first.
 	skill, code, err := core.LoadSkillFrom(s.BaseDir, name)
 	if err == nil && skill != nil && code != "" {
@@ -1519,7 +1547,12 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 	// Includes user context based on the package's [permissions].context declaration.
 	event := EventFromContext(ctx)
 	userCtx := buildUserContext(pkg.Permissions.Context, s, event)
+	params = PackageParamsFromContext(ctx)
 	ctxObj := map[string]any{"config": config}
+	if len(params) > 0 {
+		ctxObj["params"] = params
+		userCtx = overlayStructuredUserContext(userCtx, params)
+	}
 	if userCtx != nil {
 		ctxObj["user"] = userCtx
 	}
@@ -1546,7 +1579,66 @@ func runSkillOrPackage(ctx context.Context, name string, s *Session) (string, er
 	if !result.Success {
 		return jsonResult(map[string]any{"error": result.Error, "output": result.Output})
 	}
-	return jsonResult(map[string]any{"success": true, "output": result.Output})
+	output := normalizePackageOutputAttribution(pkg.Meta.ID, result.Output)
+	return jsonResult(map[string]any{"success": true, "output": output})
+}
+
+func overlayStructuredUserContext(userCtx map[string]any, params map[string]any) map[string]any {
+	loc, ok := structuredLocationParam(params)
+	if !ok {
+		return userCtx
+	}
+	if userCtx == nil {
+		userCtx = map[string]any{}
+	}
+	userCtx["location"] = loc
+	return userCtx
+}
+
+func structuredLocationParam(params map[string]any) (map[string]any, bool) {
+	if params == nil {
+		return nil, false
+	}
+	raw, ok := params["location"]
+	if !ok {
+		return nil, false
+	}
+	loc, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	out := map[string]any{}
+	if label, ok := loc["label"].(string); ok && label != "" {
+		out["city"] = label
+	}
+	if city, ok := loc["city"].(string); ok && city != "" {
+		out["city"] = city
+	}
+	if lat, ok := numberParam(loc["lat"]); ok {
+		out["lat"] = lat
+	}
+	if lon, ok := numberParam(loc["lon"]); ok {
+		out["lon"] = lon
+	}
+	return out, len(out) > 0
+}
+
+func numberParam(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 // buildPackageResolver creates a sandbox.SkillResolver that restricts skill calls

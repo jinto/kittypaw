@@ -23,6 +23,11 @@ type PipelineState struct {
 	mu                     sync.Mutex
 	lastSkillSearchResults []core.RegistryEntry
 	lastSearchAt           time.Time
+	pendingClarification   PendingClarification
+	pendingClarificationAt time.Time
+	pendingSkillRunID      string
+	pendingSkillRunParams  map[string]any
+	pendingSkillRunAt      time.Time
 
 	// lastSkillOutput is the raw user-facing output from the most recent
 	// deterministic skill execution (InstallConsentBranch +
@@ -31,8 +36,9 @@ type PipelineState struct {
 	// history" prior is observably stronger than its "use history"
 	// prior, so we re-surface the data inside the system message
 	// instead of relying on the conversation transcript alone.
-	lastSkillOutput   string
-	lastSkillOutputAt time.Time
+	lastSkillOutput        string
+	lastSkillOutputSkillID string
+	lastSkillOutputAt      time.Time
 }
 
 // skillSearchResultsTTL is how long an unused search result hangs
@@ -46,6 +52,15 @@ const skillSearchResultsTTL = 5 * time.Minute
 // — a longer window risks pairing a stale rate table with an unrelated
 // later "계산해줘".
 const skillOutputTTL = 5 * time.Minute
+
+// clarificationTTL is how long a yes/no clarification can be answered with a
+// short affirmative such as "ㅇㅇ" before it becomes too stale to trust.
+const clarificationTTL = 5 * time.Minute
+
+type PendingClarification struct {
+	Kind  string
+	Query string
+}
 
 // NewPipelineState returns an empty pipeline state.
 func NewPipelineState() *PipelineState {
@@ -92,6 +107,78 @@ func (ps *PipelineState) ClearSkillSearch() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.lastSkillSearchResults = nil
+	ps.pendingSkillRunID = ""
+	ps.pendingSkillRunParams = nil
+	ps.pendingSkillRunAt = time.Time{}
+}
+
+func (ps *PipelineState) RecordPendingSkillRun(skillID string, params map[string]any) {
+	if ps == nil || skillID == "" || len(params) == 0 {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.pendingSkillRunID = skillID
+	ps.pendingSkillRunParams = cloneParams(params)
+	ps.pendingSkillRunAt = time.Now()
+}
+
+func (ps *PipelineState) RecentPendingSkillRun(skillID string) (map[string]any, bool) {
+	if ps == nil || skillID == "" {
+		return nil, false
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ps.pendingSkillRunID != skillID || time.Since(ps.pendingSkillRunAt) > skillSearchResultsTTL {
+		return nil, false
+	}
+	return cloneParams(ps.pendingSkillRunParams), len(ps.pendingSkillRunParams) > 0
+}
+
+func cloneParams(params map[string]any) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		if nested, ok := v.(map[string]any); ok {
+			out[k] = cloneParams(nested)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func (ps *PipelineState) RecordPendingClarification(p PendingClarification) {
+	if ps == nil || p.Kind == "" {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.pendingClarification = p
+	ps.pendingClarificationAt = time.Now()
+}
+
+func (ps *PipelineState) RecentPendingClarification() (PendingClarification, bool) {
+	if ps == nil {
+		return PendingClarification{}, false
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ps.pendingClarification.Kind == "" || time.Since(ps.pendingClarificationAt) > clarificationTTL {
+		return PendingClarification{}, false
+	}
+	return ps.pendingClarification, true
+}
+
+func (ps *PipelineState) ClearPendingClarification() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.pendingClarification = PendingClarification{}
 }
 
 // RecordSkillOutput stores the raw user-facing output from a
@@ -100,12 +187,17 @@ func (ps *PipelineState) ClearSkillSearch() {
 // short follow-up turn can augment its system prompt with the data
 // the user is most likely referencing.
 func (ps *PipelineState) RecordSkillOutput(output string) {
+	ps.RecordSkillOutputForSkill("", output)
+}
+
+func (ps *PipelineState) RecordSkillOutputForSkill(skillID, output string) {
 	if ps == nil || output == "" {
 		return
 	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.lastSkillOutput = output
+	ps.lastSkillOutputSkillID = skillID
 	ps.lastSkillOutputAt = time.Now()
 }
 
@@ -124,6 +216,18 @@ func (ps *PipelineState) RecentSkillOutput() string {
 	return ps.lastSkillOutput
 }
 
+func (ps *PipelineState) RecentSkillOutputSkillID() string {
+	if ps == nil {
+		return ""
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if time.Since(ps.lastSkillOutputAt) > skillOutputTTL {
+		return ""
+	}
+	return ps.lastSkillOutputSkillID
+}
+
 // ClearSkillOutput drops the cached skill output. Called by
 // runAgentLoop after a successful legacy-LLM turn so the next short
 // follow-up does not get a stale augmentation block. Without this,
@@ -138,4 +242,5 @@ func (ps *PipelineState) ClearSkillOutput() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.lastSkillOutput = ""
+	ps.lastSkillOutputSkillID = ""
 }

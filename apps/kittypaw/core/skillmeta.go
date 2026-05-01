@@ -94,7 +94,7 @@ var SkillRegistry = []SkillMeta{
 	}},
 	{Name: "Skill", Methods: []SkillMethodMeta{
 		{Name: "list", Signature: "Skill.list()"},
-		{Name: "run", Signature: "Skill.run(name)"},
+		{Name: "run", Signature: "Skill.run(name[, params]) — execute an installed skill/package. Pass structured params declared by package.toml, e.g. Skill.run(\"weather-now\", {location:{label,lat,lon}})."},
 		{Name: "create", Signature: "Skill.create(name, desc, code, triggerType, schedule)"},
 		{Name: "disable", Signature: "Skill.disable(name)"},
 		{Name: "rollback", Signature: "Skill.rollback(name)"},
