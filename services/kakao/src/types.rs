@@ -55,12 +55,22 @@ pub struct KakaoTemplate {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KakaoOutput {
-    pub simple_text: KakaoSimpleText,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simple_text: Option<KakaoSimpleText>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simple_image: Option<KakaoSimpleImage>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct KakaoSimpleText {
     pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KakaoSimpleImage {
+    pub image_url: String,
+    pub alt_text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,9 +92,26 @@ pub fn kakao_text(text: &str) -> KakaoSimpleResponse {
         version: "2.0",
         template: KakaoTemplate {
             outputs: vec![KakaoOutput {
-                simple_text: KakaoSimpleText {
+                simple_text: Some(KakaoSimpleText {
                     text: text.to_string(),
-                },
+                }),
+                simple_image: None,
+            }],
+        },
+    }
+}
+
+/// Build a Kakao simple image response.
+pub fn kakao_image(image_url: &str, alt_text: &str) -> KakaoSimpleResponse {
+    KakaoSimpleResponse {
+        version: "2.0",
+        template: KakaoTemplate {
+            outputs: vec![KakaoOutput {
+                simple_text: None,
+                simple_image: Some(KakaoSimpleImage {
+                    image_url: image_url.to_string(),
+                    alt_text: alt_text.to_string(),
+                }),
             }],
         },
     }
@@ -116,6 +143,8 @@ pub struct WsOutgoing {
 pub struct WsIncoming {
     pub id: String,
     pub text: String,
+    pub image_url: Option<String>,
+    pub image_alt: Option<String>,
 }
 
 // ── Pending callback context (SQLite persisted) ──
@@ -270,12 +299,32 @@ mod tests {
     }
 
     #[test]
+    fn ws_incoming_deserializes_image_fields() {
+        let json = r#"{"id":"act_123","text":"response text","image_url":"https://cdn.example.com/cat.png","image_alt":"cat"}"#;
+        let frame: WsIncoming = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            frame.image_url.as_deref(),
+            Some("https://cdn.example.com/cat.png")
+        );
+        assert_eq!(frame.image_alt.as_deref(), Some("cat"));
+    }
+
+    #[test]
     fn kakao_callback_body_serializes_correctly() {
         let resp = kakao_text("테스트 메시지");
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"simpleText\""));
         assert!(json.contains("\"테스트 메시지\""));
         assert!(json.contains("\"version\":\"2.0\""));
+    }
+
+    #[test]
+    fn kakao_image_serializes_simple_image() {
+        let resp = kakao_image("https://cdn.example.com/cat.png", "cat");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"simpleImage\""));
+        assert!(json.contains("\"imageUrl\":\"https://cdn.example.com/cat.png\""));
+        assert!(json.contains("\"altText\":\"cat\""));
     }
 
     #[test]
