@@ -240,8 +240,28 @@
 - [ ] **L2 plan trigger by 2026-05-16 (D7 SLA, L1.A=`3c28f6a` 2026-05-02 머지 + 14일)** — `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
 - [ ] **L3 별도 plan** — fab deploy 종결부에 `bash deploy/smoke.sh` 추가 (D4 (A) bash+curl+jq). prod URL `/health` + 핵심 endpoint 1-2개 envelope 검증.
 - [ ] **T0 spike** — `data.go.kr` 5 service key 별 daily limit 확인 (HOLIDAY/WEATHER/AIRKOREA + KASI 음력/일출). 결과를 plan v2 §D3 표에 record. L2 plan prerequisite.
-- [ ] **L1.B/C/D sibling plan** — airkorea (5 endpoint) / weather 보강 (UltraShortNowcast/Forecast) / geo HTTP layer. **L1.D 주의**: DB+API hybrid 라 build tag 재설계 필요 — L1.A template 가 깨지는 점 plan v2 §D6 박제.
+- [x] **L1.B (airkorea 5 endpoint) + L1.C (weather UltraShort 2)** — Plan 9 ✅ (이번 세션). 외부 API 의존 endpoint cover 100%.
+- [ ] **L1.D (geo HTTP layer)** ⏸️ 별도 plan — DB+API hybrid 재설계 필요. plan v2 §D6 박제. 행안부 좌표 + PR-2 T2/T3 머지 후 trigger.
 - [ ] **dual-mode test harness** (L3 의 in-process httptest + HTTP client BASE_URL 분기) — L3 sibling plan 시점에 재검토 (현재 비범위).
+
+## Plan 9: Smoke 3-Layer L1.B + L1.C — AirKorea + Weather UltraShort ✅
+
+> Spec: Plan 8 (`smoke-3-layer.md` v2) sibling. ina:plan 생략 + 직접 ina:build (CEO 비판 학습 — template 정착됨).
+> Reuse: Plan 8 L1.A `holiday_integration_test.go` 패턴 미러
+> 외부 API 의존 endpoint cover 율: 50% (7/14) → **100% (14/14)**
+
+- [x] **L1.B: `internal/proxy/airkorea_integration_test.go` 신규** — 5 sub-test (RealtimeByCity/RealtimeByStation/Forecast/WeeklyForecast/UnhealthyStations) all PASS. AirKorea 도 `returnType=json` 사용 (holiday 와 동일 quirk class) 이지만 현재 정상 수신 — silent XML fallback 회귀 catch mechanism 박제. build tag `air_integration` + `make test-integration-air` target.
+
+- [x] **L1.C: `internal/proxy/weather_integration_test.go` 확장** — `TestUltraShort_LiveKMA` 함수 추가 (Nowcast + Forecast 2 sub-test) all PASS. 기존 `TestVillageForecast_LiveKMA` 유지 (build tag `integration` Plan 8 D1 phased 충실).
+
+- [x] **Makefile umbrella** — `test-integration-all` = `test-integration` + `test-integration-calendar` + `test-integration-air`.
+
+**Operational Checklist (L1.B/C 머지 후)**:
+- [ ] **L1.D (Geo HTTP layer)** ⏸️ 별도 plan — Plan 8 v2 D6 ⚠ DB+API hybrid. 행안부 좌표 자료 도착 + PR-2 T2/T3 머지 후 trigger.
+- [ ] **OAuth integration (10 endpoint)** ⏸️ 별도 plan — browser flow (Playwright/headless). 사용자 영향 큼.
+- [ ] **/health + /discovery** ⏸️ L3 prod smoke 영역 (외부 API 의존 0, integration 부적합).
+
+## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 
 

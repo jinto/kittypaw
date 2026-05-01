@@ -1,7 +1,7 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
 
-.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
+.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
 
 build:
 	go build -o $(BINARY) $(PKG)
@@ -44,7 +44,7 @@ benchmark-resolve:
 # L1.B/C/D sibling plan 시점.
 
 # Backward-compatible umbrella — 모든 integration 그룹 sequential 실행.
-test-integration-all: test-integration test-integration-calendar
+test-integration-all: test-integration test-integration-calendar test-integration-air
 	@echo "all integration test groups passed"
 
 # Calendar 그룹 (holiday_integration_test.go) — 외부 KASI 호출, DB 무관.
@@ -52,6 +52,12 @@ test-integration-all: test-integration test-integration-calendar
 test-integration-calendar:
 	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
 		go test -tags=calendar_integration -count=1 ./internal/proxy/... -run TestHoliday
+
+# Air 그룹 (airkorea_integration_test.go) — 외부 한국환경공단 호출, DB 무관.
+# `AIRKOREA_API_KEY` 누락 시 t.Skipf. L1.B (sibling of Plan 8 L1.A).
+test-integration-air:
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+		go test -tags=air_integration -count=1 ./internal/proxy/... -run TestAirKorea
 
 # 기존 (model + weather + almanac) — docker-compose 기반.
 # Spins up postgres:17-alpine on port 15432 with pg_trgm pre-installed,
