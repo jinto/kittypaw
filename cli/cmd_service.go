@@ -61,9 +61,6 @@ different --bind-port.`,
 					return err
 				}
 			}
-			if err := preflightPort(f.bindHost, f.bindPort); err != nil {
-				return err
-			}
 			return serviceInstall(cmd.OutOrStdout(), cmd.ErrOrStderr(), f)
 		},
 	}

@@ -56,10 +56,6 @@ func maybeInstallService(scanner *bufio.Scanner, stdout, stderr io.Writer) bool 
 		return false
 	}
 	sf := &serviceFlags{bindHost: "127.0.0.1", bindPort: 3000}
-	if err := preflightPort(sf.bindHost, sf.bindPort); err != nil {
-		_, _ = fmt.Fprintln(stderr, err)
-		return false
-	}
 	if err := serviceInstall(stdout, stderr, sf); err != nil {
 		_, _ = fmt.Fprintf(stderr, setupMsgServiceFailedFmt+"\n", err)
 		return false

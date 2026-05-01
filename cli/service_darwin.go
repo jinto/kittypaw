@@ -51,6 +51,10 @@ func serviceInstall(stdout, stderr io.Writer, f *serviceFlags) error {
 		_ = run(io.Discard, io.Discard, "launchctl", "bootout", target)
 	}
 
+	if err := preflightPort(f.bindHost, f.bindPort); err != nil {
+		return err
+	}
+
 	// launchd does not expand ~ or $HOME — substitute absolute paths.
 	plist := renderPlist(packaging.MacOSLaunchAgent, binPath, f.bindHost, f.bindPort, os.Getenv("HOME"))
 
