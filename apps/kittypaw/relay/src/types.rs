@@ -5,10 +5,13 @@ use std::env;
 
 pub const MSG_RATE_LIMITED: &str = "일일 사용 한도에 도달했습니다.";
 pub const MSG_NO_CALLBACK: &str = "KittyPaw 스킬 서버가 정상 동작 중입니다. 오픈빌더에서 비동기 콜백을 활성화하면 AI 응답을 받을 수 있습니다.";
-pub const MSG_NOT_PAIRED: &str = "KittyPaw와 연결이 필요합니다. KittyPaw 앱에서 연결 코드를 확인하세요.";
+pub const MSG_NOT_PAIRED: &str =
+    "KittyPaw와 연결이 필요합니다. KittyPaw 앱에서 연결 코드를 확인하세요.";
 pub const MSG_TRANSIENT_ERROR: &str = "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
-pub const MSG_OFFLINE: &str = "KittyPaw가 현재 오프라인 상태입니다. 앱을 실행 후 다시 시도해 주세요.";
-pub const MSG_INVALID_PAIR_CODE: &str = "유효하지 않은 연결 코드입니다. KittyPaw 앱에서 새 코드를 확인하세요.";
+pub const MSG_OFFLINE: &str =
+    "KittyPaw가 현재 오프라인 상태입니다. 앱을 실행 후 다시 시도해 주세요.";
+pub const MSG_INVALID_PAIR_CODE: &str =
+    "유효하지 않은 연결 코드입니다. KittyPaw 앱에서 새 코드를 확인하세요.";
 pub const MSG_PAIRED: &str = "연결 완료!";
 pub const MSG_PROCESSING: &str = "처리 중입니다...";
 
@@ -55,12 +58,22 @@ pub struct KakaoTemplate {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KakaoOutput {
-    pub simple_text: KakaoSimpleText,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simple_text: Option<KakaoSimpleText>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub simple_image: Option<KakaoSimpleImage>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct KakaoSimpleText {
     pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KakaoSimpleImage {
+    pub image_url: String,
+    pub alt_text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,9 +95,26 @@ pub fn kakao_text(text: &str) -> KakaoSimpleResponse {
         version: "2.0",
         template: KakaoTemplate {
             outputs: vec![KakaoOutput {
-                simple_text: KakaoSimpleText {
+                simple_text: Some(KakaoSimpleText {
                     text: text.to_string(),
-                },
+                }),
+                simple_image: None,
+            }],
+        },
+    }
+}
+
+/// Build a Kakao simple image response.
+pub fn kakao_image(image_url: &str, alt_text: &str) -> KakaoSimpleResponse {
+    KakaoSimpleResponse {
+        version: "2.0",
+        template: KakaoTemplate {
+            outputs: vec![KakaoOutput {
+                simple_text: None,
+                simple_image: Some(KakaoSimpleImage {
+                    image_url: image_url.to_string(),
+                    alt_text: alt_text.to_string(),
+                }),
             }],
         },
     }
@@ -116,6 +146,8 @@ pub struct WsOutgoing {
 pub struct WsIncoming {
     pub id: String,
     pub text: String,
+    pub image_url: Option<String>,
+    pub image_alt: Option<String>,
 }
 
 // ── Pending callback context (SQLite persisted) ──
@@ -200,10 +232,8 @@ impl Config {
                 .unwrap_or(100_000),
             channel_url: env::var("CHANNEL_URL")
                 .unwrap_or_else(|_| "https://pf.kakao.com/_exjFdX/chat".to_string()),
-            database_path: env::var("DATABASE_PATH")
-                .unwrap_or_else(|_| "relay.db".to_string()),
-            bind_addr: env::var("BIND_ADDR")
-                .unwrap_or_else(|_| "0.0.0.0:8787".to_string()),
+            database_path: env::var("DATABASE_PATH").unwrap_or_else(|_| "relay.db".to_string()),
+            bind_addr: env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8787".to_string()),
         }
     }
 }
@@ -268,12 +298,32 @@ mod tests {
     }
 
     #[test]
+    fn ws_incoming_deserializes_image_fields() {
+        let json = r#"{"id":"act_123","text":"response text","image_url":"https://cdn.example.com/cat.png","image_alt":"cat"}"#;
+        let frame: WsIncoming = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            frame.image_url.as_deref(),
+            Some("https://cdn.example.com/cat.png")
+        );
+        assert_eq!(frame.image_alt.as_deref(), Some("cat"));
+    }
+
+    #[test]
     fn kakao_callback_body_serializes_correctly() {
         let resp = kakao_text("테스트 메시지");
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"simpleText\""));
         assert!(json.contains("\"테스트 메시지\""));
         assert!(json.contains("\"version\":\"2.0\""));
+    }
+
+    #[test]
+    fn kakao_image_serializes_simple_image() {
+        let resp = kakao_image("https://cdn.example.com/cat.png", "cat");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"simpleImage\""));
+        assert!(json.contains("\"imageUrl\":\"https://cdn.example.com/cat.png\""));
+        assert!(json.contains("\"altText\":\"cat\""));
     }
 
     #[test]

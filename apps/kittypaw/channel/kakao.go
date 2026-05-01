@@ -26,8 +26,10 @@ type kakaoRelayMessage struct {
 
 // kakaoReplyMessage is sent back to the relay to dispatch to Kakao callback.
 type kakaoReplyMessage struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url,omitempty"`
+	ImageAlt string `json:"image_alt,omitempty"`
 }
 
 // --- KakaoChannel ---
@@ -182,6 +184,26 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 // The relay's Durable Object matches the ID to the pending Kakao callback.
 // replyToMessageID is unused on Kakao (relay protocol has no reply-quote concept).
 func (k *KakaoChannel) SendResponse(ctx context.Context, actionID, response, _ string) error {
+	return k.sendReply(ctx, kakaoReplyMessage{
+		ID:   actionID,
+		Text: response,
+	})
+}
+
+// SendRichResponse sends an image URL to the relay when Kakao can render it.
+func (k *KakaoChannel) SendRichResponse(ctx context.Context, actionID string, response core.OutboundResponse, _ string) error {
+	reply := kakaoReplyMessage{
+		ID:   actionID,
+		Text: response.Text,
+	}
+	if response.Image != nil && isPublicHTTPSImageURL(response.Image.URL) {
+		reply.ImageURL = response.Image.URL
+		reply.ImageAlt = response.Image.Alt
+	}
+	return k.sendReply(ctx, reply)
+}
+
+func (k *KakaoChannel) sendReply(ctx context.Context, reply kakaoReplyMessage) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
@@ -189,10 +211,6 @@ func (k *KakaoChannel) SendResponse(ctx context.Context, actionID, response, _ s
 		return fmt.Errorf("kakao: not connected to relay")
 	}
 
-	reply := kakaoReplyMessage{
-		ID:   actionID,
-		Text: response,
-	}
 	data, err := json.Marshal(reply)
 	if err != nil {
 		return err
@@ -202,4 +220,9 @@ func (k *KakaoChannel) SendResponse(ctx context.Context, actionID, response, _ s
 		return fmt.Errorf("kakao reply: %w", err)
 	}
 	return nil
+}
+
+func isPublicHTTPSImageURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != ""
 }

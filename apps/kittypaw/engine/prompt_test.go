@@ -39,6 +39,20 @@ func TestBuildSkillsSection(t *testing.T) {
 	}
 }
 
+func TestBuildSkillsSection_ImageGuardGuidance(t *testing.T) {
+	section := buildSkillsSection("")
+	for _, phrase := range []string{
+		"Image.generate",
+		"img.error || !img.url",
+		"img.url",
+		"img.imageUrl",
+	} {
+		if !strings.Contains(section, phrase) {
+			t.Fatalf("buildSkillsSection missing image guidance phrase %q", phrase)
+		}
+	}
+}
+
 func TestParseAtMention(t *testing.T) {
 	tests := []struct {
 		text      string

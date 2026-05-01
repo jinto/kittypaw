@@ -266,7 +266,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				sendWsMsg(ctx, conn, core.NewErrorMsgForTurn(clientMsg.TurnID, err.Error()))
 				continue
 			}
-			sendWsMsg(ctx, conn, core.NewDoneMsgForTurn(clientMsg.TurnID, result, nil))
+			outbound := core.ParseOutboundResponse(result)
+			sendWsMsg(ctx, conn, core.NewDoneMsgForTurnWithOutbound(clientMsg.TurnID, outbound, nil))
 		}
 	}
 }

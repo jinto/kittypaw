@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,23 @@ func TestFromConfigKakaoMissingWSURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for missing KakaoWSURL")
+	}
+}
+
+func TestKakaoRichResponseIncludesHTTPSImageFrame(t *testing.T) {
+	msg := kakaoReplyMessage{
+		ID:       "act-1",
+		Text:     "fallback",
+		ImageURL: "https://cdn.example.com/cat.png",
+		ImageAlt: "cat",
+	}
+	data, _ := json.Marshal(msg)
+	got := string(data)
+	if !strings.Contains(got, `"image_url":"https://cdn.example.com/cat.png"`) {
+		t.Fatalf("frame missing image_url: %s", got)
+	}
+	if !strings.Contains(got, `"image_alt":"cat"`) {
+		t.Fatalf("frame missing image_alt: %s", got)
 	}
 }
 

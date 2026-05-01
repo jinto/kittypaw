@@ -3,6 +3,7 @@ package channel
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -150,6 +151,7 @@ type telegramFile struct {
 type TelegramChannel struct {
 	accountID string
 	botToken  string
+	apiBase   string
 	client    *http.Client
 	chatID    int64 // last chat_id for responses
 	offset    int64 // next update_id to request
@@ -170,6 +172,7 @@ func NewTelegram(accountID, botToken string) *TelegramChannel {
 	return &TelegramChannel{
 		accountID: accountID,
 		botToken:  botToken,
+		apiBase:   telegramAPI,
 		client: &http.Client{
 			Timeout: time.Duration(telegramPollSecs+10) * time.Second,
 		},
@@ -343,23 +346,9 @@ const telegramTypingRefresh = 4 * time.Second
 // Long messages are split into chunks of telegramMaxChunk characters.
 // replyToMessageID, when non-empty, makes each chunk reply-quote the original message.
 func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response, replyToMessageID string) error {
-	chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+	chatID, replyToID, err := t.resolveSendTarget(chatIDStr, replyToMessageID)
 	if err != nil {
-		// Fall back to cached chat ID.
-		t.mu.Lock()
-		chatID = t.chatID
-		t.mu.Unlock()
-	}
-
-	if chatID == 0 {
-		return fmt.Errorf("telegram: no chat_id to respond to")
-	}
-
-	var replyToID int64
-	if replyToMessageID != "" {
-		if id, err := strconv.ParseInt(replyToMessageID, 10, 64); err == nil {
-			replyToID = id
-		}
+		return err
 	}
 
 	// Stop any event-time typingLoop now that we have a real reply ready —
@@ -376,6 +365,25 @@ func (t *TelegramChannel) SendResponse(ctx context.Context, chatIDStr, response,
 		}
 	}
 	return nil
+}
+
+// SendRichResponse sends an image response as a Telegram photo when possible.
+func (t *TelegramChannel) SendRichResponse(ctx context.Context, chatIDStr string, response core.OutboundResponse, replyToMessageID string) error {
+	if response.Image == nil || response.Image.URL == "" {
+		return t.SendResponse(ctx, chatIDStr, response.Text, replyToMessageID)
+	}
+
+	chatID, replyToID, err := t.resolveSendTarget(chatIDStr, replyToMessageID)
+	if err != nil {
+		return err
+	}
+	t.stopTyping(chatID)
+
+	caption := telegramCaption(response)
+	if strings.HasPrefix(response.Image.URL, "data:image/") {
+		return t.sendPhotoDataURI(ctx, chatID, response.Image.URL, caption, replyToID)
+	}
+	return t.sendPhotoURL(ctx, chatID, response.Image.URL, caption, replyToID)
 }
 
 // typingLoop sends the typing chat action immediately, then refreshes it every
@@ -397,7 +405,28 @@ func (t *TelegramChannel) typingLoop(ctx context.Context, chatID int64) {
 // --- internal helpers ---
 
 func (t *TelegramChannel) apiURL(method string) string {
-	return telegramAPI + t.botToken + "/" + method
+	return t.apiBase + t.botToken + "/" + method
+}
+
+func (t *TelegramChannel) resolveSendTarget(chatIDStr, replyToMessageID string) (chatID, replyToID int64, err error) {
+	chatID, err = strconv.ParseInt(chatIDStr, 10, 64)
+	if err != nil {
+		// Fall back to cached chat ID.
+		t.mu.Lock()
+		chatID = t.chatID
+		t.mu.Unlock()
+	}
+
+	if chatID == 0 {
+		return 0, 0, fmt.Errorf("telegram: no chat_id to respond to")
+	}
+
+	if replyToMessageID != "" {
+		if id, parseErr := strconv.ParseInt(replyToMessageID, 10, 64); parseErr == nil {
+			replyToID = id
+		}
+	}
+	return chatID, replyToID, nil
 }
 
 func (t *TelegramChannel) getUpdates(ctx context.Context) ([]telegramUpdate, error) {
@@ -466,12 +495,140 @@ func (t *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text st
 	}
 	defer resp.Body.Close()
 
+	return checkTelegramResponse(resp, "sendMessage")
+}
+
+func (t *TelegramChannel) sendPhotoURL(ctx context.Context, chatID int64, photoURL, caption string, replyToID int64) error {
+	body := map[string]any{
+		"chat_id": chatID,
+		"photo":   photoURL,
+	}
+	if caption != "" {
+		body["caption"] = caption
+	}
+	if replyToID != 0 {
+		body["reply_to_message_id"] = replyToID
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		t.apiURL("sendPhoto"), bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return checkTelegramResponse(resp, "sendPhoto")
+}
+
+func (t *TelegramChannel) sendPhotoDataURI(ctx context.Context, chatID int64, dataURI, caption string, replyToID int64) error {
+	mimeType, data, err := parseImageDataURI(dataURI)
+	if err != nil {
+		return err
+	}
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if err := writer.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
+	if caption != "" {
+		if err := writer.WriteField("caption", caption); err != nil {
+			return err
+		}
+	}
+	if replyToID != 0 {
+		if err := writer.WriteField("reply_to_message_id", strconv.FormatInt(replyToID, 10)); err != nil {
+			return err
+		}
+	}
+	part, err := writer.CreateFormFile("photo", filenameForImageMIME(mimeType))
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(data); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.apiURL("sendPhoto"), &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return checkTelegramResponse(resp, "sendPhoto")
+}
+
+func parseImageDataURI(dataURI string) (mimeType string, data []byte, err error) {
+	header, payload, ok := strings.Cut(dataURI, ",")
+	if !ok || !strings.HasPrefix(header, "data:image/") || !strings.HasSuffix(header, ";base64") {
+		return "", nil, fmt.Errorf("invalid image data URI")
+	}
+	data, err = base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return "", nil, fmt.Errorf("decode image data URI: %w", err)
+	}
+	return strings.TrimPrefix(strings.TrimSuffix(header, ";base64"), "data:"), data, nil
+}
+
+func filenameForImageMIME(mimeType string) string {
+	switch mimeType {
+	case "image/jpeg":
+		return "image.jpg"
+	case "image/gif":
+		return "image.gif"
+	case "image/webp":
+		return "image.webp"
+	default:
+		return "image.png"
+	}
+}
+
+func telegramCaption(response core.OutboundResponse) string {
+	if response.Image == nil {
+		return truncateTelegramCaption(response.Text)
+	}
+	if response.Image.Caption != "" {
+		return truncateTelegramCaption(response.Image.Caption)
+	}
+	if response.Image.Alt != "" {
+		return truncateTelegramCaption(response.Image.Alt)
+	}
+	return ""
+}
+
+func truncateTelegramCaption(text string) string {
+	const maxCaptionRunes = 1024
+	runes := []rune(strings.TrimSpace(text))
+	if len(runes) <= maxCaptionRunes {
+		return string(runes)
+	}
+	return string(runes[:maxCaptionRunes])
+}
+
+func checkTelegramResponse(resp *http.Response, method string) error {
 	var result telegramResponse[json.RawMessage]
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("decode sendMessage: %w", err)
+		return fmt.Errorf("decode %s: %w", method, err)
 	}
 	if !result.OK {
-		return fmt.Errorf("sendMessage: %s", result.Description)
+		return fmt.Errorf("%s: %s", method, result.Description)
 	}
 	return nil
 }

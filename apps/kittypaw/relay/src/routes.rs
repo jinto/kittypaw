@@ -101,7 +101,11 @@ async fn handle_webhook(
 
     // Killswitch
     if state.store.get_killswitch().await.unwrap_or(false) {
-        return (StatusCode::SERVICE_UNAVAILABLE, "Service temporarily suspended").into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service temporarily suspended",
+        )
+            .into_response();
     }
 
     // Rate limit
@@ -312,15 +316,15 @@ async fn handle_ws_message(state: &AppStateArc, text: &str) {
         return;
     }
 
-    dispatch_callback(state, &incoming.id, &incoming.text).await;
+    dispatch_callback(state, incoming).await;
 }
 
-async fn dispatch_callback(state: &AppStateArc, action_id: &str, response_text: &str) {
+async fn dispatch_callback(state: &AppStateArc, incoming: WsIncoming) {
     // Atomic claim
-    let pending = match state.store.take_pending(action_id).await {
+    let pending = match state.store.take_pending(&incoming.id).await {
         Ok(Some(p)) => p,
         Ok(None) => {
-            warn!("no pending entry for action {action_id}");
+            warn!("no pending entry for action {}", incoming.id);
             return;
         }
         Err(e) => {
@@ -336,7 +340,12 @@ async fn dispatch_callback(state: &AppStateArc, action_id: &str, response_text: 
     }
 
     // Fire-and-forget callback to Kakao
-    let body = kakao_text(response_text);
+    let body = match incoming.image_url.as_deref() {
+        Some(url) if is_public_https_image_url(url) => {
+            kakao_image(url, incoming.image_alt.as_deref().unwrap_or("image"))
+        }
+        _ => kakao_text(&incoming.text),
+    };
     if let Err(e) = state
         .http_client
         .post(&pending.callback_url)
@@ -435,6 +444,14 @@ pub fn is_allowed_callback_host(url: &str) -> bool {
         || (host == "kakaoenterprise.com" || host.ends_with(".kakaoenterprise.com"))
 }
 
+fn is_public_https_image_url(raw: &str) -> bool {
+    let parsed = match url::Url::parse(raw) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    parsed.scheme() == "https" && parsed.host_str().is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,11 +481,7 @@ mod tests {
     #[test]
     fn ssrf_guard_blocks_non_https() {
         assert!(!is_allowed_callback_host("http://callback.kakao.com/abc"));
-        assert!(!is_allowed_callback_host(
-            "file://kakao.com/etc/passwd"
-        ));
-        assert!(!is_allowed_callback_host(
-            "javascript://kakao.com/xss"
-        ));
+        assert!(!is_allowed_callback_host("file://kakao.com/etc/passwd"));
+        assert!(!is_allowed_callback_host("javascript://kakao.com/xss"));
     }
 }

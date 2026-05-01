@@ -29,6 +29,12 @@ type Channel interface {
 	Name() string
 }
 
+// RichResponder is an optional capability for channels that can render
+// structured response metadata such as image attachments.
+type RichResponder interface {
+	SendRichResponse(ctx context.Context, chatID string, response core.OutboundResponse, replyToMessageID string) error
+}
+
 // Confirmer is an optional capability for channels that support interactive
 // permission dialogs. Channels implement this to enable approval prompts
 // for destructive operations (e.g., shell commands, git push).
