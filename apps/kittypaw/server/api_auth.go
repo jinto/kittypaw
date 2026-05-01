@@ -145,30 +145,6 @@ func (s *Server) requireWebSessionIfAuthUsers(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireDefaultWebSessionIfAuthUsers(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		required, err := s.localAuthRequired()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "read local auth store")
-			return
-		}
-		if !required {
-			next.ServeHTTP(w, r)
-			return
-		}
-		accountID, ok := s.webSessionAccountID(r)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		if accountID != s.defaultAccountID() {
-			writeError(w, http.StatusForbidden, "default account session required")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (s *Server) localAuthRequired() (bool, error) {
 	if s.localAuth == nil {
 		return false, nil

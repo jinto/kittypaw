@@ -304,8 +304,8 @@ func TestAuthLoginAllowsNonDefaultAccountSession(t *testing.T) {
 		"alice": "alice-pw",
 		"bob":   "bob-pw",
 	}, map[string]*core.Config{
-		"alice": &core.Config{},
-		"bob":   &core.Config{},
+		"alice": {},
+		"bob":   {},
 	})
 
 	body, err := json.Marshal(map[string]string{
@@ -350,8 +350,8 @@ func TestAuthResponsesReportDefaultAccount(t *testing.T) {
 		"alice": "alice-pw",
 		"bob":   "bob-pw",
 	}, map[string]*core.Config{
-		"alice": &core.Config{},
-		"bob":   &core.Config{},
+		"alice": {},
+		"bob":   {},
 	})
 
 	aliceCookie := loginSessionCookie(t, srv, "alice", "alice-pw")

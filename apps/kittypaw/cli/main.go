@@ -2345,7 +2345,7 @@ func defaultAccountBase() (string, error) {
 }
 
 func printAccountContext(w io.Writer, accountID, commandPath string) {
-	fmt.Fprintf(w, "Account: %s\n", accountID)
+	_, _ = fmt.Fprintf(w, "Account: %s\n", accountID)
 }
 
 func accountBaseForID(accountID string) (string, error) {
