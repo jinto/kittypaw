@@ -351,6 +351,53 @@ func TestImageOpenAI_Success(t *testing.T) {
 	if result["url"] != "https://cdn.openai.com/generated.png" {
 		t.Errorf("url = %v", result["url"])
 	}
+	if result["imageUrl"] != result["url"] {
+		t.Errorf("imageUrl = %v, want %v", result["imageUrl"], result["url"])
+	}
+}
+
+func TestImageOpenAI_Base64Response(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data": [{"b64_json": "aW1hZ2VkYXRh"}]}`)
+	}))
+	defer srv.Close()
+
+	old := visionClient
+	visionClient = srv.Client()
+	defer func() { visionClient = old }()
+
+	result, err := imageOpenAIWithURL(context.Background(), srv.URL, "a sunset", "test-key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "data:image/png;base64,aW1hZ2VkYXRh"
+	if result["url"] != want {
+		t.Errorf("url = %v, want %q", result["url"], want)
+	}
+	if result["imageUrl"] != want {
+		t.Errorf("imageUrl = %v, want %q", result["imageUrl"], want)
+	}
+}
+
+func TestImageOpenAI_MissingPayload(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data": [{"revised_prompt": "a better prompt"}]}`)
+	}))
+	defer srv.Close()
+
+	old := visionClient
+	visionClient = srv.Client()
+	defer func() { visionClient = old }()
+
+	_, err := imageOpenAIWithURL(context.Background(), srv.URL, "test", "key")
+	if err == nil {
+		t.Fatal("expected error for missing image payload")
+	}
+	if !strings.Contains(err.Error(), "missing image payload") {
+		t.Errorf("error = %q, want to contain 'missing image payload'", err.Error())
+	}
 }
 
 func TestImageGemini_Success(t *testing.T) {
@@ -371,6 +418,9 @@ func TestImageGemini_Success(t *testing.T) {
 	url, ok := result["url"].(string)
 	if !ok || !strings.Contains(url, "data:image/png;base64,") {
 		t.Errorf("url = %v, want data URI", result["url"])
+	}
+	if result["imageUrl"] != result["url"] {
+		t.Errorf("imageUrl = %v, want %v", result["imageUrl"], result["url"])
 	}
 }
 
