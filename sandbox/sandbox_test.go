@@ -190,6 +190,33 @@ func TestResolverErrorThrows(t *testing.T) {
 	}
 }
 
+func TestResolverErrorCatchHasMessage(t *testing.T) {
+	sb := New(core.SandboxConfig{TimeoutSecs: 5})
+
+	resolver := func(_ context.Context, call core.SkillCall) (string, error) {
+		return "", fmt.Errorf("path not allowed")
+	}
+
+	code := `
+		try {
+			File.read("/forbidden");
+			return "should not reach";
+		} catch(e) {
+			return "caught:" + e.message;
+		}
+	`
+	result, err := sb.ExecuteWithResolver(context.Background(), code, nil, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success (catch should handle), got error: %s", result.Error)
+	}
+	if result.Output != "caught:path not allowed" {
+		t.Errorf("expected caught message, got %q", result.Output)
+	}
+}
+
 func TestResolverErrorUncaughtFails(t *testing.T) {
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})
 

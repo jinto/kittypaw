@@ -55,6 +55,18 @@ func TestBuildSkillsSection_ImageGuardGuidance(t *testing.T) {
 	}
 }
 
+func TestBuildSkillsSection_FileWorkspaceGuidance(t *testing.T) {
+	section := buildSkillsSection("")
+	for _, phrase := range []string{
+		"Relative File paths are inside the configured workspace",
+		"File.write(\"memo.txt\", content)",
+	} {
+		if !strings.Contains(section, phrase) {
+			t.Fatalf("buildSkillsSection missing file guidance phrase %q", phrase)
+		}
+	}
+}
+
 func TestParseAtMention(t *testing.T) {
 	tests := []struct {
 		text      string

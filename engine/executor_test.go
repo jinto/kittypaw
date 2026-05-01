@@ -391,6 +391,40 @@ func TestExecuteFileRead_StillWorks(t *testing.T) {
 	}
 }
 
+func TestExecuteFileWrite_RelativePathUsesWorkspaceRoot(t *testing.T) {
+	workspaceRoot := resolveForValidation(t.TempDir())
+	processCWD := t.TempDir()
+	t.Chdir(processCWD)
+
+	s := &Session{}
+	paths := []string{workspaceRoot}
+	s.allowedPaths.Store(&paths)
+
+	call := core.SkillCall{
+		SkillName: "File",
+		Method:    "write",
+		Args: []json.RawMessage{
+			json.RawMessage(`"memo.txt"`),
+			json.RawMessage(`"today tired"`),
+		},
+	}
+	_, err := executeFile(context.Background(), call, s)
+	if err != nil {
+		t.Fatalf("write relative path: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(workspaceRoot, "memo.txt"))
+	if err != nil {
+		t.Fatalf("read workspace memo: %v", err)
+	}
+	if string(got) != "today tired" {
+		t.Fatalf("workspace memo content = %q, want %q", string(got), "today tired")
+	}
+	if _, err := os.Stat(filepath.Join(processCWD, "memo.txt")); !os.IsNotExist(err) {
+		t.Fatalf("process cwd memo stat error = %v, want not exist", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // needsPermission tests
 // ---------------------------------------------------------------------------
