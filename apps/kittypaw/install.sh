@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="jinto/kittypaw"
+REPO="kittypaw-app/kittypaw"
 BINARY="kittypaw"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

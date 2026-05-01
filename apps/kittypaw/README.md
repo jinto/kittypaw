@@ -12,7 +12,7 @@ Experimental Go framework for local AI agents. Single binary, goja JS sandbox, 5
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh
 ```
 
 ## Quick Start

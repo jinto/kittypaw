@@ -35,13 +35,13 @@ changelog:
 
 release:
   github:
-    owner: jinto
+    owner: kittypaw-app
     name: kittypaw
   header: |
     ## Install
 
     ```sh
-    curl -fsSL https://raw.githubusercontent.com/jinto/kittypaw/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh
     ```
 
     The script auto-detects your OS and architecture. For manual download:

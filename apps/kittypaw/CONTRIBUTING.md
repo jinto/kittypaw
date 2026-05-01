@@ -10,7 +10,7 @@
 
 ```bash
 # Clone and build
-git clone https://github.com/jinto/kittypaw.git
+git clone https://github.com/kittypaw-app/kittypaw.git
 cd kittypaw
 make build
 
