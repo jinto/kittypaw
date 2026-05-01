@@ -16,6 +16,9 @@ const Onboarding = {
   start(root, status) {
     this.root = root;
     this.status = status;
+    if (!this.state.workspace.path && status.default_workspace_path) {
+      this.state.workspace.path = status.default_workspace_path;
+    }
     this.step = 1;
     this.render();
   },
