@@ -264,6 +264,64 @@ func TestAPITokenManager_SaveChatRelayURL_EmptyDeletes(t *testing.T) {
 	}
 }
 
+func TestAPITokenManager_SaveAndLoadChatDaemonCredential(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	ns := NamespaceForURL(apiURL)
+
+	if err := mgr.SaveChatDaemonCredential(apiURL, "device-token-1"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadChatDaemonCredential(apiURL)
+	if !ok || got != "device-token-1" {
+		t.Fatalf("LoadChatDaemonCredential = (%q, %v), want device token", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "chat_daemon_credential"); !ok || stored != "device-token-1" {
+		t.Fatalf("stored credential = (%q, %v), want chat_daemon_credential", stored, ok)
+	}
+
+	if err := mgr.SaveChatDaemonCredential(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadChatDaemonCredential(apiURL)
+	if ok || got != "" {
+		t.Fatalf("after empty save, LoadChatDaemonCredential = (%q, %v), want empty false", got, ok)
+	}
+}
+
+func TestAPITokenManager_SaveAndLoadChatRelayDeviceID(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	ns := NamespaceForURL(apiURL)
+
+	if err := mgr.SaveChatRelayDeviceID(apiURL, "dev_123"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadChatRelayDeviceID(apiURL)
+	if !ok || got != "dev_123" {
+		t.Fatalf("LoadChatRelayDeviceID = (%q, %v), want device id", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "chat_relay_device_id"); !ok || stored != "dev_123" {
+		t.Fatalf("stored device id = (%q, %v), want chat_relay_device_id", stored, ok)
+	}
+
+	if err := mgr.SaveChatRelayDeviceID(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadChatRelayDeviceID(apiURL)
+	if ok || got != "" {
+		t.Fatalf("after empty save, LoadChatRelayDeviceID = (%q, %v), want empty false", got, ok)
+	}
+}
+
 func TestAPITokenManager_LoadKakaoRelayBaseURL_ReadsKakaoRelayURLSecret(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",

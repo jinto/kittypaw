@@ -104,9 +104,11 @@ func (m *APITokenManager) saveOrDelete(ns, key, value string) error {
 }
 
 const (
-	chatRelayURLKey    = "chat_relay_url"
-	kakaoRelayURLKey   = "kakao_relay_url"
-	kakaoRelayWSURLKey = "kakao_relay_ws_url"
+	chatRelayURLKey         = "chat_relay_url"
+	chatRelayDeviceIDKey    = "chat_relay_device_id"
+	chatDaemonCredentialKey = "chat_daemon_credential"
+	kakaoRelayURLKey        = "kakao_relay_url"
+	kakaoRelayWSURLKey      = "kakao_relay_ws_url"
 )
 
 // SaveChatRelayURL stores the chat relay server base URL from GET /discovery.
@@ -118,6 +120,29 @@ func (m *APITokenManager) SaveChatRelayURL(apiURL, chatRelayURL string) error {
 // LoadChatRelayURL returns the stored chat relay server base URL.
 func (m *APITokenManager) LoadChatRelayURL(apiURL string) (string, bool) {
 	return m.secrets.Get(NamespaceForURL(apiURL), chatRelayURLKey)
+}
+
+// SaveChatRelayDeviceID stores the API-issued device ID used for the chat
+// relay hello frame. Empty value deletes the key.
+func (m *APITokenManager) SaveChatRelayDeviceID(apiURL, deviceID string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), chatRelayDeviceIDKey, deviceID)
+}
+
+// LoadChatRelayDeviceID returns the stored chat relay device ID.
+func (m *APITokenManager) LoadChatRelayDeviceID(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), chatRelayDeviceIDKey)
+}
+
+// SaveChatDaemonCredential stores the API-issued daemon/device credential
+// used for outbound WSS connections to the chat relay.
+// Empty value deletes the key so revoked credentials don't survive rotation.
+func (m *APITokenManager) SaveChatDaemonCredential(apiURL, credential string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), chatDaemonCredentialKey, credential)
+}
+
+// LoadChatDaemonCredential returns the stored daemon/device credential.
+func (m *APITokenManager) LoadChatDaemonCredential(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), chatDaemonCredentialKey)
 }
 
 // SaveKakaoRelayBaseURL stores the KakaoTalk relay server base URL from GET /discovery.
