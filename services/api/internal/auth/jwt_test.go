@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
@@ -132,23 +134,49 @@ func TestClaimsJSONUsesSubField(t *testing.T) {
 	}
 }
 
-// BC: legacy tokens issued via Sign (no aud/scope/v) must still verify.
-func TestVerify_LegacyTokenWithoutAudOrScope(t *testing.T) {
-	token, err := auth.Sign("user-legacy", testSecret, 15*time.Minute)
+// Tokens issued via the bare Sign helper (no audiences/scopes) must verify
+// successfully — the only difference from SignForAudiences is empty aud/scope.
+// They still use the standard "sub" claim. This is NOT a uid-fallback.
+func TestVerify_TokenWithoutAudOrScope(t *testing.T) {
+	token, err := auth.Sign("user-bare", testSecret, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
 	claims, err := auth.Verify(token, testSecret)
 	if err != nil {
-		t.Fatalf("verify legacy: %v", err)
+		t.Fatalf("verify bare: %v", err)
 	}
-	if claims.UserID != "user-legacy" {
+	if claims.UserID != "user-bare" {
 		t.Fatalf("UserID = %q", claims.UserID)
 	}
 	if len(claims.Audience) != 0 {
-		t.Fatalf("legacy Audience must be empty, got %v", claims.Audience)
+		t.Fatalf("bare token Audience must be empty, got %v", claims.Audience)
 	}
 	if len(claims.Scope) != 0 {
-		t.Fatalf("legacy Scope must be empty, got %v", claims.Scope)
+		t.Fatalf("bare token Scope must be empty, got %v", claims.Scope)
+	}
+}
+
+// Pin the contract: tokens minted with the legacy "uid" JSON tag (no "sub")
+// MUST be rejected. There is no uid-fallback. The verifier reads the
+// standard sub claim only.
+func TestVerify_RejectsLegacyUIDOnlyToken(t *testing.T) {
+	legacy := struct {
+		LegacyUID string `json:"uid"`
+		jwt.RegisteredClaims
+	}{
+		LegacyUID: "user-old",
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, legacy)
+	signed, err := token.SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatalf("sign legacy: %v", err)
+	}
+	if _, err := auth.Verify(signed, testSecret); err == nil {
+		t.Fatal("expected Verify to reject token with only uid (no sub)")
 	}
 }
