@@ -68,6 +68,33 @@ func displayWidth(s string) int {
 	return runewidth.StringWidth(s)
 }
 
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout pipe writer: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read stdout pipe: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close stdout pipe reader: %v", err)
+	}
+	return buf.String()
+}
+
 // AC-1: autoChatEligible truth table — gates auto-entry on (stdin+stdout TTY)
 // AND (provider=="") AND (!noChat). Non-interactive or opt-out paths must
 // return false without prompting the user.
@@ -347,6 +374,23 @@ func TestRunWizardUsesNamedAccountSecrets(t *testing.T) {
 		t.Fatalf("APIServerURL = %q, want %q", w.APIServerURL, core.DefaultAPIServerURL)
 	}
 	mustNotExist(t, filepath.Join(root, "accounts", "default", "secrets.json"))
+}
+
+func TestWizardAPIServerLoginDefaultsToYes(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+
+	out := captureStdout(t, func() {
+		var w core.WizardResult
+		wizardAPIServer(bufio.NewScanner(strings.NewReader("n\n")), "alice", &w)
+		if w.APIServerURL != "" {
+			t.Fatalf("APIServerURL = %q, want empty when login is declined", w.APIServerURL)
+		}
+	})
+
+	if !strings.Contains(out, "  > Login? (Y/n):") {
+		t.Fatalf("login prompt = %q, want default-yes hint", out)
+	}
 }
 
 func TestRunSetupPassesResolvedAccountToWizard(t *testing.T) {

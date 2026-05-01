@@ -681,7 +681,7 @@ func wizardAPIServer(scanner *bufio.Scanner, accountID string, w *core.WizardRes
 		return
 	}
 
-	if !promptYesNo(scanner, "  > Login?", false) {
+	if !promptYesNo(scanner, "  > Login?", true) {
 		return
 	}
 
