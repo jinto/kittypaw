@@ -231,6 +231,12 @@ func channelHint(channelName string) string {
 		return `## Output format (Discord)
 - Use Discord markdown: **bold**, *italic*, ~~strike~~, ` + "`code`" + `.
 - Code blocks with language hints are supported.`
+	case "kakao_talk":
+		return `## Output format (KakaoTalk)
+- You are already replying in the current KakaoTalk chat.
+- ` + "`return value`" + ` → engine sends value back to this current KakaoTalk chat automatically.
+- Do not say KakaoTalk is unavailable, not connected, or only available through Telegram/Slack/Discord when the current channel is KakaoTalk.
+- For images, call Image.generate(prompt) and return a markdown image so the channel can send it as an image.`
 	default:
 		return ""
 	}
@@ -369,7 +375,7 @@ func buildSkillsSection(baseDir string) string {
 	}
 	lines = append(lines, "- Relative File paths are inside the configured workspace. Use `File.write(\"memo.txt\", content)` to write `<workspace>/memo.txt`; use absolute paths only when the user gives one.")
 	lines = append(lines, "- For user image-generation requests, call Image.generate(prompt) first. Do not claim image generation is unavailable, missing, or unconfigured unless Image.generate returns an error.")
-	lines = append(lines, "- Image.generate guard: `const img = Image.generate(prompt); if (img.error || !img.url) return \"이미지 생성 실패: \"+(img.error || \"결과 URL이 비어 있어요\"); return img.url;` Use `img.url`; `img.imageUrl` is only a compatibility alias.")
+	lines = append(lines, "- Image.generate guard: `const img = Image.generate(prompt); if (img.error || !img.url) return \"이미지 생성 실패: \"+(img.error || \"결과 URL이 비어 있어요\"); return \"이미지를 생성했어요.\\n\\n![generated image](\"+img.url+\")\";` Use `img.url`; `img.imageUrl` is only a compatibility alias.")
 	lines = append(lines, "- console.log(...args) — Log output (for debugging)")
 
 	// Append installed user skills + packages (callable via Skill.run).

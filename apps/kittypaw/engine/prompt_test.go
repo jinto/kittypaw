@@ -44,7 +44,7 @@ func TestBuildSkillsSection_ImageGuardGuidance(t *testing.T) {
 	for _, phrase := range []string{
 		"Image.generate",
 		"img.error || !img.url",
-		"img.url",
+		"![generated image]",
 		"img.imageUrl",
 		"Do not claim image generation is unavailable",
 		"unless Image.generate returns an error",
@@ -274,6 +274,7 @@ func TestChannelHint_KnownChannels(t *testing.T) {
 		{"desktop", "CLI"},
 		{"slack", "Slack"},
 		{"discord", "Discord"},
+		{"kakao_talk", "KakaoTalk"},
 	}
 	for _, tt := range tests {
 		hint := channelHint(tt.channel)
@@ -302,6 +303,21 @@ func TestChannelHint_TelegramDispatch(t *testing.T) {
 	}
 	if !strings.Contains(hint, "return null") {
 		t.Error("telegram hint missing duplicate message avoidance")
+	}
+}
+
+func TestChannelHint_KakaoTalkCurrentChatAndImages(t *testing.T) {
+	hint := channelHint("kakao_talk")
+	for _, phrase := range []string{
+		"return value",
+		"current KakaoTalk chat",
+		"Do not say KakaoTalk is unavailable",
+		"images",
+		"Image.generate",
+	} {
+		if !strings.Contains(hint, phrase) {
+			t.Fatalf("kakao_talk hint missing %q:\n%s", phrase, hint)
+		}
 	}
 }
 
