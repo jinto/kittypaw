@@ -1,0 +1,216 @@
+package identity
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/kittypaw-app/kittychat/internal/broker"
+	"github.com/kittypaw-app/kittychat/internal/openai"
+)
+
+const (
+	AudienceKittyChat  = "kittychat"
+	CredentialVersion1 = 1
+)
+
+type Scope string
+
+const (
+	ScopeChatRelay     Scope = "chat:relay"
+	ScopeModelsRead    Scope = "models:read"
+	ScopeDaemonConnect Scope = "daemon:connect"
+)
+
+var ErrUnauthorized = errors.New("unauthorized")
+
+type APIClientClaims struct {
+	Subject   string
+	Audience  string
+	Version   int
+	Scopes    []Scope
+	UserID    string
+	DeviceID  string
+	AccountID string
+}
+
+func (c APIClientClaims) Principal() openai.Principal {
+	return openai.Principal{
+		UserID:    c.UserID,
+		DeviceID:  c.DeviceID,
+		AccountID: c.AccountID,
+	}
+}
+
+type DeviceClaims struct {
+	Subject         string
+	Audience        string
+	Version         int
+	Scopes          []Scope
+	UserID          string
+	DeviceID        string
+	LocalAccountIDs []string
+}
+
+func (c DeviceClaims) Principal() broker.DevicePrincipal {
+	return broker.DevicePrincipal{
+		UserID:          c.UserID,
+		DeviceID:        c.DeviceID,
+		LocalAccountIDs: append([]string(nil), c.LocalAccountIDs...),
+	}
+}
+
+type CredentialVerifier interface {
+	VerifyAPIClient(ctx context.Context, token string) (APIClientClaims, error)
+	VerifyDevice(ctx context.Context, token string) (DeviceClaims, error)
+}
+
+type MemoryCredentialVerifier struct {
+	mu      sync.RWMutex
+	api     map[string]APIClientClaims
+	devices map[string]DeviceClaims
+}
+
+func NewMemoryCredentialVerifier() *MemoryCredentialVerifier {
+	return &MemoryCredentialVerifier{
+		api:     make(map[string]APIClientClaims),
+		devices: make(map[string]DeviceClaims),
+	}
+}
+
+func (v *MemoryCredentialVerifier) AddAPIClient(token string, claims APIClientClaims) error {
+	if token == "" {
+		return fmt.Errorf("api token is required")
+	}
+	if err := validateAPIClientClaims(claims); err != nil {
+		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.api[token] = cloneAPIClientClaims(claims)
+	return nil
+}
+
+func (v *MemoryCredentialVerifier) AddDevice(token string, claims DeviceClaims) error {
+	if token == "" {
+		return fmt.Errorf("device token is required")
+	}
+	if err := validateDeviceClaims(claims); err != nil {
+		return err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.devices[token] = cloneDeviceClaims(claims)
+	return nil
+}
+
+func (v *MemoryCredentialVerifier) VerifyAPIClient(ctx context.Context, token string) (APIClientClaims, error) {
+	if err := ctx.Err(); err != nil {
+		return APIClientClaims{}, err
+	}
+	if token == "" {
+		return APIClientClaims{}, ErrUnauthorized
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	claims, ok := v.api[token]
+	if !ok {
+		return APIClientClaims{}, ErrUnauthorized
+	}
+	return cloneAPIClientClaims(claims), nil
+}
+
+func (v *MemoryCredentialVerifier) VerifyDevice(ctx context.Context, token string) (DeviceClaims, error) {
+	if err := ctx.Err(); err != nil {
+		return DeviceClaims{}, err
+	}
+	if token == "" {
+		return DeviceClaims{}, ErrUnauthorized
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	claims, ok := v.devices[token]
+	if !ok {
+		return DeviceClaims{}, ErrUnauthorized
+	}
+	return cloneDeviceClaims(claims), nil
+}
+
+func validateAPIClientClaims(claims APIClientClaims) error {
+	if err := validateCommonClaims(claims.Subject, claims.Audience, claims.Version, claims.Scopes); err != nil {
+		return err
+	}
+	if claims.UserID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	if claims.DeviceID == "" {
+		return fmt.Errorf("device_id is required")
+	}
+	if claims.AccountID == "" {
+		return fmt.Errorf("account_id is required")
+	}
+	return nil
+}
+
+func validateDeviceClaims(claims DeviceClaims) error {
+	if err := validateCommonClaims(claims.Subject, claims.Audience, claims.Version, claims.Scopes); err != nil {
+		return err
+	}
+	if claims.UserID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+	if claims.DeviceID == "" {
+		return fmt.Errorf("device_id is required")
+	}
+	if len(claims.LocalAccountIDs) == 0 {
+		return fmt.Errorf("at least one local account is required")
+	}
+	for _, accountID := range claims.LocalAccountIDs {
+		if accountID == "" {
+			return fmt.Errorf("local account id is required")
+		}
+	}
+	return nil
+}
+
+func validateCommonClaims(subject, audience string, version int, scopes []Scope) error {
+	if subject == "" {
+		return fmt.Errorf("subject is required")
+	}
+	if audience != AudienceKittyChat {
+		return fmt.Errorf("audience must be %q", AudienceKittyChat)
+	}
+	if version != CredentialVersion1 {
+		return fmt.Errorf("credential version must be %d", CredentialVersion1)
+	}
+	if len(scopes) == 0 {
+		return fmt.Errorf("at least one scope is required")
+	}
+	for _, scope := range scopes {
+		if !knownScope(scope) {
+			return fmt.Errorf("unknown scope %q", scope)
+		}
+	}
+	return nil
+}
+
+func knownScope(scope Scope) bool {
+	switch scope {
+	case ScopeChatRelay, ScopeModelsRead, ScopeDaemonConnect:
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneAPIClientClaims(claims APIClientClaims) APIClientClaims {
+	claims.Scopes = append([]Scope(nil), claims.Scopes...)
+	return claims
+}
+
+func cloneDeviceClaims(claims DeviceClaims) DeviceClaims {
+	claims.Scopes = append([]Scope(nil), claims.Scopes...)
+	claims.LocalAccountIDs = append([]string(nil), claims.LocalAccountIDs...)
+	return claims
+}
