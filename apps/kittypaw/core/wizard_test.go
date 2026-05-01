@@ -35,6 +35,44 @@ func TestResolveLLMConfig_OpenRouter(t *testing.T) {
 	}
 }
 
+func TestResolveLLMConfig_OpenAI(t *testing.T) {
+	p, m, u := ResolveLLMConfig("openai", "", "")
+	if p != "openai" {
+		t.Errorf("provider = %q, want openai", p)
+	}
+	if m != OpenAIDefaultModel {
+		t.Errorf("model = %q, want %q", m, OpenAIDefaultModel)
+	}
+	if u != "" {
+		t.Errorf("baseURL = %q, want empty", u)
+	}
+}
+
+func TestResolveLLMConfig_Gemini(t *testing.T) {
+	p, m, u := ResolveLLMConfig("gemini", "", "")
+	if p != "gemini" {
+		t.Errorf("provider = %q, want gemini", p)
+	}
+	if m != GeminiDefaultModel {
+		t.Errorf("model = %q, want %q", m, GeminiDefaultModel)
+	}
+	if u != "" {
+		t.Errorf("baseURL = %q, want empty", u)
+	}
+}
+
+func TestHostedModelChoicesStartWithDefaults(t *testing.T) {
+	if got := ClaudeModelChoices()[0]; got != ClaudeDefaultModel {
+		t.Errorf("ClaudeModelChoices()[0] = %q, want %q", got, ClaudeDefaultModel)
+	}
+	if got := OpenAIModelChoices()[0]; got != OpenAIDefaultModel {
+		t.Errorf("OpenAIModelChoices()[0] = %q, want %q", got, OpenAIDefaultModel)
+	}
+	if got := GeminiModelChoices()[0]; got != GeminiDefaultModel {
+		t.Errorf("GeminiModelChoices()[0] = %q, want %q", got, GeminiDefaultModel)
+	}
+}
+
 func TestResolveLLMConfig_Local(t *testing.T) {
 	p, m, u := ResolveLLMConfig("local", "http://myhost:1234/v1", "llama3")
 	if p != "openai" {

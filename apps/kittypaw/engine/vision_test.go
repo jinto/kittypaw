@@ -33,6 +33,11 @@ func TestResolveVisionProvider(t *testing.T) {
 			wantProv: "openai",
 		},
 		{
+			name:     "config gemini with key",
+			cfg:      core.Config{LLM: core.LLMConfig{Provider: "gemini", APIKey: "gem-key"}},
+			wantProv: "gemini",
+		},
+		{
 			name:     "env fallback anthropic",
 			cfg:      core.Config{},
 			envVars:  map[string]string{"ANTHROPIC_API_KEY": "sk-env-ant"},
@@ -105,6 +110,11 @@ func TestResolveImageProvider(t *testing.T) {
 			name:     "config openai with key",
 			cfg:      core.Config{LLM: core.LLMConfig{Provider: "openai", APIKey: "sk-oai"}},
 			wantProv: "openai",
+		},
+		{
+			name:     "config gemini with key",
+			cfg:      core.Config{LLM: core.LLMConfig{Provider: "gemini", APIKey: "gem-key"}},
+			wantProv: "gemini",
 		},
 		{
 			name:     "env openai",

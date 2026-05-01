@@ -167,19 +167,9 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		}
 	}
 
-	defaultIdx := 1
-	if existing != nil {
-		switch {
-		case existing.LLM.Provider == "anthropic":
-			defaultIdx = 1
-		case existing.LLM.BaseURL == core.OpenRouterBaseURL:
-			defaultIdx = 2
-		case existing.LLM.BaseURL != "":
-			defaultIdx = 3
-		}
-	}
+	defaultIdx := setupLLMDefaultIndex(existing)
 
-	choice := promptChoice(scanner, "  > ", []string{"Claude API", "OpenRouter", "Local (Ollama)"}, defaultIdx)
+	choice := promptChoice(scanner, "  > ", setupLLMProviderChoices(), defaultIdx)
 
 	var provider, apiKey, localURL, localModel string
 	switch choice {
@@ -196,10 +186,42 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		} else if apiKey != "" {
 			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
 		}
-		claudeModels := []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-20250514"}
+		claudeModels := setupLLMModelChoices(provider)
 		modelIdx := promptChoice(scanner, "  Model > ", claudeModels, 1)
 		localModel = claudeModels[modelIdx-1]
 	case 2:
+		provider = "openai"
+		var err error
+		apiKey, err = promptPassword("  API Key: ")
+		if err != nil {
+			return fmt.Errorf("read API key: %w", err)
+		}
+		if apiKey == "" && existing != nil && existing.LLM.Provider == "openai" && existing.LLM.BaseURL == "" {
+			apiKey = existing.LLM.APIKey
+			fmt.Println("  (keeping existing key)")
+		} else if apiKey != "" {
+			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+		}
+		openAIModels := setupLLMModelChoices(provider)
+		modelIdx := promptChoice(scanner, "  Model > ", openAIModels, 1)
+		localModel = openAIModels[modelIdx-1]
+	case 3:
+		provider = "gemini"
+		var err error
+		apiKey, err = promptPassword("  API Key: ")
+		if err != nil {
+			return fmt.Errorf("read API key: %w", err)
+		}
+		if apiKey == "" && existing != nil && existing.LLM.Provider == "gemini" {
+			apiKey = existing.LLM.APIKey
+			fmt.Println("  (keeping existing key)")
+		} else if apiKey != "" {
+			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+		}
+		geminiModels := setupLLMModelChoices(provider)
+		modelIdx := promptChoice(scanner, "  Model > ", geminiModels, 1)
+		localModel = geminiModels[modelIdx-1]
+	case 4:
 		provider = "openrouter"
 		var err error
 		apiKey, err = promptPassword("  API Key: ")
@@ -212,7 +234,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 		} else if apiKey != "" {
 			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
 		}
-	case 3:
+	case 5:
 		provider = "local"
 		defURL := core.OllamaDefaultBaseURL
 		if existing != nil && existing.LLM.BaseURL != "" && existing.LLM.BaseURL != core.OpenRouterBaseURL {
@@ -268,6 +290,43 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 	}
 
 	return nil
+}
+
+func setupLLMProviderChoices() []string {
+	return []string{"Anthropic (Claude)", "OpenAI", "Gemini", "OpenRouter", "Local (Ollama)"}
+}
+
+func setupLLMDefaultIndex(existing *core.Config) int {
+	if existing == nil {
+		return 1
+	}
+	switch {
+	case existing.LLM.Provider == "anthropic" || existing.LLM.Provider == "claude":
+		return 1
+	case (existing.LLM.Provider == "openai" || existing.LLM.Provider == "gpt") && existing.LLM.BaseURL == "":
+		return 2
+	case existing.LLM.Provider == "gemini" || existing.LLM.Provider == "google":
+		return 3
+	case existing.LLM.BaseURL == core.OpenRouterBaseURL:
+		return 4
+	case existing.LLM.BaseURL != "":
+		return 5
+	default:
+		return 1
+	}
+}
+
+func setupLLMModelChoices(provider string) []string {
+	switch strings.ToLower(provider) {
+	case "anthropic", "claude":
+		return core.ClaudeModelChoices()
+	case "openai", "gpt":
+		return core.OpenAIModelChoices()
+	case "gemini", "google":
+		return core.GeminiModelChoices()
+	default:
+		return nil
+	}
 }
 
 // ---------------------------------------------------------------------------

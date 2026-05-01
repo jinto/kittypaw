@@ -9,27 +9,37 @@ import (
 	"math"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jinto/kittypaw/core"
 )
 
 const (
-	openAIDefaultBaseURL = "https://api.openai.com/v1/chat/completions"
-	openAIDefaultWindow  = 128_000
-	openAIMaxRetries     = 3
-	openAIBaseDelay      = 1 * time.Second
+	openAIChatCompletionsURL = "https://api.openai.com/v1/chat/completions"
+	openAIResponsesURL       = "https://api.openai.com/v1/responses"
+	openAIDefaultWindow      = 128_000
+	openAIMaxRetries         = 3
+	openAIBaseDelay          = 1 * time.Second
 )
 
-// OpenAIProvider implements Provider for the OpenAI Chat Completions API.
-// It also supports any OpenAI-compatible endpoint (e.g. Ollama) via a
-// configurable base URL.
+type openAIAPIMode string
+
+const (
+	openAIAPIModeChat      openAIAPIMode = "chat"
+	openAIAPIModeResponses openAIAPIMode = "responses"
+)
+
+// OpenAIProvider implements Provider for OpenAI's Responses API by default.
+// It also supports OpenAI-compatible Chat Completions endpoints (OpenRouter,
+// Ollama, LM Studio) via a configurable base URL.
 type OpenAIProvider struct {
 	apiKey        string
 	model         string
 	maxTokens     int
 	contextWindow int
 	baseURL       string
+	apiMode       openAIAPIMode
 	client        *http.Client
 }
 
@@ -37,9 +47,19 @@ type OpenAIProvider struct {
 type OpenAIOption func(*OpenAIProvider)
 
 // WithBaseURL overrides the default OpenAI API endpoint.
+// Custom endpoints are treated as Chat Completions-compatible.
 func WithBaseURL(url string) OpenAIOption {
 	return func(p *OpenAIProvider) {
 		p.baseURL = url
+		p.apiMode = openAIAPIModeChat
+	}
+}
+
+// WithResponsesBaseURL overrides the default OpenAI Responses endpoint.
+func WithResponsesBaseURL(url string) OpenAIOption {
+	return func(p *OpenAIProvider) {
+		p.baseURL = url
+		p.apiMode = openAIAPIModeResponses
 	}
 }
 
@@ -64,7 +84,8 @@ func NewOpenAI(apiKey, model string, maxTokens int, opts ...OpenAIOption) *OpenA
 		model:         model,
 		maxTokens:     maxTokens,
 		contextWindow: openAIDefaultWindow,
-		baseURL:       openAIDefaultBaseURL,
+		baseURL:       openAIResponsesURL,
+		apiMode:       openAIAPIModeResponses,
 		client:        &http.Client{Timeout: 5 * time.Minute},
 	}
 	for _, opt := range opts {
@@ -169,15 +190,68 @@ type openAIMessage struct {
 }
 
 func (o *OpenAIProvider) buildRequestBody(messages []core.LlmMessage) map[string]any {
+	if o.apiMode == openAIAPIModeResponses {
+		return o.buildResponsesRequestBody(messages)
+	}
+	return o.buildChatRequestBody(messages)
+}
+
+func (o *OpenAIProvider) buildChatRequestBody(messages []core.LlmMessage) map[string]any {
 	apiMsgs := make([]openAIMessage, len(messages))
 	for i, m := range messages {
-		apiMsgs[i] = openAIMessage{Role: string(m.Role), Content: m.Content}
+		apiMsgs[i] = openAIMessage{Role: string(m.Role), Content: textFromMessage(m)}
 	}
 	return map[string]any{
 		"model":      o.model,
 		"max_tokens": o.maxTokens,
 		"messages":   apiMsgs,
 	}
+}
+
+type openAIResponsesInput struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+func (o *OpenAIProvider) buildResponsesRequestBody(messages []core.LlmMessage) map[string]any {
+	instructions, conversation := splitSystemMessages(messages)
+	input := make([]openAIResponsesInput, 0, len(conversation))
+	for _, m := range conversation {
+		content := textFromMessage(m)
+		if content == "" {
+			continue
+		}
+		input = append(input, openAIResponsesInput{Role: string(m.Role), Content: content})
+	}
+	body := map[string]any{
+		"model":             o.model,
+		"max_output_tokens": o.maxTokens,
+		"input":             input,
+	}
+	if instructions != "" {
+		body["instructions"] = instructions
+	}
+	return body
+}
+
+func textFromMessage(m core.LlmMessage) string {
+	if m.Content != "" {
+		return m.Content
+	}
+	var parts []string
+	for _, b := range m.ContentBlocks {
+		switch b.Type {
+		case core.BlockTypeText:
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		case core.BlockTypeToolResult:
+			if b.Content != "" {
+				parts = append(parts, b.Content)
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // --- JSON (non-streaming) response parsing ---
@@ -195,7 +269,31 @@ type openAIResponse struct {
 	Model string `json:"model"`
 }
 
+type openAIResponsesResponse struct {
+	OutputText string `json:"output_text"`
+	Output     []struct {
+		Type    string `json:"type"`
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"output"`
+	Usage *struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage"`
+	Model string `json:"model"`
+}
+
 func (o *OpenAIProvider) parseJSONResponse(r io.Reader) (*Response, error) {
+	if o.apiMode == openAIAPIModeResponses {
+		return o.parseResponsesJSONResponse(r)
+	}
+	return o.parseChatJSONResponse(r)
+}
+
+func (o *OpenAIProvider) parseChatJSONResponse(r io.Reader) (*Response, error) {
 	var resp openAIResponse
 	// Cap response body — see llmMaxResponseBytes rationale.
 	if err := json.NewDecoder(io.LimitReader(r, llmMaxResponseBytes)).Decode(&resp); err != nil {
@@ -212,6 +310,36 @@ func (o *OpenAIProvider) parseJSONResponse(r io.Reader) (*Response, error) {
 		result.Usage = &TokenUsage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
+			Model:        resp.Model,
+		}
+	}
+	return result, nil
+}
+
+func (o *OpenAIProvider) parseResponsesJSONResponse(r io.Reader) (*Response, error) {
+	var resp openAIResponsesResponse
+	if err := json.NewDecoder(io.LimitReader(r, llmMaxResponseBytes)).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("openai: decode response: %w", err)
+	}
+
+	content := resp.OutputText
+	if content == "" {
+		var parts []string
+		for _, item := range resp.Output {
+			for _, part := range item.Content {
+				if part.Text != "" {
+					parts = append(parts, part.Text)
+				}
+			}
+		}
+		content = strings.Join(parts, "")
+	}
+
+	result := &Response{Content: content}
+	if resp.Usage != nil {
+		result.Usage = &TokenUsage{
+			InputTokens:  resp.Usage.InputTokens,
+			OutputTokens: resp.Usage.OutputTokens,
 			Model:        resp.Model,
 		}
 	}

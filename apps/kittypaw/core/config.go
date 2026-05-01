@@ -358,7 +358,7 @@ type ProfileConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		LLM: LLMConfig{
-			Model:     "claude-sonnet-4-20250514",
+			Model:     ClaudeDefaultModel,
 			MaxTokens: 4096,
 		},
 		Sandbox: SandboxConfig{
