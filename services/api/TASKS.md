@@ -238,7 +238,7 @@
 
 **Operational Checklist** (L1.A 머지 후):
 - [ ] **L2 plan trigger by 2026-05-16 (D7 SLA, L1.A=`3c28f6a` 2026-05-02 머지 + 14일)** — `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
-- [x] **L3 prod smoke ✅ (Plan 10)** — `deploy/smoke.sh` 신규. 17 endpoint cover (/health + /discovery + 14 외부 API + /v1/geo/resolve). `make smoke` / `fab smoke` / `fab deploy` 종결부 자동 호출. 첫 검증에서 routing 회귀 (Air `/v1/air/airkorea/...` prefix) 즉시 catch — integration test 가 못 잡는 layer 증명.
+- [x] **L3 prod smoke ✅ (Plan 10)** — `deploy/smoke.sh` 신규. **26/26 endpoint 100% cover** (Plan 10 확장 후). `make smoke` / `fab smoke` / `fab deploy` 종결부 자동 호출. 두 routing 회귀 sequential catch (Air `/v1/air/airkorea/...`, OAuth `/auth/*` 두 prefix 가정 실패) — integration test 가 못 잡는 layer 증명.
 - [ ] **T0 spike** — `data.go.kr` 5 service key 별 daily limit 확인 (HOLIDAY/WEATHER/AIRKOREA + KASI 음력/일출). 결과를 plan v2 §D3 표에 record. L2 plan prerequisite.
 - [x] **L1.B (airkorea 5 endpoint) + L1.C (weather UltraShort 2)** — Plan 9 ✅ (이번 세션). 외부 API 의존 endpoint cover 100%.
 - [ ] **L1.D (geo HTTP layer)** ⏸️ 별도 plan — DB+API hybrid 재설계 필요. plan v2 §D6 박제. 행안부 좌표 + PR-2 T2/T3 머지 후 trigger.
@@ -267,18 +267,67 @@
 > Goal: prod URL (`api.kittypaw.app`) 대상 17 endpoint 자동 smoke
 > 직접 동기: integration test (in-process httptest) 가 routing/배포 회귀 못 catch — Plan 9 까지의 100% integration cover 도 prefix 잘못은 무방비
 
-- [x] **`deploy/smoke.sh` 신규** — 17 endpoint cover. HTTP 200 + envelope resultCode=00 (KASI/KMA/AirKorea) + lat/lon/name_matched (geo). anon 5rpm/IP rate-limit auto-retry (429 → 61s wait → retry once). KASI/KMA rate-limit (resultCode=22/99) = warn 처리.
+- [x] **`deploy/smoke.sh` 신규 (확장 후 26 endpoint)** — /health + /discovery (2) + Calendar (3) + Almanac (3) + Weather (3) + Air (5) + Geo (1) + OAuth endpoint-level (9) = 26. HTTP 200 + envelope resultCode=00 (KASI/KMA/AirKorea) + lat/lon/name_matched (geo) + status code (OAuth: 302/400/401). anon 5rpm/IP rate-limit auto-retry (429 → 61s wait → retry once).
 
 - [x] **Makefile `smoke` target** — `make smoke` 단독 호출.
 
 - [x] **fabfile.py 통합** — `fab deploy` 종결부 자동 smoke + 별도 `fab smoke` task.
 
-- [x] **검증** — 17/17 PASS against api.kittypaw.app. 첫 시도에서 Air prefix 회귀 catch (`/v1/air/airkorea/...`) — integration test layer 가 못 잡은 routing 회귀.
+- [x] **검증** — 26/26 PASS against api.kittypaw.app (확장 후). 두 routing 회귀 sequential catch — Air prefix (`/v1/air/airkorea/...`), OAuth prefix (`/auth/*` not `/v1/auth/*`). 둘 다 integration test (in-process httptest) 가 못 잡은 layer.
 
 **비범위**:
-- OAuth 10 endpoint — browser flow, 별도 plan
+- **OAuth full browser flow** (Playwright/headless, login 성공까지 검증) — 별도 plan. 현재 endpoint-level liveness 만 cover.
 - prod 자동 smoke 의 CI 통합 — L2 plan (D7 SLA 2026-05-16) 영역
 - Cloudflare 우회 / 운영자 IP 화이트리스트 — 운영 시 검토
+
+## Plan 11: B0 — testfixture-only (γ option) ✅
+
+> Spec: `.claude/plans/test-coverage-completion.md` (γ compromise, 사용자 결정 2026-05-02)
+> Goal: `internal/auth/testfixture/` 신규 sub-package — `IssueTestJWT` + `SeedTestUser`. Plan 12·13·14 가 모두 의존하는 helper 분리 PR.
+> Critic 권고 기반 — 머지 후 12·13·14 병렬 가능. 본 plan 자체는 production 코드 변경 0.
+
+- [x] **T1: package skeleton + RED** — `fixture.go` stub + `fixture_test.go` (3 case: round-trip + DefaultTTL + CustomTTL). 3개 모두 fail 확인.
+
+- [x] **T2: GREEN — `IssueTestJWT`** — `auth.Sign` 재사용. ttl=0 시 `15*time.Minute` 기본값. 3 case pass. **시그니처 정정** (plan 박제 vs 실 코드): `secret string`, `userID string` (실 `auth.Sign` + `User.ID` 가 string).
+
+- [x] **T3: GREEN — `SeedTestUser`** — `store.CreateOrUpdate` 호출 (실 시그니처). `fixture_pg_integration_test.go` (`//go:build integration`) — `DATABASE_URL` skip + LiveDB seed + Idempotent (UnixNano provider_id 로 collision X). teardown 은 `UserStore.Delete` 부재로 omit, `doc.go` 에 명시.
+
+- [x] **T4: doc + commit gate** — `doc.go` package doc 작성. `make build` ✓ / `make lint` 0 issues / `make test` PASS. 사용자 허락 후 commit (이 commit).
+
+## Plan 12: A — L1.D + L3 geo 보강 (B0 ✅ 머지 후 ← 활성, 병렬 13·14)
+
+> Spec: `.claude/plans/test-coverage-completion.md` Plan A 섹션
+> kickoff: B0 머지 직후 별도 `ina:plan` 호출하여 7-task TDD 분해.
+> 핵심: 7 case (exact / alias_override_priority self-seed / fuzzy / subway_type_hint / out_of_korea / missing_q / input_too_long) + smoke.sh 4 case 확장.
+
+- [ ] kickoff 시 ina:plan trigger
+
+## Plan 13: B1 — L1.E /auth/me + refresh rotation (B0 ✅ 머지 후 ← 활성, 병렬 12·14)
+
+> Spec: `.claude/plans/test-coverage-completion.md` Plan B1 섹션
+> kickoff: B0 머지 직후 별도 `ina:plan` 호출.
+> 핵심: `me_integration_test.go` (3 case: no token 401 / valid 200 / expired 401) + `refresh_rotation_integration_test.go` (refresh → 새 access+refresh, 이전 refresh reuse 시 reuse-detected 401 + 모든 user token 무효화). **mock OAuth provider 미사용** (B2 deferred).
+
+- [ ] kickoff 시 ina:plan trigger
+
+## Plan 14: C′ — L1.F cross-cutting 축소판 (B0 ✅ 머지 후 ← 활성, 병렬 12·13)
+
+> Spec: `.claude/plans/test-coverage-completion.md` Plan C′ 섹션
+> kickoff: B0 머지 직후 별도 `ina:plan` 호출.
+> 핵심: cache_stale Warning:110 (airkorea 1 case) + ratelimit (anon 5rpm 429 + auth 60rpm 패스 + RealIP/XFF 격리 4 case). fakeClock window reset 은 deferred.
+
+- [ ] kickoff 시 ina:plan trigger
+
+## Plan 15: B2 — OAuth e2e mock provider (deferred)
+
+> γ deferred — Google/GitHub OAuth provider spec drift 빈도 낮음 + mock provider 영구 부채 회피.
+> 재개 트리거: prod OAuth 회귀 발생 또는 다중 provider 추가 시.
+
+## Plan 16: D — L2 staging (deferred + 14d SLA 폐기)
+
+> γ deferred — 1인 메인테이너 + private 환경에서 라우터 wiring 회귀 발생률 ≈ 0.
+> `smoke-3-layer.md` 14d SLA 박제 명시 폐기 (CEO ITERATE 채택, sunk cost fallacy).
+> 재개 트리거: 라우터 wiring 회귀 발생 또는 외부 운영 인력 추가 시.
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
