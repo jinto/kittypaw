@@ -52,3 +52,7 @@ target/
 
 # Autopilot pipeline state (ephemeral, per-session)
 .state/
+
+# Local eval outputs
+eval/secretary_smoke/results/
+eval/user_vision_flows/results/

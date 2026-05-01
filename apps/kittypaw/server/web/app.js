@@ -7,11 +7,15 @@ const App = {
   authRequired: false,
   accountID: null,
   isDefault: true,
+  chatOnly: false,
+  settingsSurface: false,
   activeTab: null,
   _dashboardInterval: null,
 
   async init() {
     this.root = document.getElementById('app');
+    this.chatOnly = this.isChatSurface();
+    this.settingsSurface = this.isSettingsSurface();
     const auth = await this.checkAuth();
     this.authRequired = !!auth.auth_required;
     this.accountID = auth.account_id || null;
@@ -20,15 +24,44 @@ const App = {
       this.showLogin();
       return;
     }
+    if (!this.chatOnly && !this.settingsSurface) {
+      this.redirectToSettingsSurface();
+      return;
+    }
+    await this.startCurrentSurface();
+  },
+
+  isChatSurface() {
+    return location.pathname === '/chat' || location.pathname.startsWith('/chat/');
+  },
+
+  isSettingsSurface() {
+    return location.pathname === '/_settings' || location.pathname.startsWith('/_settings/');
+  },
+
+  redirectToSettingsSurface() {
+    location.replace('/_settings');
+  },
+
+  async startCurrentSurface() {
+    if (this.chatOnly) {
+      await this.startChatFlow();
+      return;
+    }
     await this.startMainFlow();
   },
 
   async startMainFlow() {
     const status = await apiRaw('/api/setup/status');
     if (!status.completed) {
-      Onboarding.start(this.root, status);
+      this.showCliSetupRequired(status);
     } else {
-      await this.bootstrap();
+      if (!this.authRequired || this.isDefault) {
+        await this.bootstrap();
+      } else {
+        this.apiKey = null;
+        this.wsUrl = null;
+      }
       this.showShell();
     }
   },
@@ -37,6 +70,24 @@ const App = {
     const data = await apiRaw('/api/bootstrap');
     this.apiKey = data.api_key;
     this.wsUrl = data.ws_url;
+  },
+
+  async bootstrapChat() {
+    const data = await apiRaw('/api/chat/bootstrap');
+    this.apiKey = null;
+    this.wsUrl = data.ws_url;
+    this.accountID = data.account_id || this.accountID;
+    this.isDefault = data.is_default !== false;
+    return data;
+  },
+
+  async startChatFlow() {
+    const data = await this.bootstrapChat();
+    if (data.setup_completed === false) {
+      this.showChatSetupRequired();
+      return;
+    }
+    this.showChatSurface();
   },
 
   async checkAuth() {
@@ -103,7 +154,11 @@ const App = {
         this.authRequired = true;
         this.accountID = auth.account_id || null;
         this.isDefault = auth.is_default !== false;
-        await this.startMainFlow();
+        if (this.chatOnly) {
+          await this.startCurrentSurface();
+        } else {
+          location.assign('/_settings');
+        }
       } catch (e) {
         error.textContent = e.message === 'default account required'
           ? 'This Web UI is currently available only for the default account.'
@@ -127,14 +182,46 @@ const App = {
     this.activeTab = null;
   },
 
+  showChatSurface() {
+    this._teardown();
+    this.root.style.display = 'block';
+    this.root.style.alignItems = '';
+    this.root.style.justifyContent = '';
+    this.root.innerHTML = `
+      <main class="chat-surface">
+        <div id="chat-panel"></div>
+      </main>`;
+    const chatPanel = document.getElementById('chat-panel');
+    chatPanel.style.display = 'flex';
+    Chat.mount(chatPanel);
+    this._chatMounted = true;
+    this.activeTab = 'chat';
+  },
+
+  showChatSetupRequired() {
+    this._teardown();
+    this.root.style.cssText = '';
+    this.root.innerHTML = `
+      <div class="card card--center">
+        <h1>Kitty<span class="accent">Paw</span></h1>
+        <p class="sub mt-16">Run <code class="inline-code">kittypaw setup</code> in your terminal before starting web chat.</p>
+      </div>`;
+  },
+
+  showCliSetupRequired() {
+    this._teardown();
+    this.root.style.cssText = '';
+    this.root.innerHTML = `
+      <div class="card card--center">
+        <h1>Kitty<span class="accent">Paw</span></h1>
+        <p class="sub mt-16">Run <code class="inline-code">kittypaw setup</code> in your terminal to finish local setup.</p>
+      </div>`;
+  },
+
   showShell() {
     this._teardown();
-    const fullShell = !this.authRequired || this.isDefault;
-    const adminNav = fullShell
-      ? '<button class="nav-item" data-tab="dashboard">Dashboard</button><button class="nav-item" data-tab="skills">Skills</button><button class="nav-item" data-tab="settings">Settings</button>'
-      : '';
-    const wizardButton = fullShell
-      ? '<button class="sidebar-wizard-btn" id="wizard-btn">\uC124\uC815 \uC704\uC790\uB4DC</button>'
+    const adminNav = this.isDefault
+      ? '<button class="nav-item" data-tab="dashboard">Dashboard</button><button class="nav-item" data-tab="skills">Skills</button>'
       : '';
 
     // Override #app centering from stylesheet
@@ -146,16 +233,14 @@ const App = {
         <aside class="sidebar">
           <div class="sidebar-logo">Kitty<span class="accent">Paw</span></div>
           <nav class="sidebar-nav">
-            <button class="nav-item" data-tab="chat">Chat</button>
             ${adminNav}
+            <button class="nav-item" data-tab="settings">Settings</button>
           </nav>
           <div class="sidebar-footer">
-            ${wizardButton}
             <span class="sidebar-version">v0.1.0</span>
           </div>
         </aside>
         <main class="main-content">
-          <div id="chat-panel" style="display:none"></div>
           <div id="tab-content"></div>
         </main>
       </div>`;
@@ -164,10 +249,7 @@ const App = {
       btn.addEventListener('click', () => this.switchTab(btn.dataset.tab));
     });
 
-    const wizardBtn = document.getElementById('wizard-btn');
-    if (wizardBtn) wizardBtn.addEventListener('click', () => this.launchWizard());
-
-    this.switchTab('chat');
+    this.switchTab('settings');
   },
 
   switchTab(tab) {
@@ -184,44 +266,22 @@ const App = {
       this._dashboardInterval = null;
     }
 
-    const chatPanel = document.getElementById('chat-panel');
     const content = document.getElementById('tab-content');
 
     // Hide/destroy previous
-    if (prev === 'chat') {
-      chatPanel.style.display = 'none';
-    } else if (prev) {
+    if (prev) {
       content.innerHTML = '';
     }
 
     // Show/mount new
-    if (tab === 'chat') {
-      chatPanel.style.display = 'flex';
-      content.style.display = 'none';
-      if (!this._chatMounted) {
-        Chat.mount(chatPanel);
-        this._chatMounted = true;
-      }
+    content.style.display = '';
+    if (tab === 'dashboard') {
+      this._showDashboard(content);
+    } else if (tab === 'skills') {
+      Skills.mount(content);
     } else {
-      content.style.display = '';
-      if (tab === 'dashboard') {
-        this._showDashboard(content);
-      } else if (tab === 'skills') {
-        Skills.mount(content);
-      } else if (tab === 'settings') {
-        Settings.mount(content);
-      }
+      Settings.mount(content);
     }
-  },
-
-  async launchWizard() {
-    await apiPost('/api/setup/reset', {});
-    this._teardown();
-    this.apiKey = null;
-    // Restore #app centering (undo showShell inline overrides)
-    this.root.style.cssText = '';
-    const status = await apiRaw('/api/setup/status');
-    Onboarding.start(this.root, status);
   },
 
   _showDashboard(container) {

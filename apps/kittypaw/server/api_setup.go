@@ -32,15 +32,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scheme := "ws"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "wss"
-	}
-	wsURL := fmt.Sprintf("%s://%s/ws", scheme, r.Host)
-
 	writeJSON(w, http.StatusOK, map[string]any{
 		"api_key": apiKey,
-		"ws_url":  wsURL,
+		"ws_url":  websocketURL(r, "/ws"),
 	})
 }
 
@@ -334,9 +328,9 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, r *http.Request
 	}
 	mgr := core.NewAPITokenManager("", secrets)
 
-	relayURL, ok := mgr.LoadRelayURL(apiURL)
+	relayURL, ok := mgr.LoadKakaoRelayBaseURL(apiURL)
 	if !ok || relayURL == "" {
-		writeError(w, http.StatusServiceUnavailable, "relay URL not configured — login to the API server first")
+		writeError(w, http.StatusServiceUnavailable, "Kakao relay URL not configured — login to the API server first")
 		return
 	}
 
@@ -347,7 +341,7 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, r *http.Request
 	}
 
 	wsURL := core.WSURLFromRelay(relayURL, reg.Token)
-	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
+	if err := mgr.SaveKakaoRelayWSURL(apiURL, wsURL); err != nil {
 		writeError(w, http.StatusInternalServerError, "save kakao ws url: "+err.Error())
 		return
 	}

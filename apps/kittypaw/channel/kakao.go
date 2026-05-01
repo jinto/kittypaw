@@ -61,7 +61,7 @@ func TestKakaoRelay(ctx context.Context, wsURL string) error {
 }
 
 // NewKakao creates a KakaoChannel that connects via WebSocket to the relay.
-// wsURL is the full WebSocket URL (e.g. wss://relay.kittypaw.app/ws/{token}).
+// wsURL is the full WebSocket URL (e.g. wss://kakao.kittypaw.app/ws/{token}).
 // accountID is stamped on every emitted Event for AccountRouter dispatch.
 func NewKakao(accountID, wsURL string) *KakaoChannel {
 	return &KakaoChannel{accountID: accountID, wsEndpoint: wsURL}

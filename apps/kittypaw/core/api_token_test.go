@@ -201,30 +201,56 @@ func TestAPITokenManager_SaveAndLoadSkillsRegistryURL(t *testing.T) {
 	}
 }
 
-func TestAPITokenManager_SaveRelayURL_EmptyDeletes(t *testing.T) {
+func TestAPITokenManager_SaveKakaoRelayBaseURL_EmptyDeletes(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",
 		data: make(map[string]map[string]string),
 	}
 	mgr := NewAPITokenManager("", secrets)
 	apiURL := "http://localhost:8080"
+	ns := NamespaceForURL(apiURL)
 
 	// First store a real value.
-	if err := mgr.SaveRelayURL(apiURL, "https://relay.kittypaw.app"); err != nil {
+	if err := mgr.SaveKakaoRelayBaseURL(apiURL, "https://kakao.kittypaw.app"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := mgr.LoadRelayURL(apiURL)
-	if !ok || got != "https://relay.kittypaw.app" {
-		t.Fatalf("setup: LoadRelayURL = (%q, %v)", got, ok)
+	got, ok := mgr.LoadKakaoRelayBaseURL(apiURL)
+	if !ok || got != "https://kakao.kittypaw.app" {
+		t.Fatalf("setup: LoadKakaoRelayBaseURL = (%q, %v)", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "kakao_relay_url"); !ok || stored != "https://kakao.kittypaw.app" {
+		t.Fatalf("SaveKakaoRelayBaseURL stored key = (%q, %v), want kakao_relay_url", stored, ok)
+	}
+	if stale, ok := secrets.Get(ns, "relay_url"); ok || stale != "" {
+		t.Fatalf("SaveKakaoRelayBaseURL must not write legacy relay_url, got (%q, %v)", stale, ok)
 	}
 
 	// Empty save must delete the key so stale URLs don't persist across relay migrations.
-	if err := mgr.SaveRelayURL(apiURL, ""); err != nil {
+	if err := mgr.SaveKakaoRelayBaseURL(apiURL, ""); err != nil {
 		t.Fatal(err)
 	}
-	got, ok = mgr.LoadRelayURL(apiURL)
+	got, ok = mgr.LoadKakaoRelayBaseURL(apiURL)
 	if ok || got != "" {
 		t.Errorf("after empty save, Load = (%q, %v), want (\"\", false)", got, ok)
+	}
+}
+
+func TestAPITokenManager_LoadKakaoRelayBaseURL_ReadsKakaoRelayURLSecret(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "http://localhost:8080"
+	ns := NamespaceForURL(apiURL)
+
+	if err := secrets.Set(ns, "kakao_relay_url", "https://kakao.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := mgr.LoadKakaoRelayBaseURL(apiURL)
+	if !ok || got != "https://kakao.kittypaw.app" {
+		t.Fatalf("LoadKakaoRelayBaseURL = (%q, %v), want kakao_relay_url value", got, ok)
 	}
 }
 

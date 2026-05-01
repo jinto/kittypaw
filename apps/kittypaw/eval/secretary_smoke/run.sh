@@ -16,30 +16,86 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EVAL_DIR="$ROOT_DIR/eval/secretary_smoke"
 FIX_DIR="$EVAL_DIR/fixtures"
 OUT_DIR="$EVAL_DIR/results"
+SUMMARY="$OUT_DIR/summary.md"
+LOCK_DIR="$EVAL_DIR/.runner.lock"
+KITTY_BIN="${KITTY_BIN:-$ROOT_DIR/bin/kittypaw}"
+JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
+RUN_ACCOUNT="${KITTYPAW_ACCOUNT:-auto}"
+RUN_PROVIDER="${KITTYPAW_EVAL_PROVIDER:-configured}"
+RUN_MODEL="${KITTYPAW_EVAL_MODEL:-configured}"
+RUN_DAEMON="${KITTYPAW_EVAL_DAEMON:-local}"
+FINISHED=0
+
+mkdir -p "$OUT_DIR"
+
+write_summary_header() {
+  {
+    echo "# Secretary Smoke Results"
+    echo
+    echo "Date: $(date -u +'%Y-%m-%d %H:%M UTC')"
+    echo "State: RUNNING"
+    echo "Provider: $RUN_PROVIDER"
+    echo "Model: $RUN_MODEL"
+    echo "Judge model: $JUDGE_MODEL"
+    echo "Account: $RUN_ACCOUNT"
+    echo "Daemon: $RUN_DAEMON"
+    echo
+  } > "$SUMMARY"
+}
+
+cleanup() {
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+finish() {
+  local state="$1"
+  local code="$2"
+  local detail="${3:-}"
+  FINISHED=1
+  {
+    echo
+    echo "State: $state"
+    [[ -n "$detail" ]] && echo "Detail: $detail"
+  } >> "$SUMMARY"
+  cleanup
+  echo "STATE: $state"
+  [[ -n "$detail" ]] && echo "$detail" >&2
+  exit "$code"
+}
+
+trap 'rc=$?; if (( rc != 0 && FINISHED == 0 )); then cleanup; echo "STATE: INFRA"; echo "runner aborted with exit $rc" >&2; exit 2; fi; cleanup' EXIT
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    finish INFRA 2 "required command not found: $1"
+  fi
+}
+
+write_summary_header
+
+if [[ "${KITTYPAW_EVAL_SKIP:-}" == "1" ]]; then
+  finish NOT_RUN 3 "KITTYPAW_EVAL_SKIP=1"
+fi
+
+need_cmd jq
+need_cmd curl
+need_cmd python3
 
 # Single-instance lock (prevents the multi-runner race we hit during the
 # first eval pass — multiple bash run.sh writing to results/ simultaneously
 # corrupted the per-category jsonl and the summary).
 #
 # `mkdir` is atomic across POSIX, macOS-friendly (flock is Linux-only).
-LOCK_DIR="$EVAL_DIR/.runner.lock"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  echo "Another runner already holds $LOCK_DIR; aborting." >&2
-  exit 2
+  finish INFRA 2 "Another runner already holds $LOCK_DIR"
 fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
-KITTY_BIN="${KITTY_BIN:-$ROOT_DIR/bin/kittypaw}"
-JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
-
-mkdir -p "$OUT_DIR"
 
 # Resolve Anthropic key.
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/tenants/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
 fi
 if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-  echo "ERROR: ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml" >&2
-  exit 1
+  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml"
 fi
 
 # Strip ANSI + spinner glyphs + REPL prompts from `kittypaw chat <text>`
@@ -103,12 +159,23 @@ judge_behavior() {
       }]
     }')
 
-  local result
-  result=$(curl -sS https://api.anthropic.com/v1/messages \
+  local api_response
+  if ! api_response=$(curl -fsS https://api.anthropic.com/v1/messages \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
-    -d "$body" | jq -r '.content[0].text // "FAIL"' | head -n1 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    -d "$body"); then
+    return 2
+  fi
+  if echo "$api_response" | jq -e '.error' >/dev/null 2>&1; then
+    return 2
+  fi
+
+  local result
+  result=$(echo "$api_response" | jq -r '.content[0].text // empty' | head -n1 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  if [[ -z "$result" ]]; then
+    return 2
+  fi
 
   case "$result" in
     PASS) echo "PASS" ;;
@@ -143,7 +210,11 @@ score_category() {
 
     # Run KittyPaw.
     local raw_response
-    raw_response=$("$KITTY_BIN" chat "$input" 2>&1 || true)
+    if ! raw_response=$("$KITTY_BIN" chat "$input" 2>&1); then
+      echo "chat command failed for $category/$id:" >&2
+      echo "$raw_response" >&2
+      return 2
+    fi
     local response
     response=$(echo "$raw_response" | strip_chat_output)
 
@@ -160,16 +231,19 @@ score_category() {
     done <<< "$antipatterns"
 
     # Behavior judge calls.
-    local passed=0
+    local points=0
     local total_b=0
     local behavior_results="["
     IFS=',' read -ra bs <<< "$expected"
     for b in "${bs[@]}"; do
       total_b=$((total_b + 1))
       local verdict
-      verdict=$(judge_behavior "$input" "$response" "$b")
-      [[ "$verdict" == "PASS" ]] && passed=$((passed + 1))
-      [[ "$verdict" == "PARTIAL" ]] && passed=$((passed + 1)) # half? We count partial as 0.5 below.
+      if ! verdict=$(judge_behavior "$input" "$response" "$b"); then
+        echo "judge request failed for $category/$id behavior=$b" >&2
+        return 2
+      fi
+      [[ "$verdict" == "PASS" ]] && points=$((points + 2))
+      [[ "$verdict" == "PARTIAL" ]] && points=$((points + 1))
       behavior_results+="{\"behavior\":\"$b\",\"verdict\":\"$verdict\"},"
       echo "    $b -> $verdict" >&2
     done
@@ -178,7 +252,7 @@ score_category() {
     # Compute score: (passed / total) * 2 - penalty (0 or 1).
     local score
     if (( total_b > 0 )); then
-      score=$(awk "BEGIN { printf \"%.2f\", ($passed / $total_b) * 2 - $antipattern_penalty * 0.5 }")
+      score=$(awk "BEGIN { s = ($points / $total_b) - $antipattern_penalty * 0.5; if (s < 0) s = 0; printf \"%.2f\", s }")
     else
       score="0.00"
     fi
@@ -227,17 +301,10 @@ check_threshold() {
   echo "$threshold_msg"
 }
 
-# Main loop.
-SUMMARY="$OUT_DIR/summary.md"
 {
-  echo "# Secretary Smoke Results"
-  echo
-  echo "Date: $(date -u +'%Y-%m-%d %H:%M UTC')"
-  echo "Judge model: $JUDGE_MODEL"
-  echo
   echo "| Category | Total | Pass (≥1.5) | Antipattern hits | Threshold |"
   echo "|---|---|---|---|---|"
-} > "$SUMMARY"
+} >> "$SUMMARY"
 
 categories=(vague domain weak_serp framing stale)
 overall_pass=0
@@ -249,7 +316,9 @@ for cat in "${categories[@]}"; do
   overall_categories=$((overall_categories + 1))
   echo "==== $cat ====" >&2
 
-  agg=$(score_category "$fixture")
+  if ! agg=$(score_category "$fixture"); then
+    finish INFRA 2 "score category failed: $cat"
+  fi
   threshold=$(check_threshold "$agg")
   total=$(echo "$agg" | jq -r '.total')
   pass=$(echo "$agg" | jq -r '.pass')
@@ -271,3 +340,8 @@ done
 } >> "$SUMMARY"
 
 cat "$SUMMARY"
+if (( overall_pass >= 4 )); then
+  finish PASS 0
+else
+  finish FAIL 1 "Sub-plan A pass criterion not met: $overall_pass / $overall_categories categories"
+fi

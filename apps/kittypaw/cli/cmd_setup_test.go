@@ -296,6 +296,13 @@ func TestNewSetupCmd_RegistersNoChatFlag(t *testing.T) {
 	}
 }
 
+func TestSetupWebFlagIsRemoved(t *testing.T) {
+	cmd := newSetupCmd()
+	if f := cmd.Flags().Lookup("web"); f != nil {
+		t.Fatalf("--web flag should not be registered: %+v", f)
+	}
+}
+
 // AC-3 regression: `--provider` (non-interactive mode) must NOT prompt for
 // auto-entry. This drives autoChatEligible directly to double-pin the gate
 // — the T1 truth table covers the helper in isolation; this test covers the

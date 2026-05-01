@@ -319,7 +319,7 @@ func InjectKakaoWSURL(accountID string, channels []ChannelConfig) {
 		apiURL = DefaultAPIServerURL
 	}
 
-	wsURL, ok := mgr.LoadKakaoRelayURL(apiURL)
+	wsURL, ok := mgr.LoadKakaoRelayWSURL(apiURL)
 	if !ok || wsURL == "" {
 		return
 	}

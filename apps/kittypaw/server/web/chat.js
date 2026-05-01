@@ -60,7 +60,8 @@ const Chat = {
     if (!App.wsUrl) {
       // Construct from current location if no wsUrl from bootstrap.
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      App.wsUrl = `${proto}//${location.host}/ws`;
+      const path = App.chatOnly ? '/chat/ws' : '/ws';
+      App.wsUrl = `${proto}//${location.host}${path}`;
     }
 
     // Tear down any existing connection.
@@ -265,7 +266,11 @@ const Chat = {
     this._setStatus('connecting', `Reconnecting in ${Math.round(delay / 1000)}s...`);
 
     this.reconnectTimer = setTimeout(async () => {
-      await App.bootstrap();
+      if (App.chatOnly) {
+        await App.bootstrapChat();
+      } else {
+        await App.bootstrap();
+      }
       this.connect();
     }, delay);
   },

@@ -258,7 +258,7 @@ func TestSetupKakaoRegisterUsesLoggedInAccountSecrets(t *testing.T) {
 		t.Fatalf("load bob secrets: %v", err)
 	}
 	bobMgr := core.NewAPITokenManager("", bobSecrets)
-	if err := bobMgr.SaveRelayURL(core.DefaultAPIServerURL, relay.URL); err != nil {
+	if err := bobMgr.SaveKakaoRelayBaseURL(core.DefaultAPIServerURL, relay.URL); err != nil {
 		t.Fatalf("save bob relay URL: %v", err)
 	}
 
@@ -275,14 +275,14 @@ func TestSetupKakaoRegisterUsesLoggedInAccountSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload bob secrets: %v", err)
 	}
-	if wsURL, ok := core.NewAPITokenManager("", bobFresh).LoadKakaoRelayURL(core.DefaultAPIServerURL); !ok || wsURL == "" {
+	if wsURL, ok := core.NewAPITokenManager("", bobFresh).LoadKakaoRelayWSURL(core.DefaultAPIServerURL); !ok || wsURL == "" {
 		t.Fatalf("bob Kakao relay URL = (%q, %v), want saved", wsURL, ok)
 	}
 	aliceFresh, err := core.LoadAccountSecrets("alice")
 	if err != nil {
 		t.Fatalf("reload alice secrets: %v", err)
 	}
-	if wsURL, ok := core.NewAPITokenManager("", aliceFresh).LoadKakaoRelayURL(core.DefaultAPIServerURL); ok || wsURL != "" {
+	if wsURL, ok := core.NewAPITokenManager("", aliceFresh).LoadKakaoRelayWSURL(core.DefaultAPIServerURL); ok || wsURL != "" {
 		t.Fatalf("alice Kakao relay URL = (%q, %v), want empty", wsURL, ok)
 	}
 }
@@ -438,7 +438,7 @@ func TestSetupCompleteRejectsDuplicateStoredKakaoRelayURL(t *testing.T) {
 			t.Fatalf("load %s secrets: %v", accountID, err)
 		}
 		mgr := core.NewAPITokenManager("", secrets)
-		if err := mgr.SaveKakaoRelayURL(core.DefaultAPIServerURL, "wss://relay.example/ws/shared"); err != nil {
+		if err := mgr.SaveKakaoRelayWSURL(core.DefaultAPIServerURL, "wss://relay.example/ws/shared"); err != nil {
 			t.Fatalf("save %s kakao relay URL: %v", accountID, err)
 		}
 	}
@@ -492,7 +492,7 @@ func TestSetupCompleteRejectsDuplicateStoredKakaoRelayURLWithCustomAPIServer(t *
 			t.Fatalf("load %s secrets: %v", accountID, err)
 		}
 		mgr := core.NewAPITokenManager("", secrets)
-		if err := mgr.SaveKakaoRelayURL(apiURL, sharedRelay); err != nil {
+		if err := mgr.SaveKakaoRelayWSURL(apiURL, sharedRelay); err != nil {
 			t.Fatalf("save %s kakao relay URL: %v", accountID, err)
 		}
 		if accountID == "alice" {

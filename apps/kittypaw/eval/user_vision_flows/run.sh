@@ -2,225 +2,319 @@
 #
 # User-vision multi-turn regression smoke.
 #
-# Why this exists: the assistant-quality work is driven by live REPL
-# scenarios the user actually walked through (clarify → install → browse →
-# chitchat). The LLM in the loop makes traditional unit tests unreliable —
-# the same query routes through different code each run. This script pins
-# a small set of canonical flows so a future prompt/skill/UX change can
-# be sanity-checked with one command.
+# Runs canonical user-visible chat flows through `kittypaw chat`, then judges
+# provider-independent behavior outcomes. The assertions intentionally avoid
+# exact prose, emoji, source-name, or one-provider phrasing checks.
 #
-# Each flow:
-#   1. Stops the daemon and wipes installed packages/skills (fresh state).
-#   2. Pipes a multi-turn input sequence into `kittypaw chat`.
-#   3. Strips spinner/ANSI noise (clean_chat.py shared with secretary_smoke).
-#   4. Runs substring assertions against the joined output.
-#
-# The assertions are deliberately loose — substring presence, not exact
-# wording — because the LLM rephrases. Anything tighter would be flaky.
-# Adjust the substrings (or add LLM-judge variants) when the canonical
-# response wording shifts.
-#
-# Cost: ~4 chat sessions × Claude 4 = a few cents per run. Run before any
-# QualityBlock / Capability / Decision / Evidence prompt change.
+# Exit state contract:
+#   PASS    -> 0
+#   FAIL    -> 1
+#   INFRA   -> 2
+#   NOT_RUN -> 3
 #
 # Usage:
-#   ./eval/user_vision_flows/run.sh                # all flows
-#   FLOW=clarify ./eval/user_vision_flows/run.sh   # single flow
+#   ./eval/user_vision_flows/run.sh
+#   FLOW=clarify ./eval/user_vision_flows/run.sh
+#   KITTYPAW_EVAL_PROVIDER=openai ./eval/user_vision_flows/run.sh
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KITTY_BIN="${KITTY_BIN:-$ROOT_DIR/bin/kittypaw}"
 CLEAN_CHAT="$ROOT_DIR/eval/secretary_smoke/clean_chat.py"
+BASELINE_FILE="$ROOT_DIR/eval/user_vision_flows/provider_baselines.json"
+OUT_DIR="$ROOT_DIR/eval/user_vision_flows/results"
+SUMMARY="$OUT_DIR/summary.md"
+RESULTS_JSONL="$OUT_DIR/results.jsonl"
+JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
+RUN_ACCOUNT="${KITTYPAW_ACCOUNT:-auto}"
+RUN_PROVIDER="${KITTYPAW_EVAL_PROVIDER:-configured}"
+RUN_MODEL="${KITTYPAW_EVAL_MODEL:-configured}"
+RUN_DAEMON="${KITTYPAW_EVAL_DAEMON:-local}"
+FINISHED=0
+LAST_FLOW_DETAIL=""
+
+declare -A FLOWS
+declare -A FLOW_BEHAVIORS
+declare -A FLOW_THRESHOLDS
+
+mkdir -p "$OUT_DIR"
+
+provider_family() {
+  local provider
+  provider=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$provider" in
+    *anthropic*|*claude*) echo "anthropic" ;;
+    *openai*|*gpt*) echo "openai" ;;
+    *gemini*|*google*) echo "gemini" ;;
+    *) echo "default" ;;
+  esac
+}
+
+PROVIDER_FAMILY="$(provider_family "$RUN_PROVIDER")"
+
+write_summary_header() {
+  {
+    echo "# User Vision Flow Results"
+    echo
+    echo "Date: $(date -u +'%Y-%m-%d %H:%M UTC')"
+    echo "State: RUNNING"
+    echo "Provider: $RUN_PROVIDER"
+    echo "Provider family: $PROVIDER_FAMILY"
+    echo "Model: $RUN_MODEL"
+    echo "Judge model: $JUDGE_MODEL"
+    echo "Account: $RUN_ACCOUNT"
+    echo "Daemon: $RUN_DAEMON"
+    echo
+    echo "| Flow | State | Detail |"
+    echo "|---|---|---|"
+  } > "$SUMMARY"
+  : > "$RESULTS_JSONL"
+}
+
+finish() {
+  local state="$1"
+  local code="$2"
+  local detail="${3:-}"
+  FINISHED=1
+  {
+    echo
+    echo "State: $state"
+    [[ -n "$detail" ]] && echo "Detail: $detail"
+  } >> "$SUMMARY"
+  echo "STATE: $state"
+  [[ -n "$detail" ]] && echo "$detail" >&2
+  exit "$code"
+}
+
+trap 'rc=$?; if (( rc != 0 && FINISHED == 0 )); then echo "STATE: INFRA"; echo "runner aborted with exit $rc" >&2; exit 2; fi' EXIT
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    finish INFRA 2 "required command not found: $1"
+  fi
+}
+
+json_escape() {
+  jq -Rn --arg value "$1" '$value'
+}
+
+record_flow() {
+  local flow="$1" state="$2" detail="${3:-}"
+  echo "| $flow | $state | ${detail//|/ } |" >> "$SUMMARY"
+  printf '{"flow":%s,"state":%s,"detail":%s}\n' \
+    "$(json_escape "$flow")" "$(json_escape "$state")" "$(json_escape "$detail")" >> "$RESULTS_JSONL"
+}
+
+write_summary_header
+
+if [[ "${KITTYPAW_EVAL_SKIP:-}" == "1" ]]; then
+  finish NOT_RUN 3 "KITTYPAW_EVAL_SKIP=1"
+fi
+
+need_cmd jq
+need_cmd curl
+need_cmd python3
 
 if [[ ! -x "$KITTY_BIN" ]]; then
-  echo "ERROR: kittypaw binary not found at $KITTY_BIN — run 'make build' first" >&2
-  exit 2
+  finish INFRA 2 "kittypaw binary not found at $KITTY_BIN — run 'make build' first"
 fi
 
 if [[ ! -f "$CLEAN_CHAT" ]]; then
-  echo "ERROR: clean_chat.py missing at $CLEAN_CHAT" >&2
-  exit 2
+  finish INFRA 2 "clean_chat.py missing at $CLEAN_CHAT"
 fi
+
+if [[ ! -f "$BASELINE_FILE" ]]; then
+  finish INFRA 2 "provider baseline file missing at $BASELINE_FILE"
+fi
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/tenants/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
+fi
+if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml"
+fi
+
+load_provider_baselines() {
+  local provider="$1"
+  while IFS=$'\t' read -r flow behaviors; do
+    FLOW_BEHAVIORS["$flow"]="$behaviors"
+  done < <(jq -r --arg provider "$provider" '
+    .default as $default
+    | (.[$provider] // {}) as $specific
+    | ($default.behaviors + ($specific.behaviors // {}))
+    | to_entries[]
+    | [.key, (.value | join(","))]
+    | @tsv
+  ' "$BASELINE_FILE")
+
+  while IFS=$'\t' read -r flow threshold; do
+    FLOW_THRESHOLDS["$flow"]="$threshold"
+  done < <(jq -r --arg provider "$provider" '
+    .default as $default
+    | (.[$provider] // {}) as $specific
+    | ($default.thresholds + ($specific.thresholds // {}))
+    | to_entries[]
+    | [.key, (.value | tostring)]
+    | @tsv
+  ' "$BASELINE_FILE")
+}
+
+load_provider_baselines "$PROVIDER_FAMILY"
 
 reset_daemon() {
   "$KITTY_BIN" stop >/dev/null 2>&1 || true
-  # Force-kill any stale serve processes — `stop` only targets the
-  # pid in daemon.pid, but earlier sessions may have left orphans
-  # whose in-memory PipelineState cache would leak into the next
-  # flow's first turn (Phase 10 cross-turn augmentation regression).
   pkill -9 -f "kittypaw serve" 2>/dev/null || true
   rm -rf "$HOME/.kittypaw/tenants/default/packages/"* \
          "$HOME/.kittypaw/tenants/default/skills/"* 2>/dev/null || true
   sleep 1
 }
 
-# assert_contains <flow_name> <substring> <full_output>
-assert_contains() {
-  local name="$1" needle="$2" hay="$3"
-  if [[ "$hay" == *"$needle"* ]]; then
-    echo "  OK   $name → '$needle'"
-  else
-    echo "  FAIL $name → expected '$needle'" >&2
-    echo "  --- response (truncated 800ch) ---" >&2
-    printf '%s\n' "${hay:0:800}" >&2
-    echo "  ----------------------------------" >&2
-    return 1
-  fi
-}
-
-assert_not_contains() {
-  local name="$1" needle="$2" hay="$3"
-  if [[ "$hay" != *"$needle"* ]]; then
-    echo "  OK   $name → no '$needle'"
-  else
-    echo "  FAIL $name → unexpected '$needle'" >&2
-    return 1
-  fi
-}
-
-# run_flow <name> <stdin_sequence>
-# Returns the cleaned chat output via stdout.
 run_flow() {
   local name="$1" input="$2"
   reset_daemon
-  printf '%s' "$input" | "$KITTY_BIN" chat 2>&1 | python3 "$CLEAN_CHAT"
+  local raw
+  if ! raw=$(printf '%s' "$input" | "$KITTY_BIN" chat 2>&1); then
+    echo "chat command failed for flow $name:" >&2
+    echo "$raw" >&2
+    return 2
+  fi
+  printf '%s' "$raw" | python3 "$CLEAN_CHAT"
 }
 
-# ---- Flows ----
+behavior_def() {
+  case "$1" in
+    clarifies_ambiguous_currency)
+      echo "The assistant handles the ambiguous currency query by asking or confirming whether the user means exchange rate/currency, instead of jumping to a confident numeric answer." ;;
+    avoids_rate_fabrication)
+      echo "The assistant does not invent a specific exchange rate for an ambiguous query. If it gives a number, it must clearly be grounded in a tool/source or framed as needing confirmation." ;;
+    exchange_rate_data)
+      echo "The assistant provides useful exchange-rate information or a clear tool-backed exchange-rate result, not merely an offer to install/search." ;;
+    skill_install_acknowledged)
+      echo "The assistant clearly confirms that the relevant exchange-rate capability was installed, enabled, or is ready to use." ;;
+    helpful_chitchat_after_success)
+      echo "After the user praises the assistant, the response naturally acknowledges the praise without rerunning tools, reopening setup, or asking for unrelated clarification." ;;
+    no_repeated_install_offer)
+      echo "After the exchange-rate capability is already installed or used, the assistant does not offer to install the same capability again." ;;
+    krw_reframed_response)
+      echo "For a Korean-won reframing request, the assistant presents the exchange-rate result from a KRW/Korean-won perspective or explicitly explains the KRW framing." ;;
+    explicit_install_request_completes)
+      echo "When the user explicitly asks to install after a relevant skill was suggested, the assistant proceeds with that skill/capability and does not ask which skill again." ;;
+    browses_available_skills)
+      echo "The assistant lists multiple available skills or skill categories and does not auto-install a skill during browsing." ;;
+    asks_choice_for_news_multimatch)
+      echo "For a news-related skill query with multiple plausible matches, the assistant presents multiple news-related options and asks or lets the user choose, without auto-installing one." ;;
+    *) echo "Unknown behavior." ;;
+  esac
+}
+
+judge_flow_behavior() {
+  local flow="$1" input="$2" transcript="$3" behavior="$4"
+  local def body api_response result
+  def=$(behavior_def "$behavior")
+  body=$(jq -n \
+    --arg model "$JUDGE_MODEL" \
+    --arg flow "$flow" \
+    --arg input "$input" \
+    --arg transcript "$transcript" \
+    --arg behavior "$behavior" \
+    --arg def "$def" \
+    '{
+      model: $model,
+      max_tokens: 120,
+      messages: [{
+        role: "user",
+        content: ("You evaluate a multi-turn KittyPaw assistant transcript.\n\nFlow: " + $flow + "\nUser input sequence:\n" + $input + "\n\nCleaned assistant transcript:\n" + $transcript + "\n\nTarget behavior: " + $behavior + "\nDefinition: " + $def + "\n\nAnswer with exactly one token on the first line: PASS, PARTIAL, or FAIL. Use PASS for equivalent behavior even if phrasing/source names differ across providers. Then give one short reason.")
+      }]
+    }')
+
+  if ! api_response=$(curl -fsS https://api.anthropic.com/v1/messages \
+    -H "x-api-key: $ANTHROPIC_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    -d "$body"); then
+    return 2
+  fi
+  if echo "$api_response" | jq -e '.error' >/dev/null 2>&1; then
+    return 2
+  fi
+  result=$(echo "$api_response" | jq -r '.content[0].text // empty' | head -n1 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  case "$result" in
+    PASS|PARTIAL|FAIL) echo "$result" ;;
+    *) return 2 ;;
+  esac
+}
+
+evaluate_flow() {
+  local flow="$1" input="$2" transcript="$3"
+  local behaviors="${FLOW_BEHAVIORS[$flow]:-}"
+  local threshold="${FLOW_THRESHOLDS[$flow]:-1.5}"
+  if [[ -z "$behaviors" ]]; then
+    LAST_FLOW_DETAIL="missing baseline behaviors"
+    return 2
+  fi
+
+  local points=0 total=0 detail=""
+  IFS=',' read -ra bs <<< "$behaviors"
+  for behavior in "${bs[@]}"; do
+    total=$((total + 1))
+    local verdict
+    if ! verdict=$(judge_flow_behavior "$flow" "$input" "$transcript" "$behavior"); then
+      LAST_FLOW_DETAIL="judge request failed for behavior=$behavior"
+      return 2
+    fi
+    [[ "$verdict" == "PASS" ]] && points=$((points + 2))
+    [[ "$verdict" == "PARTIAL" ]] && points=$((points + 1))
+    detail+="$behavior=$verdict "
+    echo "  $behavior -> $verdict"
+  done
+
+  local score
+  score=$(awk "BEGIN { printf \"%.2f\", $points / $total }")
+  LAST_FLOW_DETAIL="score=$score threshold=$threshold provider=$PROVIDER_FAMILY ${detail% }"
+  awk -v s="$score" -v t="$threshold" 'BEGIN { exit (s >= t) ? 0 : 1 }'
+}
+
+run_and_judge() {
+  local flow="$1" label="$2" input="$3"
+  echo "[$flow] $label"
+  local out
+  if ! out=$(run_flow "$flow" "$input"); then
+    LAST_FLOW_DETAIL="chat command failed"
+    return 2
+  fi
+  evaluate_flow "$flow" "$input" "$out"
+}
 
 flow_clarify() {
-  echo "[clarify] 엔화는? → '환율 말씀이세요?'"
-  local out
-  out=$(run_flow clarify $'엔화는?\n')
-  assert_contains "clarify" "환율 말씀이세요" "$out"
-  assert_not_contains "clarify-no-fabrication" "1477" "$out"
+  run_and_judge clarify "ambiguous currency query" $'엔화는?\n'
 }
 
 flow_install_chitchat() {
-  echo "[install_chitchat] 환율 알려줘 → 네 → 오 잘하네!"
-  local out
-  out=$(run_flow install_chitchat $'환율 알려줘\n네\n오 잘하네!\n')
-  assert_contains "evidence" "환율" "$out"
-  assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "Frankfurter" "$out"
-  assert_contains "chitchat-ack" "도움이 됐다니" "$out"
+  run_and_judge install_chitchat "install exchange-rate flow then chitchat" $'환율 알려줘\n네\n오 잘하네!\n'
 }
 
 flow_installed_dispatch() {
-  echo "[installed_dispatch] 환율 알려줘 → 네 → 환율 (직접 dispatch, no re-install offer)"
-  # Reproduces the 2026-04-27 transcript turn 5 regression: with the
-  # exchange-rate skill already installed, the legacy LLM was emitting
-  # another "설치해드릴까요?" suffix on a follow-up "환율" query, ignoring
-  # the prompt's PRIORITY rule. The Phase 4 RunInstalledSkillBranch
-  # short-circuits to Skill.run before the LLM is consulted.
-  local out
-  out=$(run_flow installed_dispatch $'환율 알려줘\n네\n환율\n')
-  assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "Frankfurter" "$out"
-  # T3 follow-up should be the rates again, not another install offer.
-  # Count install-acks: usually exactly one (T2). Up to two is tolerated
-  # because the legacy LLM at T1 occasionally generates an ack-shaped
-  # phrase ("…스킬을 설치했어요" 같은) inside its suffix-offer prose, and
-  # that LLM output is stochastic. Three or more means T3 actually
-  # re-installed the skill — that we still catch.
-  local ack_count
-  ack_count=$(printf '%s' "$out" | grep -c "스킬을 설치했어요" || true)
-  if [[ "$ack_count" -gt 2 ]]; then
-    echo "  FAIL installed-dispatch-no-reinstall → '스킬을 설치했어요' count=$ack_count (want ≤2)" >&2
-    return 1
-  fi
-  echo "  OK   installed-dispatch-no-reinstall → '스킬을 설치했어요' count=$ack_count (≤2)"
-  # No new install offer on T3.
-  local offer_count
-  offer_count=$(printf '%s' "$out" | grep -c "설치해드릴까요\|설치를 도와드릴까요" || true)
-  if [[ "$offer_count" -gt 1 ]]; then
-    echo "  FAIL installed-dispatch-no-suffix-loop → install offer count=$offer_count (want ≤1)" >&2
-    return 1
-  fi
-  echo "  OK   installed-dispatch-no-suffix-loop → install offer count=$offer_count"
+  run_and_judge installed_dispatch "installed exchange-rate follow-up dispatch" $'환율 알려줘\n네\n환율\n'
 }
 
 flow_intent_aligned_format() {
-  echo "[intent_aligned] 환율 알려줘 → 네 → 원화로 환율 (KRW reframe via mediateSkillOutput)"
-  # Reproduces the 2026-04-27 transcript turn 3 regression: with the
-  # exchange-rate skill installed, "원화로 환율" was returning USD-base
-  # raw output verbatim because RunInstalledSkillBranch dispatched the
-  # skill but never reframed the response. mediateSkillOutput (Phase 7)
-  # passes the raw output + user query through a small LLM call so the
-  # query modifier ("원화로") lands in the response without any change
-  # to the skill JS itself.
-  local out
-  out=$(run_flow intent_aligned $'환율 알려줘\n네\n원화로 환율\n')
-  assert_contains "install-ack" "✅" "$out"
-  # T3 응답: KRW base reframe — "원" 또는 "KRW" 단위 표기 등장.
-  # Stochastic by nature of LLM rephrasing — assertion is presence of
-  # *either* token, not a specific phrase. Strong numeric assertion is
-  # avoided (Round 4 placebo class re-emergence risk).
-  if [[ "$out" == *"원"* ]] || [[ "$out" == *"KRW"* ]]; then
-    echo "  OK   intent-aligned-krw-reframe → '원' or 'KRW' present"
-  else
-    echo "  FAIL intent-aligned-krw-reframe → neither '원' nor 'KRW' in response" >&2
-    echo "  --- response (truncated 1200ch) ---" >&2
-    printf '%s\n' "${out:0:1200}" >&2
-    echo "  ----------------------------------" >&2
-    return 1
-  fi
-  # Fabrication guard: vague hedge phrases like "약 1480원" suggest the
-  # LLM invented a rate rather than reformatting the raw output. Only
-  # the literal pattern is checked — too narrow to flake on legit
-  # phrasings, too specific to silently approve fabrication.
-  assert_not_contains "intent-aligned-no-vague-hedge" "약 14" "$out"
+  run_and_judge intent_aligned "KRW reframing after install" $'환율 알려줘\n네\n원화로 환율\n'
 }
 
 flow_install_explicit_request() {
-  echo "[install_explicit_request] 엔화는? → 네 → 설치해줘요."
-  # Reproduces the user transcript where "설치해줘요." (a complete
-  # Korean sentence containing "설치", not the bare "네") used to be
-  # mis-routed to a generic "어떤 스킬?" clarification. The Round-4
-  # consent-trigger expansion + suffix-strict-wording should drive
-  # the LLM straight from clarify → suffix offer → install in 3 turns.
-  local out
-  out=$(run_flow install_explicit_request $'엔화는?\n네\n설치해줘요.\n')
-  assert_contains "clarify" "환율 말씀이세요" "$out"
-  assert_contains "suffix-skill-name" "환율 조회" "$out"
-  # 'paw>' style direct ack, not "어떤 스킬을 설치할지 알려주세요" loop
-  assert_not_contains "no-clarify-loop" "어떤 스킬을 설치할지" "$out"
-  assert_contains "install-ack" "✅" "$out"
-  assert_contains "live-rates" "Frankfurter" "$out"
+  run_and_judge install_explicit_request "explicit install request after clarification" $'엔화는?\n네\n설치해줘요.\n'
 }
 
 flow_browse() {
-  echo "[browse] 어떤 스킬들이 있어요?"
-  local out
-  out=$(run_flow browse $'어떤 스킬들이 있어요?\n')
-  assert_contains "browse-rate" "환율 조회" "$out"
-  assert_contains "browse-news" "RSS 뉴스 요약" "$out"
-  assert_contains "browse-weather" "현재 날씨" "$out"
-  assert_not_contains "browse-no-auto-install" "✅" "$out"
+  run_and_judge browse "browse available skills" $'어떤 스킬들이 있어요?\n'
 }
 
 flow_multimatch() {
-  echo "[multimatch] 뉴스 관련 스킬 있어요?"
-  local out
-  out=$(run_flow multimatch $'뉴스 관련 스킬 있어요?\n')
-  assert_contains "multimatch-rss" "RSS 뉴스" "$out"
-  assert_contains "multimatch-daily" "오늘의 뉴스" "$out"
-  # No auto-install — the prompt rule is "≥2 hits → ask which".
-  assert_not_contains "multimatch-no-auto-install" "✅" "$out"
+  run_and_judge multimatch "multiple news skill matches" $'뉴스 관련 스킬 있어요?\n'
 }
 
-flow_missing_skill_grace() {
-  echo "[missing_skill] 잘못된 id 의 Skill.run 호출이 발생했을 때 graceful 안내"
-  # Indirect: this flow doesn't trigger the path reliably (the LLM picks
-  # ids by itself). Kept as a marker — augment when we have a deterministic
-  # way to invoke `Skill.run("nonexistent")` from chat.
-  echo "  SKIP missing_skill_grace (no deterministic trigger; needs unit-level coverage in engine/executor_test.go)"
-}
-
-# ---- Driver ----
-
-declare -A FLOWS=(
+FLOWS=(
   [clarify]=flow_clarify
   [install_chitchat]=flow_install_chitchat
   [install_explicit_request]=flow_install_explicit_request
@@ -228,34 +322,55 @@ declare -A FLOWS=(
   [intent_aligned]=flow_intent_aligned_format
   [browse]=flow_browse
   [multimatch]=flow_multimatch
-  [missing_skill]=flow_missing_skill_grace
 )
+
+FLOW_ORDER=(clarify install_chitchat install_explicit_request installed_dispatch intent_aligned browse multimatch)
 
 run_one() {
   local name="$1"
   local fn="${FLOWS[$name]:-}"
   if [[ -z "$fn" ]]; then
-    echo "ERROR: unknown flow '$name' (valid: ${!FLOWS[*]})" >&2
-    exit 2
+    finish INFRA 2 "unknown flow '$name' (valid: ${!FLOWS[*]})"
   fi
   "$fn"
 }
 
 main() {
   if [[ -n "${FLOW:-}" ]]; then
-    run_one "$FLOW"
-    return
+    if run_one "$FLOW"; then
+      record_flow "$FLOW" PASS "$LAST_FLOW_DETAIL"
+      finish PASS 0
+    else
+      rc=$?
+      if (( rc == 2 )); then
+        record_flow "$FLOW" INFRA "$LAST_FLOW_DETAIL"
+        finish INFRA 2 "flow infrastructure failure: $FLOW"
+      fi
+      record_flow "$FLOW" FAIL "$LAST_FLOW_DETAIL"
+      finish FAIL 1 "flow assertion failed: $FLOW"
+    fi
   fi
+
   local fail=0
-  for name in clarify install_chitchat install_explicit_request installed_dispatch intent_aligned browse multimatch missing_skill; do
-    "${FLOWS[$name]}" || fail=$((fail+1))
+  for name in "${FLOW_ORDER[@]}"; do
+    LAST_FLOW_DETAIL=""
+    if "${FLOWS[$name]}"; then
+      record_flow "$name" PASS "$LAST_FLOW_DETAIL"
+    else
+      rc=$?
+      if (( rc == 2 )); then
+        record_flow "$name" INFRA "$LAST_FLOW_DETAIL"
+        finish INFRA 2 "flow infrastructure failure: $name"
+      fi
+      record_flow "$name" FAIL "$LAST_FLOW_DETAIL"
+      fail=$((fail + 1))
+    fi
     echo
   done
   if (( fail > 0 )); then
-    echo "FAILED: $fail flow(s)" >&2
-    exit 1
+    finish FAIL 1 "FAILED: $fail flow(s)"
   fi
-  echo "All flows passed."
+  finish PASS 0
 }
 
 main "$@"
