@@ -329,6 +329,25 @@
 > `smoke-3-layer.md` 14d SLA 박제 명시 폐기 (CEO ITERATE 채택, sunk cost fallacy).
 > 재개 트리거: 라우터 wiring 회귀 발생 또는 외부 운영 인력 추가 시.
 
+## Plan 17: kittychat credential foundation (← 활성, 외부 의존 우선)
+
+> Spec: `docs/specs/kittychat-credential-foundation.md` (cross-team contract — track 필요. multi-aud + claims schema + scope vocab + version policy 박제, 사용자 결정 2026-05-02)
+> 외부 의존: kittychat 측 implementer unblock. 그쪽이 우리 spec 위에서 `CredentialVerifier`/`APIClientClaims`/`DeviceClaims` 정의 후 env-seeded verifier 진행.
+> 본 commit 은 **spec only** — 실 구현 (T1~T5) 은 다음 slice (별도 `ina:plan` kickoff).
+
+- [ ] **T1**: `Claims` struct 확장 (`Aud []string`, `Scope []string`, `V int`) — RED in `jwt_test.go`
+- [ ] **T2**: `auth.SignForAudiences(...)` 신규 helper — 기존 `Sign` BC 보존
+- [ ] **T3**: OAuth Google/GitHub callback 의 access token 발급 시 default claims (`aud=["kittyapi","kittychat"]`, `scope=["chat:relay","models:read"]`, `v=1`)
+- [ ] **T4**: `internal/auth/scopes.go` 신규 — scope 상수 박제
+- [ ] **T5**: README 의 OAuth 섹션 + 본 plan link
+
+**다음 slice (Plan 17 머지 후, 별도 plan)**:
+- device schema migration (users → devices 1:N)
+- device credential 발급 endpoint (`POST /auth/devices/pair`, `POST /auth/devices/{id}/credential`)
+- opaque API key + introspection endpoint
+- JWKS public endpoint + RS256 마이그레이션
+- pairing flow (registration code)
+
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 
