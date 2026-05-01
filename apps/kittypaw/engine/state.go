@@ -28,6 +28,8 @@ type PipelineState struct {
 	pendingSkillRunID      string
 	pendingSkillRunParams  map[string]any
 	pendingSkillRunAt      time.Time
+	pendingPreference      PendingPreferenceConfirmation
+	pendingPreferenceAt    time.Time
 
 	// lastSkillOutput is the raw user-facing output from the most recent
 	// deterministic skill execution (InstallConsentBranch +
@@ -60,6 +62,11 @@ const clarificationTTL = 5 * time.Minute
 type PendingClarification struct {
 	Kind  string
 	Query string
+}
+
+type PendingPreferenceConfirmation struct {
+	Key   string
+	Value string
 }
 
 // NewPipelineState returns an empty pipeline state.
@@ -179,6 +186,38 @@ func (ps *PipelineState) ClearPendingClarification() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.pendingClarification = PendingClarification{}
+}
+
+func (ps *PipelineState) RecordPendingPreferenceConfirmation(p PendingPreferenceConfirmation) {
+	if ps == nil || p.Key == "" || p.Value == "" {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.pendingPreference = p
+	ps.pendingPreferenceAt = time.Now()
+}
+
+func (ps *PipelineState) RecentPendingPreferenceConfirmation() (PendingPreferenceConfirmation, bool) {
+	if ps == nil {
+		return PendingPreferenceConfirmation{}, false
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ps.pendingPreference.Key == "" || time.Since(ps.pendingPreferenceAt) > clarificationTTL {
+		return PendingPreferenceConfirmation{}, false
+	}
+	return ps.pendingPreference, true
+}
+
+func (ps *PipelineState) ClearPendingPreferenceConfirmation() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.pendingPreference = PendingPreferenceConfirmation{}
+	ps.pendingPreferenceAt = time.Time{}
 }
 
 // RecordSkillOutput stores the raw user-facing output from a

@@ -525,6 +525,221 @@ return "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 U
 	}
 }
 
+func TestExchangeRateLookupBranchUsesAcceptedDisplayPreference(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	st := openTestStore(t)
+	if err := st.SetUserContext(
+		"preference:exchange_rate.display",
+		`{"base":"KRW","unit":1000}`,
+		"test",
+	); err != nil {
+		t.Fatal(err)
+	}
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `
+return "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 USD = 1477 KRW";
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		Store:          st,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ExchangeRateLookupBranch{}).Execute(context.Background(), sess, webChatEvent("환율"), Intent{
+		Kind: IntentExchangeRateLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "1,000 KRW = 0.68 USD") {
+		t.Fatalf("out = %q, want accepted 1,000 KRW display preference", out)
+	}
+	if strings.Contains(out, "앞으로 그렇게") {
+		t.Fatalf("accepted preference must not ask for confirmation again:\n%s", out)
+	}
+}
+
+func TestExchangeRateLookupBranchExplicitBaseOverridesPreference(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	st := openTestStore(t)
+	if err := st.SetUserContext(
+		"preference:exchange_rate.display",
+		`{"base":"KRW","unit":1000}`,
+		"test",
+	); err != nil {
+		t.Fatal(err)
+	}
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `
+return "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 USD = 1477 KRW";
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		Store:          st,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ExchangeRateLookupBranch{}).Execute(context.Background(), sess, webChatEvent("달러 기준 환율"), Intent{
+		Kind: IntentExchangeRateLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if strings.Contains(out, "1,000 KRW") {
+		t.Fatalf("explicit base request must override stored preference:\n%s", out)
+	}
+	if !strings.Contains(out, "1 USD = 1477 KRW") {
+		t.Fatalf("out = %q, want USD-base package output", out)
+	}
+}
+
+func TestExchangeRateLookupBranchAsksOnceForDisplayPreferenceCandidate(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	state := NewPipelineState()
+	st := openTestStore(t)
+	if err := st.SetUserContext(
+		"preference_candidate:exchange_rate.display",
+		`{"base":"KRW","unit":1000,"reason":"사용자가 원화는 보통 1000원 기준이라고 반복해서 정정함"}`,
+		"test",
+	); err != nil {
+		t.Fatal(err)
+	}
+	baseDir := t.TempDir()
+	pm := installTestPackage(t, baseDir, `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "환율을 조회합니다."
+`, `
+return "📈 환율 (2026-04-30)\n\n1 USD = 0.85383 EUR\n1 USD = 156.56 JPY\n1 USD = 1477 KRW";
+`)
+	cfg := core.DefaultConfig()
+	sess := &Session{
+		Pipeline:       state,
+		Store:          st,
+		PackageManager: pm,
+		Sandbox:        sandbox.New(cfg.Sandbox),
+		Config:         &cfg,
+	}
+
+	out, err := (&ExchangeRateLookupBranch{}).Execute(context.Background(), sess, webChatEvent("환율"), Intent{
+		Kind: IntentExchangeRateLookup,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "이전 대화 기록상 환율을 1,000 KRW 기준으로 보길 원하신 것 같아요") {
+		t.Fatalf("out = %q, want one-time preference confirmation", out)
+	}
+	if _, ok, _ := st.GetUserContext("preference_pending_confirmation:exchange_rate.display"); !ok {
+		t.Fatal("pending preference confirmation was not stored")
+	}
+	if _, ok, _ := st.GetUserContext("preference_candidate_surfaced:exchange_rate.display"); !ok {
+		t.Fatal("candidate surface marker was not stored")
+	}
+
+	out, err = (&ExchangeRateLookupBranch{}).Execute(context.Background(), sess, webChatEvent("환율"), Intent{
+		Kind: IntentExchangeRateLookup,
+	})
+	if err != nil {
+		t.Fatalf("second Execute error: %v", err)
+	}
+	if strings.Contains(out, "앞으로 그렇게") {
+		t.Fatalf("candidate should be surfaced only once:\n%s", out)
+	}
+}
+
+func TestExchangeRateDisplayPreferenceCandidateReadsLegacyMemory(t *testing.T) {
+	st := openTestStore(t)
+	if err := st.SetUserContext("currency_display_preference", "1000원 기준으로 표시", "agent"); err != nil {
+		t.Fatal(err)
+	}
+	pref, ok := exchangeRateDisplayPreferenceCandidate(&Session{Store: st})
+	if !ok {
+		t.Fatal("expected legacy currency display memory to become a preference candidate")
+	}
+	if pref.Base != "KRW" || pref.Unit != 1000 {
+		t.Fatalf("pref = %+v, want KRW unit 1000", pref)
+	}
+}
+
+func TestPreferenceConfirmationBranchAcceptsExchangeRateDisplayPreference(t *testing.T) {
+	state := NewPipelineState()
+	st := openTestStore(t)
+	pref := `{"base":"KRW","unit":1000,"reason":"사용자가 원화는 보통 1000원 기준이라고 반복해서 정정함"}`
+	state.RecordPendingPreferenceConfirmation(PendingPreferenceConfirmation{
+		Key:   "exchange_rate.display",
+		Value: pref,
+	})
+	if err := st.SetUserContext("preference_pending_confirmation:exchange_rate.display", pref, "test"); err != nil {
+		t.Fatal(err)
+	}
+	sess := &Session{Pipeline: state, Store: st}
+
+	intent := classifyIntent("네네", state, sess)
+	if intent.Kind != IntentPreferenceConfirmation {
+		t.Fatalf("intent = %v, want preference confirmation", intent.Kind)
+	}
+	out, err := (&PreferenceConfirmationBranch{}).Execute(context.Background(), sess, webChatEvent("네네"), intent)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !strings.Contains(out, "앞으로 환율은 1,000 KRW 기준으로 보여드릴게요") {
+		t.Fatalf("out = %q, want acceptance acknowledgement", out)
+	}
+	got, ok, err := st.GetUserContext("preference:exchange_rate.display")
+	if err != nil || !ok {
+		t.Fatalf("accepted preference missing: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(got, `"base":"KRW"`) || !strings.Contains(got, `"unit":1000`) {
+		t.Fatalf("preference = %q, want KRW unit 1000", got)
+	}
+	if _, ok, _ := st.GetUserContext("preference_pending_confirmation:exchange_rate.display"); ok {
+		t.Fatal("pending confirmation was not cleared")
+	}
+}
+
+func TestPreferenceConfirmationDoesNotStealRecentSkillConsent(t *testing.T) {
+	state := NewPipelineState()
+	state.RecordSkillSearch([]core.RegistryEntry{
+		{ID: "weather-now", Name: "현재 날씨", Description: "현재 날씨를 확인합니다."},
+	})
+	st := openTestStore(t)
+	if err := st.SetUserContext(
+		"preference_pending_confirmation:exchange_rate.display",
+		`{"base":"KRW","unit":1000}`,
+		"test",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	intent := classifyIntent("네", state, &Session{Pipeline: state, Store: st})
+	if intent.Kind != IntentInstallConsentReply {
+		t.Fatalf("intent = %v, want recent skill consent to win over preference confirmation", intent.Kind)
+	}
+}
+
 func TestSelectRecentSkillCandidate_CurrentWeather(t *testing.T) {
 	entries := []core.RegistryEntry{
 		{ID: "weather-briefing", Name: "아침 날씨 요약", Description: "매일 아침 날씨를 확인하고 텔레그램으로 보내줍니다."},
