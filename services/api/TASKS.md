@@ -294,15 +294,19 @@
 
 - [x] **T4: doc + commit gate** — `doc.go` package doc 작성. `make build` ✓ / `make lint` 0 issues / `make test` PASS. 사용자 허락 후 commit (이 commit).
 
-## Plan 12: A — L1.D + L3 geo 보강 (대기, Plan 17 후)
+## Plan 12: A — L1.D + L3 geo 보강 ✅
 
-> Spec: `.claude/plans/test-coverage-completion.md` Plan A 섹션
-> kickoff: B0 머지 직후 별도 `ina:plan` 호출하여 7-task TDD 분해.
-> 핵심: 7 case (exact / alias_override_priority self-seed / fuzzy / subway_type_hint / out_of_korea / missing_q / input_too_long) + smoke.sh 4 case 확장.
+> **Spec**: `.claude/plans/plan-12-l1d-l3-geo.md`. Phase 1 Architect/Critic + Phase 2 종합 ITERATE 모두 반영.
 
-- [ ] kickoff 시 ina:plan trigger
+- [x] **T1**: scaffold `internal/proxy/places_integration_test.go` (`//go:build integration`) + `setupGeoIntegration(t)` (DATABASE_URL skip + pgxpool + `pg_advisory_lock(12)` + prefix-DELETE teardown) + `seedPlace`/`seedAliasOverride` helper + `TestResolve_Integration_Exact` PASS.
+- [x] **T2**: 3 case — `AliasOverridePriority` (places vs alias_overrides 다른 좌표 → response.source=`kittypaw_alias`/type=`alias_override`) + `FuzzyFallback` (q=`_p12_fuzzy_강남구청` → seed `_p12_fuzzy_강남구청역` trgm match) + `TypeHintSubwayWins` (동일 name_ko 두 row, 역 suffix → subway_station 우선). 모두 PASS.
+- [x] **T3**: 3 negative — `OutOfKorea` (q=`_p12_oof_unmappable_*` → 422 `unsupported_input`. *cross-package row 와 fuzzy 충돌 회피 위해 prefix 박제 unmappable query 사용* — Tokyo 같은 ASCII short token 은 model 패키지 fixture 와 trgm match 가능) + `MissingQ` (400) + `InputTooLong` (201자 → 414).
+- [x] **T4**: `check_geo` 3rd arg `expected_status_class` default `200`, `4xx` regex 박제. 4 case (강남역/서울대입구역/강남/Tokyo `4xx`). 기존 호출 BC 보존. **`make smoke` 29/29 PASS** (26 → 29, 3 추가).
+- [x] **T5**: TASKS.md ✅ + Plan 13 promote. commit gate.
 
-## Plan 13: B1 — L1.E /auth/me + refresh rotation (대기, Plan 17 후)
+**검증**: `make test-integration` 전 패키지 PASS (회귀 0) / `make build` ✓ / `make lint` 0 issues / `make smoke` 29/29 PASS. production 코드 변경 0.
+
+## Plan 13: B1 — L1.E /auth/me + refresh rotation ← 현재
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan B1 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출.
@@ -329,7 +333,7 @@
 > `smoke-3-layer.md` 14d SLA 박제 명시 폐기 (CEO ITERATE 채택, sunk cost fallacy).
 > 재개 트리거: 라우터 wiring 회귀 발생 또는 외부 운영 인력 추가 시.
 
-## Plan 17: kittychat credential foundation ← 현재
+## Plan 17: kittychat credential foundation ✅
 
 > Spec: `docs/specs/kittychat-credential-foundation.md` (cross-team contract — track 필요. multi-aud + claims schema + scope vocab + version policy 박제, 사용자 결정 2026-05-02)
 > 외부 의존: kittychat 측 implementer unblock. 그쪽이 우리 spec 위에서 `CredentialVerifier`/`APIClientClaims`/`DeviceClaims` 정의 후 env-seeded verifier 진행.

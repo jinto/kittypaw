@@ -109,9 +109,14 @@ check_envelope() {
 
 # /v1/geo/resolve has its own JSON shape (no `response.header` envelope).
 # curl -G with --data-urlencode handles Hangul query safely.
+#
+# Args: <query> <desc> [expected_status_class]
+#   expected_status_class: "200" (default — also asserts lat/lon/name_matched
+#   fields) or "4xx" (passes on any 4XX — used for unsupported_input cases).
 check_geo() {
     local query="$1"
     local desc="$2"
+    local expected="${3:-200}"
     local raw
     raw=$(curl -sS -w $'\n%{http_code}' "${BASE}/v1/geo/resolve" --data-urlencode "q=${query}" -G 2>/dev/null || printf '\n000')
     _split_body_code "$raw"
@@ -122,6 +127,20 @@ check_geo() {
         _split_body_code "$raw"
     fi
 
+    if [[ "$expected" == "4xx" ]]; then
+        if [[ "$CODE" =~ ^4[0-9]{2}$ ]]; then
+            printf "${G}✓${N} %s [%s — 4xx as expected]\n" "$desc" "$CODE"
+            PASS=$((PASS + 1))
+        else
+            printf "${R}✗${N} %s [HTTP %s, expected 4xx]\n" "$desc" "$CODE"
+            FAIL=$((FAIL + 1))
+            FAIL_LIST+=("$desc")
+        fi
+        sleep "$THROTTLE"
+        return
+    fi
+
+    # default: expect 200 + lat/lon/name_matched fields
     if [[ "$CODE" != "200" ]]; then
         printf "${R}✗${N} %s [HTTP %s]\n" "$desc" "$CODE"
         FAIL=$((FAIL + 1))
@@ -211,7 +230,10 @@ check_envelope "/v1/air/airkorea/unhealthy" "air/airkorea/unhealthy"
 
 echo
 echo "--- Geo (places DB + addresses fallthrough) ---"
-check_geo "강남역" "geo/resolve (강남역)"
+check_geo "강남역" "geo/resolve (강남역, exact)"
+check_geo "서울대입구역" "geo/resolve (서울대입구역, alias_override or exact)"
+check_geo "강남" "geo/resolve (강남, fuzzy)"
+check_geo "Tokyo" "geo/resolve (Tokyo, out-of-korea)" "4xx"
 
 # OAuth: endpoint-level GET smoke (routing/handler liveness).
 # Login 동작 자체는 별도 plan (Playwright/headless browser flow).
