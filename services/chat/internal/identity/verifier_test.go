@@ -97,6 +97,7 @@ func TestMemoryCredentialVerifierValidatesAPIClientSeeds(t *testing.T) {
 	}{
 		{name: "empty token", token: "", claims: valid},
 		{name: "missing kittychat audience", token: "api_secret", claims: withAPIAudiences(valid, []string{AudienceKittyAPI})},
+		{name: "legacy kittychat audience", token: "api_secret", claims: withAPIAudiences(valid, []string{"kittychat"})},
 		{name: "wrong version", token: "api_secret", claims: withAPIVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "api_secret", claims: withAPIScopes(valid, nil)},
 		{name: "unknown scope", token: "api_secret", claims: withAPIScopes(valid, []Scope{"unknown"})},
@@ -129,6 +130,7 @@ func TestMemoryCredentialVerifierValidatesDeviceSeeds(t *testing.T) {
 	}{
 		{name: "empty token", token: "", claims: valid},
 		{name: "missing kittychat audience", token: "dev_secret", claims: withDeviceAudiences(valid, []string{AudienceKittyAPI})},
+		{name: "legacy kittychat audience", token: "dev_secret", claims: withDeviceAudiences(valid, []string{"kittychat"})},
 		{name: "wrong version", token: "dev_secret", claims: withDeviceVersion(valid, CredentialVersion1+1)},
 		{name: "missing scope", token: "dev_secret", claims: withDeviceScopes(valid, nil)},
 		{name: "unknown scope", token: "dev_secret", claims: withDeviceScopes(valid, []Scope{"unknown"})},

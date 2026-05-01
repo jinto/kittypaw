@@ -53,12 +53,10 @@ to the package-specific principals used by the relay:
 
 Claims include the fields that `api.kittypaw.app` will own:
 
-- `issuer`: canonical value is `https://api.kittypaw.app/auth`. The legacy
-  value `kittyapi` is accepted only during migration.
+- `issuer`: must be `https://api.kittypaw.app/auth`.
 - `audiences`: must include canonical `https://chat.kittypaw.app`. API server
   JWTs can use `["https://api.kittypaw.app", "https://chat.kittypaw.app"]`
-  for multi-audience tokens. The legacy resource audience `kittychat` is
-  accepted only during migration.
+  for multi-audience tokens.
 - `version`: must be `1` for this slice.
 - `scopes`: must contain known scope strings.
 - API client claims: `subject`, `user_id`, `device_id`, `account_id`.

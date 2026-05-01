@@ -67,7 +67,7 @@ Expected: fail because `internal/identity` does not exist yet.
 
 Create `internal/identity/verifier.go` with:
 
-- `const AudienceKittyChat = "kittychat"`
+- `const AudienceKittyChat = "https://chat.kittypaw.app"`
 - `const CredentialVersion1 = 1`
 - `type Scope string`
 - `ScopeChatRelay`, `ScopeModelsRead`, `ScopeDaemonConnect`
@@ -78,7 +78,7 @@ Create `internal/identity/verifier.go` with:
 - `type MemoryCredentialVerifier` with `AddAPIClient`, `AddDevice`, `VerifyAPIClient`, and `VerifyDevice`.
 - `func (c APIClientClaims) Principal() openai.Principal`.
 - `func (c DeviceClaims) Principal() broker.DevicePrincipal`.
-- validation that requires audiences include `kittychat`, `version == 1`, non-empty subject/user/device/account fields, non-empty local accounts for device claims, and only known scope values.
+- validation that requires audiences include `https://chat.kittypaw.app`, `version == 1`, non-empty subject/user/device/account fields, non-empty local accounts for device claims, and only known scope values.
 - defensive copying for all slices on insert and return.
 
 - [ ] **Step 4: Run test and verify GREEN**

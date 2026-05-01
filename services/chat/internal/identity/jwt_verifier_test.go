@@ -65,27 +65,49 @@ func TestJWTCredentialVerifierIgnoresUnknownScopes(t *testing.T) {
 	assertScopes(t, got.Scopes, []Scope{ScopeModelsRead})
 }
 
-func TestJWTCredentialVerifierAcceptsLegacyIssuerAudienceDuringMigration(t *testing.T) {
+func TestJWTCredentialVerifierRejectsLegacyIssuerAudience(t *testing.T) {
 	verifier, err := NewJWTCredentialVerifier(JWTVerifierConfig{Secret: testJWTSecret})
 	if err != nil {
 		t.Fatalf("NewJWTCredentialVerifier() error = %v", err)
 	}
-	token := signTestJWT(t, map[string]any{
-		"sub":   "user_1",
-		"iss":   LegacyIssuerKittyAPI,
-		"aud":   []string{LegacyAudienceKittyAPI, LegacyAudienceKittyChat},
-		"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)},
-		"v":     CredentialVersion1,
-		"iat":   time.Now().Unix(),
-		"exp":   time.Now().Add(time.Hour).Unix(),
-	})
-
-	got, err := verifier.VerifyAPIClient(context.Background(), token)
-	if err != nil {
-		t.Fatalf("VerifyAPIClient() legacy token error = %v", err)
+	tests := []struct {
+		name string
+		iss  string
+		aud  []string
+	}{
+		{
+			name: "legacy issuer and audience",
+			iss:  "kittyapi",
+			aud:  []string{"kittyapi", "kittychat"},
+		},
+		{
+			name: "legacy issuer",
+			iss:  "kittyapi",
+			aud:  []string{AudienceKittyAPI, AudienceKittyChat},
+		},
+		{
+			name: "legacy audience",
+			iss:  IssuerKittyAPI,
+			aud:  []string{AudienceKittyAPI, "kittychat"},
+		},
 	}
-	if got.Subject != "user_1" {
-		t.Fatalf("Subject = %q, want user_1", got.Subject)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := signTestJWT(t, map[string]any{
+				"sub":   "user_1",
+				"iss":   tt.iss,
+				"aud":   tt.aud,
+				"scope": []string{string(ScopeChatRelay), string(ScopeModelsRead)},
+				"v":     CredentialVersion1,
+				"iat":   time.Now().Unix(),
+				"exp":   time.Now().Add(time.Hour).Unix(),
+			})
+
+			_, err := verifier.VerifyAPIClient(context.Background(), token)
+			if !errors.Is(err, ErrUnauthorized) {
+				t.Fatalf("VerifyAPIClient() error = %v, want ErrUnauthorized", err)
+			}
+		})
 	}
 }
 

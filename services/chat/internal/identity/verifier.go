@@ -15,10 +15,6 @@ const (
 	AudienceKittyChat = "https://chat.kittypaw.app"
 	IssuerKittyAPI    = "https://api.kittypaw.app/auth"
 
-	LegacyAudienceKittyAPI  = "kittyapi"
-	LegacyAudienceKittyChat = "kittychat"
-	LegacyIssuerKittyAPI    = "kittyapi"
-
 	CredentialVersion1 = 1
 )
 
@@ -244,7 +240,7 @@ func validateCommonClaims(subject string, audiences []string, version int, scope
 	if subject == "" {
 		return fmt.Errorf("subject is required")
 	}
-	if !hasAcceptedAudience(audiences, AudienceKittyChat, LegacyAudienceKittyChat) {
+	if !hasAudience(audiences, AudienceKittyChat) {
 		return fmt.Errorf("audience must include %q", AudienceKittyChat)
 	}
 	if version != CredentialVersion1 {
@@ -264,15 +260,6 @@ func validateCommonClaims(subject string, audiences []string, version int, scope
 func hasAudience(audiences []string, want string) bool {
 	for _, audience := range audiences {
 		if audience == want {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAcceptedAudience(audiences []string, accepted ...string) bool {
-	for _, want := range accepted {
-		if hasAudience(audiences, want) {
 			return true
 		}
 	}

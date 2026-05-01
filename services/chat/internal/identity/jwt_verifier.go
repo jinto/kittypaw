@@ -105,17 +105,13 @@ func (v *JWTCredentialVerifier) parse(tokenString string) (*jwtCredentialClaims,
 			}
 			return v.secret, nil
 		},
+		jwt.WithIssuer(IssuerKittyAPI),
+		jwt.WithAudience(AudienceKittyChat),
 	)
 	if err != nil {
 		return nil, ErrUnauthorized
 	}
 	if !token.Valid || claims.ExpiresAt == nil || claims.Subject == "" || claims.Version != CredentialVersion1 {
-		return nil, ErrUnauthorized
-	}
-	if claims.Issuer != IssuerKittyAPI && claims.Issuer != LegacyIssuerKittyAPI {
-		return nil, ErrUnauthorized
-	}
-	if !hasAcceptedAudience([]string(claims.Audience), AudienceKittyChat, LegacyAudienceKittyChat) {
 		return nil, ErrUnauthorized
 	}
 	return claims, nil
