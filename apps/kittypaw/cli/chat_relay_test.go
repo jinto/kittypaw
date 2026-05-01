@@ -27,7 +27,7 @@ func TestChatRelayConnectorConfigsRequiresCompleteAccountSecrets(t *testing.T) {
 			Secrets:     secrets,
 			APITokenMgr: mgr,
 		},
-	}, "0.1.5")
+	}, "0.1.5", false)
 
 	if len(got) != 1 {
 		t.Fatalf("connector configs = %d, want 1", len(got))
@@ -53,6 +53,39 @@ func TestChatRelayConnectorConfigsRequiresCompleteAccountSecrets(t *testing.T) {
 	}
 }
 
+func TestChatRelayConnectorConfigsAdvertisesDefaultCapabilitiesWhenDispatchIsReady(t *testing.T) {
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := core.DefaultAPIServerURL
+	if err := mgr.SaveChatRelayURL(apiURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayDeviceID(apiURL, "dev_123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatDaemonCredential(apiURL, "device-token-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := chatRelayConnectorConfigs([]*server.AccountDeps{
+		{
+			Account:     &core.Account{ID: "alice"},
+			Secrets:     secrets,
+			APITokenMgr: mgr,
+		},
+	}, "0.1.5", true)
+
+	if len(got) != 1 {
+		t.Fatalf("connector configs = %d, want 1", len(got))
+	}
+	if len(got[0].Capabilities) != 0 {
+		t.Fatalf("Capabilities = %#v, want nil/default capabilities", got[0].Capabilities)
+	}
+	if got[0].Capabilities != nil {
+		t.Fatalf("Capabilities = %#v, want nil so protocol defaults are advertised", got[0].Capabilities)
+	}
+}
+
 func TestChatRelayConnectorConfigsGroupsAccountsForSameDeviceCredential(t *testing.T) {
 	aliceSecrets := testSecretsStore(t)
 	aliceMgr := core.NewAPITokenManager("", aliceSecrets)
@@ -73,7 +106,7 @@ func TestChatRelayConnectorConfigsGroupsAccountsForSameDeviceCredential(t *testi
 	got := chatRelayConnectorConfigs([]*server.AccountDeps{
 		{Account: &core.Account{ID: "alice"}, Secrets: aliceSecrets, APITokenMgr: aliceMgr},
 		{Account: &core.Account{ID: "bob"}, Secrets: bobSecrets, APITokenMgr: bobMgr},
-	}, "0.1.5")
+	}, "0.1.5", false)
 
 	if len(got) != 1 {
 		t.Fatalf("connector configs = %d, want one grouped device connector", len(got))
@@ -109,7 +142,7 @@ func TestChatRelayConnectorConfigsSeparatesSameDeviceWithDifferentCredential(t *
 	got := chatRelayConnectorConfigs([]*server.AccountDeps{
 		{Account: &core.Account{ID: "alice"}, Secrets: aliceSecrets, APITokenMgr: aliceMgr},
 		{Account: &core.Account{ID: "bob"}, Secrets: bobSecrets, APITokenMgr: bobMgr},
-	}, "0.1.5")
+	}, "0.1.5", false)
 
 	if len(got) != 2 {
 		t.Fatalf("connector configs = %d, want two credentials kept separate", len(got))
@@ -132,7 +165,7 @@ func TestChatRelayConnectorConfigsSkipsPartialSecrets(t *testing.T) {
 			Secrets:     secrets,
 			APITokenMgr: mgr,
 		},
-	}, "0.1.5")
+	}, "0.1.5", false)
 
 	if len(got) != 0 {
 		t.Fatalf("connector configs = %#v, want none without credential", got)

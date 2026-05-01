@@ -10,11 +10,11 @@ import (
 	"github.com/jinto/kittypaw/server"
 )
 
-func chatRelayConnectorConfigs(deps []*server.AccountDeps, daemonVersion string) []chatrelay.ConnectorConfig {
+func chatRelayConnectorConfigs(deps []*server.AccountDeps, daemonVersion string, dispatchReady bool) []chatrelay.ConnectorConfig {
 	configs := make([]chatrelay.ConnectorConfig, 0, len(deps))
 	groupIndex := make(map[chatRelayConnectorKey]int)
 	for _, dep := range deps {
-		cfg, ok := chatRelayConnectorConfig(dep, daemonVersion)
+		cfg, ok := chatRelayConnectorConfig(dep, daemonVersion, dispatchReady)
 		if !ok {
 			continue
 		}
@@ -43,7 +43,7 @@ type chatRelayConnectorKey struct {
 	DeviceID   string
 }
 
-func chatRelayConnectorConfig(dep *server.AccountDeps, daemonVersion string) (chatrelay.ConnectorConfig, bool) {
+func chatRelayConnectorConfig(dep *server.AccountDeps, daemonVersion string, dispatchReady bool) (chatrelay.ConnectorConfig, bool) {
 	if dep == nil || dep.Account == nil || dep.Account.ID == "" || dep.Secrets == nil || dep.APITokenMgr == nil {
 		return chatrelay.ConnectorConfig{}, false
 	}
@@ -60,19 +60,26 @@ func chatRelayConnectorConfig(dep *server.AccountDeps, daemonVersion string) (ch
 	if !ok || credential == "" {
 		return chatrelay.ConnectorConfig{}, false
 	}
-	return chatrelay.ConnectorConfig{
+	cfg := chatrelay.ConnectorConfig{
 		RelayURL:      relayURL,
 		Credential:    credential,
 		DeviceID:      deviceID,
 		LocalAccounts: []string{dep.Account.ID},
 		DaemonVersion: daemonVersion,
 		Capabilities:  []string{},
-	}, true
+	}
+	if dispatchReady {
+		cfg.Capabilities = nil
+	}
+	return cfg, true
 }
 
-func startChatRelayConnectors(ctx context.Context, deps []*server.AccountDeps, daemonVersion string) {
-	for _, cfg := range chatRelayConnectorConfigs(deps, daemonVersion) {
-		connector := &chatrelay.Connector{Config: cfg}
+func startChatRelayConnectors(ctx context.Context, deps []*server.AccountDeps, daemonVersion string, dispatcher chatrelay.Dispatcher) {
+	for _, cfg := range chatRelayConnectorConfigs(deps, daemonVersion, dispatcher != nil) {
+		connector := &chatrelay.Connector{
+			Config:     cfg,
+			Dispatcher: dispatcher,
+		}
 		go connector.Run(ctx, chatrelay.RunOptions{
 			Logf: func(format string, args ...any) {
 				slog.Debug("chat relay connector", "message", formatLog(format, args...))
