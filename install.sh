@@ -5,6 +5,62 @@ REPO="kittypaw-app/kittypaw"
 BINARY="kittypaw"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
+restart_standalone_daemon() {
+  BIN_PATH="$1"
+
+  if [ ! -x "$BIN_PATH" ]; then
+    return
+  fi
+
+  if "$BIN_PATH" daemon status 2>/dev/null | grep -q "Daemon is running"; then
+    echo "  Restarting running kittypaw daemon..."
+    if "$BIN_PATH" daemon stop >/dev/null 2>&1 && "$BIN_PATH" daemon start >/dev/null 2>&1; then
+      echo "  ✓ kittypaw daemon restarted"
+    else
+      echo "  ! Installed, but failed to restart the daemon."
+      echo "    Run: kittypaw daemon stop && kittypaw daemon start"
+    fi
+  fi
+}
+
+restart_after_install() {
+  BIN_PATH="$1"
+
+  case "$OS" in
+    darwin)
+      if command -v launchctl >/dev/null 2>&1; then
+        TARGET="gui/$(id -u)/dev.kittypaw.daemon"
+        if launchctl print "$TARGET" >/dev/null 2>&1; then
+          echo "  Restarting running kittypaw service..."
+          if launchctl kickstart -k "$TARGET" >/dev/null 2>&1; then
+            echo "  ✓ kittypaw service restarted"
+          else
+            echo "  ! Installed, but failed to restart the service."
+            echo "    Run: launchctl kickstart -k $TARGET"
+          fi
+          return
+        fi
+      fi
+      ;;
+    linux)
+      if command -v systemctl >/dev/null 2>&1; then
+        if systemctl --user is-active --quiet kittypaw.service >/dev/null 2>&1; then
+          echo "  Restarting running kittypaw service..."
+          if systemctl --user restart kittypaw.service >/dev/null 2>&1; then
+            echo "  ✓ kittypaw service restarted"
+          else
+            echo "  ! Installed, but failed to restart the service."
+            echo "    Run: systemctl --user restart kittypaw.service"
+          fi
+          return
+        fi
+      fi
+      ;;
+  esac
+
+  restart_standalone_daemon "$BIN_PATH"
+}
+
 # ----- detect platform -----
 
 OS="$(uname -s)"
@@ -72,8 +128,14 @@ else
   sudo mv "$BINARY" "$INSTALL_DIR/"
 fi
 
+case "$INSTALL_DIR" in
+  */) INSTALLED_BIN="${INSTALL_DIR}${BINARY}" ;;
+  *)  INSTALLED_BIN="${INSTALL_DIR}/${BINARY}" ;;
+esac
+
 echo ""
 echo "  ✓ ${BINARY} v${VERSION} installed"
+restart_after_install "$INSTALLED_BIN"
 echo ""
 echo "  Get started:"
 echo "    kittypaw setup"
