@@ -873,24 +873,170 @@ func promptYesNo(scanner *bufio.Scanner, prompt string, defaultYes bool) bool {
 
 // promptChoice presents numbered options and returns a 1-indexed selection.
 func promptChoice(scanner *bufio.Scanner, prompt string, options []string, defaultIdx int) int {
-	for i, opt := range options {
-		marker := "  "
-		if i+1 == defaultIdx {
-			marker = "> "
-		}
-		fmt.Printf("  %s(%d) %s\n", marker, i+1, opt)
+	defaultIdx = normalizeChoiceIndex(defaultIdx, len(options))
+	if defaultIdx == 0 {
+		return 0
 	}
-	fmt.Printf("%sSelect [%d]: ", prompt, defaultIdx)
+	if isTTY() {
+		if idx, ok := promptChoiceInteractive(prompt, options, defaultIdx); ok {
+			return idx
+		}
+	}
+
+	renderChoiceBlock(prompt, options, defaultIdx, false)
 	if !scanner.Scan() {
 		return defaultIdx
 	}
-	line := strings.TrimSpace(scanner.Text())
+	return choiceFromInput(scanner.Text(), defaultIdx, len(options))
+}
+
+func normalizeChoiceIndex(idx, optionCount int) int {
+	if optionCount <= 0 {
+		return 0
+	}
+	if idx < 1 {
+		return 1
+	}
+	if idx > optionCount {
+		return optionCount
+	}
+	return idx
+}
+
+func renderChoiceBlock(prompt string, options []string, selectedIdx int, clear bool) {
+	lineEnd := "\n"
+	if clear {
+		lineEnd = "\r\n"
+	}
+	for i, opt := range options {
+		if clear {
+			fmt.Print("\r\033[2K")
+		}
+		marker := "  "
+		if i+1 == selectedIdx {
+			marker = "> "
+		}
+		fmt.Printf("  %s(%d) %s%s", marker, i+1, opt, lineEnd)
+	}
+	if clear {
+		fmt.Print("\r\033[2K")
+	}
+	fmt.Printf("%sSelect [%d]: ", prompt, selectedIdx)
+}
+
+func choiceFromInput(line string, defaultIdx, optionCount int) int {
+	selected := normalizeChoiceIndex(defaultIdx, optionCount)
+	if selected == 0 {
+		return 0
+	}
+	line = strings.TrimSpace(line)
 	if line == "" {
-		return defaultIdx
+		return selected
 	}
 	var idx int
-	if _, err := fmt.Sscanf(line, "%d", &idx); err == nil && idx >= 1 && idx <= len(options) {
+	if _, err := fmt.Sscanf(line, "%d", &idx); err == nil && idx >= 1 && idx <= optionCount {
 		return idx
 	}
-	return defaultIdx
+	for i := 0; i < len(line); i++ {
+		if line[i] != '\x1b' || i+2 >= len(line) || line[i+1] != '[' {
+			continue
+		}
+		switch line[i+2] {
+		case 'A':
+			selected = moveChoiceSelection(selected, -1, optionCount)
+			i += 2
+		case 'B':
+			selected = moveChoiceSelection(selected, 1, optionCount)
+			i += 2
+		}
+	}
+	return selected
+}
+
+func promptChoiceInteractive(prompt string, options []string, defaultIdx int) (int, bool) {
+	fd := int(syscall.Stdin)
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return 0, false
+	}
+	defer term.Restore(fd, oldState) //nolint:errcheck
+
+	selected := defaultIdx
+	renderChoiceBlock(prompt, options, selected, true)
+
+	refresh := func() {
+		fmt.Printf("\r\033[%dA", choiceRefreshRows(len(options)))
+		renderChoiceBlock(prompt, options, selected, true)
+	}
+
+	var b [1]byte
+	for {
+		if _, err := os.Stdin.Read(b[:]); err != nil {
+			fmt.Print("\r\n")
+			return selected, true
+		}
+		switch b[0] {
+		case '\r', '\n':
+			fmt.Print("\r\n")
+			return selected, true
+		case 3: // Ctrl+C
+			_ = term.Restore(fd, oldState)
+			fmt.Print("\r\n")
+			os.Exit(130)
+		case '\x1b':
+			first, err := readChoiceByte()
+			if err != nil {
+				continue
+			}
+			second, err := readChoiceByte()
+			if err != nil {
+				continue
+			}
+			if first != '[' {
+				continue
+			}
+			switch second {
+			case 'A':
+				selected = moveChoiceSelection(selected, -1, len(options))
+				refresh()
+			case 'B':
+				selected = moveChoiceSelection(selected, 1, len(options))
+				refresh()
+			}
+		default:
+			if b[0] >= '1' && b[0] <= '9' {
+				if idx := int(b[0] - '0'); idx >= 1 && idx <= len(options) {
+					selected = idx
+					refresh()
+				}
+			}
+		}
+	}
+}
+
+func readChoiceByte() (byte, error) {
+	var b [1]byte
+	_, err := os.Stdin.Read(b[:])
+	return b[0], err
+}
+
+func choiceRefreshRows(optionCount int) int {
+	if optionCount < 0 {
+		return 0
+	}
+	return optionCount
+}
+
+func moveChoiceSelection(current, delta, optionCount int) int {
+	if optionCount <= 0 {
+		return 0
+	}
+	next := current + delta
+	if next < 1 {
+		return optionCount
+	}
+	if next > optionCount {
+		return 1
+	}
+	return next
 }

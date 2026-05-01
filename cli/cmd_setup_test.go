@@ -153,6 +153,64 @@ func TestSetupStrings_Golden(t *testing.T) {
 	}
 }
 
+func TestPromptChoiceAcceptsArrowSequences(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		def     int
+		want    int
+		options []string
+	}{
+		{
+			name:    "down selects next option",
+			input:   "\x1b[B\n",
+			def:     1,
+			want:    2,
+			options: []string{"Anthropic", "OpenAI", "Gemini"},
+		},
+		{
+			name:    "up wraps to previous option",
+			input:   "\x1b[A\n",
+			def:     1,
+			want:    3,
+			options: []string{"Anthropic", "OpenAI", "Gemini"},
+		},
+		{
+			name:    "multiple arrows accumulate",
+			input:   "\x1b[B\x1b[B\n",
+			def:     1,
+			want:    3,
+			options: []string{"Anthropic", "OpenAI", "Gemini"},
+		},
+		{
+			name:    "number still selects directly",
+			input:   "2\n",
+			def:     1,
+			want:    2,
+			options: []string{"Anthropic", "OpenAI", "Gemini"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scanner := bufio.NewScanner(strings.NewReader(tc.input))
+			got := 0
+			captureStdout(t, func() {
+				got = promptChoice(scanner, "  > ", tc.options, tc.def)
+			})
+			if got != tc.want {
+				t.Fatalf("promptChoice(%q, default=%d) = %d, want %d", tc.input, tc.def, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPromptChoiceRefreshRowsMatchesOptionCount(t *testing.T) {
+	if got := choiceRefreshRows(5); got != 5 {
+		t.Fatalf("choiceRefreshRows(5) = %d, want 5", got)
+	}
+}
+
 func TestAccountCredentialsIntroLocalizedWithoutAccountID(t *testing.T) {
 	t.Run("korean", func(t *testing.T) {
 		t.Setenv("LC_ALL", "")
