@@ -38,6 +38,7 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 **API client (web/CLI 사용자)**:
 ```json
 {
+  "iss": "kittyapi",
   "sub": "user_<id>",
   "aud": ["kittyapi", "kittychat"],
   "scope": ["chat:relay", "models:read"],
@@ -52,6 +53,7 @@ kittychat 측 codex 가 결정 (그쪽 영역):
 **daemon (device-scoped, 다음 slice)**:
 ```json
 {
+  "iss": "kittyapi",
   "sub": "device:<device_id>",
   "aud": ["kittychat"],
   "scope": ["daemon:connect"],
@@ -63,6 +65,10 @@ kittychat 측 codex 가 결정 (그쪽 영역):
   "exp": 1234568790
 }
 ```
+
+**Wire-format 박제 (검증자 측 주의)**:
+- `sub` 는 RFC 7519 standard. **`uid` 는 사용 안 함** — 초기 박제 시 `uid` 박제됐던 것을 2026-05-02 정정. 검증자가 *uid 우선 + sub fallback* hack 박제 불필요.
+- `iss="kittyapi"` 박제 — issuer mismatch 시 reject 권장.
 
 ### D3. scope vocabulary (확장 가능, additive only)
 

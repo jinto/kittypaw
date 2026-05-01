@@ -14,6 +14,8 @@ const (
 	AudienceKittyAPI  = "kittyapi"
 	AudienceKittyChat = "kittychat"
 
+	IssuerKittyAPI = "kittyapi"
+
 	ClaimsVersion = 1
 )
 

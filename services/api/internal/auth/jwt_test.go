@@ -1,6 +1,9 @@
 package auth_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,6 +88,47 @@ func TestSignForAudiences_RoundTrip(t *testing.T) {
 	}
 	if claims.V != 1 {
 		t.Fatalf("V = %d, want 1", claims.V)
+	}
+	if claims.Issuer != "kittyapi" {
+		t.Fatalf("Issuer = %q, want kittyapi (RFC 7519 iss)", claims.Issuer)
+	}
+}
+
+// TestClaimsJSONUsesSubField verifies the JSON wire shape uses RFC 7519
+// "sub" (not legacy "uid"). Cross-service (kittychat) MUST be able to
+// read the standard sub claim without any uid-fallback hack.
+func TestClaimsJSONUsesSubField(t *testing.T) {
+	token, err := auth.SignForAudiences(
+		"user-xyz",
+		[]string{"kittyapi"},
+		nil,
+		testSecret,
+		15*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("SignForAudiences: %v", err)
+	}
+	// Decode the middle (payload) segment without verification.
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT segments, got %d", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got, ok := raw["sub"].(string); !ok || got != "user-xyz" {
+		t.Fatalf(`payload "sub" = %v, want "user-xyz"`, raw["sub"])
+	}
+	if _, ok := raw["uid"]; ok {
+		t.Fatalf(`payload must not contain legacy "uid" key, got: %v`, raw)
+	}
+	if got, ok := raw["iss"].(string); !ok || got != "kittyapi" {
+		t.Fatalf(`payload "iss" = %v, want "kittyapi"`, raw["iss"])
 	}
 }
 

@@ -7,8 +7,15 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// Claims is the JWT payload shape issued by kittyapi.
+//
+// JSON wire format follows RFC 7519: subject is encoded as "sub" (not
+// the legacy "uid"). Cross-service verifiers (kittychat) read the
+// standard sub claim directly with no fallback hack.
+//
+// docs/specs/kittychat-credential-foundation.md (D2 schema, sub + iss).
 type Claims struct {
-	UserID string   `json:"uid"`
+	UserID string   `json:"sub"`
 	Scope  []string `json:"scope,omitempty"`
 	V      int      `json:"v,omitempty"`
 	jwt.RegisteredClaims
@@ -29,6 +36,7 @@ func SignForAudiences(userID string, audiences []string, scopes []string, secret
 		UserID: userID,
 		Scope:  scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    IssuerKittyAPI,
 			Audience:  jwt.ClaimStrings(audiences),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
