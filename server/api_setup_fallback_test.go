@@ -82,8 +82,8 @@ func TestSetupKakaoRegisterUsesDefaultAccountSecrets(t *testing.T) {
 		t.Fatalf("LoadAccountSecrets alice: %v", err)
 	}
 	mgr := core.NewAPITokenManager("", secrets)
-	if err := mgr.SaveRelayURL(core.DefaultAPIServerURL, relay.URL); err != nil {
-		t.Fatalf("SaveRelayURL: %v", err)
+	if err := mgr.SaveKakaoRelayBaseURL(core.DefaultAPIServerURL, relay.URL); err != nil {
+		t.Fatalf("SaveKakaoRelayBaseURL: %v", err)
 	}
 
 	cfg := core.DefaultConfig()
@@ -107,7 +107,7 @@ func TestSetupKakaoRegisterUsesDefaultAccountSecrets(t *testing.T) {
 		t.Fatalf("reload alice secrets: %v", err)
 	}
 	freshMgr := core.NewAPITokenManager("", freshSecrets)
-	if wsURL, ok := freshMgr.LoadKakaoRelayURL(core.DefaultAPIServerURL); !ok || wsURL == "" {
+	if wsURL, ok := freshMgr.LoadKakaoRelayWSURL(core.DefaultAPIServerURL); !ok || wsURL == "" {
 		t.Fatalf("alice Kakao relay URL = (%q, %v), want saved", wsURL, ok)
 	}
 	if _, err := os.Stat(filepath.Join(root, "accounts", core.DefaultAccountID, "secrets.json")); !os.IsNotExist(err) {

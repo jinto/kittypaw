@@ -103,15 +103,20 @@ func (m *APITokenManager) saveOrDelete(ns, key, value string) error {
 	return m.secrets.Set(ns, key, value)
 }
 
-// SaveRelayURL stores the relay server base URL from GET /discovery.
+const (
+	kakaoRelayURLKey   = "kakao_relay_url"
+	kakaoRelayWSURLKey = "kakao_relay_ws_url"
+)
+
+// SaveKakaoRelayBaseURL stores the KakaoTalk relay server base URL from GET /discovery.
 // Empty value deletes the key so stale URLs don't survive relay migrations.
-func (m *APITokenManager) SaveRelayURL(apiURL, relayURL string) error {
-	return m.saveOrDelete(NamespaceForURL(apiURL), "relay_url", relayURL)
+func (m *APITokenManager) SaveKakaoRelayBaseURL(apiURL, relayURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), kakaoRelayURLKey, relayURL)
 }
 
-// LoadRelayURL returns the stored relay server base URL.
-func (m *APITokenManager) LoadRelayURL(apiURL string) (string, bool) {
-	return m.secrets.Get(NamespaceForURL(apiURL), "relay_url")
+// LoadKakaoRelayBaseURL returns the stored KakaoTalk relay server base URL.
+func (m *APITokenManager) LoadKakaoRelayBaseURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), kakaoRelayURLKey)
 }
 
 // SaveAPIBaseURL stores the API base URL from GET /discovery.
@@ -138,17 +143,17 @@ func (m *APITokenManager) LoadSkillsRegistryURL(apiURL string) (string, bool) {
 	return m.secrets.Get(NamespaceForURL(apiURL), "skills_registry_url")
 }
 
-// SaveKakaoRelayURL stores the full Kakao relay WebSocket URL built from
+// SaveKakaoRelayWSURL stores the full Kakao relay WebSocket URL built from
 // a client-side relay registration (baseURL + /ws/{token}).
-func (m *APITokenManager) SaveKakaoRelayURL(apiURL, wsURL string) error {
+func (m *APITokenManager) SaveKakaoRelayWSURL(apiURL, wsURL string) error {
 	ns := NamespaceForURL(apiURL)
-	return m.secrets.Set(ns, "kakao_relay_ws_url", wsURL)
+	return m.secrets.Set(ns, kakaoRelayWSURLKey, wsURL)
 }
 
-// LoadKakaoRelayURL returns the stored Kakao relay WebSocket URL.
-func (m *APITokenManager) LoadKakaoRelayURL(apiURL string) (string, bool) {
+// LoadKakaoRelayWSURL returns the stored Kakao relay WebSocket URL.
+func (m *APITokenManager) LoadKakaoRelayWSURL(apiURL string) (string, bool) {
 	ns := NamespaceForURL(apiURL)
-	return m.secrets.Get(ns, "kakao_relay_ws_url")
+	return m.secrets.Get(ns, kakaoRelayWSURLKey)
 }
 
 // ClearTokens removes stored tokens for an API.

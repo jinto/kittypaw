@@ -36,7 +36,6 @@ type setupFlags struct {
 	force          bool
 	noChat         bool
 	noService      bool
-	web            bool
 }
 
 type setupConfigValidator func(core.WizardResult) error
@@ -560,8 +559,8 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
 		return nil
 	}
-	if d.RelayURL == "" {
-		fmt.Println("  Discovery 응답에 relay_url이 없어 페어링을 건너뜁니다.")
+	if d.KakaoRelayURL == "" {
+		fmt.Println("  Discovery 응답에 kakao_relay_url이 없어 페어링을 건너뜁니다.")
 		return nil
 	}
 
@@ -572,15 +571,15 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 	}
 	mgr := core.NewAPITokenManager("", secrets)
 
-	reg, err := core.RegisterRelaySession(d.RelayURL)
+	reg, err := core.RegisterRelaySession(d.KakaoRelayURL)
 	if err != nil {
 		fmt.Printf("  릴레이 등록 실패: %v\n", err)
 		fmt.Println("  KakaoTalk 활성화를 건너뜁니다. 네트워크 확인 후 재실행하세요.")
 		return nil
 	}
 
-	wsURL := core.WSURLFromRelay(d.RelayURL, reg.Token)
-	if err := mgr.SaveKakaoRelayURL(apiURL, wsURL); err != nil {
+	wsURL := core.WSURLFromRelay(d.KakaoRelayURL, reg.Token)
+	if err := mgr.SaveKakaoRelayWSURL(apiURL, wsURL); err != nil {
 		fmt.Printf("  WS URL 저장 실패: %v\n", err)
 		return nil
 	}
@@ -589,7 +588,7 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 	// "kittypaw-api" namespace that InjectKakaoWSURL reads at serve time.
 	w.APIServerURL = apiURL
 	w.KakaoEnabled = true
-	wizardKakaoPairing(scanner, d.RelayURL, reg)
+	wizardKakaoPairing(scanner, d.KakaoRelayURL, reg)
 	return nil
 }
 

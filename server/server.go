@@ -342,6 +342,21 @@ func (s *Server) setupRoutes() chi.Router {
 	// created auth.json it requires a browser session before returning api_key.
 	r.With(s.requireWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
 
+	// Chat bootstrap is the narrow browser chat surface. It does not return
+	// the /api/v1 control token and points clients at /chat/ws.
+	r.Get("/api/chat/bootstrap", s.handleChatBootstrap)
+
+	// Authenticated post-setup settings. First-run setup stays in the CLI;
+	// these endpoints only mutate already configured accounts.
+	r.Route("/api/settings", func(r chi.Router) {
+		r.Post("/llm", s.handleSettingsLLM)
+		r.Post("/telegram", s.handleSettingsTelegram)
+		r.Post("/telegram/chat-id", s.handleSettingsTelegramChatID)
+		r.Get("/workspaces", s.handleSettingsWorkspacesList)
+		r.Post("/workspaces", s.handleSettingsWorkspacesCreate)
+		r.Delete("/workspaces/{id}", s.handleSettingsWorkspacesDelete)
+	})
+
 	// Setup / onboarding routes are open for first-run setup only. Existing
 	// installs require the local Web UI session because localhost checks are
 	// not enough when the daemon is reached through a tunnel.
@@ -468,6 +483,7 @@ func (s *Server) setupRoutes() chi.Router {
 
 	// WebSocket sits outside /api/v1 — auth is done via query param or header.
 	r.HandleFunc("/ws", s.handleWebSocket)
+	r.HandleFunc("/chat/ws", s.handleChatWebSocket)
 
 	// Static web assets with SPA fallback — must be last (catch-all).
 	r.Handle("/*", staticHandler())

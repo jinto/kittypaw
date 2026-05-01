@@ -159,7 +159,19 @@ func readPump(ctx context.Context, conn *websocket.Conn, sessionID string,
 
 // handleWebSocket upgrades to WebSocket and runs a multi-turn chat session.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	acct, err := s.requestAccount(r)
+	s.handleWebSocketWithAccount(w, r, s.requestAccount)
+}
+
+func (s *Server) handleChatWebSocket(w http.ResponseWriter, r *http.Request) {
+	s.handleWebSocketWithAccount(w, r, s.requestChatSurfaceAccount)
+}
+
+func (s *Server) handleWebSocketWithAccount(
+	w http.ResponseWriter,
+	r *http.Request,
+	accountForRequest func(*http.Request) (*requestAccount, error),
+) {
+	acct, err := accountForRequest(r)
 	if err != nil {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return

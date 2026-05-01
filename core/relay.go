@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// RelayRegistration is the POST {relay_url}/register response from the
+// RelayRegistration is the POST {kakao_relay_url}/register response from the
 // KakaoTalk relay server.
 type RelayRegistration struct {
 	Token      string `json:"token"`

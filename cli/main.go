@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -239,15 +238,10 @@ func newSetupCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flags.force, "force", false, "Overwrite existing config without confirmation")
 	cmd.Flags().BoolVar(&flags.noChat, "no-chat", false, "Skip the post-setup chat REPL prompt (auto-entry)")
 	cmd.Flags().BoolVar(&flags.noService, "no-service", false, "Skip the post-setup service-install prompt")
-	cmd.Flags().BoolVar(&flags.web, "web", false, "Open the web onboarding UI in a browser (requires a running daemon)")
 	return cmd
 }
 
 func runSetup(cmd *cobra.Command, flags *setupFlags) error {
-	if flags.web {
-		return runSetupWeb(cmd)
-	}
-
 	cfgDir, err := core.ConfigDir()
 	if err != nil {
 		return err
@@ -538,51 +532,6 @@ func promptLocalPassword() (string, error) {
 		}
 		return password, nil
 	}
-}
-
-// runSetupWeb handles `kittypaw setup --web`. A daemon has to be listening
-// already (either via `kittypaw service install` or `kittypaw serve` in
-// another terminal) — the web wizard lives inside the daemon binary and
-// cannot be served in isolation without duplicating that logic. If none is
-// up we print explicit recovery steps rather than silently spawning a
-// foreground daemon, which would surprise users by blocking their terminal.
-func runSetupWeb(_ *cobra.Command) error {
-	conn, err := client.NewDaemonConn(flagRemote)
-	if err == nil && conn.IsRunning() {
-		url := conn.BaseURL
-		fmt.Printf("웹 온보딩: %s\n", url)
-		if openErr := openBrowser(url); openErr != nil {
-			fmt.Printf("(브라우저 자동 열기에 실패했습니다 — 위 URL을 수동으로 여세요: %v)\n", openErr)
-		}
-		return nil
-	}
-	fmt.Println("데몬이 아직 기동되지 않았습니다.")
-	fmt.Println("다음 중 하나를 먼저 실행한 뒤 'kittypaw setup --web' 을 다시 시도하세요:")
-	fmt.Println("  kittypaw service install      # 백그라운드 등록 + 기동")
-	fmt.Println("  kittypaw serve                # 이 터미널에서 포그라운드 기동")
-	fmt.Println("또는 브라우저로 http://127.0.0.1:3000 에 직접 접속하세요.")
-	return nil
-}
-
-// openBrowser shells out to the platform-appropriate URL opener. Best
-// effort — a non-zero exit or missing opener is surfaced to the caller
-// so the CLI can fall back to printing the URL.
-func openBrowser(url string) error {
-	var bin string
-	switch runtime.GOOS {
-	case "darwin":
-		bin = "open"
-	case "linux":
-		bin = "xdg-open"
-	case "windows":
-		bin = "rundll32"
-	default:
-		return fmt.Errorf("no known browser opener for %s", runtime.GOOS)
-	}
-	if runtime.GOOS == "windows" {
-		return exec.Command(bin, "url.dll,FileProtocolHandler", url).Start()
-	}
-	return exec.Command(bin, url).Start()
 }
 
 // ---------------------------------------------------------------------------

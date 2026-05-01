@@ -71,7 +71,7 @@ func injectKakaoWSURLForAPIURL(accountID string, channels []core.ChannelConfig, 
 		return
 	}
 	mgr := core.NewAPITokenManager("", secrets)
-	wsURL, ok := mgr.LoadKakaoRelayURL(apiURL)
+	wsURL, ok := mgr.LoadKakaoRelayWSURL(apiURL)
 	if !ok || wsURL == "" {
 		return
 	}

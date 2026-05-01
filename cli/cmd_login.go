@@ -72,8 +72,8 @@ func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
 	if err := mgr.SaveAPIBaseURL(apiURL, d.APIBaseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save api_base_url: %v\n", err)
 	}
-	if err := mgr.SaveRelayURL(apiURL, d.RelayURL); err != nil {
-		fmt.Fprintf(os.Stderr, "discovery: save relay_url: %v\n", err)
+	if err := mgr.SaveKakaoRelayBaseURL(apiURL, d.KakaoRelayURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save kakao_relay_url: %v\n", err)
 	}
 	if err := mgr.SaveSkillsRegistryURL(apiURL, d.SkillsRegistryURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save skills_registry_url: %v\n", err)
