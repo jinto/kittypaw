@@ -6,16 +6,16 @@ import (
 )
 
 // TestChatBelongsToAccount_StrictMatch pins the ownership check: when a
-// account has AdminChatIDs configured, only chat_ids in that list are
+// account has AllowedChatIDs configured, only chat_ids in that list are
 // accepted. A mismatch is the AC-T7 attack surface — a bot-token leak
 // must not let a foreign chat_id leak into this account's session state.
 func TestChatBelongsToAccount_StrictMatch(t *testing.T) {
-	cfg := &Config{AdminChatIDs: []string{"111", "222"}}
+	cfg := &Config{AllowedChatIDs: []string{"111", "222"}}
 	if !ChatBelongsToAccount(cfg, "111") {
-		t.Error("chat_id 111 should match AdminChatIDs")
+		t.Error("chat_id 111 should match AllowedChatIDs")
 	}
 	if !ChatBelongsToAccount(cfg, "222") {
-		t.Error("chat_id 222 should match AdminChatIDs")
+		t.Error("chat_id 222 should match AllowedChatIDs")
 	}
 	if ChatBelongsToAccount(cfg, "999") {
 		t.Error("chat_id 999 must NOT match; AC-T7 violation")
@@ -26,14 +26,14 @@ func TestChatBelongsToAccount_StrictMatch(t *testing.T) {
 }
 
 // TestChatBelongsToAccount_PermissiveUnconfigured locks in the back-compat
-// path: an account with no AdminChatIDs (fresh install, WebChat-only account)
+// path: an account with no AllowedChatIDs (fresh install, WebChat-only account)
 // accepts every chat_id. Without this the migration would silently drop
 // every inbound message on existing installs.
 func TestChatBelongsToAccount_PermissiveUnconfigured(t *testing.T) {
 	cases := []*Config{
 		nil,
-		{AdminChatIDs: nil},
-		{AdminChatIDs: []string{}},
+		{AllowedChatIDs: nil},
+		{AllowedChatIDs: []string{}},
 	}
 	for i, cfg := range cases {
 		if !ChatBelongsToAccount(cfg, "anything") {

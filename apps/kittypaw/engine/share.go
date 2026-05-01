@@ -52,7 +52,7 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 	// error string comes back; the audit log keeps the distinction internally
 	// for forensics. Same reason both branches share the rejection message.
 	owner := s.AccountRegistry.Get(targetID)
-	if owner == nil || owner.Config == nil || !owner.Config.IsFamily {
+	if owner == nil || owner.Config == nil || !owner.Config.IsSharedAccount() {
 		reason := "target_not_family"
 		if owner == nil {
 			reason = "unknown_account"

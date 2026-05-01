@@ -80,7 +80,7 @@ func TestSettingsTelegramUpdatesCompletedAccountConfig(t *testing.T) {
 	if len(written.Channels) != 1 || written.Channels[0].ChannelType != core.ChannelTelegram {
 		t.Fatalf("channels = %#v, want one telegram channel", written.Channels)
 	}
-	if got := written.AdminChatIDs; len(got) != 1 || got[0] != "4242" {
+	if got := written.AllowedChatIDs; len(got) != 1 || got[0] != "4242" {
 		t.Fatalf("admin chat IDs = %#v, want [4242]", got)
 	}
 }

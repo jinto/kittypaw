@@ -129,7 +129,7 @@ func TestAuthLogoutClearsSessionCookie(t *testing.T) {
 func TestAuthMeRejectsDisabledUserSession(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "pw"); err != nil {
 		t.Fatalf("create local auth user: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestSessionBoundBootstrapTokenIsRevokedWithLocalUser(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	cfg := core.DefaultConfig()
 	cfg.Server.APIKey = "account-key"
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "pw"); err != nil {
 		t.Fatalf("create local auth user: %v", err)
 	}
@@ -217,7 +217,11 @@ func TestSessionBoundBootstrapTokenIsRevokedWithLocalUser(t *testing.T) {
 func TestAPIAuthFailsClosedWhenLocalAuthStoreIsCorrupt(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	if err := os.WriteFile(filepath.Join(root, "auth.json"), []byte("{"), 0o600); err != nil {
+	accountDir := filepath.Join(root, "accounts", "alice")
+	if err := os.MkdirAll(accountDir, 0o700); err != nil {
+		t.Fatalf("mkdir account auth dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(accountDir, "account.toml"), []byte("{"), 0o600); err != nil {
 		t.Fatalf("write corrupt auth store: %v", err)
 	}
 	srv := newAuthTestServer(t, root, "alice", &core.Config{})
@@ -400,7 +404,7 @@ func newServerWithLocalUserAndConfig(t *testing.T, accountID, password string, c
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser(accountID, password); err != nil {
 		t.Fatalf("create local auth user: %v", err)
 	}
@@ -422,7 +426,7 @@ func newMultiAccountAuthTestServer(t *testing.T, defaultAccount string, users ma
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	for accountID, password := range users {
 		if err := auth.CreateUser(accountID, password); err != nil {
 			t.Fatalf("create local auth user %s: %v", accountID, err)

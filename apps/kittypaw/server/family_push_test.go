@@ -109,7 +109,7 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 // per target) deliver to each personal account's own channel with that
 // account's own chat_id. A regression here is the defining family-account
 // failure mode — either the wrong target gets the wrong message, or the
-// chat_id falls back to the family's own (non-existent) AdminChatIDs.
+// chat_id falls back to the family's own (non-existent) AllowedChatIDs.
 //
 // The scheduled-skill trigger is exercised elsewhere in engine/schedule;
 // this test narrows in on the Fanout → dispatchLoop → channel.SendResponse
@@ -120,16 +120,16 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 	// Family drives fanout; three personal accounts receive their own tailored text.
 	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"alice-chat"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"alice-chat"},
 	})
 	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"bob-chat"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"bob-chat"},
 	})
 	charlieDeps := buildAccountDeps(t, root, "charlie", &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"charlie-chat"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"charlie-chat"},
 	})
 	srv := New([]*AccountDeps{familyDeps, aliceDeps, bobDeps, charlieDeps}, "test")
 
@@ -209,12 +209,12 @@ func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 
 	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"alice-chat"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"alice-chat"},
 	})
 	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"bob-chat"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"bob-chat"},
 	})
 	srv := New([]*AccountDeps{familyDeps, aliceDeps, bobDeps}, "test")
 
@@ -272,7 +272,7 @@ func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 
 // TestDispatchLoop_FamilyPush_DeliversToTargetChannel is the happy path — a
 // family fanout push to alice with one telegram channel configured lands on
-// that telegram channel's SendResponse with alice's AdminChatIDs[0] as the
+// that telegram channel's SendResponse with alice's AllowedChatIDs[0] as the
 // chat ID. Critically, the agent loop must NOT run (payload.Text is a
 // finished outbound message, not an inbound chat that needs LLM processing).
 // The mock's backing Session has Provider=nil — if the dispatch loop ever
@@ -281,8 +281,8 @@ func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 func TestDispatchLoop_FamilyPush_DeliversToTargetChannel(t *testing.T) {
 	tg := &mockPushChannel{}
 	srv, shutdown := buildFamilyPushServer(t, &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"99999"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"99999"},
 	}, map[core.EventType]*mockPushChannel{core.EventTelegram: tg})
 	defer shutdown()
 
@@ -293,7 +293,7 @@ func TestDispatchLoop_FamilyPush_DeliversToTargetChannel(t *testing.T) {
 		t.Fatalf("expected 1 SendResponse, got %d", len(calls))
 	}
 	if calls[0].ChatID != "99999" {
-		t.Errorf("expected chatID 99999 (alice AdminChatIDs[0]), got %q", calls[0].ChatID)
+		t.Errorf("expected chatID 99999 (alice AllowedChatIDs[0]), got %q", calls[0].ChatID)
 	}
 	if calls[0].Response != "🍚 저녁 준비됐어!" {
 		t.Errorf("expected push text, got %q", calls[0].Response)
@@ -313,7 +313,7 @@ func TestDispatchLoop_FamilyPush_ChannelHintRoutesToSpecificChannel(t *testing.T
 			{ChannelType: core.ChannelTelegram},
 			{ChannelType: core.ChannelSlack},
 		},
-		AdminChatIDs: []string{"99999"},
+		AllowedChatIDs: []string{"99999"},
 	}, map[core.EventType]*mockPushChannel{
 		core.EventTelegram: tg,
 		core.EventSlack:    sl,
@@ -346,8 +346,8 @@ func TestDispatchLoop_FamilyPush_NoChannel_Enqueues(t *testing.T) {
 	// Pass an empty mocks map: Config declares a telegram channel but
 	// spawner has none registered.
 	srv, shutdown := buildFamilyPushServer(t, &core.Config{
-		Channels:     []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
-		AdminChatIDs: []string{"99999"},
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"99999"},
 	}, map[core.EventType]*mockPushChannel{})
 	defer shutdown()
 

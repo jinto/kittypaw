@@ -1112,6 +1112,38 @@ func (s *Store) SeedWorkspacesFromConfig(paths []string) error {
 	return nil
 }
 
+func (s *Store) SeedWorkspaceRootsFromConfig(roots []core.WorkspaceRoot) error {
+	ts := time.Now().UnixNano()
+	for i, root := range roots {
+		p := strings.TrimSpace(root.Path)
+		if p == "" {
+			continue
+		}
+		p = filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		var exists int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM workspaces WHERE root_path = ?", p).Scan(&exists); err != nil {
+			return fmt.Errorf("check workspace %q: %w", p, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		id := strings.TrimSpace(root.Alias)
+		if id == "" {
+			id = fmt.Sprintf("ws-seed-%d-%d", ts, i)
+		}
+		if _, err := s.db.Exec(
+			"INSERT INTO workspaces (id, name, root_path) VALUES (?, ?, ?)",
+			id, id, p,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Permissions
 // ---------------------------------------------------------------------------

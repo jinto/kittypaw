@@ -166,7 +166,7 @@ func TestAccountIsolation_ChannelSpawner_SameTypeTwoAccounts(t *testing.T) {
 
 // TestDispatchLoop_ChatIDMismatch_Drops enforces AC-T7: even after a
 // successful AccountID→Session route, the payload's chat_id must belong to
-// that account's AdminChatIDs. A mismatch is the exact bot-token-leak
+// that account's AllowedChatIDs. A mismatch is the exact bot-token-leak
 // scenario — alice's bot token gets stolen, the attacker crafts an update
 // carrying bob's chat_id to write bob's conversation into alice's store.
 // The event must be dropped before Session.Run and the mismatch counter
@@ -174,10 +174,10 @@ func TestAccountIsolation_ChannelSpawner_SameTypeTwoAccounts(t *testing.T) {
 func TestDispatchLoop_ChatIDMismatch_Drops(t *testing.T) {
 	root := t.TempDir()
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
-		AdminChatIDs: []string{"alice-chat-1"},
+		AllowedChatIDs: []string{"alice-chat-1"},
 	})
 	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
-		AdminChatIDs: []string{"bob-chat-1"},
+		AllowedChatIDs: []string{"bob-chat-1"},
 	})
 	srv := New([]*AccountDeps{aliceDeps, bobDeps}, "test")
 
@@ -235,7 +235,7 @@ func TestDispatchLoop_ChatIDMismatch_Drops(t *testing.T) {
 func TestDispatchLoop_ChatIDMatch_NoMismatch(t *testing.T) {
 	root := t.TempDir()
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
-		AdminChatIDs: []string{"alice-chat-1"},
+		AllowedChatIDs: []string{"alice-chat-1"},
 	})
 	srv := New([]*AccountDeps{aliceDeps}, "test")
 
@@ -275,11 +275,11 @@ func TestDispatchLoop_ChatIDMatch_NoMismatch(t *testing.T) {
 // counterpart to AC-T7. Kakao ChatID is the relay callback action id used for
 // SendResponse, not a stable owner chat id. The account boundary is the
 // per-account relay token that stamped Event.AccountID, so Telegram-style
-// AdminChatIDs matching must not drop a legitimate Kakao action id.
+// AllowedChatIDs matching must not drop a legitimate Kakao action id.
 func TestDispatchLoop_KakaoActionIDSkipsAdminChatOwnershipCheck(t *testing.T) {
 	root := t.TempDir()
 	deps := buildAccountDeps(t, root, "jinto", &core.Config{
-		AdminChatIDs: []string{"telegram-chat-id"},
+		AllowedChatIDs: []string{"telegram-chat-id"},
 	})
 	provider := &chatRelayMockProvider{content: "kakao reply"}
 	deps.Provider = provider

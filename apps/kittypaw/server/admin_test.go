@@ -24,7 +24,7 @@ func newServerForAdminTest(t *testing.T, accountsRoot string, defaultCh []core.C
 	cfg.Channels = defaultCh
 	deps := buildAccountDeps(t, accountsRoot, DefaultAccountID, cfg)
 	srv := New([]*AccountDeps{deps}, "test-admin")
-	srv.localAuth = core.NewLocalAuthStore(filepath.Join(accountsRoot, "auth.json"))
+	srv.localAuth = core.NewLocalAuthStore(accountsRoot)
 	return srv
 }
 

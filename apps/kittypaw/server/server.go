@@ -339,7 +339,8 @@ func (s *Server) setupRoutes() chi.Router {
 	})
 
 	// Bootstrap is open only before local Web UI users exist; once setup has
-	// created auth.json it requires a browser session before returning api_key.
+	// created per-account auth files it requires a browser session before
+	// returning api_key.
 	r.With(s.requireWebSessionIfAuthUsers).Get("/api/bootstrap", s.handleBootstrap)
 
 	// Chat bootstrap is the narrow browser chat surface. It does not return
@@ -589,8 +590,8 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			// an event whose chat_id belongs to a different account. Without
 			// this gate alice's Session.Run would persist bob's conversation
 			// under alice's store — a privacy breach the AccountID check
-			// alone cannot catch. Permissive when AdminChatIDs is empty
-			// (legacy single-account installs, web_chat-only accounts).
+			// alone cannot catch. Permissive when no allowed chat IDs are
+			// configured (web_chat-only accounts).
 			//
 			// Kakao is different: payload.ChatID is the relay callback action id
 			// used by SendResponse, not a stable user/chat identity. Kakao account
@@ -721,8 +722,8 @@ func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string,
 // Routing order:
 //  1. Target account must exist + have at least one declared channel.
 //  2. ChannelHint picks a specific channel type; fall back to Channels[0].
-//  3. AdminChatIDs[0] is the destination chat; empty = log + drop (nowhere
-//     to send).
+//  3. First allowed chat ID is the destination chat; empty = log + drop
+//     (nowhere to send).
 //  4. If the channel is not currently running (hot-reload, post-restart),
 //     enqueue to pending_responses so the retry loop can pick it up.
 func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
@@ -745,10 +746,7 @@ func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
 
 	channelType := resolveFamilyPushChannel(target.Config.Channels, p.ChannelHint)
 
-	chatID := ""
-	if len(target.Config.AdminChatIDs) > 0 {
-		chatID = target.Config.AdminChatIDs[0]
-	}
+	chatID := core.FirstAllowedChatID(target.Config)
 	if chatID == "" {
 		slog.Warn("family_push: target has no admin chat; dropping",
 			"account", event.AccountID, "channel", channelType)

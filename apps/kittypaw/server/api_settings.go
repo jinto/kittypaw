@@ -350,6 +350,9 @@ func (s *Server) applySettingsWizard(acct *requestAccount, wizard core.WizardRes
 	if err := s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, merged, wizard.APIServerURL); err != nil {
 		return err
 	}
+	if err := core.SaveWizardSecrets(accountID, wizard, merged); err != nil {
+		return err
+	}
 	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -30,20 +30,28 @@ var ErrLocalUserExists = errors.New("local user already exists")
 
 // LocalAuthStore manages server-wide local Web UI credentials.
 type LocalAuthStore struct {
-	path string
+	accountsDir string
 }
 
 type LocalAuthFile struct {
-	Version int                  `json:"version"`
-	Users   map[string]LocalUser `json:"users"`
+	Version int
+	Users   map[string]LocalUser
 }
 
 type LocalUser struct {
-	AccountID    string    `json:"account_id"`
-	PasswordHash string    `json:"password_hash"`
-	Disabled     bool      `json:"disabled,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	AccountID    string    `toml:"-"`
+	PasswordHash string    `toml:"password_hash"`
+	Disabled     bool      `toml:"disabled,omitempty"`
+	CreatedAt    time.Time `toml:"created_at"`
+	UpdatedAt    time.Time `toml:"updated_at"`
+}
+
+type localAccountAuthFile struct {
+	Version      int       `toml:"version"`
+	PasswordHash string    `toml:"password_hash"`
+	Disabled     bool      `toml:"disabled,omitempty"`
+	CreatedAt    time.Time `toml:"created_at"`
+	UpdatedAt    time.Time `toml:"updated_at"`
 }
 
 type passwordParams struct {
@@ -53,7 +61,7 @@ type passwordParams struct {
 }
 
 func NewLocalAuthStore(path string) *LocalAuthStore {
-	return &LocalAuthStore{path: path}
+	return &LocalAuthStore{accountsDir: path}
 }
 
 func LocalAuthPath() (string, error) {
@@ -61,7 +69,7 @@ func LocalAuthPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "auth.json"), nil
+	return filepath.Join(dir, "accounts"), nil
 }
 
 func (s *LocalAuthStore) CreateUser(accountID, password string) error {
@@ -86,13 +94,13 @@ func (s *LocalAuthStore) CreateUser(accountID, password string) error {
 		}
 
 		now := time.Now().UTC()
-		f.Users[accountID] = LocalUser{
+		u := LocalUser{
 			AccountID:    accountID,
 			PasswordHash: hash,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
-		return s.save(f)
+		return s.saveUser(u)
 	})
 }
 
@@ -141,7 +149,11 @@ func (s *LocalAuthStore) DeleteUser(accountID string) error {
 			return nil
 		}
 		delete(f.Users, accountID)
-		return s.save(f)
+		err = os.Remove(s.accountAuthPath(accountID))
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	})
 }
 
@@ -175,13 +187,12 @@ func (s *LocalAuthStore) SetDisabled(accountID string, disabled bool) error {
 		}
 		u.Disabled = disabled
 		u.UpdatedAt = time.Now().UTC()
-		f.Users[accountID] = u
-		return s.save(f)
+		return s.saveUser(u)
 	})
 }
 
 func (s *LocalAuthStore) load() (*LocalAuthFile, error) {
-	b, err := os.ReadFile(s.path)
+	entries, err := os.ReadDir(s.accountsDir)
 	if os.IsNotExist(err) {
 		return &LocalAuthFile{Version: localAuthVersion, Users: map[string]LocalUser{}}, nil
 	}
@@ -189,45 +200,83 @@ func (s *LocalAuthStore) load() (*LocalAuthFile, error) {
 		return nil, err
 	}
 
-	var f LocalAuthFile
-	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, fmt.Errorf("parse local auth store: %w", err)
+	f := &LocalAuthFile{Version: localAuthVersion, Users: map[string]LocalUser{}}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		accountID := entry.Name()
+		if err := ValidateAccountID(accountID); err != nil {
+			continue
+		}
+		u, err := s.loadUser(accountID)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		f.Users[accountID] = u
+	}
+	return f, nil
+}
+
+func (s *LocalAuthStore) loadUser(accountID string) (LocalUser, error) {
+	raw, err := os.ReadFile(s.accountAuthPath(accountID))
+	if err != nil {
+		return LocalUser{}, err
+	}
+	var f localAccountAuthFile
+	if _, err := toml.Decode(string(raw), &f); err != nil {
+		return LocalUser{}, fmt.Errorf("parse local account auth %q: %w", accountID, err)
 	}
 	switch f.Version {
 	case 0:
 		f.Version = localAuthVersion
 	case localAuthVersion:
 	default:
-		return nil, fmt.Errorf("unsupported local auth store version %d", f.Version)
+		return LocalUser{}, fmt.Errorf("unsupported local account auth version %d", f.Version)
 	}
-	if f.Users == nil {
-		f.Users = map[string]LocalUser{}
-	}
-	return &f, nil
+	return LocalUser{
+		AccountID:    accountID,
+		PasswordHash: f.PasswordHash,
+		Disabled:     f.Disabled,
+		CreatedAt:    f.CreatedAt,
+		UpdatedAt:    f.UpdatedAt,
+	}, nil
 }
 
-func (s *LocalAuthStore) save(f *LocalAuthFile) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+func (s *LocalAuthStore) saveUser(u LocalUser) error {
+	if err := os.MkdirAll(s.accountDir(u.AccountID), 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(filepath.Dir(s.path), 0o700); err != nil {
+	if err := os.Chmod(s.accountsDir, 0o700); err != nil {
 		return err
 	}
-
-	if f.Version == 0 {
-		f.Version = localAuthVersion
-	}
-	if f.Users == nil {
-		f.Users = map[string]LocalUser{}
-	}
-
-	b, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
+	if err := os.Chmod(s.accountDir(u.AccountID), 0o700); err != nil {
 		return err
 	}
 
-	_ = os.Remove(s.path + ".tmp")
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".*.tmp")
+	return writeLocalAccountAuthFile(s.accountAuthPath(u.AccountID), u)
+}
+
+func writeLocalAccountAuthFile(path string, u LocalUser) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	var b strings.Builder
+	if err := toml.NewEncoder(&b).Encode(localAccountAuthFile{
+		Version:      localAuthVersion,
+		PasswordHash: u.PasswordHash,
+		Disabled:     u.Disabled,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}); err != nil {
+		return err
+	}
+
+	_ = os.Remove(path + ".tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -243,14 +292,14 @@ func (s *LocalAuthStore) save(f *LocalAuthFile) error {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(b); err != nil {
+	if _, err := tmp.WriteString(b.String()); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	removeTmp = false
@@ -258,14 +307,14 @@ func (s *LocalAuthStore) save(f *LocalAuthFile) error {
 }
 
 func (s *LocalAuthStore) withLock(fn func() error) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+	if err := os.MkdirAll(s.accountsDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.Chmod(filepath.Dir(s.path), 0o700); err != nil {
+	if err := os.Chmod(s.accountsDir, 0o700); err != nil {
 		return err
 	}
 
-	lockPath := s.path + ".lock"
+	lockPath := filepath.Join(s.accountsDir, ".auth.lock")
 	deadline := time.Now().Add(lockTimeout)
 	for {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -283,6 +332,14 @@ func (s *LocalAuthStore) withLock(fn func() error) error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func (s *LocalAuthStore) accountDir(accountID string) string {
+	return filepath.Join(s.accountsDir, accountID)
+}
+
+func (s *LocalAuthStore) accountAuthPath(accountID string) string {
+	return filepath.Join(s.accountDir(accountID), "account.toml")
 }
 
 func hashPassword(password string) (string, error) {

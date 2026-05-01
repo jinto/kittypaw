@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestParseBindAddr(t *testing.T) {
@@ -170,6 +172,17 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func writeLocalServerSecret(t *testing.T, dir, accountID, apiKey string) {
+	t.Helper()
+	secrets, err := core.LoadSecretsFrom(filepath.Join(dir, "accounts", accountID, "secrets.json"))
+	if err != nil {
+		t.Fatalf("load secrets for %s: %v", accountID, err)
+	}
+	if err := secrets.Set("local-server", "api_key", apiKey); err != nil {
+		t.Fatalf("write local server secret for %s: %v", accountID, err)
+	}
+}
+
 // The five tests below cover every combination of fallback tiers that
 // resolveDaemonEndpoint() has to handle. They drive KITTYPAW_CONFIG_DIR to
 // an isolated tempdir via t.Setenv so they never touch the real ~/.kittypaw.
@@ -183,7 +196,8 @@ func TestNewDaemonConn_ServerToml_Wins(t *testing.T) {
 
 	// Also plant an account config with DIFFERENT values — tier 1 must win.
 	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
-		"[server]\nbind = \":9999\"\napi_key = \"account-key\"\n")
+		"[server]\nbind = \":9999\"\n")
+	writeLocalServerSecret(t, dir, "default", "account-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -205,7 +219,8 @@ func TestNewDaemonConn_ServerTomlBindOnlyUsesAccountKey(t *testing.T) {
 		"bind = \"127.0.0.1:3456\"\n")
 
 	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "default", "account-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -227,7 +242,8 @@ func TestNewDaemonConn_ServerTomlMasterOnlyUsesAccountBind(t *testing.T) {
 		"master_api_key = \"server-key\"\n")
 
 	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "default", "account-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -248,9 +264,11 @@ func TestNewDaemonConn_ServerTomlDefaultAccountOnly(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"default_account = \"bob\"\n")
 	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "alice", "alice-key")
 	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4568\"\n")
+	writeLocalServerSecret(t, dir, "bob", "bob-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -271,9 +289,11 @@ func TestNewDaemonConnForAccount_UsesAccountAPIKey(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\ndefault_account = \"alice\"\n")
 	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "alice", "alice-key")
 	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4568\"\n")
+	writeLocalServerSecret(t, dir, "bob", "bob-key")
 
 	d, err := NewDaemonConnForAccount("", "bob")
 	if err != nil {
@@ -297,7 +317,8 @@ func TestNewDaemonConn_ServerTomlInvalidDefaultAccount(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "server.toml"),
 		"bind = \"127.0.0.1:3456\"\nmaster_api_key = \"server-key\"\ndefault_account = \"missing\"\n")
 	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "alice", "alice-key")
 
 	_, err := NewDaemonConn("")
 	if err == nil {
@@ -316,7 +337,8 @@ func TestNewDaemonConn_AccountsDefault(t *testing.T) {
 
 	// Post-migration layout: only accounts/default/config.toml exists.
 	writeFile(t, filepath.Join(dir, "accounts", "default", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "default", "account-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -335,7 +357,8 @@ func TestDaemonConnSingleNonDefaultAccount(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 
 	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"account-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "alice", "account-key")
 
 	d, err := NewDaemonConn("")
 	if err != nil {
@@ -353,9 +376,11 @@ func TestDaemonConnMultipleAccountsNeedsServerToml(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 	writeFile(t, filepath.Join(dir, "accounts", "alice", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4567\"\napi_key = \"alice-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4567\"\n")
+	writeLocalServerSecret(t, dir, "alice", "alice-key")
 	writeFile(t, filepath.Join(dir, "accounts", "bob", "config.toml"),
-		"[server]\nbind = \"127.0.0.1:4568\"\napi_key = \"bob-key\"\n")
+		"[server]\nbind = \"127.0.0.1:4568\"\n")
+	writeLocalServerSecret(t, dir, "bob", "bob-key")
 
 	_, err := NewDaemonConn("")
 	if err == nil {
@@ -368,23 +393,20 @@ func TestDaemonConnMultipleAccountsNeedsServerToml(t *testing.T) {
 	}
 }
 
-func TestNewDaemonConn_LegacyTopLevel(t *testing.T) {
+func TestNewDaemonConn_RejectsTopLevelConfigWithoutAccount(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 
-	// Fresh post-setup, pre-serve state: only the legacy top-level file.
+	// v2 does not resolve daemon credentials from top-level config.toml.
 	writeFile(t, filepath.Join(dir, "config.toml"),
-		"[server]\nbind = \"127.0.0.1:5678\"\napi_key = \"legacy-key\"\n")
+		"[server]\nbind = \"127.0.0.1:5678\"\n")
 
-	d, err := NewDaemonConn("")
-	if err != nil {
-		t.Fatalf("NewDaemonConn: %v", err)
+	_, err := NewDaemonConn("")
+	if err == nil {
+		t.Fatal("expected top-level config without accounts to be rejected")
 	}
-	if d.BaseURL != "http://127.0.0.1:5678" {
-		t.Errorf("BaseURL = %q, want http://127.0.0.1:5678", d.BaseURL)
-	}
-	if d.APIKey != "legacy-key" {
-		t.Errorf("APIKey = %q, want legacy-key", d.APIKey)
+	if !strings.Contains(err.Error(), "kittypaw setup") {
+		t.Fatalf("error = %q, want setup hint", err.Error())
 	}
 }
 
@@ -400,7 +422,7 @@ func TestNewDaemonConn_NothingExists(t *testing.T) {
 	// path that was tried so they can verify the probe landed where they
 	// expected.
 	msg := err.Error()
-	for _, want := range []string{"kittypaw setup", "server.toml", "accounts", "config.toml"} {
+	for _, want := range []string{"kittypaw setup", "server.toml", "accounts"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q: %s", want, msg)
 		}

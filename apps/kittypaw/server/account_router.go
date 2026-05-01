@@ -107,7 +107,7 @@ func (r *AccountRouter) DropCount() int64 {
 
 // RecordMismatch increments the per-account chat_id ownership violation
 // counter. Callers use this *after* a successful Route() when the routed
-// session's Config.AdminChatIDs rejects the event's chat_id — the event
+// session's Config.AllowedChatIDs rejects the event's chat_id — the event
 // must be dropped and not fed to Session.Run (AC-T7).
 func (r *AccountRouter) RecordMismatch(accountID string) {
 	v, _ := r.mismatchCount.LoadOrStore(accountID, &atomic.Int64{})

@@ -222,20 +222,21 @@ func ValidateAccountChannels(accountChannels map[string][]ChannelConfig) error {
 }
 
 // ChatBelongsToAccount reports whether chatID belongs to the account whose
-// Config is cfg. An account with no AdminChatIDs configured returns true —
+// Config is cfg. An account with no AllowedChatIDs configured returns true —
 // the check is permissive for legacy single-account installs and for channels
 // like web_chat whose ownership is tracked by SessionID, not chat_id.
 //
-// When AdminChatIDs is non-empty the check is strict: only IDs in that list
+// When AllowedChatIDs is non-empty the check is strict: only IDs in that list
 // pass. This is the last line of defense against a compromised bot token or
 // a crafted inbound payload that claims AccountID=alice while carrying bob's
 // chat_id — a mismatch must never reach the agent loop or it would mix
 // accounts' conversation histories in the DB (AC-T7).
 func ChatBelongsToAccount(cfg *Config, chatID string) bool {
-	if cfg == nil || len(cfg.AdminChatIDs) == 0 {
+	allowed := cfgAllowedChatIDs(cfg)
+	if len(allowed) == 0 {
 		return true
 	}
-	for _, owned := range cfg.AdminChatIDs {
+	for _, owned := range allowed {
 		if owned == chatID {
 			return true
 		}
@@ -243,7 +244,27 @@ func ChatBelongsToAccount(cfg *Config, chatID string) bool {
 	return false
 }
 
-// ValidateFamilyAccounts fails fast when an account marked `is_family=true`
+func cfgAllowedChatIDs(cfg *Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := append([]string(nil), cfg.AllowedChatIDs...)
+	for _, ch := range cfg.Channels {
+		out = append(out, ch.AllowedChatIDs...)
+	}
+	return out
+}
+
+func FirstAllowedChatID(cfg *Config) string {
+	for _, id := range cfgAllowedChatIDs(cfg) {
+		if strings.TrimSpace(id) != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// ValidateFamilyAccounts fails fast when an account marked `is_shared=true`
 // declares channel configs. Family accounts are coordinators (scheduled
 // skills + fanout push); they never own a Telegram/Kakao account of their
 // own. A misconfigured `[telegram]` on family would race the real
@@ -254,7 +275,7 @@ func ChatBelongsToAccount(cfg *Config, chatID string) bool {
 func ValidateFamilyAccounts(accounts []*Account) error {
 	var offenders []string
 	for _, t := range accounts {
-		if t == nil || t.Config == nil || !t.Config.IsFamily {
+		if t == nil || t.Config == nil || !t.Config.IsSharedAccount() {
 			continue
 		}
 		if len(t.Config.Channels) == 0 {

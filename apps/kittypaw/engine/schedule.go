@@ -141,7 +141,7 @@ func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 	}
 
 	// Weekly report: if today matches WeeklyReportDay, emit the report
-	// to the account's first configured telegram channel + AdminChatIDs[0].
+	// to the account's first configured Telegram channel and allowed chat id.
 	// Skipped silently when there's no telegram channel — the report is
 	// still queryable on demand via GET /api/v1/reflection/weekly-report.
 	s.deliverWeeklyReport(ctx)
@@ -206,12 +206,13 @@ func (s *Scheduler) deliverWeeklyReport(ctx context.Context) {
 // first telegram channel, or ("", "") when none is configured.
 func (s *Scheduler) firstTelegramTarget() (string, string) {
 	cfg := s.session.Config
-	if len(cfg.AdminChatIDs) == 0 {
+	chatID := core.FirstAllowedChatID(cfg)
+	if chatID == "" {
 		return "", ""
 	}
 	for _, ch := range cfg.Channels {
 		if ch.ChannelType == core.ChannelTelegram && ch.Token != "" {
-			return ch.Token, cfg.AdminChatIDs[0]
+			return ch.Token, chatID
 		}
 	}
 	return "", ""

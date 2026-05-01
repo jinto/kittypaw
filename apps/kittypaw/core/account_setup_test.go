@@ -44,14 +44,21 @@ func TestInitAccount_HappyPath_Personal(t *testing.T) {
 	if len(cfg.Channels) != 1 || cfg.Channels[0].ChannelType != ChannelTelegram {
 		t.Errorf("expected one telegram channel, got %+v", cfg.Channels)
 	}
-	if cfg.Channels[0].Token != "12345:alice-token" {
-		t.Errorf("token = %q, want 12345:alice-token", cfg.Channels[0].Token)
+	if cfg.Channels[0].Token != "" {
+		t.Errorf("config token = %q, want empty", cfg.Channels[0].Token)
 	}
-	if len(cfg.AdminChatIDs) != 1 || cfg.AdminChatIDs[0] != "111" {
-		t.Errorf("AdminChatIDs = %v, want [111]", cfg.AdminChatIDs)
+	if got := cfg.Channels[0].AllowedChatIDs; len(got) != 1 || got[0] != "111" {
+		t.Errorf("allowed_chat_ids = %v, want [111]", got)
+	}
+	secrets, err := LoadSecretsFrom(filepath.Join(dir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("LoadSecretsFrom: %v", err)
+	}
+	if token, ok := secrets.Get("channel/telegram", "bot_token"); !ok || token != "12345:alice-token" {
+		t.Errorf("telegram secret = (%q, %v), want token true", token, ok)
 	}
 
-	// Config holds a bot token; enforce 0600. Windows CI fakes perms.
+	// Account config stays private, even though channel secrets live in secrets.json.
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(cfgPath)
 		if err != nil {
@@ -79,8 +86,8 @@ func TestInitAccount_HappyPath_Family(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if !cfg.IsFamily {
-		t.Error("expected IsFamily=true")
+	if !cfg.IsSharedAccount() {
+		t.Error("expected IsSharedAccount=true")
 	}
 	if len(cfg.Channels) != 0 {
 		t.Errorf("family account must declare no channels, got %+v", cfg.Channels)
@@ -99,7 +106,7 @@ func TestInitAccountCreatesLocalAuthUser(t *testing.T) {
 		t.Fatalf("InitAccount: %v", err)
 	}
 
-	auth := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if ok, err := auth.VerifyPassword("alice", "pw123"); err != nil || !ok {
 		t.Fatalf("VerifyPassword = (%v, %v), want true nil", ok, err)
 	}
@@ -109,7 +116,7 @@ func TestInitAccountAuthDuplicateRollsBackStaging(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	accountsDir := filepath.Join(root, "accounts")
-	auth := NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "existing"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -118,11 +125,11 @@ func TestInitAccountAuthDuplicateRollsBackStaging(t *testing.T) {
 		IsFamily:      true,
 		LocalPassword: "new",
 	})
-	if !errors.Is(err, ErrLocalUserExists) {
-		t.Fatalf("InitAccount err = %v, want ErrLocalUserExists", err)
+	if !errors.Is(err, ErrAccountExists) {
+		t.Fatalf("InitAccount err = %v, want ErrAccountExists", err)
 	}
-	if _, err := os.Stat(filepath.Join(accountsDir, "alice")); !os.IsNotExist(err) {
-		t.Fatalf("account dir should not exist after auth duplicate, stat err=%v", err)
+	if _, err := os.Stat(filepath.Join(accountsDir, "alice", "account.toml")); err != nil {
+		t.Fatalf("existing account auth file should remain after duplicate, stat err=%v", err)
 	}
 	if _, err := os.Stat(filepath.Join(accountsDir, ".alice.staging")); !os.IsNotExist(err) {
 		t.Fatalf("staging dir should be removed after auth duplicate, stat err=%v", err)

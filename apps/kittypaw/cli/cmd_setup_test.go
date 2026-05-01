@@ -346,11 +346,15 @@ func TestSetupWritesNamedAccount(t *testing.T) {
 	if cfg.LLM.Provider != "openai" || cfg.LLM.Model != "llama3" || cfg.LLM.BaseURL != "http://localhost:11434/v1/chat/completions" {
 		t.Fatalf("LLM config = provider=%q model=%q base=%q", cfg.LLM.Provider, cfg.LLM.Model, cfg.LLM.BaseURL)
 	}
-	if cfg.Server.APIKey == "" {
-		t.Fatal("setup must write server.api_key so local CLI chat can authenticate to /ws")
+	secrets, err := core.LoadSecretsFrom(filepath.Join(root, "accounts", "alice", "secrets.json"))
+	if err != nil {
+		t.Fatalf("load account secrets: %v", err)
+	}
+	if key, ok := secrets.Get("local-server", "api_key"); !ok || key == "" {
+		t.Fatal("setup must write local-server api key secret so local CLI chat can authenticate to /ws")
 	}
 
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if ok, err := auth.VerifyPassword("alice", "secret-password"); err != nil || !ok {
 		t.Fatalf("VerifyPassword alice = (%v, %v), want true nil", ok, err)
 	}
@@ -425,7 +429,7 @@ func TestRunSetupPassesResolvedAccountToWizard(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	t.Setenv("KITTYPAW_ACCOUNT", "")
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "existing-password"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -616,7 +620,7 @@ func TestSetupExistingAccountWithAuthDoesNotRequirePasswordStdin(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	t.Setenv("KITTYPAW_ACCOUNT", "")
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "existing-password"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -744,6 +748,20 @@ func mustWriteTestConfigWith(t *testing.T, path string, mutate func(*core.Config
 	}
 	cfg := core.DefaultConfig()
 	mutate(&cfg)
+	if cfg.IsFamily {
+		cfg.IsShared = true
+	}
+	secrets, err := core.LoadSecretsFrom(filepath.Join(filepath.Dir(path), "secrets.json"))
+	if err != nil {
+		t.Fatalf("load secrets %s: %v", path, err)
+	}
+	for _, ch := range cfg.Channels {
+		if ch.ChannelType == core.ChannelTelegram && ch.Token != "" {
+			if err := secrets.Set("channel/"+ch.SecretID(), "bot_token", ch.Token); err != nil {
+				t.Fatalf("save telegram secret: %v", err)
+			}
+		}
+	}
 	if err := core.WriteConfigAtomic(&cfg, path); err != nil {
 		t.Fatalf("write config %s: %v", path, err)
 	}

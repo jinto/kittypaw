@@ -118,7 +118,7 @@ func TestAccountAddCreatesAuthUser(t *testing.T) {
 	if err := runAccountAdd("alice", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountAdd: %v", err)
 	}
-	if ok, err := core.NewLocalAuthStore(filepath.Join(root, "auth.json")).VerifyPassword("alice", "pw123"); err != nil || !ok {
+	if ok, err := core.NewLocalAuthStore(filepath.Join(root, "accounts")).VerifyPassword("alice", "pw123"); err != nil || !ok {
 		t.Fatalf("VerifyPassword = %v, %v; want true nil", ok, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
@@ -129,7 +129,13 @@ func TestAccountAddCreatesAuthUser(t *testing.T) {
 		t.Fatalf("load account config: %v", err)
 	}
 	if cfg.Server.APIKey == "" {
-		t.Fatal("account add must write server.api_key so local CLI chat can authenticate to /ws")
+		secrets, err := core.LoadSecretsFrom(filepath.Join(root, "accounts", "alice", "secrets.json"))
+		if err != nil {
+			t.Fatalf("load account secrets: %v", err)
+		}
+		if key, ok := secrets.Get("local-server", "api_key"); !ok || key == "" {
+			t.Fatal("account add must write local-server api key secret so local CLI chat can authenticate to /ws")
+		}
 	}
 }
 
@@ -149,7 +155,7 @@ func TestAccountAddTokenAndPasswordStdin(t *testing.T) {
 	if err := runAccountAdd("alice", f, stdin, &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountAdd: %v", err)
 	}
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if ok, err := auth.VerifyPassword("alice", "pw123"); err != nil || !ok {
 		t.Fatalf("VerifyPassword = %v, %v; want true nil", ok, err)
 	}
@@ -159,7 +165,7 @@ func TestAccountAddAuthRollback(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	t.Setenv("HOME", t.TempDir())
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "existing"); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -174,8 +180,8 @@ func TestAccountAddAuthRollback(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected duplicate auth user error")
 	}
-	if _, statErr := os.Stat(filepath.Join(root, "accounts", "alice")); !os.IsNotExist(statErr) {
-		t.Fatalf("account dir should not be committed on auth duplicate, stat err=%v", statErr)
+	if _, statErr := os.Stat(filepath.Join(root, "accounts", "alice", "account.toml")); statErr != nil {
+		t.Fatalf("existing account auth file should remain after duplicate, stat err=%v", statErr)
 	}
 	if ok, err := auth.VerifyPassword("alice", "existing"); err != nil || !ok {
 		t.Fatalf("existing password should remain valid, got %v, %v", ok, err)
@@ -283,7 +289,7 @@ func setupRemoveFixture(t *testing.T, members map[string]bool) string {
 		}
 		cfg := "[llm]\nprovider = \"anthropic\"\n"
 		if isFamily {
-			cfg = "is_family = true\n" + cfg + "\n[share.alice]\nread = [\"pub/index.txt\"]\n[share.bob]\nread = [\"pub/index.txt\"]\n"
+			cfg = "is_shared = true\n" + cfg + "\n[share.alice]\nread = [\"pub/index.txt\"]\n[share.bob]\nread = [\"pub/index.txt\"]\n"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o640); err != nil {
 			t.Fatalf("write config for %s: %v", name, err)
@@ -410,8 +416,8 @@ func TestRunAccountRemove_TrashCollision(t *testing.T) {
 	}
 }
 
-// AC-RM7: removing the family account itself surfaces an extra warning AND
-// skips the scrub step (no "upstream" family to clean).
+// AC-RM7: removing the shared account itself surfaces an extra warning AND
+// skips the scrub step (no "upstream" shared account to clean).
 func TestRunAccountRemove_FamilySelf_ExtraWarning(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{"family": true, "alice": false})
 	var stdout, stderr bytes.Buffer
@@ -419,8 +425,8 @@ func TestRunAccountRemove_FamilySelf_ExtraWarning(t *testing.T) {
 		t.Fatalf("runAccountRemove(family): %v", err)
 	}
 
-	if !strings.Contains(stderr.String(), "family account removed") {
-		t.Errorf("expected extra family-removal warning, stderr = %q", stderr.String())
+	if !strings.Contains(stderr.String(), "shared account removed") {
+		t.Errorf("expected extra shared-removal warning, stderr = %q", stderr.String())
 	}
 	// alice's config is untouched (no cascade).
 	cfg, err := core.LoadConfig(filepath.Join(home, ".kittypaw", "accounts", "alice", "config.toml"))

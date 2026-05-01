@@ -94,24 +94,30 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 		return nil, fmt.Errorf("open store for %s: %w", t.ID, err)
 	}
 
-	provider, err := llm.NewProviderFromConfig(t.Config.LLM)
+	secrets, secretsErr := core.LoadSecretsFrom(t.SecretsPath())
+	if secretsErr != nil {
+		slog.Warn("failed to load secrets store, package config will be limited",
+			"account", t.ID, "error", secretsErr)
+	}
+	core.HydrateRuntimeSecrets(t.Config, secrets)
+
+	defaultModel, ok := t.Config.RuntimeDefaultModel(secrets)
+	if !ok {
+		_ = st.Close()
+		return nil, fmt.Errorf("create llm provider for %s: no default model configured", t.ID)
+	}
+	provider, err := llm.NewProviderFromModelConfig(defaultModel)
 	if err != nil {
 		_ = st.Close()
 		return nil, fmt.Errorf("create llm provider for %s: %w", t.ID, err)
 	}
 
 	var fallback llm.Provider
-	if m := t.Config.DefaultModel(); m != nil {
-		fallback, _ = llm.NewProviderFromModelConfig(*m)
+	if m, ok := t.Config.RuntimeFallbackModel(secrets); ok {
+		fallback, _ = llm.NewProviderFromModelConfig(m)
 	}
 
 	sbox := sandbox.New(t.Config.Sandbox)
-
-	secrets, secretsErr := core.LoadSecretsFrom(t.SecretsPath())
-	if secretsErr != nil {
-		slog.Warn("failed to load secrets store, package config will be limited",
-			"account", t.ID, "error", secretsErr)
-	}
 	pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
 
@@ -158,8 +164,8 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 // personal accounts leave sess.Fanout == nil so the sandbox hides the
 // Fanout JS global (I5 — personal cannot reach personal).
 func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventCh chan<- core.Event) *engine.Session {
-	if len(td.Account.Config.Sandbox.AllowedPaths) > 0 {
-		if err := td.Store.SeedWorkspacesFromConfig(td.Account.Config.Sandbox.AllowedPaths); err != nil {
+	if roots := td.Account.Config.WorkspaceRoots(); len(roots) > 0 {
+		if err := td.Store.SeedWorkspaceRootsFromConfig(roots); err != nil {
 			slog.Error("seed workspaces from config", "account", td.Account.ID, "error", err)
 		}
 	}
@@ -179,7 +185,7 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 		Health:           core.NewHealthState(),
 		SummaryFlight:    &singleflight.Group{},
 	}
-	if td.Account.Config.IsFamily {
+	if td.Account.Config.IsSharedAccount() {
 		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Account.ID)
 	}
 

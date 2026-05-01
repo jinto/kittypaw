@@ -306,6 +306,9 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	if err := validateSetupConfig(cfgDir, accountID, merged); err != nil {
 		return err
 	}
+	if err := core.SaveWizardSecrets(accountID, result, merged); err != nil {
+		return fmt.Errorf("save setup secrets: %w", err)
+	}
 	if err := os.MkdirAll(accountDir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", accountDir, err)
 	}
@@ -404,7 +407,9 @@ func validateSetupConfig(cfgDir, accountID string, cfg *core.Config) error {
 			continue
 		}
 		finalAccounts = append(finalAccounts, peer)
-		snapshot[peer.ID] = peer.Config.Channels
+		channels := append([]core.ChannelConfig(nil), peer.Config.Channels...)
+		core.InjectChannelSecrets(peer.ID, channels)
+		snapshot[peer.ID] = channels
 	}
 	if !seen {
 		finalAccounts = append(finalAccounts, &core.Account{
@@ -2731,6 +2736,15 @@ func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 			closeOnErr()
 			return nil, core.TopLevelServerConfig{}, err
 		} else if changed {
+			secrets, secretErr := core.LoadSecretsFrom(filepath.Join(t.BaseDir, "secrets.json"))
+			if secretErr != nil {
+				closeOnErr()
+				return nil, core.TopLevelServerConfig{}, fmt.Errorf("load account secrets for %s: %w", t.ID, secretErr)
+			}
+			if secretErr := secrets.Set("local-server", "api_key", t.Config.Server.APIKey); secretErr != nil {
+				closeOnErr()
+				return nil, core.TopLevelServerConfig{}, fmt.Errorf("backfill server api key secret for %s: %w", t.ID, secretErr)
+			}
 			if err := core.WriteConfigAtomic(t.Config, filepath.Join(t.BaseDir, "config.toml")); err != nil {
 				closeOnErr()
 				return nil, core.TopLevelServerConfig{}, fmt.Errorf("backfill server api key for %s: %w", t.ID, err)

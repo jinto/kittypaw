@@ -92,13 +92,18 @@ func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) er
 	}
 
 	cfgCopy := *cfg
-	provider, err := llm.NewProviderFromConfig(cfgCopy.LLM)
+	core.HydrateRuntimeSecrets(&cfgCopy, td.Secrets)
+	defaultModel, ok := cfgCopy.RuntimeDefaultModel(td.Secrets)
+	if !ok {
+		return fmt.Errorf("create llm provider: no default model configured")
+	}
+	provider, err := llm.NewProviderFromModelConfig(defaultModel)
 	if err != nil {
 		return fmt.Errorf("create llm provider: %w", err)
 	}
 	var fallback llm.Provider
-	if m := cfgCopy.DefaultModel(); m != nil {
-		fallback, _ = llm.NewProviderFromModelConfig(*m)
+	if m, ok := cfgCopy.RuntimeFallbackModel(td.Secrets); ok {
+		fallback, _ = llm.NewProviderFromModelConfig(m)
 	}
 
 	td.Account.Config = &cfgCopy
@@ -178,12 +183,12 @@ func (s *Server) rebuildSessionForConfigLocked(td *AccountDeps, old *engine.Sess
 		Indexer:          indexer,
 		Pipeline:         pipeline,
 	}
-	if td.Account.Config.IsFamily {
+	if td.Account.Config.IsSharedAccount() {
 		sess.Fanout = core.NewChannelFanout(s.eventCh, s.accountRegistry, td.Account.ID)
 	}
 
-	if len(td.Account.Config.Sandbox.AllowedPaths) > 0 {
-		if err := td.Store.SeedWorkspacesFromConfig(td.Account.Config.Sandbox.AllowedPaths); err != nil {
+	if roots := td.Account.Config.WorkspaceRoots(); len(roots) > 0 {
+		if err := td.Store.SeedWorkspaceRootsFromConfig(roots); err != nil {
 			slog.Error("seed workspaces from config", "account", td.Account.ID, "error", err)
 		}
 	}

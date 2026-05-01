@@ -364,8 +364,15 @@ func TestBootstrapBackfillsMissingAccountAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload account config: %v", err)
 	}
-	if loaded.Server.APIKey == "" {
-		t.Fatal("bootstrap must backfill server.api_key for existing accounts")
+	if loaded.Server.APIKey != "" {
+		t.Fatalf("bootstrap wrote server.api_key to config, want secret-only storage")
+	}
+	secrets, err := core.LoadSecretsFrom(filepath.Join(root, "accounts", "alice", "secrets.json"))
+	if err != nil {
+		t.Fatalf("load account secrets: %v", err)
+	}
+	if key, ok := secrets.Get("local-server", "api_key"); !ok || key == "" {
+		t.Fatal("bootstrap must backfill local-server api key secret for existing accounts")
 	}
 }
 

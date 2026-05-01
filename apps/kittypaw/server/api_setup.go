@@ -64,6 +64,9 @@ func (s *Server) setupAccount(r *http.Request) (*setupAccountContext, error) {
 		if cfgPath, err := core.ConfigPathForAccount(acct.ID); err == nil {
 			if loaded, loadErr := core.LoadConfig(cfgPath); loadErr == nil {
 				cfg = loaded
+				if secrets, secretErr := core.LoadAccountSecrets(acct.ID); secretErr == nil {
+					core.HydrateRuntimeSecrets(cfg, secrets)
+				}
 			}
 		}
 		return &setupAccountContext{ID: acct.ID, Config: cfg, Store: acct.Deps.Store}, nil
@@ -72,6 +75,9 @@ func (s *Server) setupAccount(r *http.Request) (*setupAccountContext, error) {
 	s.configMu.RLock()
 	cfgCopy := *s.config
 	s.configMu.RUnlock()
+	if secrets, secretErr := core.LoadAccountSecrets(s.defaultAccountID()); secretErr == nil {
+		core.HydrateRuntimeSecrets(&cfgCopy, secrets)
+	}
 	return &setupAccountContext{
 		ID:     s.defaultAccountID(),
 		Config: &cfgCopy,
@@ -343,6 +349,10 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, r *http.Request
 	wsURL := core.WSURLFromRelay(relayURL, reg.Token)
 	if err := mgr.SaveKakaoRelayWSURL(apiURL, wsURL); err != nil {
 		writeError(w, http.StatusInternalServerError, "save kakao ws url: "+err.Error())
+		return
+	}
+	if err := secrets.Set("channel/kakao", "ws_url", wsURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "save kakao channel secret: "+err.Error())
 		return
 	}
 

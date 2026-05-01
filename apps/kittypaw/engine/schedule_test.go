@@ -215,19 +215,19 @@ func TestFirstTelegramTarget_NoAdminChatID(t *testing.T) {
 		Channels: []core.ChannelConfig{
 			{ChannelType: core.ChannelTelegram, Token: "bot-tok"},
 		},
-		// AdminChatIDs intentionally empty — without a chat target we
+		// AllowedChatIDs intentionally empty — without a chat target we
 		// cannot dispatch, so first-channel match must short-circuit.
 	}
 	sched := NewScheduler(&Session{Store: st, Config: cfg}, nil)
 	if tok, chat := sched.firstTelegramTarget(); tok != "" || chat != "" {
-		t.Errorf("missing admin_chat_ids must yield empty target; got token=%q chat=%q", tok, chat)
+		t.Errorf("missing allowed chat ids must yield empty target; got token=%q chat=%q", tok, chat)
 	}
 }
 
 func TestFirstTelegramTarget_PicksFirstTelegram(t *testing.T) {
 	st := newTestStore(t)
 	cfg := &core.Config{
-		AdminChatIDs: []string{"54076829"},
+		AllowedChatIDs: []string{"54076829"},
 		Channels: []core.ChannelConfig{
 			{ChannelType: core.ChannelKakaoTalk, Token: ""},
 			{ChannelType: core.ChannelTelegram, Token: "telegram-token-1"},
@@ -253,7 +253,7 @@ func TestDeliverWeeklyReport_WrongDay(t *testing.T) {
 	// short-circuit before any network attempt — verified by absence of
 	// a __weekly_report__ last-run marker afterwards.
 	_ = st.SetUserContext("topic_pref:weather", "0.40", "test")
-	sched.session.Config.AdminChatIDs = []string{"chat-id"}
+	sched.session.Config.AllowedChatIDs = []string{"chat-id"}
 	sched.session.Config.Channels = []core.ChannelConfig{
 		{ChannelType: core.ChannelTelegram, Token: "tok"},
 	}
@@ -291,7 +291,7 @@ func TestDeliverWeeklyReport_NoPrefsSkips(t *testing.T) {
 	sched.session.Config.Reflection.WeeklyReportDay = uint32(today)
 	// No topic_pref:* rows — empty report would be useless. Function
 	// must skip dispatch and not record a last-run.
-	sched.session.Config.AdminChatIDs = []string{"chat-id"}
+	sched.session.Config.AllowedChatIDs = []string{"chat-id"}
 	sched.session.Config.Channels = []core.ChannelConfig{
 		{ChannelType: core.ChannelTelegram, Token: "tok"},
 	}
@@ -312,7 +312,7 @@ func TestDeliverWeeklyReport_NoChannelPreservesLastRun(t *testing.T) {
 	today := int(time.Now().Weekday())
 	sched.session.Config.Reflection.WeeklyReportDay = uint32(today)
 	_ = st.SetUserContext("topic_pref:weather", "0.40", "test")
-	// No channels, no admin_chat_ids — firstTelegramTarget returns empty.
+	// No channels, no allowed chat ids — firstTelegramTarget returns empty.
 
 	sched.deliverWeeklyReport(context.Background())
 
