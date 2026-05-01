@@ -18,7 +18,7 @@ import (
 	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
-func TestDaemonWebSocketRelaysHostedOpenAIRequest(t *testing.T) {
+func TestDaemonWebSocketRelaysOpenAIRequestToDaemon(t *testing.T) {
 	b := broker.New(broker.Config{
 		RequestTimeout:       2 * time.Second,
 		MaxInflightPerDevice: 4,
@@ -108,7 +108,7 @@ func TestDaemonWebSocketRelaysHostedOpenAIRequest(t *testing.T) {
 	httpReq.Header.Set("Authorization", "Bearer api_secret")
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		t.Fatalf("hosted openai request: %v", err)
+		t.Fatalf("openai client request: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)

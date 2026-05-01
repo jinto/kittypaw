@@ -26,7 +26,7 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `KITTYCHAT_API_TOKEN` | required | Bearer token for hosted OpenAI-compatible client requests |
+| `KITTYCHAT_API_TOKEN` | required | Bearer token for web chat and OpenAI-compatible client requests |
 | `KITTYCHAT_DEVICE_TOKEN` | required | Bearer token for daemon WebSocket connections |
 | `KITTYCHAT_USER_ID` | required | MVP cloud user id |
 | `KITTYCHAT_DEVICE_ID` | required | MVP device id |
@@ -59,4 +59,4 @@ make run
 - Replace static MVP auth with cloud users, sessions, API keys, device credentials,
   and pairing codes backed by Postgres.
 - Add the real KittyPaw daemon outbound connector.
-- Add hosted chat UI after the OpenAI-compatible streaming path is stable.
+- Add web chat UI after the OpenAI-compatible streaming path is stable.
