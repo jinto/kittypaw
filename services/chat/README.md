@@ -15,7 +15,8 @@ This repository currently contains the relay core:
 - `POST /nodes/{device_id}/v1/chat/completions`
 - JSON relay frames over WebSocket
 - in-memory single-instance device broker
-- static-token MVP auth for one device/account
+- env-seeded MVP credential verifier for one device/account
+- operation-based daemon protocol v1 for OpenAI-compatible relay requests
 
 The relay is application-level. It only forwards the narrow chat/OpenAI-compatible
 surface and is not a generic localhost tunnel.
@@ -56,7 +57,7 @@ make run
 
 ## Next Steps
 
-- Replace static MVP auth with cloud users, sessions, API keys, device credentials,
-  and pairing codes backed by Postgres.
+- Replace env-seeded credentials with API-server-issued sessions, API keys,
+  device credentials, and pairing codes backed by Postgres.
 - Add the real KittyPaw daemon outbound connector.
 - Add web chat UI after the OpenAI-compatible streaming path is stable.
