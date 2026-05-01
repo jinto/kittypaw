@@ -1,4 +1,4 @@
-# KittyRelay — Development Guidelines
+# KittyKakao — Development Guidelines
 
 ## Open Source Security Policy
 
@@ -25,7 +25,7 @@
 |------|-----------|------|
 | `src/types.rs` | `channel_url` 기본값을 `unwrap_or_default()`로 변경 | 카카오 채널 ID 하드코딩 제거 |
 | `deploy/env.example` | `CHANNEL_URL`을 플레이스홀더로 | 동일 |
-| `deploy/kittyrelay.nginx` | `server_name`을 `{{DOMAIN}}`으로 | 운영 도메인 노출 방지 |
+| `deploy/kittykakao.nginx` | `server_name`을 `{{DOMAIN}}`으로 | 운영 도메인 노출 방지 |
 | `DEPLOY.md` | 도메인, 호스트명을 일반화 | 내부 인프라 정보 제거 |
 | `fabfile.py` | `HOST`를 `DEPLOY_HOST` 환경변수로 | 서버 정보 분리 |
 

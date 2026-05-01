@@ -4,9 +4,9 @@ use tokio::signal;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use kittypaw_relay::routes;
-use kittypaw_relay::state::AppState;
-use kittypaw_relay::types::Config;
+use kittykakao::routes;
+use kittykakao::state::AppState;
+use kittykakao::types::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

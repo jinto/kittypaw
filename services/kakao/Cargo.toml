@@ -1,11 +1,11 @@
 [package]
-name = "kittypaw-relay"
+name = "kittykakao"
 version = "0.1.0"
 edition = "2021"
 license = "Elastic-2.0"
 
 [[bin]]
-name = "kittypaw-relay"
+name = "kittykakao"
 path = "src/main.rs"
 
 [dependencies]

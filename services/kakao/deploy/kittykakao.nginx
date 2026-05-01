@@ -1,5 +1,5 @@
-upstream kittyrelay {
-  server unix:/home/ubuntu/kittyrelay/kittyrelay.sock;
+upstream kittykakao {
+  server unix:{{REMOTE_DIR}}/kittykakao.sock;
 }
 
 server {
@@ -7,7 +7,7 @@ server {
   server_name {{DOMAIN}};
 
   location /ws/ {
-    proxy_pass http://kittyrelay;
+    proxy_pass http://kittykakao;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -17,7 +17,7 @@ server {
   }
 
   location / {
-    proxy_pass http://kittyrelay;
+    proxy_pass http://kittykakao;
     include proxy_params;
   }
 }

@@ -1,4 +1,4 @@
-# KittyRelay 배포 메모
+# KittyKakao 배포 메모
 
 ## 웹훅 설정
 
@@ -28,7 +28,7 @@ fab setup
 
 # 서버에 SSH 접속 후 .env 편집
 ssh <your-host>
-vi /home/ubuntu/kittyrelay/.env
+vi /home/ubuntu/kittykakao/.env
 ```
 
 ### 배포

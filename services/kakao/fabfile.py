@@ -1,5 +1,5 @@
 """
-KittyRelay deployment — fab deploy / fab setup / fab logs / fab status / fab rollback
+KittyKakao deployment — fab deploy / fab setup / fab logs / fab status / fab rollback
 """
 import os
 import subprocess
@@ -10,9 +10,11 @@ from fabric import task
 
 HOST = os.environ.get("DEPLOY_HOST", "second")
 DOMAIN = os.environ.get("DEPLOY_DOMAIN", "")
-REMOTE_DIR = "/home/ubuntu/kittyrelay"
-SERVICE = "kittyrelay"
-BINARY = "kittypaw-relay"
+REMOTE_DIR = os.environ.get("DEPLOY_REMOTE_DIR", "/home/ubuntu/kittykakao")
+SERVICE_USER = os.environ.get("DEPLOY_USER", "ubuntu")
+SERVICE_GROUP = os.environ.get("DEPLOY_GROUP", SERVICE_USER)
+SERVICE = "kittykakao"
+BINARY = "kittykakao"
 TARGET = "x86_64-unknown-linux-gnu"
 
 LOCAL_ROOT = Path(__file__).resolve().parent
@@ -48,16 +50,20 @@ def setup(ctx):
         sys.exit(1)
 
     # Upload config files
-    c.put(str(LOCAL_ROOT / "deploy" / "kittyrelay.service"), "/tmp/kittyrelay.service")
-    c.put(str(LOCAL_ROOT / "deploy" / "kittyrelay.nginx"), "/tmp/kittyrelay.nginx")
+    c.put(str(LOCAL_ROOT / "deploy" / "kittykakao.service"), "/tmp/kittykakao.service")
+    c.put(str(LOCAL_ROOT / "deploy" / "kittykakao.nginx"), "/tmp/kittykakao.nginx")
 
     # Replace {{DOMAIN}} placeholder on server
-    c.run(f"sed -i 's/{{{{DOMAIN}}}}/{DOMAIN}/g' /tmp/kittyrelay.nginx")
+    c.run(f"sed -i 's/{{{{DOMAIN}}}}/{DOMAIN}/g' /tmp/kittykakao.nginx")
+    c.run(f"sed -i 's#{{{{REMOTE_DIR}}}}#{REMOTE_DIR}#g' /tmp/kittykakao.nginx")
+    c.run(f"sed -i 's#{{{{REMOTE_DIR}}}}#{REMOTE_DIR}#g' /tmp/kittykakao.service")
+    c.run(f"sed -i 's#{{{{SERVICE_USER}}}}#{SERVICE_USER}#g' /tmp/kittykakao.service")
+    c.run(f"sed -i 's#{{{{SERVICE_GROUP}}}}#{SERVICE_GROUP}#g' /tmp/kittykakao.service")
 
-    c.sudo("cp /tmp/kittyrelay.service /etc/systemd/system/kittyrelay.service")
-    c.sudo("cp /tmp/kittyrelay.nginx /etc/nginx/sites-enabled/kittyrelay")
+    c.sudo("cp /tmp/kittykakao.service /etc/systemd/system/kittykakao.service")
+    c.sudo("cp /tmp/kittykakao.nginx /etc/nginx/sites-enabled/kittykakao")
     c.sudo("systemctl daemon-reload")
-    c.sudo("systemctl enable kittyrelay")
+    c.sudo("systemctl enable kittykakao")
     c.sudo("nginx -t && systemctl reload nginx")
 
     # Remind about .env

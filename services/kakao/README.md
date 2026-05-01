@@ -1,11 +1,11 @@
-# KittyRelay
+# KittyKakao
 
 [한국어](README.ko.md)
 
 A messaging relay server for [KittyPaw](https://github.com/kittypaw-app). Bridges KakaoTalk chatbot messages to connected clients over WebSocket.
 
 ```
-KakaoTalk User ──► Kakao OpenBuilder ──► KittyRelay ──► WebSocket ──► KittyPaw Client
+KakaoTalk User ──► Kakao OpenBuilder ──► KittyKakao ──► WebSocket ──► KittyPaw Client
                                               ◄── async callback ◄── response ◄──┘
 ```
 
@@ -13,9 +13,9 @@ KakaoTalk User ──► Kakao OpenBuilder ──► KittyRelay ──► WebSoc
 
 1. A KittyPaw client registers and receives a **pairing code**
 2. The KakaoTalk user sends the 6-digit code to the chatbot to link their account
-3. When the user sends a message, Kakao's OpenBuilder forwards it to KittyRelay
-4. KittyRelay relays the message to the paired client via WebSocket
-5. The client responds, and KittyRelay delivers the reply through Kakao's async callback
+3. When the user sends a message, Kakao's OpenBuilder forwards it to KittyKakao
+4. KittyKakao relays the message to the paired client via WebSocket
+5. The client responds, and KittyKakao delivers the reply through Kakao's async callback
 
 ## Features
 
@@ -40,7 +40,7 @@ cp deploy/env.example .env
 # Edit .env — at minimum, set WEBHOOK_SECRET
 
 # Run
-WEBHOOK_SECRET=your-secret ./target/release/kittypaw-relay
+WEBHOOK_SECRET=your-secret ./target/release/kittykakao
 ```
 
 ## Configuration
@@ -93,8 +93,8 @@ All configuration is via environment variables:
 See [DEPLOY.md](DEPLOY.md) for production deployment with systemd, nginx, and Cloudflare.
 
 Pre-built deployment configs are in the `deploy/` directory:
-- `kittyrelay.service` — systemd unit
-- `kittyrelay.nginx` — nginx reverse proxy with WebSocket support
+- `kittykakao.service` — systemd unit
+- `kittykakao.nginx` — nginx reverse proxy with WebSocket support
 - `env.example` — environment variable template
 
 ## Development

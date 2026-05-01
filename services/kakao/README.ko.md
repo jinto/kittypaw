@@ -1,9 +1,9 @@
-# KittyRelay
+# KittyKakao
 
 [KittyPaw](https://github.com/kittypaw-app)를 위한 메시징 릴레이 서버. 카카오톡 챗봇 메시지를 WebSocket으로 연결된 클라이언트에 중계합니다.
 
 ```
-카카오톡 사용자 ──► 카카오 오픈빌더 ──► KittyRelay ──► WebSocket ──► KittyPaw 클라이언트
+카카오톡 사용자 ──► 카카오 오픈빌더 ──► KittyKakao ──► WebSocket ──► KittyPaw 클라이언트
                                               ◄── 비동기 콜백 ◄── 응답 ◄──┘
 ```
 
@@ -11,9 +11,9 @@
 
 1. KittyPaw 클라이언트가 등록하면 **페어링 코드**를 받습니다
 2. 카카오톡 사용자가 챗봇에 6자리 코드를 보내 계정을 연결합니다
-3. 사용자가 메시지를 보내면 카카오 오픈빌더가 KittyRelay로 전달합니다
-4. KittyRelay가 WebSocket을 통해 페어링된 클라이언트에 메시지를 중계합니다
-5. 클라이언트가 응답하면 KittyRelay가 카카오 비동기 콜백으로 답변을 전달합니다
+3. 사용자가 메시지를 보내면 카카오 오픈빌더가 KittyKakao로 전달합니다
+4. KittyKakao가 WebSocket을 통해 페어링된 클라이언트에 메시지를 중계합니다
+5. 클라이언트가 응답하면 KittyKakao가 카카오 비동기 콜백으로 답변을 전달합니다
 
 ## 주요 기능
 
@@ -38,7 +38,7 @@ cp deploy/env.example .env
 # .env 편집 — 최소한 WEBHOOK_SECRET 설정 필요
 
 # 실행
-WEBHOOK_SECRET=your-secret ./target/release/kittypaw-relay
+WEBHOOK_SECRET=your-secret ./target/release/kittykakao
 ```
 
 ## 설정
@@ -91,8 +91,8 @@ WEBHOOK_SECRET=your-secret ./target/release/kittypaw-relay
 프로덕션 배포 가이드는 [DEPLOY.md](DEPLOY.md)를 참고하세요.
 
 `deploy/` 디렉토리에 배포 설정 파일이 준비되어 있습니다:
-- `kittyrelay.service` — systemd 유닛
-- `kittyrelay.nginx` — WebSocket 지원 nginx 리버스 프록시
+- `kittykakao.service` — systemd 유닛
+- `kittykakao.nginx` — WebSocket 지원 nginx 리버스 프록시
 - `env.example` — 환경변수 템플릿
 
 ## 개발

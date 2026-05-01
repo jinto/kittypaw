@@ -827,7 +827,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kittypaw-relay"
+name = "kittykakao"
 version = "0.1.0"
 dependencies = [
  "anyhow",

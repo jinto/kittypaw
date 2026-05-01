@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
-use kittypaw_relay::routes;
-use kittypaw_relay::state::AppState;
-use kittypaw_relay::types::Config;
+use kittykakao::routes;
+use kittykakao::state::AppState;
+use kittykakao::types::Config;
 
 // ── Test Harness ──
 

@@ -3,7 +3,7 @@
 # dependencies = ["websockets", "httpx"]
 # ///
 """
-WS concurrent connection stress test for kittypaw-relay.
+WS concurrent connection stress test for kittykakao.
 
 Ramps up WebSocket connections in steps, measuring connection latency
 and polling the server's own /admin/stats for accurate metrics.
@@ -131,7 +131,7 @@ async def close_all(conns: list):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="WS flood test for kittypaw-relay")
+    parser = argparse.ArgumentParser(description="WS flood test for kittykakao")
     parser.add_argument("--host", default="localhost:9088")
     parser.add_argument("--secret", default=os.environ.get("WEBHOOK_SECRET", ""),
                         help="WEBHOOK_SECRET (default: $WEBHOOK_SECRET env var)")
