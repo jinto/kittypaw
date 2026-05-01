@@ -24,7 +24,7 @@ type CLILoginConfig struct {
 
 // issueTokenPair creates access + refresh tokens without writing to an http.ResponseWriter.
 func (h *OAuthHandler) issueTokenPair(ctx context.Context, user *model.User) (*TokenResponse, error) {
-	accessToken, err := Sign(user.ID, h.JWTSecret, AccessTokenTTL)
+	accessToken, err := SignForAudiences(user.ID, DefaultAPIClientAudiences, DefaultAPIClientScopes, h.JWTSecret, AccessTokenTTL)
 	if err != nil {
 		return nil, fmt.Errorf("jwt sign: %w", err)
 	}

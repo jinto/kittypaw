@@ -18,7 +18,7 @@ KittyPaw Client ──► KittyAPI ──► Public Data APIs (AirKorea, etc.)
 - **Data proxy** — cached access to public APIs (AirKorea air quality: realtime, forecast, weekly, unhealthy stations)
 - **OAuth authentication** — Google + GitHub with PKCE, no email/password
 - **CLI login** — `kittypaw login` via HTTP callback or one-time code paste
-- **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection
+- **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection. Issued tokens carry `aud=["kittyapi","kittychat"]`, `scope`, and `v=1` claims — see [`docs/specs/kittychat-credential-foundation.md`](docs/specs/kittychat-credential-foundation.md).
 - **Rate limiting** — per-IP anonymous (5/min) + per-user authenticated (60/min), daily 10K cap
 - **Service discovery** — `GET /discovery` returns Kakao relay, API, and skills registry URLs
 - **Stale-while-revalidate** — serves stale cached data when upstream is down

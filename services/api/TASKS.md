@@ -294,7 +294,7 @@
 
 - [x] **T4: doc + commit gate** — `doc.go` package doc 작성. `make build` ✓ / `make lint` 0 issues / `make test` PASS. 사용자 허락 후 commit (이 commit).
 
-## Plan 12: A — L1.D + L3 geo 보강 (B0 ✅ 머지 후 ← 활성, 병렬 13·14)
+## Plan 12: A — L1.D + L3 geo 보강 (대기, Plan 17 후)
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan A 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출하여 7-task TDD 분해.
@@ -302,7 +302,7 @@
 
 - [ ] kickoff 시 ina:plan trigger
 
-## Plan 13: B1 — L1.E /auth/me + refresh rotation (B0 ✅ 머지 후 ← 활성, 병렬 12·14)
+## Plan 13: B1 — L1.E /auth/me + refresh rotation (대기, Plan 17 후)
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan B1 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출.
@@ -310,7 +310,7 @@
 
 - [ ] kickoff 시 ina:plan trigger
 
-## Plan 14: C′ — L1.F cross-cutting 축소판 (B0 ✅ 머지 후 ← 활성, 병렬 12·13)
+## Plan 14: C′ — L1.F cross-cutting 축소판 (대기, Plan 17 후)
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan C′ 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출.
@@ -329,17 +329,17 @@
 > `smoke-3-layer.md` 14d SLA 박제 명시 폐기 (CEO ITERATE 채택, sunk cost fallacy).
 > 재개 트리거: 라우터 wiring 회귀 발생 또는 외부 운영 인력 추가 시.
 
-## Plan 17: kittychat credential foundation (← 활성, 외부 의존 우선)
+## Plan 17: kittychat credential foundation ← 현재
 
 > Spec: `docs/specs/kittychat-credential-foundation.md` (cross-team contract — track 필요. multi-aud + claims schema + scope vocab + version policy 박제, 사용자 결정 2026-05-02)
 > 외부 의존: kittychat 측 implementer unblock. 그쪽이 우리 spec 위에서 `CredentialVerifier`/`APIClientClaims`/`DeviceClaims` 정의 후 env-seeded verifier 진행.
 > 본 commit 은 **spec only** — 실 구현 (T1~T5) 은 다음 slice (별도 `ina:plan` kickoff).
 
-- [ ] **T1**: `Claims` struct 확장 (`Aud []string`, `Scope []string`, `V int`) — RED in `jwt_test.go`
-- [ ] **T2**: `auth.SignForAudiences(...)` 신규 helper — 기존 `Sign` BC 보존
-- [ ] **T3**: OAuth Google/GitHub callback 의 access token 발급 시 default claims (`aud=["kittyapi","kittychat"]`, `scope=["chat:relay","models:read"]`, `v=1`)
-- [ ] **T4**: `internal/auth/scopes.go` 신규 — scope 상수 박제
-- [ ] **T5**: README 의 OAuth 섹션 + 본 plan link
+- [x] **T1**: `Claims` struct 확장 — `Scope []string` + `V int` (Aud 는 RegisteredClaims.Audience 재사용 = RFC 7519 standard). RED 2 case (`TestSignForAudiences_RoundTrip` + `TestVerify_LegacyTokenWithoutAudOrScope` BC) fail 확인.
+- [x] **T2**: `auth.SignForAudiences(userID, audiences, scopes, secret, ttl)` helper. 기존 `Sign` 은 thin wrapper (BC + DRY). `v=1` 박제 (audiences/scopes 둘 다 빈 경우만 v=0 — legacy path). 6 case PASS.
+- [x] **T3**: `cli.go:27` 의 `issueTokenPair` 한 줄 변경 — Google/GitHub/Refresh/CLI 모두 *single choke point* 경유라 한 줄로 모든 발급 path cover. `SignForAudiences(user.ID, DefaultAPIClientAudiences, DefaultAPIClientScopes, ...)`.
+- [x] **T4**: `internal/auth/scopes.go` 신규 — `ScopeChatRelay/ModelsRead/DaemonConnect`, `AudienceKittyAPI/KittyChat`, `ClaimsVersion=1`, `DefaultAPIClientScopes`, `DefaultAPIClientAudiences`.
+- [x] **T5**: README.md / README.ko.md 의 JWT 항목에 spec link 박제.
 
 **다음 slice (Plan 17 머지 후, 별도 plan)**:
 - device schema migration (users → devices 1:N)
