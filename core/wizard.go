@@ -143,6 +143,16 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 	// LLM — when provider is set, apply all LLM fields unconditionally
 	// (including empty values) to avoid stale keys when switching providers.
 	if w.LLMProvider != "" {
+		credential := wizardLLMCredential(w)
+		cfg.LLM.Default = "main"
+		cfg.LLM.Models = []ModelConfig{{
+			ID:         "main",
+			Provider:   w.LLMProvider,
+			Model:      w.LLMModel,
+			Credential: credential,
+			MaxTokens:  4096,
+			BaseURL:    w.LLMBaseURL,
+		}}
 		cfg.LLM.Provider = w.LLMProvider
 		cfg.LLM.APIKey = w.LLMAPIKey
 		cfg.LLM.BaseURL = w.LLMBaseURL
@@ -170,16 +180,19 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 
 	if hasTelegram {
 		kept = append(kept, ChannelConfig{
-			ChannelType: ChannelTelegram,
-			Token:       w.TelegramBotToken,
+			ID:             "telegram",
+			ChannelType:    ChannelTelegram,
+			AllowedChatIDs: compactNonEmpty([]string{w.TelegramChatID}),
+			Token:          w.TelegramBotToken,
 		})
 		if w.TelegramChatID != "" {
-			cfg.AdminChatIDs = []string{w.TelegramChatID}
+			cfg.AllowedChatIDs = []string{w.TelegramChatID}
 		}
 	}
 
 	if w.KakaoEnabled {
 		kept = append(kept, ChannelConfig{
+			ID:          "kakao",
 			ChannelType: ChannelKakaoTalk,
 			// KakaoWSURL is injected at runtime from secrets
 		})
@@ -202,10 +215,103 @@ func MergeWizardSettings(existing *Config, w WizardResult) *Config {
 
 	// Workspace → sandbox allowed paths
 	if w.WorkspacePath != "" {
+		cfg.Workspace.Default = "home"
+		cfg.Workspace.Roots = []WorkspaceRoot{{
+			Alias:  "home",
+			Path:   w.WorkspacePath,
+			Access: "read_write",
+		}}
 		cfg.Sandbox.AllowedPaths = []string{w.WorkspacePath}
 	}
 
 	return &cfg
+}
+
+func SaveWizardSecrets(accountID string, w WizardResult, cfg *Config) error {
+	secrets, err := LoadAccountSecrets(accountID)
+	if err != nil {
+		return err
+	}
+	return SaveWizardSecretsTo(secrets, w, cfg)
+}
+
+func SaveWizardSecretsTo(secrets *SecretsStore, w WizardResult, cfg *Config) error {
+	if secrets == nil {
+		return nil
+	}
+	if w.LLMProvider != "" && w.LLMAPIKey != "" {
+		credential := wizardLLMCredential(w)
+		if err := secrets.Set("llm/"+credential, "api_key", w.LLMAPIKey); err != nil {
+			return err
+		}
+	}
+	if w.TelegramBotToken != "" {
+		if err := secrets.Set("channel/telegram", "bot_token", w.TelegramBotToken); err != nil {
+			return err
+		}
+	}
+	if w.FirecrawlKey != "" {
+		if err := secrets.Set("web/firecrawl", "api_key", w.FirecrawlKey); err != nil {
+			return err
+		}
+	}
+	if cfg != nil && cfg.Server.APIKey != "" {
+		if err := secrets.Set("local-server", "api_key", cfg.Server.APIKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func HydrateRuntimeSecrets(cfg *Config, secrets *SecretsStore) {
+	if cfg == nil || secrets == nil {
+		return
+	}
+	if key, ok := secrets.Get("local-server", "api_key"); ok {
+		cfg.Server.APIKey = key
+	}
+	if key, ok := secrets.Get("web/firecrawl", "api_key"); ok {
+		cfg.Web.FirecrawlKey = key
+	}
+	if key, ok := secrets.Get("web/tavily", "api_key"); ok {
+		cfg.Web.TavilyAPIKey = key
+	}
+	if key, ok := secrets.Get("stt/"+cfg.STT.Provider, "api_key"); ok {
+		cfg.STT.APIKey = key
+	}
+	if model, ok := cfg.RuntimeDefaultModel(secrets); ok {
+		cfg.LLM.Provider = model.Provider
+		cfg.LLM.APIKey = model.APIKey
+		cfg.LLM.Model = model.Model
+		cfg.LLM.MaxTokens = model.MaxTokens
+		cfg.LLM.BaseURL = model.BaseURL
+	}
+	for i := range cfg.LLM.Models {
+		cfg.LLM.Models[i] = HydrateModelSecrets(cfg.LLM.Models[i], secrets)
+	}
+	for i := range cfg.Models {
+		cfg.Models[i] = HydrateModelSecrets(cfg.Models[i], secrets)
+	}
+}
+
+func wizardLLMCredential(w WizardResult) string {
+	if w.LLMBaseURL == OpenRouterBaseURL {
+		return "openrouter"
+	}
+	if w.LLMBaseURL != "" {
+		return "local"
+	}
+	return w.LLMProvider
+}
+
+func compactNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // WriteConfigAtomic encodes cfg as TOML and writes it to cfgPath

@@ -282,17 +282,17 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("account %q does not exist at %s", name, accountDir)
 	}
 
-	// Load account's own config to learn is_family (so we can skip the
+	// Load account's own config to learn is_shared (so we can skip the
 	// self-cleanup step and surface the extra warning). A missing
 	// config.toml is treated as personal — the worst case is a no-op scrub.
 	selfCfg, _ := core.LoadConfig(filepath.Join(accountDir, "config.toml"))
-	removedIsFamily := selfCfg != nil && selfCfg.IsFamily
+	removedIsShared := selfCfg != nil && selfCfg.IsSharedAccount()
 
 	if err := deactivateAccountOnDaemon(name, stdout, stderr); err != nil {
 		return fmt.Errorf("deactivate on daemon: %w", err)
 	}
 
-	if !removedIsFamily {
+	if !removedIsShared {
 		if err := scrubFamilyShare(accountsDir, name, stderr); err != nil {
 			return fmt.Errorf("update family config: %w", err)
 		}
@@ -305,8 +305,8 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 
 	_, _ = fmt.Fprintf(stdout, "account %q decommissioned → %s\n", name, trashedPath)
 	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for account %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
-	if removedIsFamily {
-		_, _ = fmt.Fprintln(stderr, "note: family account removed — personal accounts will no longer see cross-account shares or fanout until a new family is provisioned.")
+	if removedIsShared {
+		_, _ = fmt.Fprintln(stderr, "note: shared account removed — personal accounts will no longer see cross-account shares or fanout until a new shared account is provisioned.")
 	}
 	return nil
 }
@@ -355,7 +355,7 @@ func scrubFamilyShare(accountsDir, removed string, stderr io.Writer) error {
 	}
 	var family *core.Account
 	for _, tt := range accounts {
-		if tt != nil && tt.Config != nil && tt.Config.IsFamily {
+		if tt != nil && tt.Config != nil && tt.Config.IsSharedAccount() {
 			family = tt
 			break
 		}
@@ -420,8 +420,8 @@ func activateAccountOnDaemon(accountID string, stdout, stderr io.Writer) error {
 	}
 
 	channels, _ := resp["channels"].(float64)
-	isFamily, _ := resp["is_family"].(bool)
-	_, _ = fmt.Fprintf(stdout, "account %q activated (channels=%d, is_family=%t)\n",
-		accountID, int(channels), isFamily)
+	isShared, _ := resp["is_shared"].(bool)
+	_, _ = fmt.Fprintf(stdout, "account %q activated (channels=%d, is_shared=%t)\n",
+		accountID, int(channels), isShared)
 	return nil
 }

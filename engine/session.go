@@ -115,7 +115,7 @@ type Session struct {
 func (s *Session) sandboxOptions() sandbox.Options {
 	return sandbox.Options{
 		ExposeFanout: s.Fanout != nil,
-		ExposeShare:  s.Config != nil && !s.Config.IsFamily,
+		ExposeShare:  s.Config != nil && !s.Config.IsSharedAccount(),
 	}
 }
 

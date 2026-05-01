@@ -757,6 +757,12 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "reload failed: "+err.Error())
 		return
 	}
+	secrets, err := core.LoadAccountSecrets(defaultID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reload secrets failed: "+err.Error())
+		return
+	}
+	core.HydrateRuntimeSecrets(cfg, secrets)
 
 	s.accountMu.Lock()
 	defer s.accountMu.Unlock()
@@ -778,16 +784,16 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 			proposedCfg := *cfg
 			proposedAccount.Config = &proposedCfg
 			accounts = append(accounts, &proposedAccount)
-			snapshot[peer.ID] = cfg.Channels
+			snapshot[peer.ID] = accountChannelsForValidation(peer.ID, cfg.Channels, "")
 			defaultSeen = true
 		} else {
 			accounts = append(accounts, peer)
-			snapshot[peer.ID] = peer.Config.Channels
+			snapshot[peer.ID] = accountChannelsForValidation(peer.ID, peer.Config.Channels, "")
 		}
 	}
 	if !defaultSeen {
 		accounts = append(accounts, &core.Account{ID: defaultID, Config: cfg})
-		snapshot[defaultID] = cfg.Channels
+		snapshot[defaultID] = accountChannelsForValidation(defaultID, cfg.Channels, "")
 	}
 
 	if err := core.ValidateAccountChannels(snapshot); err != nil {

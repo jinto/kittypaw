@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // validTok is the shortest Telegram-format token that passes ValidateTelegramToken.
@@ -42,23 +44,25 @@ func TestScanExistingAccounts_BuildsSeenSet(t *testing.T) {
 	// alice: personal account with a bot token.
 	aliceToken := "11111:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
 	writeAccountConfig(t, accountsDir, "alice", `
-admin_chat_ids = ["111"]
 [[channels]]
-channel_type = "telegram"
-token = "`+aliceToken+`"
+id = "telegram"
+type = "telegram"
+allowed_chat_ids = ["111"]
 `)
+	writeTelegramSecret(t, accountsDir, "alice", aliceToken)
 	// family: no channels, IsFamily-style.
 	writeAccountConfig(t, accountsDir, "family", `
-is_family = true
+is_shared = true
 `)
 	// bob: account with a different token.
 	bobToken := "22222:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
 	writeAccountConfig(t, accountsDir, "bob", `
-admin_chat_ids = ["222"]
 [[channels]]
-channel_type = "telegram"
-token = "`+bobToken+`"
+id = "telegram"
+type = "telegram"
+allowed_chat_ids = ["222"]
 `)
+	writeTelegramSecret(t, accountsDir, "bob", bobToken)
 	// non-directory entries and hidden staging must be ignored.
 	if err := os.WriteFile(filepath.Join(accountsDir, "loose.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write loose file: %v", err)
@@ -99,12 +103,30 @@ func writeAccountConfig(t *testing.T, accountsDir, id, body string) {
 	}
 }
 
+func writeTelegramSecret(t *testing.T, accountsDir, id, token string) {
+	t.Helper()
+	secrets, err := core.LoadSecretsFrom(filepath.Join(accountsDir, id, "secrets.json"))
+	if err != nil {
+		t.Fatalf("load secrets for %s: %v", id, err)
+	}
+	if err := secrets.Set("channel/telegram", "bot_token", token); err != nil {
+		t.Fatalf("save telegram secret for %s: %v", id, err)
+	}
+}
+
 // Re-running the wizard with a half-finished household must NOT overwrite the
 // already-onboarded accounts — the idempotent skip is the only thing standing
 // between the admin and a wiped alice dir.
 func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
 	accountsDir := t.TempDir()
-	writeAccountConfig(t, accountsDir, "alice", `admin_chat_ids = ["111"]`)
+	existingConfig := `version = 2
+
+[[channels]]
+  id = "telegram"
+  type = "telegram"
+  allowed_chat_ids = ["111"]
+`
+	writeAccountConfig(t, accountsDir, "alice", existingConfig)
 
 	var stdout, stderr bytes.Buffer
 	entry := provisionMember(accountsDir, "alice",
@@ -122,7 +144,7 @@ func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read alice config: %v", err)
 	}
-	if string(got) != `admin_chat_ids = ["111"]` {
+	if string(got) != existingConfig {
 		t.Errorf("alice config got rewritten: %q", string(got))
 	}
 }
@@ -297,8 +319,8 @@ func TestCreateFamilyAccount_Default(t *testing.T) {
 		t.Fatalf("read family config: %v", err)
 	}
 	got := string(body)
-	if !strings.Contains(got, "is_family = true") {
-		t.Errorf("config missing is_family flag:\n%s", got)
+	if !strings.Contains(got, "is_shared = true") {
+		t.Errorf("config missing is_shared flag:\n%s", got)
 	}
 	if !strings.Contains(got, "[share.family]") {
 		t.Errorf("config missing [share.family] stanza:\n%s", got)
@@ -310,7 +332,7 @@ func TestCreateFamilyAccount_Default(t *testing.T) {
 // after the initial household setup.
 func TestCreateFamilyAccount_IdempotentWhenExists(t *testing.T) {
 	accountsDir := t.TempDir()
-	writeAccountConfig(t, accountsDir, "family", `is_family = true`)
+	writeAccountConfig(t, accountsDir, "family", `is_shared = true`)
 	seen := &seenSet{
 		accounts: map[string]struct{}{"family": {}},
 		tokens:   map[string]string{},
@@ -327,7 +349,7 @@ func TestCreateFamilyAccount_IdempotentWhenExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read family config: %v", err)
 	}
-	if string(got) != `is_family = true` {
+	if string(got) != `is_shared = true` {
 		t.Errorf("pre-existing family config was modified: %q", string(got))
 	}
 }

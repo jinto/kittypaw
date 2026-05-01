@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ func TestServerNewUsesMasterAPIKey(t *testing.T) {
 	srv := NewWithServerConfig([]*AccountDeps{aliceDeps}, "test", core.TopLevelServerConfig{
 		MasterAPIKey: "master-key",
 	})
-	srv.localAuth = core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	srv.localAuth = core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if got := srv.effectiveAPIKey(); got != "master-key" {
 		t.Fatalf("effectiveAPIKey = %q, want master-key", got)
 	}
@@ -188,6 +189,8 @@ func buildAccountDeps(t *testing.T, root, id string, cfg *core.Config) *AccountD
 	sbox := sandbox.New(core.SandboxConfig{TimeoutSecs: 5})
 
 	secrets, _ := core.LoadSecretsFrom(filepath.Join(baseDir, "secrets.json"))
+	saveRuntimeSecretsForTest(t, secrets, cfg)
+	core.HydrateRuntimeSecrets(cfg, secrets)
 	pkgMgr := core.NewPackageManagerFrom(baseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(baseDir, secrets)
 
@@ -198,5 +201,68 @@ func buildAccountDeps(t *testing.T, root, id string, cfg *core.Config) *AccountD
 		PkgMgr:      pkgMgr,
 		APITokenMgr: apiTokenMgr,
 		Secrets:     secrets,
+	}
+}
+
+func writeConfigForTest(t *testing.T, accountDir string, cfg *core.Config) {
+	t.Helper()
+	if cfg.IsFamily {
+		cfg.IsShared = true
+	}
+	if err := os.MkdirAll(accountDir, 0o755); err != nil {
+		t.Fatalf("mkdir account dir: %v", err)
+	}
+	secrets, err := core.LoadSecretsFrom(filepath.Join(accountDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("load secrets: %v", err)
+	}
+	saveRuntimeSecretsForTest(t, secrets, cfg)
+	if err := core.WriteConfigAtomic(cfg, filepath.Join(accountDir, "config.toml")); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func saveRuntimeSecretsForTest(t *testing.T, secrets *core.SecretsStore, cfg *core.Config) {
+	t.Helper()
+	if secrets == nil || cfg == nil {
+		return
+	}
+	if cfg.LLM.APIKey != "" {
+		credential := cfg.LLM.Provider
+		if credential == "" {
+			if m := cfg.DefaultModel(); m != nil {
+				credential = m.SecretID()
+			}
+		}
+		if credential != "" {
+			if err := secrets.Set("llm/"+credential, "api_key", cfg.LLM.APIKey); err != nil {
+				t.Fatalf("save llm secret: %v", err)
+			}
+		}
+	}
+	if cfg.Server.APIKey != "" {
+		if err := secrets.Set("local-server", "api_key", cfg.Server.APIKey); err != nil {
+			t.Fatalf("save server api key secret: %v", err)
+		}
+	}
+	for _, ch := range cfg.Channels {
+		id := ch.SecretID()
+		if id == "" {
+			continue
+		}
+		switch ch.ChannelType {
+		case core.ChannelTelegram:
+			if ch.Token != "" {
+				if err := secrets.Set("channel/"+id, "bot_token", ch.Token); err != nil {
+					t.Fatalf("save telegram secret: %v", err)
+				}
+			}
+		case core.ChannelKakaoTalk:
+			if ch.KakaoWSURL != "" {
+				if err := secrets.Set("channel/"+id, "ws_url", ch.KakaoWSURL); err != nil {
+					t.Fatalf("save kakao secret: %v", err)
+				}
+			}
+		}
 	}
 }

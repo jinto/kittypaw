@@ -367,11 +367,16 @@ func scanExistingAccounts(accountsDir string) (*seenSet, error) {
 		if t.Config == nil {
 			continue
 		}
+		secrets, _ := core.LoadSecretsFrom(filepath.Join(t.BaseDir, "secrets.json"))
 		for _, ch := range t.Config.Channels {
 			if ch.ChannelType != core.ChannelTelegram {
 				continue
 			}
 			token := strings.TrimSpace(ch.Token)
+			if token == "" && secrets != nil {
+				token, _ = secrets.Get("channel/"+ch.SecretID(), "bot_token")
+				token = strings.TrimSpace(token)
+			}
 			if token == "" {
 				continue
 			}

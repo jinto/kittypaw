@@ -44,19 +44,26 @@ func (d *chatRelayDispatcher) Dispatch(ctx context.Context, req chatrelay.Reques
 }
 
 func (d *chatRelayDispatcher) dispatchModels(acct *requestAccount) chatrelay.DispatchResult {
-	models := make([]map[string]any, 0, 1+len(acct.Session.Config.Models))
-	if id := strings.TrimSpace(acct.Session.Config.LLM.Model); id != "" {
-		models = append(models, openAIModelItem(id))
-	}
-	for _, model := range acct.Session.Config.Models {
-		id := strings.TrimSpace(model.Name)
-		if id == "" {
-			id = strings.TrimSpace(model.Model)
-		}
+	cfg := acct.Session.Config
+	models := make([]map[string]any, 0, len(cfg.LLM.Models)+len(cfg.Models)+1)
+	for _, model := range cfg.LLM.Models {
+		id := strings.TrimSpace(model.ModelID())
 		if id == "" || modelIDExists(models, id) {
 			continue
 		}
 		models = append(models, openAIModelItem(id))
+	}
+	for _, model := range cfg.Models {
+		id := strings.TrimSpace(model.ModelID())
+		if id == "" || modelIDExists(models, id) {
+			continue
+		}
+		models = append(models, openAIModelItem(id))
+	}
+	if len(models) == 0 {
+		if id := strings.TrimSpace(cfg.LLM.Model); id != "" {
+			models = append(models, openAIModelItem(id))
+		}
 	}
 	return jsonDispatch(http.StatusOK, map[string]any{
 		"object": "list",
@@ -202,13 +209,14 @@ func (r openAIChatCompletionRequest) ModelOverride(cfg *core.Config) string {
 		return ""
 	}
 	model := strings.TrimSpace(r.Model)
-	if model == "" || model == cfg.LLM.Model {
+	if model == "" || model == cfg.LLM.Model || model == cfg.LLM.Default {
 		return ""
 	}
-	for _, candidate := range cfg.Models {
-		if model != "" && model == candidate.Name {
-			return model
-		}
+	if def := cfg.DefaultModel(); def != nil && model == def.ModelID() {
+		return ""
+	}
+	if cfg.FindModel(model) != nil {
+		return model
 	}
 	return ""
 }
@@ -216,6 +224,11 @@ func (r openAIChatCompletionRequest) ModelOverride(cfg *core.Config) string {
 func (r openAIChatCompletionRequest) ResponseModel(cfg *core.Config) string {
 	if strings.TrimSpace(r.Model) != "" {
 		return strings.TrimSpace(r.Model)
+	}
+	if cfg != nil {
+		if def := cfg.DefaultModel(); def != nil && strings.TrimSpace(def.ModelID()) != "" {
+			return strings.TrimSpace(def.ModelID())
+		}
 	}
 	if cfg != nil && strings.TrimSpace(cfg.LLM.Model) != "" {
 		return strings.TrimSpace(cfg.LLM.Model)

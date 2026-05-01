@@ -15,9 +15,10 @@ import (
 func TestChatRelayDispatcherModelsListsDefaultAndNamedModels(t *testing.T) {
 	root := t.TempDir()
 	cfg := core.DefaultConfig()
-	cfg.LLM.Model = "default-model"
-	cfg.Models = []core.ModelConfig{
-		{Name: "fast", Model: "fast-provider-model", Provider: "openai"},
+	cfg.LLM.Default = "main"
+	cfg.LLM.Models = []core.ModelConfig{
+		{ID: "main", Model: "default-provider-model", Provider: "anthropic"},
+		{ID: "fast", Model: "fast-provider-model", Provider: "openai"},
 	}
 	deps := buildAccountDeps(t, root, "alice", &cfg)
 	srv := New([]*AccountDeps{deps}, "test")
@@ -49,7 +50,7 @@ func TestChatRelayDispatcherModelsListsDefaultAndNamedModels(t *testing.T) {
 	if body.Object != "list" {
 		t.Fatalf("object = %q", body.Object)
 	}
-	if got := modelIDs(body.Data); !reflect.DeepEqual(got, []string{"default-model", "fast"}) {
+	if got := modelIDs(body.Data); !reflect.DeepEqual(got, []string{"main", "fast"}) {
 		t.Fatalf("model ids = %#v", got)
 	}
 }

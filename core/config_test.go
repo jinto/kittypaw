@@ -45,6 +45,140 @@ func TestConfigPathForAccountRejectsInvalidID(t *testing.T) {
 	}
 }
 
+func TestConfigV2ShapeParsing(t *testing.T) {
+	tomlContent := `
+version = 2
+is_shared = true
+freeform_fallback = true
+autonomy_level = "full"
+default_profile = "default"
+
+[llm]
+default = "main"
+fallback = "backup"
+
+[[llm.models]]
+id = "main"
+provider = "openai"
+model = "gpt-5.5"
+credential = "openai"
+max_tokens = 4096
+
+[[llm.models]]
+id = "backup"
+provider = "anthropic"
+model = "claude-sonnet-4-6"
+credential = "anthropic"
+max_tokens = 4096
+
+[[channels]]
+id = "telegram"
+type = "telegram"
+allowed_chat_ids = ["54076829"]
+
+[[channels]]
+id = "kakao"
+type = "kakao_talk"
+
+[workspace]
+default = "home"
+live_index = true
+
+[[workspace.roots]]
+alias = "home"
+path = "/Users/jinto/Documents/kittypaw/jinto"
+access = "read_write"
+`
+
+	var cfg Config
+	if _, err := toml.Decode(tomlContent, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if cfg.Version != 2 {
+		t.Fatalf("Version = %d, want 2", cfg.Version)
+	}
+	if !cfg.IsSharedAccount() {
+		t.Fatal("is_shared=true must mark account as shared")
+	}
+	if cfg.LLM.Default != "main" || cfg.LLM.Fallback != "backup" {
+		t.Fatalf("LLM default/fallback = %q/%q", cfg.LLM.Default, cfg.LLM.Fallback)
+	}
+	if got := cfg.DefaultModel(); got == nil || got.ID != "main" || got.Credential != "openai" {
+		t.Fatalf("DefaultModel = %#v, want main/openai", got)
+	}
+	if got := cfg.FallbackModel(); got == nil || got.ID != "backup" || got.Credential != "anthropic" {
+		t.Fatalf("FallbackModel = %#v, want backup/anthropic", got)
+	}
+	if len(cfg.Channels) != 2 {
+		t.Fatalf("Channels len = %d", len(cfg.Channels))
+	}
+	if cfg.Channels[0].ID != "telegram" || cfg.Channels[0].ChannelType != ChannelTelegram {
+		t.Fatalf("telegram channel = %#v", cfg.Channels[0])
+	}
+	if got := cfg.Channels[0].AllowedChatIDs; len(got) != 1 || got[0] != "54076829" {
+		t.Fatalf("AllowedChatIDs = %v", got)
+	}
+	if cfg.Channels[1].ID != "kakao" || cfg.Channels[1].ChannelType != ChannelKakaoTalk {
+		t.Fatalf("kakao channel = %#v", cfg.Channels[1])
+	}
+	if cfg.Workspace.Default != "home" {
+		t.Fatalf("workspace default = %q", cfg.Workspace.Default)
+	}
+	if got := cfg.WorkspaceRoots(); len(got) != 1 || got[0].Alias != "home" || got[0].Path == "" {
+		t.Fatalf("WorkspaceRoots = %#v", got)
+	}
+}
+
+func TestConfigV2SecretsHydration(t *testing.T) {
+	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+	secrets, err := LoadAccountSecrets("jinto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set("llm/openai", "api_key", "sk-openai"); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set("channel/telegram", "bot_token", "tg-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Set("channel/kakao", "ws_url", "wss://kakao.kittypaw.app/ws/token"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		LLM: LLMConfig{
+			Default: "main",
+			Models: []ModelConfig{{
+				ID:         "main",
+				Provider:   "openai",
+				Model:      "gpt-5.5",
+				Credential: "openai",
+			}},
+		},
+		Channels: []ChannelConfig{
+			{ID: "telegram", ChannelType: ChannelTelegram},
+			{ID: "kakao", ChannelType: ChannelKakaoTalk},
+		},
+	}
+
+	model, ok := cfg.RuntimeDefaultModel(secrets)
+	if !ok {
+		t.Fatal("RuntimeDefaultModel not found")
+	}
+	if model.APIKey != "sk-openai" {
+		t.Fatalf("hydrated model APIKey = %q", model.APIKey)
+	}
+
+	InjectChannelSecrets("jinto", cfg.Channels)
+	if cfg.Channels[0].Token != "tg-token" {
+		t.Fatalf("telegram token = %q", cfg.Channels[0].Token)
+	}
+	if cfg.Channels[1].KakaoWSURL != "wss://kakao.kittypaw.app/ws/token" {
+		t.Fatalf("kakao ws url = %q", cfg.Channels[1].KakaoWSURL)
+	}
+}
+
 func TestPermissionPolicyParsing(t *testing.T) {
 	tomlContent := `
 autonomy_level = "supervised"
@@ -81,7 +215,7 @@ timeout_seconds = 60
 // silently reshape it into something that breaks existing family installs.
 func TestFamilyShareParsing(t *testing.T) {
 	tomlContent := `
-is_family = true
+is_shared = true
 
 [share.family]
 read = ["memory/weather.json", "memory/household.json"]
@@ -94,8 +228,8 @@ read = ["summary.md"]
 		t.Fatalf("decode: %v", err)
 	}
 
-	if !cfg.IsFamily {
-		t.Errorf("IsFamily=true expected")
+	if !cfg.IsSharedAccount() {
+		t.Errorf("IsSharedAccount=true expected")
 	}
 	if len(cfg.Share) != 2 {
 		t.Fatalf("expected 2 share peers, got %d: %#v", len(cfg.Share), cfg.Share)

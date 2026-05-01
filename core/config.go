@@ -68,13 +68,14 @@ func ServerConfigPath() (string, error) {
 
 // Config is the top-level application configuration, loaded from TOML.
 type Config struct {
+	Version          int                 `toml:"version"`
 	LLM              LLMConfig           `toml:"llm"`
 	Sandbox          SandboxConfig       `toml:"sandbox"`
 	Agents           []AgentConfig       `toml:"agents"`
 	Channels         []ChannelConfig     `toml:"channels"`
-	AdminChatIDs     []string            `toml:"admin_chat_ids"`
+	AllowedChatIDs   []string            `toml:"-"`
 	FreeformFallback bool                `toml:"freeform_fallback"`
-	Models           []ModelConfig       `toml:"models"`
+	Models           []ModelConfig       `toml:"-"`
 	STT              STTConfig           `toml:"stt"`
 	Features         FeatureFlags        `toml:"features"`
 	MCPServers       []MCPServerConfig   `toml:"mcp_servers"`
@@ -93,13 +94,13 @@ type Config struct {
 	Workspace        WorkspaceConfig     `toml:"workspace"`
 	User             UserConfig          `toml:"user"`
 
-	// IsFamily marks an account as the shared/coordinator account. Family
-	// accounts run scheduled skills on behalf of the household (e.g. weather
-	// fetch) and fanout to individual accounts, but MUST NOT own chat
-	// channels — a misconfigured [telegram] on family would silently
-	// intercept updates meant for alice/bob. Enforced at startup by
-	// ValidateFamilyAccounts.
-	IsFamily bool `toml:"is_family"`
+	// IsShared marks an account as the shared/coordinator account. Shared
+	// accounts run scheduled skills on behalf of a group and fanout to
+	// individual accounts, but MUST NOT own chat channels — a misconfigured
+	// channel on a shared account would silently intercept updates meant for
+	// alice/bob. Enforced at startup by ValidateFamilyAccounts.
+	IsShared bool `toml:"is_shared"`
+	IsFamily bool `toml:"-"`
 
 	// Share declares which per-path reads this account grants to specific
 	// peers, keyed by peer AccountID. Personal accounts list the family
@@ -136,15 +137,23 @@ type UserConfig struct {
 // daemon falls back to v1 behavior: index at startup and on explicit
 // Reindex only.
 type WorkspaceConfig struct {
-	LiveIndex bool `toml:"live_index"`
+	Default   string          `toml:"default"`
+	Roots     []WorkspaceRoot `toml:"roots"`
+	LiveIndex bool            `toml:"live_index"`
+}
+
+type WorkspaceRoot struct {
+	Alias  string `toml:"alias"`
+	Path   string `toml:"path"`
+	Access string `toml:"access"`
 }
 
 // WebConfig controls web tool behavior (search backend, etc.).
 type WebConfig struct {
 	SearchBackend string `toml:"search_backend"` // "firecrawl" | "tavily" | "duckduckgo"; empty = auto-detect
-	FirecrawlKey  string `toml:"firecrawl_api_key"`
+	FirecrawlKey  string `toml:"-"`
 	FirecrawlURL  string `toml:"firecrawl_api_url"` // self-hosted; default https://api.firecrawl.dev
-	TavilyAPIKey  string `toml:"tavily_api_key"`
+	TavilyAPIKey  string `toml:"-"`
 }
 
 // SkillInstallConfig controls skill installation behavior.
@@ -173,21 +182,26 @@ var DefaultRequireApproval = []string{
 
 // LLMConfig holds the primary LLM provider settings.
 type LLMConfig struct {
-	Provider  string `toml:"provider"`
-	APIKey    string `toml:"api_key"`
-	Model     string `toml:"model"`
-	MaxTokens uint32 `toml:"max_tokens"`
-	BaseURL   string `toml:"base_url,omitempty"`
+	Default   string        `toml:"default"`
+	Fallback  string        `toml:"fallback"`
+	Models    []ModelConfig `toml:"models"`
+	Provider  string        `toml:"-"`
+	APIKey    string        `toml:"-"`
+	Model     string        `toml:"-"`
+	MaxTokens uint32        `toml:"-"`
+	BaseURL   string        `toml:"-"`
 }
 
 // ModelConfig defines an additional named model.
 type ModelConfig struct {
-	Name          string     `toml:"name"`
+	ID            string     `toml:"id"`
+	Name          string     `toml:"-"`
 	Provider      string     `toml:"provider"`
 	Model         string     `toml:"model"`
-	APIKey        string     `toml:"api_key"`
+	Credential    string     `toml:"credential"`
+	APIKey        string     `toml:"-"`
 	MaxTokens     uint32     `toml:"max_tokens"`
-	Default       bool       `toml:"default"`
+	Default       bool       `toml:"-"`
 	BaseURL       string     `toml:"base_url"`
 	ContextWindow uint32     `toml:"context_window"`
 	Tier          *ModelTier `toml:"tier"`
@@ -197,14 +211,14 @@ type ModelConfig struct {
 type SandboxConfig struct {
 	TimeoutSecs   uint64   `toml:"timeout_secs"`
 	MemoryLimitMB uint64   `toml:"memory_limit_mb"`
-	AllowedPaths  []string `toml:"allowed_paths"`
+	AllowedPaths  []string `toml:"-"`
 	AllowedHosts  []string `toml:"allowed_hosts"`
 }
 
 // STTConfig holds speech-to-text settings.
 type STTConfig struct {
 	Provider string `toml:"provider"`
-	APIKey   string `toml:"api_key"`
+	APIKey   string `toml:"-"`
 	Language string `toml:"language"`
 }
 
@@ -249,7 +263,7 @@ type RegistryConfig struct {
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Bind           string   `toml:"bind"`
-	APIKey         string   `toml:"api_key"`
+	APIKey         string   `toml:"-"`
 	AllowedOrigins []string `toml:"allowed_origins"`
 }
 
@@ -291,10 +305,13 @@ type MCPServerConfig struct {
 
 // ChannelConfig defines a messaging channel.
 type ChannelConfig struct {
-	ChannelType ChannelType `toml:"channel_type"`
-	Token       string      `toml:"token"`
-	BindAddr    string      `toml:"bind_addr"`
-	KakaoWSURL  string      `toml:"-"` // runtime-injected from secrets (not in config.toml)
+	ID             string      `toml:"id"`
+	ChannelType    ChannelType `toml:"type"`
+	AllowedChatIDs []string    `toml:"allowed_chat_ids"`
+	Credential     string      `toml:"credential"`
+	Token          string      `toml:"-"`
+	BindAddr       string      `toml:"bind_addr"`
+	KakaoWSURL     string      `toml:"-"` // runtime-injected from secrets (not in config.toml)
 }
 
 // InjectKakaoWSURL populates KakaoWSURL on kakao_talk channel configs from
@@ -308,6 +325,10 @@ type ChannelConfig struct {
 // login — fall back to DefaultAPIServerURL so the host-scoped secret
 // saved by wizardKakao still resolves.
 func InjectKakaoWSURL(accountID string, channels []ChannelConfig) {
+	InjectChannelSecrets(accountID, channels)
+}
+
+func InjectChannelSecrets(accountID string, channels []ChannelConfig) {
 	secrets, err := LoadAccountSecrets(accountID)
 	if err != nil {
 		return
@@ -319,14 +340,25 @@ func InjectKakaoWSURL(accountID string, channels []ChannelConfig) {
 		apiURL = DefaultAPIServerURL
 	}
 
-	wsURL, ok := mgr.LoadKakaoRelayWSURL(apiURL)
-	if !ok || wsURL == "" {
-		return
-	}
+	wsURL, _ := mgr.LoadKakaoRelayWSURL(apiURL)
 
 	for i := range channels {
-		if channels[i].ChannelType == ChannelKakaoTalk {
-			channels[i].KakaoWSURL = wsURL
+		id := channels[i].SecretID()
+		switch channels[i].ChannelType {
+		case ChannelTelegram:
+			if channels[i].Token == "" {
+				if token, ok := secrets.Get("channel/"+id, "bot_token"); ok {
+					channels[i].Token = token
+				}
+			}
+		case ChannelKakaoTalk:
+			if channels[i].KakaoWSURL == "" {
+				if url, ok := secrets.Get("channel/"+id, "ws_url"); ok {
+					channels[i].KakaoWSURL = url
+				} else {
+					channels[i].KakaoWSURL = wsURL
+				}
+			}
 		}
 	}
 }
@@ -357,7 +389,16 @@ type ProfileConfig struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
+		Version: 2,
 		LLM: LLMConfig{
+			Default: "main",
+			Models: []ModelConfig{{
+				ID:         "main",
+				Provider:   "anthropic",
+				Model:      ClaudeDefaultModel,
+				Credential: "anthropic",
+				MaxTokens:  4096,
+			}},
 			Model:     ClaudeDefaultModel,
 			MaxTokens: 4096,
 		},
@@ -392,6 +433,7 @@ func DefaultConfig() Config {
 			URL: DefaultRegistryURL,
 		},
 		Workspace: WorkspaceConfig{
+			Default:   "home",
 			LiveIndex: true,
 		},
 	}
@@ -407,6 +449,7 @@ func LoadConfig(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	cfg.NormalizeRuntimeFields()
 	return &cfg, nil
 }
 
@@ -478,8 +521,7 @@ func ConfigPathForAccount(accountID string) (string, error) {
 	return filepath.Join(dir, "accounts", accountID, "config.toml"), nil
 }
 
-// ConfigPath returns the legacy default account's config file path.
-// New multi-user setup paths should call ConfigPathForAccount.
+// ConfigPath returns the default account's config file path.
 func ConfigPath() (string, error) {
 	return ConfigPathForAccount(DefaultAccountID)
 }
@@ -502,10 +544,39 @@ func (c *Config) DefaultAgent() *AgentConfig {
 	return &c.Agents[0]
 }
 
+func (c *Config) NormalizeRuntimeFields() {
+	if c == nil {
+		return
+	}
+	if c.Version == 0 {
+		c.Version = 2
+	}
+	if c.IsShared {
+		c.IsFamily = true
+	}
+	if len(c.AllowedChatIDs) == 0 {
+		c.AllowedChatIDs = cfgAllowedChatIDs(c)
+	}
+	if m := c.DefaultModel(); m != nil {
+		c.LLM.Provider = m.Provider
+		c.LLM.Model = m.Model
+		c.LLM.MaxTokens = m.MaxTokens
+		c.LLM.BaseURL = m.BaseURL
+	}
+	if c.LLM.MaxTokens == 0 {
+		c.LLM.MaxTokens = 4096
+	}
+}
+
 // FindModel returns the model config matching the given name, or nil.
 func (c *Config) FindModel(name string) *ModelConfig {
+	for i := range c.LLM.Models {
+		if c.LLM.Models[i].ModelID() == name {
+			return &c.LLM.Models[i]
+		}
+	}
 	for i := range c.Models {
-		if c.Models[i].Name == name {
+		if c.Models[i].ModelID() == name {
 			return &c.Models[i]
 		}
 	}
@@ -514,6 +585,22 @@ func (c *Config) FindModel(name string) *ModelConfig {
 
 // DefaultModel returns the model marked as default, or the first model.
 func (c *Config) DefaultModel() *ModelConfig {
+	if c == nil {
+		return nil
+	}
+	if c.LLM.Default != "" {
+		if m := c.FindModel(c.LLM.Default); m != nil {
+			return m
+		}
+	}
+	for i := range c.LLM.Models {
+		if c.LLM.Models[i].Default {
+			return &c.LLM.Models[i]
+		}
+	}
+	if len(c.LLM.Models) > 0 {
+		return &c.LLM.Models[0]
+	}
 	for i := range c.Models {
 		if c.Models[i].Default {
 			return &c.Models[i]
@@ -523,4 +610,94 @@ func (c *Config) DefaultModel() *ModelConfig {
 		return &c.Models[0]
 	}
 	return nil
+}
+
+func (c *Config) FallbackModel() *ModelConfig {
+	if c == nil || c.LLM.Fallback == "" {
+		return nil
+	}
+	return c.FindModel(c.LLM.Fallback)
+}
+
+func (c *Config) IsSharedAccount() bool {
+	return c != nil && (c.IsShared || c.IsFamily)
+}
+
+func (c *Config) WorkspaceRoots() []WorkspaceRoot {
+	if c == nil {
+		return nil
+	}
+	if len(c.Workspace.Roots) > 0 {
+		return c.Workspace.Roots
+	}
+	roots := make([]WorkspaceRoot, 0, len(c.Sandbox.AllowedPaths))
+	for i, p := range c.Sandbox.AllowedPaths {
+		alias := c.Workspace.Default
+		if alias == "" {
+			alias = "home"
+		}
+		if i > 0 {
+			alias = fmt.Sprintf("workspace-%d", i+1)
+		}
+		roots = append(roots, WorkspaceRoot{Alias: alias, Path: p, Access: "read_write"})
+	}
+	return roots
+}
+
+func (m ModelConfig) ModelID() string {
+	if m.ID != "" {
+		return m.ID
+	}
+	return m.Name
+}
+
+func (m ModelConfig) SecretID() string {
+	if m.Credential != "" {
+		return m.Credential
+	}
+	if m.ID != "" {
+		return m.ID
+	}
+	if m.Provider != "" {
+		return m.Provider
+	}
+	return m.Name
+}
+
+func (c ChannelConfig) SecretID() string {
+	if c.Credential != "" {
+		return c.Credential
+	}
+	if c.ID != "" {
+		return c.ID
+	}
+	return string(c.ChannelType)
+}
+
+func HydrateModelSecrets(model ModelConfig, secrets *SecretsStore) ModelConfig {
+	if secrets == nil || model.APIKey != "" {
+		return model
+	}
+	if id := model.SecretID(); id != "" {
+		if key, ok := secrets.Get("llm/"+id, "api_key"); ok {
+			model.APIKey = key
+		}
+	}
+	return model
+}
+
+func (c *Config) RuntimeDefaultModel(secrets *SecretsStore) (ModelConfig, bool) {
+	m := c.DefaultModel()
+	if m == nil {
+		return ModelConfig{}, false
+	}
+	return HydrateModelSecrets(*m, secrets), true
+}
+
+func (c *Config) RuntimeFallbackModel(secrets *SecretsStore) (ModelConfig, bool) {
+	m := c.FallbackModel()
+	if m == nil {
+		return ModelConfig{}, false
+	}
+	return HydrateModelSecrets(*m, secrets), true
 }

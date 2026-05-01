@@ -140,7 +140,7 @@ func (s *Server) AddAccount(t *core.Account) error {
 
 	slog.Info("account_activated",
 		"account", t.ID,
-		"is_family", t.Config.IsFamily,
+		"is_shared", t.Config.IsSharedAccount(),
 		"channels", len(t.Config.Channels),
 	)
 	return nil
@@ -253,7 +253,7 @@ func (s *Server) handleAdminAccountAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "activated",
 		"account_id": body.AccountID,
-		"is_family":  cfg.IsFamily,
+		"is_shared":  cfg.IsSharedAccount(),
 		"channels":   len(cfg.Channels),
 	})
 }

@@ -18,11 +18,13 @@ func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	aliceCfg := core.DefaultConfig()
-	aliceCfg.LLM.Provider = "anthropic"
-	aliceCfg.LLM.APIKey = "alice-key"
 	bobCfg := core.DefaultConfig()
-	bobCfg.LLM.Provider = "local"
-	bobCfg.LLM.BaseURL = "http://localhost:11434/v1"
+	bobCfg.LLM.Models = []core.ModelConfig{{
+		ID:       "main",
+		Provider: "openai",
+		Model:    "llama3",
+		BaseURL:  "http://localhost:11434/v1/chat/completions",
+	}}
 	bobCfg.Channels = []core.ChannelConfig{{ChannelType: core.ChannelTelegram, Token: "123456:ABCDEF"}}
 	srv := newMultiAccountAuthTestServer(t, "alice", map[string]string{
 		"alice": "alice-pw",
@@ -69,9 +71,13 @@ func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
 
 func TestSetupStatusReportsOpenRouterProvider(t *testing.T) {
 	cfg := core.DefaultConfig()
-	cfg.LLM.Provider = "openai"
-	cfg.LLM.APIKey = "or-key"
-	cfg.LLM.BaseURL = core.OpenRouterBaseURL
+	cfg.LLM.Models = []core.ModelConfig{{
+		ID:         "main",
+		Provider:   "openai",
+		Model:      core.OpenRouterDefaultModel,
+		Credential: "openrouter",
+		BaseURL:    core.OpenRouterBaseURL,
+	}}
 	srv := newServerWithLocalUserAndConfig(t, "alice", "pw", &cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/setup/status", nil)
@@ -302,10 +308,7 @@ func TestSetupCompleteWritesLoggedInAccountConfig(t *testing.T) {
 		"bob":   &bobCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "bob": &bobCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 	}
 
 	cookie := loginSessionCookie(t, srv, "bob", "bob-pw")
@@ -330,8 +333,8 @@ func TestSetupCompleteWritesLoggedInAccountConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load alice config: %v", err)
 	}
-	if aliceWritten.LLM.APIKey != "alice-existing" {
-		t.Fatalf("alice LLM API key = %q, want unchanged", aliceWritten.LLM.APIKey)
+	if aliceWritten.LLM.APIKey != "" {
+		t.Fatalf("alice config API key = %q, want empty", aliceWritten.LLM.APIKey)
 	}
 }
 
@@ -378,10 +381,7 @@ func TestSetupCompleteRejectsDuplicateStoredTelegramCredential(t *testing.T) {
 		"bob":   &bobCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "bob": &bobCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 	}
 	bobStore := srv.accountDepsForID("bob").Store
 	if err := bobStore.SetUserContext("setup:llm_provider", "openai", "setup"); err != nil {
@@ -429,10 +429,7 @@ func TestSetupCompleteRejectsDuplicateStoredKakaoRelayURL(t *testing.T) {
 		"bob":   &bobCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "bob": &bobCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 		secrets, err := core.LoadAccountSecrets(accountID)
 		if err != nil {
 			t.Fatalf("load %s secrets: %v", accountID, err)
@@ -483,10 +480,7 @@ func TestSetupCompleteRejectsDuplicateStoredKakaoRelayURLWithCustomAPIServer(t *
 		"bob":   &bobCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "bob": &bobCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 		secrets, err := core.LoadAccountSecrets(accountID)
 		if err != nil {
 			t.Fatalf("load %s secrets: %v", accountID, err)
@@ -534,7 +528,7 @@ func TestSetupCompleteRejectsFamilyAccountChannels(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	aliceCfg := core.DefaultConfig()
 	familyCfg := core.DefaultConfig()
-	familyCfg.IsFamily = true
+	familyCfg.IsShared = true
 	srv := newMultiAccountAuthTestServerWithRoot(t, root, "alice", map[string]string{
 		"alice":  "alice-pw",
 		"family": "family-pw",
@@ -543,10 +537,7 @@ func TestSetupCompleteRejectsFamilyAccountChannels(t *testing.T) {
 		"family": &familyCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "family": &familyCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 	}
 	familyStore := srv.accountDepsForID("family").Store
 	if err := familyStore.SetUserContext("setup:llm_provider", "openai", "setup"); err != nil {
@@ -586,10 +577,7 @@ func TestSetupCompleteRefreshesLoggedInRuntimeSession(t *testing.T) {
 		"bob":   &bobCfg,
 	})
 	for accountID, cfg := range map[string]*core.Config{"alice": &aliceCfg, "bob": &bobCfg} {
-		cfgPath := filepath.Join(root, "accounts", accountID, "config.toml")
-		if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
-			t.Fatalf("write %s config: %v", accountID, err)
-		}
+		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 	}
 
 	cookie := loginSessionCookie(t, srv, "bob", "bob-pw")
@@ -628,9 +616,7 @@ func TestSetupCompleteRefreshesLoggedInRuntimeSession(t *testing.T) {
 	aliceReload.LLM.Provider = "anthropic"
 	aliceReload.LLM.APIKey = "alice-key"
 	aliceReload.Channels = []core.ChannelConfig{{ChannelType: core.ChannelTelegram, Token: "123456:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}}
-	if err := core.WriteConfigAtomic(&aliceReload, filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
-		t.Fatalf("write alice reload config: %v", err)
-	}
+	writeConfigForTest(t, filepath.Join(root, "accounts", "alice"), &aliceReload)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/reload", nil)
 	rr = httptest.NewRecorder()
 	srv.handleReload(rr, req)
@@ -648,9 +634,7 @@ func TestSetupCompleteForDefaultPreservesReloadConfigPointers(t *testing.T) {
 	}, map[string]*core.Config{
 		"alice": &aliceCfg,
 	})
-	if err := core.WriteConfigAtomic(&aliceCfg, filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
-		t.Fatalf("write alice config: %v", err)
-	}
+	writeConfigForTest(t, filepath.Join(root, "accounts", "alice"), &aliceCfg)
 
 	cookie := loginSessionCookie(t, srv, "alice", "alice-pw")
 	postSetupJSON(t, srv, cookie, "/api/setup/llm", `{"provider":"local","local_url":"http://localhost:11434/v1","local_model":"llama3"}`)
@@ -670,9 +654,7 @@ func TestSetupCompleteForDefaultPreservesReloadConfigPointers(t *testing.T) {
 	reloadCfg.LLM.Provider = "anthropic"
 	reloadCfg.LLM.APIKey = "reloaded-key"
 	reloadCfg.LLM.Model = "claude-test"
-	if err := core.WriteConfigAtomic(&reloadCfg, filepath.Join(root, "accounts", "alice", "config.toml")); err != nil {
-		t.Fatalf("write reload config: %v", err)
-	}
+	writeConfigForTest(t, filepath.Join(root, "accounts", "alice"), &reloadCfg)
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/reload", nil)
 	rr = httptest.NewRecorder()
 	srv.handleReload(rr, req)
@@ -693,7 +675,7 @@ func TestSetupCompleteForDefaultPreservesReloadConfigPointers(t *testing.T) {
 func newMultiAccountAuthTestServerWithRoot(t *testing.T, root, defaultAccount string, users map[string]string, cfgs map[string]*core.Config) *Server {
 	t.Helper()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	for accountID, password := range users {
 		if err := auth.CreateUser(accountID, password); err != nil {
 			t.Fatalf("create local auth user %s: %v", accountID, err)

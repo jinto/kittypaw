@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 var ErrAccountExists = errors.New("account already exists")
@@ -52,15 +53,21 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		if err != nil {
 			return nil, fmt.Errorf("discover existing accounts: %w", err)
 		}
-		tc := make(map[string][]ChannelConfig, len(existing)+1)
 		for _, peer := range existing {
 			if peer.Config != nil {
-				tc[peer.ID] = peer.Config.Channels
+				for _, ch := range peer.Config.Channels {
+					if ch.ChannelType == ChannelTelegram && ch.Token == opts.TelegramToken {
+						return nil, fmt.Errorf("telegram bot_token already used by account %q", peer.ID)
+					}
+				}
 			}
-		}
-		tc[id] = []ChannelConfig{{ChannelType: ChannelTelegram, Token: opts.TelegramToken}}
-		if err := ValidateAccountChannels(tc); err != nil {
-			return nil, err
+			secrets, err := LoadSecretsFrom(filepath.Join(peer.BaseDir, "secrets.json"))
+			if err != nil {
+				return nil, fmt.Errorf("load account secrets for %q: %w", peer.ID, err)
+			}
+			if token, ok := secrets.Get("channel/telegram", "bot_token"); ok && token == opts.TelegramToken {
+				return nil, fmt.Errorf("telegram bot_token already used by account %q", peer.ID)
+			}
 		}
 	}
 
@@ -81,24 +88,52 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 	}
 
 	var authStore *LocalAuthStore
-	authCreated := false
 	if opts.LocalPassword != "" {
-		authPath, err := LocalAuthPath()
+		authStore = NewLocalAuthStore(accountsDir)
+		has, err := authStore.HasUser(id)
 		if err != nil {
 			_ = os.RemoveAll(stagingDir)
 			return nil, err
 		}
-		authStore = NewLocalAuthStore(authPath)
-		if err := authStore.CreateUser(id, opts.LocalPassword); err != nil {
+		if has {
+			_ = os.RemoveAll(stagingDir)
+			return nil, fmt.Errorf("%w: %s", ErrLocalUserExists, id)
+		}
+		hash, err := hashPassword(opts.LocalPassword)
+		if err != nil {
 			_ = os.RemoveAll(stagingDir)
 			return nil, err
 		}
-		authCreated = true
+		now := time.Now().UTC()
+		if err := writeLocalAccountAuthFile(filepath.Join(stagingDir, "account.toml"), LocalUser{
+			AccountID:    id,
+			PasswordHash: hash,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return nil, err
+		}
+	}
+	secrets, err := LoadSecretsFrom(filepath.Join(stagingDir, "secrets.json"))
+	if err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return nil, err
+	}
+	if err := SaveWizardSecretsTo(secrets, WizardResult{
+		LLMProvider:      opts.LLMProvider,
+		LLMAPIKey:        opts.LLMAPIKey,
+		LLMModel:         opts.LLMModel,
+		TelegramBotToken: opts.TelegramToken,
+		TelegramChatID:   opts.AdminChatID,
+	}, cfg); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return nil, err
 	}
 
 	if err := os.Rename(stagingDir, finalDir); err != nil {
 		_ = os.RemoveAll(stagingDir)
-		if authCreated {
+		if authStore != nil {
 			_ = authStore.DeleteUser(id)
 		}
 		return nil, fmt.Errorf("commit staging → %s: %w", finalDir, err)
@@ -118,7 +153,7 @@ func buildAccountConfig(opts AccountOpts) (*Config, error) {
 	}
 	base := DefaultConfig()
 	cfg := MergeWizardSettings(&base, w)
-	cfg.IsFamily = opts.IsFamily
+	cfg.IsShared = opts.IsFamily
 	if _, err := EnsureServerAPIKey(cfg); err != nil {
 		return nil, err
 	}

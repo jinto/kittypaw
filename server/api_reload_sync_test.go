@@ -3,7 +3,6 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -33,16 +32,11 @@ func TestHandleReload_WaitsForReconcile(t *testing.T) {
 	t.Setenv("HOME", home)
 	kpDir := filepath.Join(home, ".kittypaw")
 	accountCfgDir := filepath.Join(kpDir, "accounts", core.DefaultAccountID)
-	if err := os.MkdirAll(accountCfgDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
 	cfg := core.DefaultConfig()
 	cfg.LLM.Provider = "anthropic"
 	cfg.LLM.APIKey = "test"
 	cfg.LLM.Model = "claude-test"
-	if err := core.WriteConfigAtomic(&cfg, filepath.Join(accountCfgDir, "config.toml")); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigForTest(t, accountCfgDir, &cfg)
 
 	barrier := make(chan struct{})
 	started := make(chan struct{})

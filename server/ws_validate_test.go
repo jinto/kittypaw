@@ -113,7 +113,7 @@ func TestWebSocketUsesAuthenticatedAccount(t *testing.T) {
 func TestWebSocketSingleAccountAcceptsMasterAPIKey(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	auth := core.NewLocalAuthStore(filepath.Join(root, "auth.json"))
+	auth := core.NewLocalAuthStore(filepath.Join(root, "accounts"))
 	if err := auth.CreateUser("alice", "pw"); err != nil {
 		t.Fatalf("create local auth user: %v", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -19,7 +18,7 @@ import (
 // ValidateFamilyAccounts before any state mutation. These tests cover the
 // two classes of invalid config that the validators catch:
 //   (1) a new default-account bot_token that collides with a live peer,
-//   (2) a default account flipping is_family=true while still owning channels.
+//   (2) a default account flipping is_shared=true while still owning channels.
 // Both must reject with 409, leave s.config untouched, and NOT call the
 // spawner. The happy path round-trips: valid cfg → 200 + swap + Reconcile.
 
@@ -30,12 +29,7 @@ func writeReloadConfig(t *testing.T, cfg core.Config) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	accountCfgDir := filepath.Join(home, ".kittypaw", "accounts", core.DefaultAccountID)
-	if err := os.MkdirAll(accountCfgDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := core.WriteConfigAtomic(&cfg, filepath.Join(accountCfgDir, "config.toml")); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigForTest(t, accountCfgDir, &cfg)
 }
 
 // newReloadTestServer wires a minimal Server with a counting reloadReconcile
@@ -66,7 +60,7 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 	newCfg.LLM.Provider = "anthropic"
 	newCfg.LLM.APIKey = "new-key"
 	newCfg.Channels = []core.ChannelConfig{
-		{ChannelType: core.ChannelTelegram, Token: "shared-token"},
+		{ID: "telegram", ChannelType: core.ChannelTelegram, Token: "shared-token"},
 	}
 	writeReloadConfig(t, newCfg)
 
@@ -112,16 +106,16 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 }
 
 // TestHandleReload_FamilyWithChannels_Rejects locks in the coordinator-only
-// rule for family accounts: a reload that flips is_family=true while still
+// rule for shared accounts: a reload that flips is_shared=true while still
 // declaring [telegram]/[kakao] channels must 409. A family account owning a
 // chat channel would silently intercept updates meant for the personal
 // account that actually owns the real bot_token.
 func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	newCfg := core.DefaultConfig()
 	newCfg.LLM.APIKey = "new-key"
-	newCfg.IsFamily = true
+	newCfg.IsShared = true
 	newCfg.Channels = []core.ChannelConfig{
-		{ChannelType: core.ChannelTelegram, Token: "family-token"},
+		{ID: "telegram", ChannelType: core.ChannelTelegram, Token: "family-token"},
 	}
 	writeReloadConfig(t, newCfg)
 
@@ -152,8 +146,8 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	if srv.config.LLM.APIKey != "old-key" {
 		t.Errorf("config swapped despite rejection: LLM.APIKey=%q", srv.config.LLM.APIKey)
 	}
-	if srv.config.IsFamily {
-		t.Errorf("IsFamily flipped to true despite rejection")
+	if srv.config.IsSharedAccount() {
+		t.Errorf("shared flag flipped to true despite rejection")
 	}
 	if n := atomic.LoadInt32(callN); n != 0 {
 		t.Errorf("Reconcile called %d times, want 0", n)
@@ -271,12 +265,7 @@ func TestHandleReload_SingleNonDefaultAccount(t *testing.T) {
 	newCfg.LLM.APIKey = "new-key"
 	newCfg.LLM.Model = "claude-test"
 	accountDir := filepath.Join(root, "accounts", "alice")
-	if err := os.MkdirAll(accountDir, 0o755); err != nil {
-		t.Fatalf("mkdir account dir: %v", err)
-	}
-	if err := core.WriteConfigAtomic(&newCfg, filepath.Join(accountDir, "config.toml")); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeConfigForTest(t, accountDir, &newCfg)
 
 	liveCfg := core.DefaultConfig()
 	liveCfg.LLM.APIKey = "old-key"

@@ -346,8 +346,8 @@ func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.Wizar
 				break
 			}
 		}
-		if len(existing.AdminChatIDs) > 0 {
-			existingChatID = existing.AdminChatIDs[0]
+		if len(existing.AllowedChatIDs) > 0 {
+			existingChatID = existing.AllowedChatIDs[0]
 		}
 	}
 
@@ -580,6 +580,10 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 
 	wsURL := core.WSURLFromRelay(d.KakaoRelayURL, reg.Token)
 	if err := mgr.SaveKakaoRelayWSURL(apiURL, wsURL); err != nil {
+		fmt.Printf("  WS URL 저장 실패: %v\n", err)
+		return nil
+	}
+	if err := secrets.Set("channel/kakao", "ws_url", wsURL); err != nil {
 		fmt.Printf("  WS URL 저장 실패: %v\n", err)
 		return nil
 	}

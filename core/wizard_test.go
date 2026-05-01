@@ -194,8 +194,8 @@ func TestMergeWizardSettings_Telegram(t *testing.T) {
 	if cfg.Channels[1].Token != "123:abc" {
 		t.Errorf("telegram token = %q", cfg.Channels[1].Token)
 	}
-	if len(cfg.AdminChatIDs) != 1 || cfg.AdminChatIDs[0] != "99999" {
-		t.Errorf("AdminChatIDs = %v", cfg.AdminChatIDs)
+	if len(cfg.AllowedChatIDs) != 1 || cfg.AllowedChatIDs[0] != "99999" {
+		t.Errorf("AllowedChatIDs = %v", cfg.AllowedChatIDs)
 	}
 }
 
@@ -299,7 +299,7 @@ func TestMergeWizardSettings_EmptyTelegramPreservesExisting(t *testing.T) {
 		ChannelType: ChannelTelegram,
 		Token:       "123456:ABCDEF",
 	})
-	base.AdminChatIDs = []string{"99887766"}
+	base.AllowedChatIDs = []string{"99887766"}
 
 	cfg := MergeWizardSettings(&base, WizardResult{})
 
@@ -312,8 +312,8 @@ func TestMergeWizardSettings_EmptyTelegramPreservesExisting(t *testing.T) {
 	if !found {
 		t.Error("existing Telegram channel should be preserved when WizardResult is empty")
 	}
-	if len(cfg.AdminChatIDs) == 0 || cfg.AdminChatIDs[0] != "99887766" {
-		t.Errorf("existing AdminChatIDs should be preserved, got %v", cfg.AdminChatIDs)
+	if len(cfg.AllowedChatIDs) == 0 || cfg.AllowedChatIDs[0] != "99887766" {
+		t.Errorf("existing AllowedChatIDs should be preserved, got %v", cfg.AllowedChatIDs)
 	}
 }
 
@@ -356,7 +356,13 @@ func TestWriteConfigAtomic(t *testing.T) {
 	cfgPath := filepath.Join(dir, "config.toml")
 
 	cfg := DefaultConfig()
-	cfg.LLM.Provider = "anthropic"
+	cfg.LLM.Default = "main"
+	cfg.LLM.Models = []ModelConfig{{
+		ID:         "main",
+		Provider:   "anthropic",
+		Model:      "claude-test",
+		Credential: "anthropic",
+	}}
 	cfg.LLM.APIKey = "test-key"
 
 	if err := WriteConfigAtomic(&cfg, cfgPath); err != nil {
@@ -373,11 +379,12 @@ func TestWriteConfigAtomic(t *testing.T) {
 	if err := toml.Unmarshal(data, &loaded); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if loaded.LLM.Provider != "anthropic" {
-		t.Errorf("loaded provider = %q", loaded.LLM.Provider)
+	if loaded.LLM.APIKey != "" {
+		t.Errorf("loaded api_key = %q, want empty", loaded.LLM.APIKey)
 	}
-	if loaded.LLM.APIKey != "test-key" {
-		t.Errorf("loaded api_key = %q", loaded.LLM.APIKey)
+	model := loaded.DefaultModel()
+	if model == nil || model.Provider != "anthropic" || model.Model != "claude-test" {
+		t.Errorf("loaded default model = %#v", model)
 	}
 
 	// Verify permissions.
