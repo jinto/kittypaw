@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kittypaw-app/kittyrelay/internal/broker"
-	"github.com/kittypaw-app/kittyrelay/internal/openai"
-	"github.com/kittypaw-app/kittyrelay/internal/protocol"
+	"github.com/kittypaw-app/kittychat/internal/broker"
+	"github.com/kittypaw-app/kittychat/internal/openai"
+	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
 func TestRouterHealth(t *testing.T) {

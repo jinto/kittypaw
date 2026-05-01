@@ -13,9 +13,9 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/go-chi/chi/v5"
-	"github.com/kittypaw-app/kittyrelay/internal/broker"
-	"github.com/kittypaw-app/kittyrelay/internal/openai"
-	"github.com/kittypaw-app/kittyrelay/internal/protocol"
+	"github.com/kittypaw-app/kittychat/internal/broker"
+	"github.com/kittypaw-app/kittychat/internal/openai"
+	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
 func TestDaemonWebSocketRelaysHostedOpenAIRequest(t *testing.T) {

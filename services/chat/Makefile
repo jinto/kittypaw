@@ -1,5 +1,5 @@
-BINARY := kittyrelay
-PKG    := ./cmd/kittyrelay
+BINARY := kittychat
+PKG    := ./cmd/kittychat
 
 .PHONY: build test lint fmt run clean
 

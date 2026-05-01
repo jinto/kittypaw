@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kittypaw-app/kittyrelay/internal/protocol"
+	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
 type fakeConn struct {

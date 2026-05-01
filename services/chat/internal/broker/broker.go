@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kittypaw-app/kittyrelay/internal/protocol"
+	"github.com/kittypaw-app/kittychat/internal/protocol"
 )
 
 var (

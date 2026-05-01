@@ -1,4 +1,4 @@
-module github.com/kittypaw-app/kittyrelay
+module github.com/kittypaw-app/kittychat
 
 go 1.25.0
 

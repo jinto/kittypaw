@@ -5,11 +5,11 @@ import (
 )
 
 func TestLoadRequiresStaticMVPSecrets(t *testing.T) {
-	t.Setenv("KITTYRELAY_API_TOKEN", "")
-	t.Setenv("KITTYRELAY_DEVICE_TOKEN", "")
-	t.Setenv("KITTYRELAY_USER_ID", "")
-	t.Setenv("KITTYRELAY_DEVICE_ID", "")
-	t.Setenv("KITTYRELAY_LOCAL_ACCOUNT_ID", "")
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
+	t.Setenv("KITTYCHAT_USER_ID", "")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
 
 	_, err := Load()
 	if err == nil {
@@ -18,13 +18,13 @@ func TestLoadRequiresStaticMVPSecrets(t *testing.T) {
 }
 
 func TestLoadUsesEnvAndDefaults(t *testing.T) {
-	t.Setenv("KITTYRELAY_API_TOKEN", "api_secret")
-	t.Setenv("KITTYRELAY_DEVICE_TOKEN", "dev_secret")
-	t.Setenv("KITTYRELAY_USER_ID", "user_1")
-	t.Setenv("KITTYRELAY_DEVICE_ID", "dev_1")
-	t.Setenv("KITTYRELAY_LOCAL_ACCOUNT_ID", "alice")
+	t.Setenv("KITTYCHAT_API_TOKEN", "api_secret")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_USER_ID", "user_1")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
 	t.Setenv("PORT", "")
-	t.Setenv("KITTYRELAY_BIND_ADDR", "")
+	t.Setenv("KITTYCHAT_BIND_ADDR", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -42,13 +42,13 @@ func TestLoadUsesEnvAndDefaults(t *testing.T) {
 }
 
 func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {
-	t.Setenv("KITTYRELAY_API_TOKEN", "api_secret")
-	t.Setenv("KITTYRELAY_DEVICE_TOKEN", "dev_secret")
-	t.Setenv("KITTYRELAY_USER_ID", "user_1")
-	t.Setenv("KITTYRELAY_DEVICE_ID", "dev_1")
-	t.Setenv("KITTYRELAY_LOCAL_ACCOUNT_ID", "alice")
+	t.Setenv("KITTYCHAT_API_TOKEN", "api_secret")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_USER_ID", "user_1")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
 	t.Setenv("PORT", "9090")
-	t.Setenv("KITTYRELAY_BIND_ADDR", "127.0.0.1:7777")
+	t.Setenv("KITTYCHAT_BIND_ADDR", "127.0.0.1:7777")
 
 	cfg, err := Load()
 	if err != nil {
