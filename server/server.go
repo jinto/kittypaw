@@ -665,7 +665,8 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				continue
 			}
 
-			if err := ch.SendResponse(ctx, payload.ChatID, response, payload.ReplyToMessageID); err != nil {
+			outbound := core.ParseOutboundResponse(response)
+			if err := sendChannelResponse(ctx, ch, payload.ChatID, outbound, payload.ReplyToMessageID); err != nil {
 				slog.Error("channel event: send response failed",
 					"type", event.Type,
 					"account", event.AccountID,
@@ -674,13 +675,20 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				)
 				// Kakao uses ephemeral action IDs — retry is futile.
 				if event.Type != core.EventKakaoTalk {
-					if qErr := s.store.EnqueueResponse(event.AccountID, string(event.Type), payload.ChatID, response); qErr != nil {
+					if qErr := s.store.EnqueueResponse(event.AccountID, string(event.Type), payload.ChatID, outbound.Text); qErr != nil {
 						slog.Error("channel event: enqueue response failed", "error", qErr)
 					}
 				}
 			}
 		}
 	}
+}
+
+func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string, outbound core.OutboundResponse, replyToMessageID string) error {
+	if rich, ok := ch.(channel.RichResponder); ok {
+		return rich.SendRichResponse(ctx, chatID, outbound, replyToMessageID)
+	}
+	return ch.SendResponse(ctx, chatID, outbound.Text, replyToMessageID)
 }
 
 // deliverFamilyPush routes an EventFamilyPush to the target account's channel
