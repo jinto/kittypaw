@@ -68,7 +68,8 @@ def setup(ctx):
     c.sudo("cp /tmp/kittychat.nginx /etc/nginx/sites-enabled/kittychat")
     c.sudo("systemctl daemon-reload")
     c.sudo("systemctl enable kittychat")
-    c.sudo("nginx -t && systemctl reload nginx")
+    c.sudo("nginx -t")
+    c.sudo("systemctl reload nginx")
 
     exists = c.run(f"test -f {REMOTE_DIR}/.env", warn=True)
     if not exists.ok:
