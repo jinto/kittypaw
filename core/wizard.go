@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,6 +18,20 @@ const (
 	OllamaDefaultBaseURL   = "http://localhost:11434/v1"
 	DefaultAPIServerURL    = "https://portal.kittypaw.app"
 )
+
+// DefaultWorkspacePath returns the account-scoped user workspace suggested
+// during onboarding. This is separate from ConfigDir: users should be able to
+// find and manage these files directly.
+func DefaultWorkspacePath(accountID string) (string, error) {
+	if err := ValidateAccountID(accountID); err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "Documents", "kittypaw", accountID), nil
+}
 
 // WizardResult holds all values collected by a setup wizard (CLI or web).
 // Zero-value fields mean "not configured / keep existing".

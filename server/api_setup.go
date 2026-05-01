@@ -135,14 +135,19 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 			telegramChatID = &masked
 		}
 	}
+	defaultWorkspacePath := ""
+	if p, err := core.DefaultWorkspacePath(acct.ID); err == nil {
+		defaultWorkspacePath = p
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"completed":         completed,
-		"existing_provider": existingProvider,
-		"has_telegram":      hasTelegram,
-		"telegram_chat_id":  telegramChatID,
-		"has_kakao":         hasKakao,
-		"kakao_available":   true,
+		"completed":              completed,
+		"existing_provider":      existingProvider,
+		"has_telegram":           hasTelegram,
+		"telegram_chat_id":       telegramChatID,
+		"has_kakao":              hasKakao,
+		"kakao_available":        true,
+		"default_workspace_path": defaultWorkspacePath,
 	})
 }
 
@@ -419,20 +424,33 @@ func (s *Server) handleSetupWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &body) {
 		return
 	}
-	if body.Path == "" || !filepath.IsAbs(body.Path) {
+	requestedPath := filepath.Clean(body.Path)
+	if body.Path == "" || !filepath.IsAbs(requestedPath) {
 		writeError(w, http.StatusBadRequest, "absolute path is required")
 		return
 	}
 
-	info, err := os.Stat(body.Path)
+	info, err := os.Stat(requestedPath)
 	if err != nil || !info.IsDir() {
-		writeError(w, http.StatusBadRequest, "path does not exist or is not a directory")
-		return
+		defaultWorkspacePath, defaultErr := core.DefaultWorkspacePath(acct.ID)
+		if defaultErr != nil || requestedPath != filepath.Clean(defaultWorkspacePath) || !os.IsNotExist(err) {
+			writeError(w, http.StatusBadRequest, "path does not exist or is not a directory")
+			return
+		}
+		if mkdirErr := os.MkdirAll(requestedPath, 0o755); mkdirErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create default workspace directory")
+			return
+		}
+		info, err = os.Stat(requestedPath)
+		if err != nil || !info.IsDir() {
+			writeError(w, http.StatusInternalServerError, "failed to create default workspace directory")
+			return
+		}
 	}
 
-	canonical, err := filepath.EvalSymlinks(body.Path)
+	canonical, err := filepath.EvalSymlinks(requestedPath)
 	if err != nil {
-		canonical = body.Path
+		canonical = requestedPath
 	}
 
 	_ = acct.Store.SetUserContext("setup:workspace_path", canonical, "setup")
