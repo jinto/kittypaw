@@ -1,6 +1,8 @@
 pre-commit:
   parallel: true
   commands:
+    gitleaks:
+      run: pre-commit run gitleaks
     fmt:
       glob: "*.go"
       run: gofmt -l {staged_files} | xargs -r gofmt -w && git add {staged_files}
