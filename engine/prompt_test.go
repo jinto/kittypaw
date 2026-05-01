@@ -46,6 +46,8 @@ func TestBuildSkillsSection_ImageGuardGuidance(t *testing.T) {
 		"img.error || !img.url",
 		"img.url",
 		"img.imageUrl",
+		"Do not claim image generation is unavailable",
+		"unless Image.generate returns an error",
 	} {
 		if !strings.Contains(section, phrase) {
 			t.Fatalf("buildSkillsSection missing image guidance phrase %q", phrase)
