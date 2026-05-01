@@ -2,9 +2,11 @@ package auth_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,6 +187,44 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 	}
 	if resp.TokenType != "Bearer" {
 		t.Fatalf("expected Bearer, got %q", resp.TokenType)
+	}
+
+	// Plan 17 wire-format guard (issueTokenPair single choke point).
+	// Decode the access_token payload directly and pin sub/iss/aud/scope/v=1.
+	// If anyone reverts cli.go:27 SignForAudiences -> Sign, this assertion
+	// fires with the message below — distinguishing the regression from a
+	// generic OAuth path failure.
+	parts := strings.Split(resp.AccessToken, ".")
+	if len(parts) != 3 {
+		t.Fatalf("wire-format regression in issueTokenPair: expected 3 JWT segments, got %d", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("wire-format regression in issueTokenPair: decode payload: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("wire-format regression in issueTokenPair: unmarshal: %v", err)
+	}
+	if got, _ := raw["sub"].(string); got != "user-google-g-user-1" {
+		t.Fatalf(`wire-format regression in issueTokenPair: sub = %v, want "user-google-g-user-1"`, raw["sub"])
+	}
+	if got, _ := raw["iss"].(string); got != "kittyapi" {
+		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "kittyapi"`, raw["iss"])
+	}
+	if v, _ := raw["v"].(float64); v != 1 {
+		t.Fatalf("wire-format regression in issueTokenPair: v = %v, want 1", raw["v"])
+	}
+	if _, ok := raw["uid"]; ok {
+		t.Fatalf(`wire-format regression in issueTokenPair: legacy "uid" key must not appear, got: %v`, raw)
+	}
+	auds, _ := raw["aud"].([]any)
+	if len(auds) != 2 || auds[0] != "kittyapi" || auds[1] != "kittychat" {
+		t.Fatalf(`wire-format regression in issueTokenPair: aud = %v, want ["kittyapi","kittychat"]`, raw["aud"])
+	}
+	scopes, _ := raw["scope"].([]any)
+	if len(scopes) != 2 || scopes[0] != "chat:relay" || scopes[1] != "models:read" {
+		t.Fatalf(`wire-format regression in issueTokenPair: scope = %v, want ["chat:relay","models:read"]`, raw["scope"])
 	}
 }
 

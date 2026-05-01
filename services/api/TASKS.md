@@ -340,6 +340,7 @@
 - [x] **T3**: `cli.go:27` 의 `issueTokenPair` 한 줄 변경 — Google/GitHub/Refresh/CLI 모두 *single choke point* 경유라 한 줄로 모든 발급 path cover. `SignForAudiences(user.ID, DefaultAPIClientAudiences, DefaultAPIClientScopes, ...)`.
 - [x] **T4**: `internal/auth/scopes.go` 신규 — `ScopeChatRelay/ModelsRead/DaemonConnect`, `AudienceKittyAPI/KittyChat`, `ClaimsVersion=1`, `DefaultAPIClientScopes`, `DefaultAPIClientAudiences`.
 - [x] **T5**: README.md / README.ko.md 의 JWT 항목에 spec link 박제.
+- [x] **T6**: wire-format guard (post-merge follow-up). RFC 7519 sub/iss 정정 (`abf8c16`) + uid reject test (`c8435e2`) 후 추가 박제. `internal/auth/google_test.go`의 `TestGoogleCallbackSuccess` 끝에 access_token decode + sub/iss/aud/scope/v=1 + uid 키 부재 assertion 추가. 회귀 시뮬레이션 (cli.go:27 SignForAudiences→Sign) 결과 fail message *"wire-format regression in issueTokenPair: v = <nil>, want 1"* 정확 catch 검증. `deploy/check-token-shape.sh` 신설 — 사용자 manual decode script (paste-and-verify).
 
 **다음 slice (Plan 17 머지 후, 별도 plan)**:
 - device schema migration (users → devices 1:N)
