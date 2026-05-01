@@ -85,7 +85,7 @@ func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, erro
 	wizardWebSearch(scanner, existing, &w)
 
 	// [5/6] Workspace & HTTP
-	wizardWorkspaceHTTP(scanner, existing, &w)
+	wizardWorkspaceHTTP(scanner, accountID, existing, &w)
 	if err := validateWizardResult(flags.validate, w); err != nil {
 		return w, err
 	}
@@ -625,13 +625,15 @@ func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.Wiza
 // Step [5/5]: Workspace & HTTP
 // ---------------------------------------------------------------------------
 
-func wizardWorkspaceHTTP(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
+func wizardWorkspaceHTTP(scanner *bufio.Scanner, accountID string, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [5/6] Workspace & Permissions")
 
 	defWS := ""
 	if existing != nil && len(existing.Sandbox.AllowedPaths) > 0 {
 		defWS = existing.Sandbox.AllowedPaths[0]
+	} else if p, err := core.DefaultWorkspacePath(accountID); err == nil {
+		defWS = p
 	}
 	ws := promptLine(scanner, "  Workspace path (empty=skip)", defWS)
 	if ws != "" {

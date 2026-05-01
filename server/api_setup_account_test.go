@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,9 @@ import (
 )
 
 func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
 	aliceCfg := core.DefaultConfig()
 	aliceCfg.LLM.Provider = "anthropic"
 	aliceCfg.LLM.APIKey = "alice-key"
@@ -40,9 +44,10 @@ func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
 		t.Fatalf("status code = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var body struct {
-		ExistingProvider *string `json:"existing_provider"`
-		HasTelegram      bool    `json:"has_telegram"`
-		TelegramChatID   *string `json:"telegram_chat_id"`
+		ExistingProvider     *string `json:"existing_provider"`
+		HasTelegram          bool    `json:"has_telegram"`
+		TelegramChatID       *string `json:"telegram_chat_id"`
+		DefaultWorkspacePath string  `json:"default_workspace_path"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode status: %v", err)
@@ -55,6 +60,49 @@ func TestSetupStatusUsesLoggedInAccount(t *testing.T) {
 	}
 	if body.TelegramChatID == nil || *body.TelegramChatID != "***8877" {
 		t.Fatalf("telegram_chat_id = %v, want masked bob pending id", body.TelegramChatID)
+	}
+	wantWorkspace := filepath.Join(home, "Documents", "kittypaw", "bob")
+	if body.DefaultWorkspacePath != wantWorkspace {
+		t.Fatalf("default_workspace_path = %q, want %q", body.DefaultWorkspacePath, wantWorkspace)
+	}
+}
+
+func TestSetupWorkspaceCreatesDefaultAccountFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srv := newMultiAccountAuthTestServer(t, "alice", map[string]string{
+		"alice": "alice-pw",
+		"bob":   "bob-pw",
+	}, map[string]*core.Config{
+		"alice": {},
+		"bob":   {},
+	})
+
+	path := filepath.Join(home, "Documents", "kittypaw", "bob")
+	reqBody, err := json.Marshal(map[string]string{"path": path})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/workspace", bytes.NewReader(reqBody))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(loginSessionCookie(t, srv, "bob", "bob-pw"))
+	rr := httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("workspace code = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		t.Fatalf("default workspace dir stat = (%v, %v), want existing directory", info, err)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("canonicalize path: %v", err)
+	}
+	if got, ok, err := srv.accountDepsForID("bob").Store.GetUserContext("setup:workspace_path"); err != nil || !ok || got != canonicalPath {
+		t.Fatalf("stored workspace path = (%q, %v, %v), want %q true nil", got, ok, err, canonicalPath)
 	}
 }
 

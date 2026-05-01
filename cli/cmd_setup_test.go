@@ -354,6 +354,26 @@ func TestSetupWritesNamedAccount(t *testing.T) {
 	mustNotExist(t, filepath.Join(root, "accounts", "default"))
 }
 
+func TestWizardWorkspaceHTTPDefaultsToAccountDocumentsFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var w core.WizardResult
+	scanner := bufio.NewScanner(strings.NewReader("\ny\nn\n"))
+	wizardWorkspaceHTTP(scanner, "alice", nil, &w)
+
+	want := filepath.Join(home, "Documents", "kittypaw", "alice")
+	if w.WorkspacePath != want {
+		t.Fatalf("WorkspacePath = %q, want %q", w.WorkspacePath, want)
+	}
+	if info, err := os.Stat(want); err != nil || !info.IsDir() {
+		t.Fatalf("default workspace dir stat = (%v, %v), want existing directory", info, err)
+	}
+	if w.HTTPAccess {
+		t.Fatal("HTTPAccess = true, want false from prompt input")
+	}
+}
+
 func TestRunWizardUsesNamedAccountSecrets(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
