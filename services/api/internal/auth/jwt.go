@@ -21,12 +21,6 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// Sign issues a JWT with no audience or scopes — kept for backward compatibility.
-// New issuance paths should use SignForAudiences.
-func Sign(userID, secret string, ttl time.Duration) (string, error) {
-	return SignForAudiences(userID, nil, nil, secret, ttl)
-}
-
 // SignForAudiences issues a JWT with explicit audiences and scopes.
 // Pins claims version to 1 (Plan 17 spec D4 — additive only).
 // docs/specs/kittychat-credential-foundation.md
@@ -35,6 +29,7 @@ func SignForAudiences(userID string, audiences []string, scopes []string, secret
 	claims := Claims{
 		UserID: userID,
 		Scope:  scopes,
+		V:      ClaimsVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    Issuer,
 			Audience:  jwt.ClaimStrings(audiences),
@@ -42,20 +37,23 @@ func SignForAudiences(userID string, audiences []string, scopes []string, secret
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
-	if len(audiences) > 0 || len(scopes) > 0 {
-		claims.V = 1
-	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
 
+// Verify parses and validates a JWT issued by SignForAudiences.
+// Strict on iss (exact match) + aud (must contain AudienceAPI) — Plan 13 H1.
 func Verify(tokenString, secret string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(secret), nil
-	})
+	},
+		jwt.WithIssuer(Issuer),
+		jwt.WithAudience(AudienceAPI),
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("parse token: %w", err)
 	}

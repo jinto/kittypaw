@@ -17,7 +17,7 @@ func IssueTestJWT(t *testing.T, secret, userID string, ttl time.Duration) string
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
-	token, err := auth.Sign(userID, secret, ttl)
+	token, err := auth.SignForAudiences(userID, auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, secret, ttl)
 	if err != nil {
 		t.Fatalf("testfixture.IssueTestJWT: %v", err)
 	}

@@ -3,6 +3,7 @@ package auth_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 const testSecret = "test-secret-key-for-jwt"
 
 func TestSignVerifyRoundtrip(t *testing.T) {
-	token, err := auth.Sign("user-123", testSecret, 15*time.Minute)
+	token, err := auth.SignForAudiences("user-123", auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, testSecret, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestSignVerifyRoundtrip(t *testing.T) {
 }
 
 func TestVerifyExpired(t *testing.T) {
-	token, err := auth.Sign("user-123", testSecret, -1*time.Second)
+	token, err := auth.SignForAudiences("user-123", auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, testSecret, -1*time.Hour)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestVerifyExpired(t *testing.T) {
 }
 
 func TestVerifyWrongSecret(t *testing.T) {
-	token, err := auth.Sign("user-123", testSecret, 15*time.Minute)
+	token, err := auth.SignForAudiences("user-123", auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, testSecret, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -134,26 +135,85 @@ func TestClaimsJSONUsesSubField(t *testing.T) {
 	}
 }
 
-// Tokens issued via the bare Sign helper (no audiences/scopes) must verify
-// successfully — the only difference from SignForAudiences is empty aud/scope.
-// They still use the standard "sub" claim. This is NOT a uid-fallback.
-func TestVerify_TokenWithoutAudOrScope(t *testing.T) {
-	token, err := auth.Sign("user-bare", testSecret, 15*time.Minute)
+// Plan 13 H1 — strict iss check.
+// Same secret + wrong iss → Verify must reject (defense against same-secret
+// cross-service token confusion).
+func TestVerify_RejectsWrongIssuer(t *testing.T) {
+	claims := auth.Claims{
+		UserID: "user-evil",
+		V:      auth.ClaimsVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "evil-attacker",
+			Audience:  jwt.ClaimStrings(auth.DefaultAPIClientAudiences),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(testSecret))
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	claims, err := auth.Verify(token, testSecret)
+	_, err = auth.Verify(signed, testSecret)
+	if err == nil {
+		t.Fatal("expected Verify to reject token with wrong issuer")
+	}
+	if !errors.Is(err, jwt.ErrTokenInvalidIssuer) {
+		t.Fatalf("expected ErrTokenInvalidIssuer, got: %v", err)
+	}
+}
+
+// Plan 13 H1 — strict aud check.
+// Token with no audience (legacy bare-Sign shape) → Verify must reject.
+func TestVerify_RejectsMissingAudience(t *testing.T) {
+	claims := auth.Claims{
+		UserID: "user-bare",
+		V:      auth.ClaimsVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    auth.Issuer,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(testSecret))
 	if err != nil {
-		t.Fatalf("verify bare: %v", err)
+		t.Fatalf("sign: %v", err)
 	}
-	if claims.UserID != "user-bare" {
-		t.Fatalf("UserID = %q", claims.UserID)
+	_, err = auth.Verify(signed, testSecret)
+	if err == nil {
+		t.Fatal("expected Verify to reject token without audience")
 	}
-	if len(claims.Audience) != 0 {
-		t.Fatalf("bare token Audience must be empty, got %v", claims.Audience)
+	if !errors.Is(err, jwt.ErrTokenRequiredClaimMissing) {
+		t.Fatalf("expected ErrTokenRequiredClaimMissing, got: %v", err)
 	}
-	if len(claims.Scope) != 0 {
-		t.Fatalf("bare token Scope must be empty, got %v", claims.Scope)
+}
+
+// Plan 13 H1 — chat-only token must be rejected at api.kittypaw.app.
+// Catches WithAudience(AudienceAPI) → WithAudience(AudienceChat) typo regression.
+// Per spec D8: each resource server must enforce its own audience only.
+func TestVerify_RejectsWrongAudience(t *testing.T) {
+	claims := auth.Claims{
+		UserID: "user-cross",
+		V:      auth.ClaimsVersion,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    auth.Issuer,
+			Audience:  jwt.ClaimStrings{auth.AudienceChat}, // API aud 부재
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	_, err = auth.Verify(signed, testSecret)
+	if err == nil {
+		t.Fatal("expected Verify to reject chat-only audience token")
+	}
+	if !errors.Is(err, jwt.ErrTokenInvalidAudience) {
+		t.Fatalf("expected ErrTokenInvalidAudience, got: %v", err)
 	}
 }
 

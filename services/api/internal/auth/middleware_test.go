@@ -14,7 +14,7 @@ func TestMiddlewareValidJWT(t *testing.T) {
 	userStore := newMockUserStore()
 	_, _ = userStore.CreateOrUpdate(t.Context(), "google", "123", "t@t.com", "Test", "")
 
-	token, _ := auth.Sign("user-google-123", testSecret, 15*time.Minute)
+	token, _ := auth.SignForAudiences("user-google-123", auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, testSecret, 15*time.Minute)
 
 	handler := auth.Middleware(testSecret, userStore)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := auth.UserFromContext(r.Context())
@@ -99,7 +99,7 @@ func TestHandleMeAuthenticated(t *testing.T) {
 	userStore := newMockUserStore()
 	_, _ = userStore.CreateOrUpdate(t.Context(), "google", "123", "t@t.com", "Test", "")
 
-	token, _ := auth.Sign("user-google-123", testSecret, 15*time.Minute)
+	token, _ := auth.SignForAudiences("user-google-123", auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, testSecret, 15*time.Minute)
 
 	handler := auth.Middleware(testSecret, userStore)(http.HandlerFunc(auth.HandleMe))
 
