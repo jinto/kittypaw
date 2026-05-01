@@ -306,15 +306,24 @@
 
 **검증**: `make test-integration` 전 패키지 PASS (회귀 0) / `make build` ✓ / `make lint` 0 issues / `make smoke` 29/29 PASS. production 코드 변경 0.
 
-## Plan 13: B1 — L1.E /auth/me + refresh rotation ← 현재
+## Plan 13: B1 — auth /me + refresh rotation + contract revision ✅
 
-> Spec: `.claude/plans/test-coverage-completion.md` Plan B1 섹션
-> kickoff: B0 머지 직후 별도 `ina:plan` 호출.
-> 핵심: `me_integration_test.go` (3 case: no token 401 / valid 200 / expired 401) + `refresh_rotation_integration_test.go` (refresh → 새 access+refresh, 이전 refresh reuse 시 reuse-detected 401 + 모든 user token 무효화). **mock OAuth provider 미사용** (B2 deferred).
+> **Spec**: `.claude/plans/plan-13-auth-me-refresh-contract-revision.md` (β 묶음, Phase 1 + Phase 2 ITERATE 모두 반영)
+> **사용자 결정 2026-05-02**: D1 issuer = `"https://api.kittypaw.app/auth"` (path-based) / D2 audience = `["https://api.kittypaw.app", "https://chat.kittypaw.app"]` (URL form)
+
+- [x] **T1**: contract revision. `scopes.go` const 정정 (`Issuer`/`AudienceAPI`/`AudienceChat` URL form, 기존 `IssuerKittyAPI` 등 이름 변경) + `jwt.go` 참조 정정 + `main.go` discovery `auth_base_url` derive (`strings.TrimRight(cfg.BaseURL, "/") + "/auth"`, R6 trailing slash) + `main_test.go` `TestDiscoveryReturnsAuthBaseURL` 신규 + `google_test.go` wire-format URL form + `jwt_test.go` 의 Plan 17 박제 갱신 + `docs/specs/kittychat-credential-foundation.md` D2 + 새 D8.
+- [x] **T2**: `internal/auth/me_integration_test.go` 신규. `setupAuthIntegration(t)` Plan 12 패턴 (`_test` guard + pgxpool + middleware-wrapped httptest, advisory_lock 불필요). Plan 11 testfixture 활용. 3 case (NoToken 401 / ValidJWT 200 + body / ExpiredJWT 401) PASS.
+- [x] **T3**: `internal/auth/refresh_rotation_integration_test.go` 신규. `setupRefreshIntegration(t)` (UserStore + RefreshTokenStore). 2 case PASS — Happy (rotation + 이전 revoked DB 검증) + ReuseDetect (DB query `activeRefreshCount == 0` 검증, Critic ITERATE C2).
+- [x] **T4**: `deploy/smoke.sh` `check_discovery_keys` 4-key → 5-key (`auth_base_url` 추가).
+- [x] **T5**: TASKS.md ✅ + Plan 14 promote. 2 commit (contract revision + integration test) + push + fab deploy + smoke 검증 + cross-team 알림.
+
+**검증**: `make test-integration` 전 패키지 PASS (회귀 0 + 새 5 case PASS) / `make build` / `make lint` (0 issues) / `make smoke` 회귀 0 + auth_base_url 추가.
+
+**BC**: prod deploy 직후 active old token (iss=`kittyapi`) → 다음 호출 401 → client refresh 자동 → 새 shape. AccessTokenTTL=15min. 1인 + private 환경 영향 ≈ 0.
 
 - [ ] kickoff 시 ina:plan trigger
 
-## Plan 14: C′ — L1.F cross-cutting 축소판 (대기, Plan 17 후)
+## Plan 14: C′ — L1.F cross-cutting 축소판 ← 현재
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan C′ 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출.
