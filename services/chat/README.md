@@ -116,6 +116,12 @@ This means `alice` on two devices, or under two API users, is not the same route
 Capabilities work the same way: a request is sent to a daemon connection only
 when the connection's hello advertised the matching operation capability.
 
+After hello, daemon-to-relay application frames are limited to
+`response_headers`, `response_chunk`, `response_end`, `error`, `ping`, and
+`pong`. A daemon `ping` receives a relay `pong` with the same `id` and is not
+delivered to the request broker. Server-to-daemon `request` frames are rejected
+if a daemon sends them back to the relay.
+
 Clients can discover currently online routes with:
 
 ```text

@@ -105,8 +105,36 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close(websocket.StatusPolicyViolation, err.Error())
 			return
 		}
+		if frame.Type == protocol.FramePing {
+			if err := writePong(ctx, conn, frame.ID); err != nil {
+				return
+			}
+			continue
+		}
+		if frame.Type == protocol.FramePong {
+			continue
+		}
+		if !daemonResponseFrame(frame.Type) {
+			_ = conn.Close(websocket.StatusPolicyViolation, "unexpected daemon frame type")
+			return
+		}
 		h.broker.Deliver(activePrincipal.UserID, activePrincipal.DeviceID, frame)
 	}
+}
+
+func daemonResponseFrame(frameType protocol.FrameType) bool {
+	switch frameType {
+	case protocol.FrameResponseHeaders, protocol.FrameResponseChunk, protocol.FrameResponseEnd, protocol.FrameError:
+		return true
+	default:
+		return false
+	}
+}
+
+func writePong(ctx context.Context, conn *websocket.Conn, id string) error {
+	writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	return wsjson.Write(writeCtx, conn, protocol.Frame{Type: protocol.FramePong, ID: id})
 }
 
 func principalForHello(hello protocol.Frame, principal broker.DevicePrincipal) (broker.DevicePrincipal, error) {

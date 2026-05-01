@@ -220,8 +220,142 @@ func TestDaemonWebSocketRegistersOnlyHelloAdvertisedAccounts(t *testing.T) {
 	}
 }
 
+func TestDaemonWebSocketRejectsUnexpectedPostHelloFrame(t *testing.T) {
+	fb := &captureBroker{
+		registered: make(chan broker.DevicePrincipal, 1),
+		delivered:  make(chan protocol.Frame, 1),
+	}
+	r := chi.NewRouter()
+	r.Mount("/daemon", NewHandler(StaticTokenAuthenticator{
+		Token: "dev_secret",
+		Principal: broker.DevicePrincipal{
+			UserID:          "user_1",
+			DeviceID:        "dev_1",
+			LocalAccountIDs: []string{"alice"},
+		},
+	}, fb).Routes())
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/daemon/connect"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer dev_secret"}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	select {
+	case <-fb.registered:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for broker registration")
+	}
+
+	err = wsjson.Write(ctx, conn, protocol.Frame{
+		Type:      protocol.FrameRequest,
+		ID:        "req_bad",
+		AccountID: "alice",
+		Operation: protocol.OperationOpenAIModels,
+		Method:    http.MethodGet,
+		Path:      "/v1/models",
+	})
+	if err != nil {
+		t.Fatalf("write unexpected request frame: %v", err)
+	}
+
+	readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer readCancel()
+	var frame protocol.Frame
+	err = wsjson.Read(readCtx, conn, &frame)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("read error = %v, close status = %v, want policy violation", err, websocket.CloseStatus(err))
+	}
+	select {
+	case delivered := <-fb.delivered:
+		t.Fatalf("unexpected frame delivered to broker: %+v", delivered)
+	default:
+	}
+}
+
+func TestDaemonWebSocketRespondsToPingWithoutBrokerDelivery(t *testing.T) {
+	fb := &captureBroker{
+		registered: make(chan broker.DevicePrincipal, 1),
+		delivered:  make(chan protocol.Frame, 1),
+	}
+	r := chi.NewRouter()
+	r.Mount("/daemon", NewHandler(StaticTokenAuthenticator{
+		Token: "dev_secret",
+		Principal: broker.DevicePrincipal{
+			UserID:          "user_1",
+			DeviceID:        "dev_1",
+			LocalAccountIDs: []string{"alice"},
+		},
+	}, fb).Routes())
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/daemon/connect"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer dev_secret"}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	select {
+	case <-fb.registered:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for broker registration")
+	}
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{Type: protocol.FramePing, ID: "ping_1"}); err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+	readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer readCancel()
+	var got protocol.Frame
+	if err := wsjson.Read(readCtx, conn, &got); err != nil {
+		t.Fatalf("read pong: %v", err)
+	}
+	if got.Type != protocol.FramePong || got.ID != "ping_1" {
+		t.Fatalf("pong frame = %+v, want pong with matching id", got)
+	}
+	select {
+	case delivered := <-fb.delivered:
+		t.Fatalf("unexpected ping delivered to broker: %+v", delivered)
+	default:
+	}
+}
+
 type captureBroker struct {
 	registered chan broker.DevicePrincipal
+	delivered  chan protocol.Frame
 }
 
 func (b *captureBroker) Register(ctx context.Context, principal broker.DevicePrincipal, _ broker.DeviceConn) error {
@@ -233,7 +367,15 @@ func (b *captureBroker) Register(ctx context.Context, principal broker.DevicePri
 	}
 }
 
-func (b *captureBroker) Deliver(string, string, protocol.Frame) {}
+func (b *captureBroker) Deliver(_ string, _ string, frame protocol.Frame) {
+	if b.delivered == nil {
+		return
+	}
+	select {
+	case b.delivered <- frame:
+	default:
+	}
+}
 
 func (b *captureBroker) Unregister(string, string, broker.DeviceConn) {}
 
