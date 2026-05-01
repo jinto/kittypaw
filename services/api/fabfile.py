@@ -75,8 +75,10 @@ def deploy(ctx):
 
     c = _conn()
 
-    # Backup current binary
-    c.run(f"cp {REMOTE_DIR}/{BINARY} {REMOTE_DIR}/{BINARY}.prev 2>/dev/null || true")
+    # Move current binary aside — `cp` here would leave the running binary
+    # in-place and SFTP put would fail with ETXTBSY (text file busy) on Linux.
+    # `mv` creates a new inode so the upload below writes a fresh file.
+    c.run(f"mv {REMOTE_DIR}/{BINARY} {REMOTE_DIR}/{BINARY}.prev 2>/dev/null || true")
 
     # Upload new binary
     c.put(str(binary_path), f"{REMOTE_DIR}/{BINARY}")
