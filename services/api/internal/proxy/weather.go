@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy/kma"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy/kma"
 )
 
 // weatherKMABaseURL is the KMA village-forecast OpenAPI root.

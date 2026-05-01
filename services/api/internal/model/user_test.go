@@ -12,7 +12,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 func setupTestDB(t *testing.T) *model.PostgresUserStore {

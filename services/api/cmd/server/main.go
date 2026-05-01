@@ -11,12 +11,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/config"
-	"github.com/jinto/kittypaw-api/internal/model"
-	"github.com/jinto/kittypaw-api/internal/proxy"
-	"github.com/jinto/kittypaw-api/internal/ratelimit"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/config"
+	"github.com/kittypaw-app/kittyapi/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
 )
 
 func main() {

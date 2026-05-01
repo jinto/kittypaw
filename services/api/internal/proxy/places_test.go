@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/model"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // mockPlaceStore implements model.PlaceStore in-memory. typeHint filtering

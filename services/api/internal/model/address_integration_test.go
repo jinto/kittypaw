@@ -13,7 +13,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 // setupAddressesTestDB resets the schema (down → up through migration 005)

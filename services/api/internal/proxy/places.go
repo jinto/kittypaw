@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 // FuzzyThreshold for pg_trgm similarity. v8 default — tune via corpus

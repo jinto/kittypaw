@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // TestAirKorea_LiveAPI hits real AirKorea (한국환경공단) API when

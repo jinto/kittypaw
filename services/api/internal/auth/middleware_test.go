@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
 func TestMiddlewareValidJWT(t *testing.T) {

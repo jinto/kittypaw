@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 func Middleware(jwtSecret string, users model.UserStore) func(http.Handler) http.Handler {

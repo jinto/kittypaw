@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
 func TestGenerateVerifier(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 func newHolidayHandler(upstreamURL string) (*proxy.HolidayHandler, *cache.Cache) {

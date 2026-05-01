@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 // CLILoginConfig holds the per-provider config and shared code store for CLI OAuth.

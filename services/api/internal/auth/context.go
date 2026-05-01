@@ -3,7 +3,7 @@ package auth
 import (
 	"context"
 
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 type contextKey int

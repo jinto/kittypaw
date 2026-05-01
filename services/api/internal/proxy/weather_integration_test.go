@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // TestVillageForecast_LiveKMA hits the real KMA upstream when WEATHER_API_KEY

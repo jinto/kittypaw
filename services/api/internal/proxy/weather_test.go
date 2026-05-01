@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // fixedNow returns a deterministic time so cache keys are stable across calls.

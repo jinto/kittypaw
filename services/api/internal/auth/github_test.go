@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
 func setupGitHubTest(t *testing.T, ghServer *httptest.Server) (*auth.OAuthHandler, auth.GitHubConfig) {

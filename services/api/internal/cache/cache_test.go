@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
 )
 
 func TestSetGet(t *testing.T) {

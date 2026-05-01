@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/ratelimit"
+	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
 )
 
 func TestAllowWithinLimit(t *testing.T) {

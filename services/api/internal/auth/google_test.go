@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
-	"github.com/jinto/kittypaw-api/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
 type mockUserStore struct {

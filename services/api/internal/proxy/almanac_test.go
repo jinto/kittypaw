@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // almanacOKEnvelope is the minimal KASI response envelope that passes

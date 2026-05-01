@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/cache"
-	"github.com/jinto/kittypaw-api/internal/proxy"
+	"github.com/kittypaw-app/kittyapi/internal/cache"
+	"github.com/kittypaw-app/kittyapi/internal/proxy"
 )
 
 // TestAlmanac_LiveKASI hits the real KASI upstream when HOLIDAY_API_KEY is

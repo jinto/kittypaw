@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
-	"github.com/jinto/kittypaw-api/internal/model"
-	"github.com/jinto/kittypaw-api/internal/ratelimit"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/model"
+	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
 )
 
 func ok200(_ http.ResponseWriter, _ *http.Request) {}

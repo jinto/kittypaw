@@ -1,4 +1,4 @@
-module github.com/jinto/kittypaw-api
+module github.com/kittypaw-app/kittyapi
 
 go 1.25.0
 

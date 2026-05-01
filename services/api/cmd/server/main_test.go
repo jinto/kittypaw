@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jinto/kittypaw-api/internal/config"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 )
 
 func testRouter() http.Handler {

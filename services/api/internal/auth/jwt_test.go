@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw-api/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
 const testSecret = "test-secret-key-for-jwt"
