@@ -558,6 +558,34 @@ func TestWizardKakaoValidatesBeforeWritingSecrets(t *testing.T) {
 	mustNotExist(t, filepath.Join(root, "accounts", "alice", "secrets.json"))
 }
 
+func TestWizardKakaoReconfigureValidatesBeforeWritingSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	validateErr := errors.New("reject kakao reconfigure")
+	called := false
+	existing := core.DefaultConfig()
+	existing.Channels = []core.ChannelConfig{{ChannelType: core.ChannelKakaoTalk}}
+	var w core.WizardResult
+
+	err := wizardKakao(bufio.NewScanner(strings.NewReader("y\n")), "alice", &existing, &w, func(candidate core.WizardResult) error {
+		called = true
+		if !candidate.KakaoEnabled {
+			t.Fatal("candidate did not enable Kakao")
+		}
+		if candidate.APIServerURL != core.DefaultAPIServerURL {
+			t.Fatalf("candidate APIServerURL = %q", candidate.APIServerURL)
+		}
+		return validateErr
+	})
+	if !errors.Is(err, validateErr) {
+		t.Fatalf("wizardKakao error = %v, want %v", err, validateErr)
+	}
+	if !called {
+		t.Fatal("validator was not called")
+	}
+	mustNotExist(t, filepath.Join(root, "accounts", "alice", "secrets.json"))
+}
+
 func TestSetupEnvAccountMustExist(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
