@@ -1,7 +1,7 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
 
-.PHONY: build test test-integration test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
+.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve
 
 build:
 	go build -o $(BINARY) $(PKG)
@@ -38,7 +38,22 @@ seed-seoul-metro:
 benchmark-resolve:
 	go run ./cmd/benchmark-resolve --base=$${KITTYAPI_BASE:-http://localhost:8080}
 
-# --- Integration test (docker-compose isolated PostgreSQL) ----------------------
+# --- Integration test groups (Plan 8 / smoke-3-layer L1.A) ---------------------
+# Build tag split (1단계): 신규 `calendar_integration` (외부 KASI 그룹) 만 분리.
+# 기존 `integration` 태그는 model + weather + almanac 통합 유지 — 추가 분리는
+# L1.B/C/D sibling plan 시점.
+
+# Backward-compatible umbrella — 모든 integration 그룹 sequential 실행.
+test-integration-all: test-integration test-integration-calendar
+	@echo "all integration test groups passed"
+
+# Calendar 그룹 (holiday_integration_test.go) — 외부 KASI 호출, DB 무관.
+# `HOLIDAY_API_KEY` 누락 시 t.Skipf 패턴 (weather/almanac 과 동일).
+test-integration-calendar:
+	@if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+		go test -tags=calendar_integration -count=1 ./internal/proxy/... -run TestHoliday
+
+# 기존 (model + weather + almanac) — docker-compose 기반.
 # Spins up postgres:17-alpine on port 15432 with pg_trgm pre-installed,
 # applies all migrations, then runs `go test -tags=integration ./...`.
 # Container persists between runs for fast iteration; tear down with

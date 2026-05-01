@@ -141,7 +141,7 @@
 - [ ] **PR-2 EPSG 라이브러리 PoC 스파이크** — `go-proj` 등 후보 1개 확정 (PR-2 첫 태스크)
 - [ ] **down.sql 위험성 강화** — `migrate down 003`이 운영 데이터 즉시 삭제. maintenance.md 경고 강화 (Security #6)
 
-### PR-2 ← 현재 (build target — 8 태스크 TDD 사이클)
+### PR-2 ← 다음 (Plan 8 머지 후 복귀, build target — 8 태스크 TDD 사이클)
 
 > 의사결정 4건 (geo-address-coords.md §15):
 > - **D1**: EPSG:5179 → WGS84 = pure-Go LCC + datum-shift 무시 (CGO 0)
@@ -210,7 +210,44 @@
 - [ ] (P1 follow-up) **D4 — KASI helper 통합 refactor** — Phase B (KMA UV) 추가 시점에 holiday/almanac/weather/UV 4개 ServiceName 11 endpoint 를 한 번에 통합. plan v2 박제: `.claude/plans/d4-kasi-helper-refactor.md`. 3 reviewer (Architect/Critic/CEO) Phase 2 ITERATE — 옵션 3 (UV 동시 통합) 채택. **재개 트리거**: Phase B UV endpoint production 추가 시점.
 - [x] **holiday.go envelope 검증** — `parseKMAError` 재사용으로 `resultCode != "00"` 응답이 24h 캐시되지 않도록 fix. `fetch()` 의 200 OK 분기에서 검증 → fetch error → stale fallback → 502.
 
-## Follow-up 일감 (별도 PR / 별도 plan 권장)
+## Plan 8: Smoke 3-Layer L1.A — Holiday Integration Test ← 현재 (build target)
+
+> Spec: `.claude/plans/smoke-3-layer.md` (v2, Architect/Critic 14 finding ITERATE 후 재작성. CEO 메타 비판 dispatch — 사용자 명시 결정)
+> Goal: `internal/proxy/holiday_integration_test.go` 신규 + `Makefile` 분리 (DB 의존 vs API 의존 build tag split)
+> Reuse: `almanac_integration_test.go` 패턴 미러 (in-process httptest + `HOLIDAY_API_KEY` env + `t.Skipf` if missing)
+> 직접 동기: `3688453 fix(holiday): _type=json` (prod ~4-day 502 회귀 — 외부 KASI 실 동작 grounded 검증 layer 부재)
+> 결정 D1~D7: plan v2 §"핵심 결정 7개" 모두 사용자 합의 박제. D4 = (A) bash+curl (v1 (C) 에서 다운그레이드 — Architect F1 critical)
+
+**TDD 변형**: production code 무변경. strict RED→GREEN 사이클 N/A. **RED** = test 자체 fail (env 미설정 ∨ envelope mismatch ∨ 골든 불일치), **GREEN** = `.env` KEY 주입 후 envelope OK + 골든 일치.
+
+**L1.A 수락 기준 (AC1~AC5)**:
+- **AC1**: HTTP 200 (요청 자체 fail 시 `t.Fatalf`)
+- **AC2**: `parseKMAError(body)` → `isError == false` (envelope `response.header.resultCode == "00"`)
+- **AC3**: JSON unmarshal 성공 + `body.items.item` 길이 ≥ 1 (NO_DATA 와 구분)
+- **AC4**: (holidays 만, 골든) `2025-01-01` `dateName` = `1월1일` 또는 `신정`
+- **AC5**: `HOLIDAY_API_KEY` 부재 시 `t.Skipf("HOLIDAY_API_KEY not set")` (기존 weather/almanac 패턴 동일)
+
+**Retry 정책** (D2):
+- upstream 502/timeout → 1회 재시도 (15s timeout, 1s backoff). 두 번째도 502 → `t.Fatalf` (실 회귀)
+- envelope `resultCode=22/99/SERVICETIME_OUT` (limit hit) → `t.Skipf("daily limit reached")` + CI annotation
+- envelope `resultCode=03` (NO_DATA) → endpoint-specific. holidays = `t.Fatalf`, anniversaries = `t.Skipf` 허용
+
+- [ ] **T1: `internal/proxy/holiday_integration_test.go` 신규 (3 sub-test + AC1~AC5 + 골든)** —
+      RED: 파일 신규 + 3 sub-test (`TestIntegrationHolidays`/`Anniversaries`/`SolarTerms`). `//go:build calendar_integration` build tag. fresh `cache.New()` per sub-test (helper `newHolidayHandler`). retry 정책 + Skipf 분기 구현. 처음엔 잘못된 골든으로 작성하거나 envelope 검증 누락 → 의도된 fail.
+      GREEN: env 주입 후 3 sub-test pass. holidays 골든 (AC4) `1월1일` 정확 매칭. anniversaries/solar-terms 는 AC1~AC3 + AC5.
+
+- [ ] **T2: `Makefile` 분리 + build tag migration** —
+      RED: `test-integration` 단일 target → `test-integration-all` (alias, 회귀 방지) + `test-integration-model` (DB 의존, 기존 model/* integration test) + `test-integration-calendar` (신규 holiday_integration_test.go). 기존 model integration test 의 build tag `integration` → `model_integration` 으로 migrate (필수 — 옵션 아님). 기존 `make test-integration` 호출자 silently 0 test 실행 위험 차단.
+      GREEN: `make test-integration-calendar` → 1 파일만 실행. `make test-integration-model` → 기존 model integration. `make test-integration-all` → 둘 다 실행. 검증.
+
+**Operational Checklist** (L1.A 머지 후):
+- [ ] **L2 plan trigger by 14d (D7 SLA)** — L1.A merge 후 14일 내 `ina:plan` 으로 L2 (CI integration job, GitHub Actions secrets + fork PR silent-green 차단) plan 작성. 미이행 시 L1.A 가치 ≈ 0 (로컬 한정 검증).
+- [ ] **L3 별도 plan** — fab deploy 종결부에 `bash deploy/smoke.sh` 추가 (D4 (A) bash+curl+jq). prod URL `/health` + 핵심 endpoint 1-2개 envelope 검증.
+- [ ] **T0 spike** — `data.go.kr` 5 service key 별 daily limit 확인 (HOLIDAY/WEATHER/AIRKOREA + KASI 음력/일출). 결과를 plan v2 §D3 표에 record. L2 plan prerequisite.
+- [ ] **L1.B/C/D sibling plan** — airkorea (5 endpoint) / weather 보강 (UltraShortNowcast/Forecast) / geo HTTP layer. **L1.D 주의**: DB+API hybrid 라 build tag 재설계 필요 — L1.A template 가 깨지는 점 plan v2 §D6 박제.
+- [ ] **dual-mode test harness** (L3 의 in-process httptest + HTTP client BASE_URL 분기) — L3 sibling plan 시점에 재검토 (현재 비범위).
+
+
 
 - [ ] **L4 — 신규 kittypaw skill 작성** (`../skills/packages/`) — 음력 변환 + 일출/일몰. spec 7가지 (묶음 단위 / trigger / config / 응답 포맷 / 에러 / 인증 / allowed_hosts) 결정 필요. `ina:think` → `ina:plan` 워크플로우 권장. Plan 5 T6 (weather-briefing → KMA fallback) 선례 참고.
 - [ ] **Phase C — 서울교통공사 OpenAPI 활용 신청** (사용자 직접 작업) — data.go.kr 카탈로그에서 "지하철 실시간 도착정보" 검색 → 활용신청 → 자동/수동 승인 (1~3일) → `.env` `SEOUL_METRO_API_KEY` 등록. Phase B(KMA 확장) 작업과 병행 발의 권장.
