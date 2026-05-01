@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Gate KittyChat relay access through an identity boundary that can later verify KittyPaw API-server-issued credentials.
+**Goal:** Gate KittyChat relay access through an API-issued credential verifier boundary and stabilize daemon requests around versioned operations.
 
-**Architecture:** Add `internal/identity` as the credential resolution layer. The first implementation is an env-seeded in-memory store preserving current MVP behavior, while runtime wiring moves from direct static token authenticators to store-backed authenticators.
+**Architecture:** Add `internal/identity` as the verifier layer. The first verifier is env-seeded memory data, but the public interface is `CredentialVerifier` returning claims with `audience`, `version`, and `scopes` so JWT/JWKS or introspection can replace it later. Add protocol v1 `operation`, `protocol_version`, and `capabilities` fields so daemon contracts are not coupled only to HTTP paths.
 
 **Tech Stack:** Go 1.25, chi, coder/websocket, existing `broker`, `openai`, and `daemonws` packages.
 
@@ -12,105 +12,46 @@
 
 ## File Structure
 
-- Create `internal/identity/store.go`: `Store` interface, `MemoryStore`, seed methods, validation, and `ErrUnauthorized`.
-- Create `internal/identity/store_test.go`: focused tests for API and device credential resolution.
-- Create `internal/identity/authenticator.go`: HTTP token extraction and store-backed authenticators for API clients and daemon devices.
-- Create `internal/identity/authenticator_test.go`: tests for bearer, `x-api-key`, `x-device-token`, and nil-store behavior.
-- Modify `cmd/kittychat/main.go`: seed `MemoryStore` from config and use identity authenticators in runtime wiring.
-- Modify `cmd/kittychat/main_test.go`: account for `newRouter` returning an error and prove auth is store-backed.
-- Modify `README.md`: replace "static-token MVP auth" wording with env-seeded identity store wording.
+- Create `internal/identity/verifier.go`: scope constants, claims types, `CredentialVerifier`, `MemoryCredentialVerifier`, validation, and `ErrUnauthorized`.
+- Create `internal/identity/verifier_test.go`: tests for seeded API/device claims, invalid claims, unknown tokens, and defensive copying.
+- Create `internal/identity/authenticator.go`: HTTP token extraction and verifier-backed authenticators.
+- Create `internal/identity/authenticator_test.go`: tests for bearer, `x-api-key`, `x-device-token`, and nil verifier behavior.
+- Modify `internal/protocol/frame.go`: add operation constants, protocol version, daemon version, capabilities, and operation-to-HTTP mapping.
+- Modify `internal/protocol/frame_test.go`: verify hello v1 and request operation validation.
+- Modify `internal/broker/broker.go`: carry operation through request frames.
+- Modify relay tests under `internal/broker`, `internal/openai`, and `internal/daemonws`: assert operation values.
+- Modify `cmd/kittychat/main.go`: seed `MemoryCredentialVerifier` from config and use identity authenticators in runtime wiring.
+- Modify `cmd/kittychat/main_test.go`: account for `newRouter` returning an error and prove seeded credentials gate access.
+- Modify `README.md`: replace "static-token MVP auth" wording with env-seeded credential verifier wording.
 
 ---
 
-### Task 1: Add Identity Memory Store
+### Task 1: Add Credential Verifier and Claims
 
 **Files:**
-- Create: `internal/identity/store_test.go`
-- Create: `internal/identity/store.go`
+- Create: `internal/identity/verifier_test.go`
+- Create: `internal/identity/verifier.go`
 
-- [ ] **Step 1: Write failing store tests**
+- [ ] **Step 1: Write the failing verifier tests**
 
-Create `internal/identity/store_test.go`:
+Create `internal/identity/verifier_test.go` with tests that cover:
 
-```go
-package identity
-
-import (
-	"context"
-	"errors"
-	"testing"
-
-	"github.com/kittypaw-app/kittychat/internal/broker"
-	"github.com/kittypaw-app/kittychat/internal/openai"
-)
-
-func TestMemoryStoreResolvesSeededAPIClient(t *testing.T) {
-	store := NewMemoryStore()
-	want := openai.Principal{UserID: "user_1", DeviceID: "dev_1", AccountID: "alice"}
-	if err := store.AddAPIClient("api_secret", want); err != nil {
-		t.Fatalf("AddAPIClient() error = %v", err)
-	}
-
-	got, err := store.ResolveAPIClient(context.Background(), "api_secret")
-	if err != nil {
-		t.Fatalf("ResolveAPIClient() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("principal = %+v, want %+v", got, want)
-	}
-}
-
-func TestMemoryStoreResolvesSeededDevice(t *testing.T) {
-	store := NewMemoryStore()
-	want := broker.DevicePrincipal{
-		UserID:          "user_1",
-		DeviceID:        "dev_1",
-		LocalAccountIDs: []string{"alice", "bob"},
-	}
-	if err := store.AddDevice("dev_secret", want); err != nil {
-		t.Fatalf("AddDevice() error = %v", err)
-	}
-
-	got, err := store.ResolveDevice(context.Background(), "dev_secret")
-	if err != nil {
-		t.Fatalf("ResolveDevice() error = %v", err)
-	}
-	if got.UserID != want.UserID || got.DeviceID != want.DeviceID {
-		t.Fatalf("principal = %+v, want %+v", got, want)
-	}
-	if len(got.LocalAccountIDs) != 2 || got.LocalAccountIDs[0] != "alice" || got.LocalAccountIDs[1] != "bob" {
-		t.Fatalf("local accounts = %+v, want %+v", got.LocalAccountIDs, want.LocalAccountIDs)
-	}
-}
-
-func TestMemoryStoreRejectsUnknownTokens(t *testing.T) {
-	store := NewMemoryStore()
-
-	if _, err := store.ResolveAPIClient(context.Background(), "missing"); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("ResolveAPIClient() error = %v, want ErrUnauthorized", err)
-	}
-	if _, err := store.ResolveDevice(context.Background(), "missing"); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("ResolveDevice() error = %v, want ErrUnauthorized", err)
-	}
-}
-
-func TestMemoryStoreValidatesSeeds(t *testing.T) {
-	store := NewMemoryStore()
-
-	if err := store.AddAPIClient("", openai.Principal{UserID: "user_1", DeviceID: "dev_1", AccountID: "alice"}); err == nil {
-		t.Fatal("AddAPIClient() error = nil, want token validation error")
-	}
-	if err := store.AddAPIClient("api_secret", openai.Principal{UserID: "user_1", DeviceID: "dev_1"}); err == nil {
-		t.Fatal("AddAPIClient() error = nil, want principal validation error")
-	}
-	if err := store.AddDevice("", broker.DevicePrincipal{UserID: "user_1", DeviceID: "dev_1", LocalAccountIDs: []string{"alice"}}); err == nil {
-		t.Fatal("AddDevice() error = nil, want token validation error")
-	}
-	if err := store.AddDevice("dev_secret", broker.DevicePrincipal{UserID: "user_1", DeviceID: "dev_1"}); err == nil {
-		t.Fatal("AddDevice() error = nil, want principal validation error")
-	}
-}
-```
+- `NewMemoryCredentialVerifier().AddAPIClient("api_secret", claims)` then `VerifyAPIClient(..., "api_secret")` returns claims containing:
+  - `Subject: "user_1"`
+  - `Audience: AudienceKittyChat`
+  - `Version: CredentialVersion1`
+  - `Scopes: []Scope{ScopeChatRelay, ScopeModelsRead}`
+  - `UserID: "user_1"`, `DeviceID: "dev_1"`, `AccountID: "alice"`
+- `AddDevice("dev_secret", claims)` then `VerifyDevice(..., "dev_secret")` returns claims containing:
+  - `Subject: "device:dev_1"`
+  - `Audience: AudienceKittyChat`
+  - `Version: CredentialVersion1`
+  - `Scopes: []Scope{ScopeDaemonConnect}`
+  - `UserID: "user_1"`, `DeviceID: "dev_1"`, `LocalAccountIDs: []string{"alice", "bob"}`
+- missing/unknown API and device tokens return `ErrUnauthorized`.
+- invalid API claims are rejected for empty token, wrong audience, wrong version, missing scope, unknown scope, and missing account id.
+- invalid device claims are rejected for empty token, wrong audience, wrong version, missing scope, unknown scope, and missing local accounts.
+- returned device claims cannot mutate stored local accounts or scopes.
 
 - [ ] **Step 2: Run test and verify RED**
 
@@ -120,129 +61,25 @@ Run:
 go test ./internal/identity -count=1
 ```
 
-Expected: fail because `internal/identity` has no implementation yet.
+Expected: fail because `internal/identity` does not exist yet.
 
-- [ ] **Step 3: Implement memory store**
+- [ ] **Step 3: Implement verifier**
 
-Create `internal/identity/store.go`:
+Create `internal/identity/verifier.go` with:
 
-```go
-package identity
-
-import (
-	"context"
-	"errors"
-	"fmt"
-	"sync"
-
-	"github.com/kittypaw-app/kittychat/internal/broker"
-	"github.com/kittypaw-app/kittychat/internal/openai"
-)
-
-var ErrUnauthorized = errors.New("unauthorized")
-
-type Store interface {
-	ResolveAPIClient(ctx context.Context, token string) (openai.Principal, error)
-	ResolveDevice(ctx context.Context, token string) (broker.DevicePrincipal, error)
-}
-
-type MemoryStore struct {
-	mu      sync.RWMutex
-	api     map[string]openai.Principal
-	devices map[string]broker.DevicePrincipal
-}
-
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
-		api:     make(map[string]openai.Principal),
-		devices: make(map[string]broker.DevicePrincipal),
-	}
-}
-
-func (s *MemoryStore) AddAPIClient(token string, principal openai.Principal) error {
-	if token == "" {
-		return fmt.Errorf("api token is required")
-	}
-	if err := principal.Validate(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.api[token] = principal
-	return nil
-}
-
-func (s *MemoryStore) AddDevice(token string, principal broker.DevicePrincipal) error {
-	if token == "" {
-		return fmt.Errorf("device token is required")
-	}
-	if err := validateDevicePrincipal(principal); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.devices[token] = cloneDevicePrincipal(principal)
-	return nil
-}
-
-func (s *MemoryStore) ResolveAPIClient(ctx context.Context, token string) (openai.Principal, error) {
-	if err := ctx.Err(); err != nil {
-		return openai.Principal{}, err
-	}
-	if token == "" {
-		return openai.Principal{}, ErrUnauthorized
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	principal, ok := s.api[token]
-	if !ok {
-		return openai.Principal{}, ErrUnauthorized
-	}
-	return principal, nil
-}
-
-func (s *MemoryStore) ResolveDevice(ctx context.Context, token string) (broker.DevicePrincipal, error) {
-	if err := ctx.Err(); err != nil {
-		return broker.DevicePrincipal{}, err
-	}
-	if token == "" {
-		return broker.DevicePrincipal{}, ErrUnauthorized
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	principal, ok := s.devices[token]
-	if !ok {
-		return broker.DevicePrincipal{}, ErrUnauthorized
-	}
-	return cloneDevicePrincipal(principal), nil
-}
-
-func validateDevicePrincipal(principal broker.DevicePrincipal) error {
-	if principal.UserID == "" {
-		return fmt.Errorf("user_id is required")
-	}
-	if principal.DeviceID == "" {
-		return fmt.Errorf("device_id is required")
-	}
-	if len(principal.LocalAccountIDs) == 0 {
-		return fmt.Errorf("at least one local account is required")
-	}
-	for _, accountID := range principal.LocalAccountIDs {
-		if accountID == "" {
-			return fmt.Errorf("local account id is required")
-		}
-	}
-	return nil
-}
-
-func cloneDevicePrincipal(principal broker.DevicePrincipal) broker.DevicePrincipal {
-	return broker.DevicePrincipal{
-		UserID:          principal.UserID,
-		DeviceID:        principal.DeviceID,
-		LocalAccountIDs: append([]string(nil), principal.LocalAccountIDs...),
-	}
-}
-```
+- `const AudienceKittyChat = "kittychat"`
+- `const CredentialVersion1 = 1`
+- `type Scope string`
+- `ScopeChatRelay`, `ScopeModelsRead`, `ScopeDaemonConnect`
+- `var ErrUnauthorized = errors.New("unauthorized")`
+- `type APIClientClaims struct { Subject, Audience, UserID, DeviceID, AccountID string; Scopes []Scope; Version int }`
+- `type DeviceClaims struct { Subject, Audience, UserID, DeviceID string; LocalAccountIDs []string; Scopes []Scope; Version int }`
+- `type CredentialVerifier interface { VerifyAPIClient(context.Context, string) (APIClientClaims, error); VerifyDevice(context.Context, string) (DeviceClaims, error) }`
+- `type MemoryCredentialVerifier` with `AddAPIClient`, `AddDevice`, `VerifyAPIClient`, and `VerifyDevice`.
+- `func (c APIClientClaims) Principal() openai.Principal`.
+- `func (c DeviceClaims) Principal() broker.DevicePrincipal`.
+- validation that requires `audience == "kittychat"`, `version == 1`, non-empty subject/user/device/account fields, non-empty local accounts for device claims, and only known scope values.
+- defensive copying for all slices on insert and return.
 
 - [ ] **Step 4: Run test and verify GREEN**
 
@@ -257,122 +94,104 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/identity/store.go internal/identity/store_test.go
-git commit -m "feat: add identity memory store"
+git add internal/identity/verifier.go internal/identity/verifier_test.go
+git commit -m "feat: add credential verifier"
 ```
 
 ---
 
-### Task 2: Add Store-backed Authenticators
+### Task 2: Add Operation-based Protocol Contract
+
+**Files:**
+- Modify: `internal/protocol/frame_test.go`
+- Modify: `internal/protocol/frame.go`
+- Modify: `internal/broker/broker_test.go`
+- Modify: `internal/broker/broker.go`
+- Modify: `internal/openai/handler_test.go`
+- Modify: `internal/openai/handler.go`
+- Modify: `internal/daemonws/handler_test.go`
+
+- [ ] **Step 1: Write failing protocol and relay tests**
+
+Update protocol tests so:
+
+- request round-trip includes `Operation: OperationOpenAIChatCompletions`.
+- hello validation requires `ProtocolVersion: ProtocolVersion1` and non-empty
+  `Capabilities`.
+- hello validation rejects unknown capabilities.
+- request validation accepts `OperationOpenAIModels` and
+  `OperationOpenAIChatCompletions`.
+- request validation rejects an unknown operation.
+
+Update broker/openai/daemon tests so request frames and broker requests assert:
+
+- models route uses `OperationOpenAIModels`.
+- chat completions route uses `OperationOpenAIChatCompletions`.
+
+- [ ] **Step 2: Run tests and verify RED**
+
+Run:
+
+```bash
+go test ./internal/protocol ./internal/broker ./internal/openai ./internal/daemonws -count=1
+```
+
+Expected: fail because operation/protocol fields are not implemented yet.
+
+- [ ] **Step 3: Implement operation protocol**
+
+Implement:
+
+- `type Operation string`
+- `OperationOpenAIModels = "openai.models"`
+- `OperationOpenAIChatCompletions = "openai.chat_completions"`
+- `ProtocolVersion1 = "1"`
+- `Frame.Operation`, `Frame.DaemonVersion`, `Frame.ProtocolVersion`, and
+  `Frame.Capabilities`.
+- `AllowedOperation(operation Operation) bool`.
+- `HTTPForOperation(operation Operation) (method string, path string, ok bool)`.
+- request validation that requires a valid operation. `method` and `path` are
+  optional compatibility fields, but if either is present they must match the
+  operation mapping.
+- hello validation that requires `protocol_version == "1"` and at least one
+  known capability.
+- broker request struct and frame construction to include operation.
+- OpenAI handler mapping from HTTP route to operation.
+
+- [ ] **Step 4: Run focused tests and verify GREEN**
+
+Run:
+
+```bash
+go test ./internal/protocol ./internal/broker ./internal/openai ./internal/daemonws -count=1
+```
+
+Expected: pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/protocol internal/broker internal/openai internal/daemonws
+git commit -m "feat: add operation based relay protocol"
+```
+
+---
+
+### Task 3: Add Verifier-backed Authenticators
 
 **Files:**
 - Create: `internal/identity/authenticator_test.go`
 - Create: `internal/identity/authenticator.go`
 
-- [ ] **Step 1: Write failing authenticator tests**
+- [ ] **Step 1: Write the failing authenticator tests**
 
-Create `internal/identity/authenticator_test.go`:
+Create `internal/identity/authenticator_test.go` with tests that cover:
 
-```go
-package identity
-
-import (
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"github.com/kittypaw-app/kittychat/internal/broker"
-	"github.com/kittypaw-app/kittychat/internal/openai"
-)
-
-func TestAPIAuthenticatorAcceptsBearerToken(t *testing.T) {
-	store := NewMemoryStore()
-	want := openai.Principal{UserID: "user_1", DeviceID: "dev_1", AccountID: "alice"}
-	if err := store.AddAPIClient("api_secret", want); err != nil {
-		t.Fatalf("AddAPIClient() error = %v", err)
-	}
-	auth := APIAuthenticator{Store: store}
-	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
-	req.Header.Set("Authorization", "Bearer api_secret")
-
-	got, err := auth.Authenticate(req)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("principal = %+v, want %+v", got, want)
-	}
-}
-
-func TestAPIAuthenticatorAcceptsXAPIKey(t *testing.T) {
-	store := NewMemoryStore()
-	want := openai.Principal{UserID: "user_1", DeviceID: "dev_1", AccountID: "alice"}
-	if err := store.AddAPIClient("api_secret", want); err != nil {
-		t.Fatalf("AddAPIClient() error = %v", err)
-	}
-	auth := APIAuthenticator{Store: store}
-	req := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
-	req.Header.Set("x-api-key", "api_secret")
-
-	got, err := auth.Authenticate(req)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("principal = %+v, want %+v", got, want)
-	}
-}
-
-func TestDeviceAuthenticatorAcceptsBearerAndDeviceTokenHeader(t *testing.T) {
-	store := NewMemoryStore()
-	want := broker.DevicePrincipal{UserID: "user_1", DeviceID: "dev_1", LocalAccountIDs: []string{"alice"}}
-	if err := store.AddDevice("dev_secret", want); err != nil {
-		t.Fatalf("AddDevice() error = %v", err)
-	}
-	auth := DeviceAuthenticator{Store: store}
-
-	for _, header := range []struct {
-		name  string
-		key   string
-		value string
-	}{
-		{name: "bearer", key: "Authorization", value: "Bearer dev_secret"},
-		{name: "device header", key: "x-device-token", value: "dev_secret"},
-	} {
-		t.Run(header.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/daemon/connect", nil)
-			req.Header.Set(header.key, header.value)
-			got, err := auth.Authenticate(req)
-			if err != nil {
-				t.Fatalf("Authenticate() error = %v", err)
-			}
-			if got.UserID != want.UserID || got.DeviceID != want.DeviceID || len(got.LocalAccountIDs) != 1 || got.LocalAccountIDs[0] != "alice" {
-				t.Fatalf("principal = %+v, want %+v", got, want)
-			}
-		})
-	}
-}
-
-func TestAuthenticatorsRejectMissingStoreOrToken(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	if _, err := (APIAuthenticator{}).Authenticate(req); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("API Authenticate() error = %v, want ErrUnauthorized", err)
-	}
-	if _, err := (DeviceAuthenticator{}).Authenticate(req); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("Device Authenticate() error = %v, want ErrUnauthorized", err)
-	}
-
-	store := NewMemoryStore()
-	if _, err := (APIAuthenticator{Store: store}).Authenticate(req); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("API missing token error = %v, want ErrUnauthorized", err)
-	}
-	if _, err := (DeviceAuthenticator{Store: store}).Authenticate(req); !errors.Is(err, ErrUnauthorized) {
-		t.Fatalf("Device missing token error = %v, want ErrUnauthorized", err)
-	}
-}
-```
+- `APIAuthenticator{Verifier: verifier}` accepts `Authorization: Bearer api_secret` and returns `openai.Principal{UserID: "user_1", DeviceID: "dev_1", AccountID: "alice"}`.
+- `APIAuthenticator{Verifier: verifier}` accepts `x-api-key: api_secret`.
+- `DeviceAuthenticator{Verifier: verifier}` accepts `Authorization: Bearer dev_secret` and returns `broker.DevicePrincipal{UserID: "user_1", DeviceID: "dev_1", LocalAccountIDs: []string{"alice"}}`.
+- `DeviceAuthenticator{Verifier: verifier}` accepts `x-device-token: dev_secret`.
+- missing verifier, missing token, and unknown token return `ErrUnauthorized`.
 
 - [ ] **Step 2: Run test and verify RED**
 
@@ -382,56 +201,17 @@ Run:
 go test ./internal/identity -count=1
 ```
 
-Expected: fail because `APIAuthenticator` and `DeviceAuthenticator` are undefined.
+Expected: fail because the authenticators do not exist yet.
 
 - [ ] **Step 3: Implement authenticators**
 
-Create `internal/identity/authenticator.go`:
+Create `internal/identity/authenticator.go` with:
 
-```go
-package identity
-
-import (
-	"net/http"
-	"strings"
-
-	"github.com/kittypaw-app/kittychat/internal/broker"
-	"github.com/kittypaw-app/kittychat/internal/openai"
-)
-
-type APIAuthenticator struct {
-	Store Store
-}
-
-func (a APIAuthenticator) Authenticate(r *http.Request) (openai.Principal, error) {
-	if a.Store == nil {
-		return openai.Principal{}, ErrUnauthorized
-	}
-	return a.Store.ResolveAPIClient(r.Context(), requestToken(r, "x-api-key"))
-}
-
-type DeviceAuthenticator struct {
-	Store Store
-}
-
-func (a DeviceAuthenticator) Authenticate(r *http.Request) (broker.DevicePrincipal, error) {
-	if a.Store == nil {
-		return broker.DevicePrincipal{}, ErrUnauthorized
-	}
-	return a.Store.ResolveDevice(r.Context(), requestToken(r, "x-device-token"))
-}
-
-func requestToken(r *http.Request, fallbackHeader string) string {
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
-	}
-	if token := r.Header.Get(fallbackHeader); token != "" {
-		return token
-	}
-	return ""
-}
-```
+- `type APIAuthenticator struct { Verifier CredentialVerifier }`
+- `func (a APIAuthenticator) Authenticate(r *http.Request) (openai.Principal, error)` that extracts bearer or `x-api-key`, verifies API claims, and returns `claims.Principal()`.
+- `type DeviceAuthenticator struct { Verifier CredentialVerifier }`
+- `func (a DeviceAuthenticator) Authenticate(r *http.Request) (broker.DevicePrincipal, error)` that extracts bearer or `x-device-token`, verifies device claims, and returns `claims.Principal()`.
+- `requestToken(r, fallbackHeader)` helper that prefers `Authorization: Bearer ...` over the fallback header.
 
 - [ ] **Step 4: Run test and verify GREEN**
 
@@ -447,96 +227,25 @@ Expected: pass.
 
 ```bash
 git add internal/identity/authenticator.go internal/identity/authenticator_test.go
-git commit -m "feat: add identity authenticators"
+git commit -m "feat: add credential authenticators"
 ```
 
 ---
 
-### Task 3: Wire Runtime Through Identity Store
+### Task 4: Wire Runtime Through Credential Verifier
 
 **Files:**
 - Modify: `cmd/kittychat/main.go`
 - Modify: `cmd/kittychat/main_test.go`
 
-- [ ] **Step 1: Write failing runtime wiring tests**
+- [ ] **Step 1: Write the failing runtime wiring tests**
 
-Modify `cmd/kittychat/main_test.go` to use the new `newRouter` return value and
-prove the router uses the seeded identity store:
+Modify `cmd/kittychat/main_test.go` so:
 
-```go
-package main
-
-import (
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"github.com/kittypaw-app/kittychat/internal/config"
-)
-
-func TestNewServerBuildsRunnableRouter(t *testing.T) {
-	cfg := testConfig()
-	router, err := newRouter(cfg)
-	if err != nil {
-		t.Fatalf("newRouter() error = %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
-}
-
-func TestNewServerUsesSeededIdentityStore(t *testing.T) {
-	cfg := testConfig()
-	router, err := newRouter(cfg)
-	if err != nil {
-		t.Fatalf("newRouter() error = %v", err)
-	}
-
-	wrongReq := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
-	wrongReq.Header.Set("Authorization", "Bearer wrong")
-	wrongRR := httptest.NewRecorder()
-	router.ServeHTTP(wrongRR, wrongReq)
-
-	if wrongRR.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong token status = %d, want 401; body=%s", wrongRR.Code, wrongRR.Body.String())
-	}
-
-	validReq := httptest.NewRequest(http.MethodGet, "/nodes/dev_1/v1/models", nil)
-	validReq.Header.Set("Authorization", "Bearer api_secret")
-	validRR := httptest.NewRecorder()
-	router.ServeHTTP(validRR, validReq)
-
-	if validRR.Code != http.StatusServiceUnavailable {
-		t.Fatalf("valid token status = %d, want 503 offline; body=%s", validRR.Code, validRR.Body.String())
-	}
-}
-
-func TestNewServerRejectsInvalidIdentitySeed(t *testing.T) {
-	cfg := testConfig()
-	cfg.APIToken = ""
-
-	if _, err := newRouter(cfg); err == nil {
-		t.Fatal("newRouter() error = nil, want invalid identity seed error")
-	}
-}
-
-func testConfig() config.Config {
-	return config.Config{
-		BindAddr:       ":0",
-		APIToken:       "api_secret",
-		DeviceToken:    "dev_secret",
-		UserID:         "user_1",
-		DeviceID:       "dev_1",
-		LocalAccountID: "alice",
-		Version:        "test",
-	}
-}
-```
+- `newRouter(cfg)` returns `(http.Handler, error)`.
+- `TestNewServerBuildsRunnableRouter` checks `/health`.
+- `TestNewServerUsesSeededCredentialVerifier` checks wrong API token returns `401` and valid API token reaches the broker enough to return `503` while the daemon is offline.
+- `TestNewServerRejectsInvalidCredentialSeed` clears `cfg.APIToken` and expects `newRouter` to return an error.
 
 - [ ] **Step 2: Run test and verify RED**
 
@@ -550,74 +259,24 @@ Expected: fail because `newRouter` still returns only `http.Handler`.
 
 - [ ] **Step 3: Update runtime wiring**
 
-Modify `cmd/kittychat/main.go`:
+Modify `cmd/kittychat/main.go` so:
 
-```go
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-
-	"github.com/kittypaw-app/kittychat/internal/broker"
-	"github.com/kittypaw-app/kittychat/internal/config"
-	"github.com/kittypaw-app/kittychat/internal/daemonws"
-	"github.com/kittypaw-app/kittychat/internal/identity"
-	"github.com/kittypaw-app/kittychat/internal/openai"
-	"github.com/kittypaw-app/kittychat/internal/server"
-)
-
-func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-
-	router, err := newRouter(cfg)
-	if err != nil {
-		log.Fatalf("router: %v", err)
-	}
-
-	log.Printf("listening on %s", cfg.BindAddr)
-	if err := http.ListenAndServe(cfg.BindAddr, router); err != nil {
-		log.Fatalf("server: %v", err)
-	}
-}
-
-func newRouter(cfg config.Config) (http.Handler, error) {
-	identityStore, err := newIdentityStore(cfg)
-	if err != nil {
-		return nil, err
-	}
-	b := broker.New(broker.Config{})
-
-	return server.NewRouter(server.Config{
-		Version:       cfg.Version,
-		DaemonHandler: daemonws.NewHandler(identity.DeviceAuthenticator{Store: identityStore}, b),
-		OpenAIHandler: openai.NewHandler(identity.APIAuthenticator{Store: identityStore}, b),
-	}), nil
-}
-
-func newIdentityStore(cfg config.Config) (*identity.MemoryStore, error) {
-	store := identity.NewMemoryStore()
-	if err := store.AddAPIClient(cfg.APIToken, openai.Principal{
-		UserID:    cfg.UserID,
-		DeviceID:  cfg.DeviceID,
-		AccountID: cfg.LocalAccountID,
-	}); err != nil {
-		return nil, fmt.Errorf("seed api client: %w", err)
-	}
-	if err := store.AddDevice(cfg.DeviceToken, broker.DevicePrincipal{
-		UserID:          cfg.UserID,
-		DeviceID:        cfg.DeviceID,
-		LocalAccountIDs: []string{cfg.LocalAccountID},
-	}); err != nil {
-		return nil, fmt.Errorf("seed device: %w", err)
-	}
-	return store, nil
-}
-```
+- `main()` calls `newRouter(cfg)` and exits on router creation errors.
+- `newRouter(cfg)` creates a `MemoryCredentialVerifier`, seeds API and device claims from config, and wires:
+  - `daemonws.NewHandler(identity.DeviceAuthenticator{Verifier: verifier}, b)`
+  - `openai.NewHandler(identity.APIAuthenticator{Verifier: verifier}, b)`
+- API seed claims:
+  - `Subject: cfg.UserID`
+  - `Audience: identity.AudienceKittyChat`
+  - `Version: identity.CredentialVersion1`
+  - `Scopes: []identity.Scope{identity.ScopeChatRelay, identity.ScopeModelsRead}`
+  - `UserID`, `DeviceID`, `AccountID` from config
+- Device seed claims:
+  - `Subject: "device:" + cfg.DeviceID`
+  - `Audience: identity.AudienceKittyChat`
+  - `Version: identity.CredentialVersion1`
+  - `Scopes: []identity.Scope{identity.ScopeDaemonConnect}`
+  - `UserID`, `DeviceID`, `LocalAccountIDs` from config
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -633,12 +292,12 @@ Expected: pass.
 
 ```bash
 git add cmd/kittychat/main.go cmd/kittychat/main_test.go
-git commit -m "feat: wire kittychat through identity store"
+git commit -m "feat: wire kittychat through credential verifier"
 ```
 
 ---
 
-### Task 4: Documentation and Full Verification
+### Task 5: Documentation and Full Verification
 
 **Files:**
 - Modify: `README.md`
@@ -648,7 +307,8 @@ git commit -m "feat: wire kittychat through identity store"
 Modify the MVP scope bullet in `README.md`:
 
 ```markdown
-- env-seeded MVP identity store for one device/account
+- env-seeded MVP credential verifier for one device/account
+- operation-based daemon protocol v1 for OpenAI-compatible relay requests
 ```
 
 Keep the environment variable table unchanged because the MVP seed variables are
@@ -672,24 +332,14 @@ Expected:
 - `make build` exits 0 and creates `kittychat`.
 - `make clean` removes the build artifact.
 
-- [ ] **Step 3: Confirm repo status**
-
-Run:
-
-```bash
-git status --short --branch
-```
-
-Expected before commit: only README and implementation files modified or added.
-
-- [ ] **Step 4: Commit docs and any final cleanup**
+- [ ] **Step 3: Commit docs**
 
 ```bash
 git add README.md
-git commit -m "docs: describe env seeded identity store"
+git commit -m "docs: describe env seeded credential verifier"
 ```
 
-- [ ] **Step 5: Final push after verification**
+- [ ] **Step 4: Final push after verification**
 
 Run:
 
@@ -699,16 +349,15 @@ git log --oneline -8
 git push origin main
 ```
 
-Expected:
-
-- branch is ahead by the implementation commits before push.
-- push succeeds to `https://github.com/kittypaw-app/kittychat.git`.
+Expected: push succeeds to `https://github.com/kittypaw-app/kittychat.git`.
 
 ---
 
 ## Coverage Checklist
 
-- The identity boundary exists in `internal/identity`.
+- `internal/identity` exposes `CredentialVerifier`, claims, scope constants, and version constants.
+- Daemon request frames use stable `operation` values.
+- Daemon hello frames require protocol v1 and known capabilities.
 - Runtime wiring no longer directly uses static token authenticators.
 - Current MVP env configuration still works.
 - API client access remains limited by resolved `device_id` and `account_id`.
