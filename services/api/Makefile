@@ -1,7 +1,7 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
 
-.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down lint run clean seed-wikidata seed-seoul-metro benchmark-resolve smoke
+.PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down test-migration lint run clean seed-wikidata seed-seoul-metro benchmark-resolve smoke
 
 build:
 	go build -o $(BINARY) $(PKG)
@@ -78,6 +78,22 @@ test-integration:
 
 test-integration-down:
 	@docker-compose -f docker-compose.test.yml down -v
+
+# Migration reversibility (Plan 22 PR-C). Pins `up → down → up` cycle
+# across the latest migrations and asserts dirty=false at each boundary.
+# Failing here means a down-path RAISE EXCEPTION or a non-recoverable
+# DDL — block the merge until fixed.
+test-migration:
+	@docker-compose -f docker-compose.test.yml up -d
+	@echo "waiting for postgres-test to be healthy..."
+	@for i in $$(seq 1 30); do \
+		if docker exec kittypaw-postgres-test pg_isready -U kittypaw -d kittypaw_api_test >/dev/null 2>&1; then \
+			echo "postgres-test ready"; break; \
+		fi; \
+		sleep 1; \
+	done
+	DATABASE_URL="postgres://kittypaw:kittypaw@localhost:15432/kittypaw_api_test?sslmode=disable" \
+		go test -tags=integration -count=1 -run TestMigrationReversibility ./internal/model/...
 
 # --- Prod smoke (Plan 8 v2 D4 / L3) -------------------------------------------
 # Verifies every external-API endpoint against prod (default) or a custom URL.

@@ -5,60 +5,17 @@ package model_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
-
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
-func setupTestDB(t *testing.T) *model.PostgresUserStore {
-	t.Helper()
-
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://kittypaw:kittypaw@localhost:5432/kittypaw_api_test?sslmode=disable"
-	}
-
-	m, err := migrate.New("file://../../migrations", "pgx5://"+stripScheme(dbURL))
-	if err != nil {
-		t.Fatalf("migrate new: %v", err)
-	}
-	if err := m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		// ignore — tables might not exist yet
-	}
-	if err := m.Up(); err != nil {
-		t.Fatalf("migrate up: %v", err)
-	}
-
-	ctx := context.Background()
-	pool, err := model.NewPool(ctx, dbURL)
-	if err != nil {
-		t.Fatalf("new pool: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-
-	// Clean tables for test isolation.
-	_, _ = pool.Exec(ctx, "DELETE FROM refresh_tokens")
-	_, _ = pool.Exec(ctx, "DELETE FROM users")
-
-	return model.NewUserStore(pool)
-}
-
-func stripScheme(url string) string {
-	for i, c := range url {
-		if c == ':' && i > 0 {
-			return url[i+3:] // skip "://"
-		}
-	}
-	return url
-}
+// setupTestDB lives in setup_test.go (Plan 22 PR-C) — returns *pgxpool.Pool
+// so the same helper covers user/refresh/device tests.
 
 func TestCreateOrUpdateAndFindByID(t *testing.T) {
-	store := setupTestDB(t)
+	pool := setupTestDB(t)
+	store := model.NewUserStore(pool)
 	ctx := context.Background()
 
 	user, err := store.CreateOrUpdate(ctx, "google", "123", "test@test.com", "Test User", "https://avatar.example.com/1")
@@ -88,7 +45,8 @@ func TestCreateOrUpdateAndFindByID(t *testing.T) {
 }
 
 func TestCreateOrUpdateUpsert(t *testing.T) {
-	store := setupTestDB(t)
+	pool := setupTestDB(t)
+	store := model.NewUserStore(pool)
 	ctx := context.Background()
 
 	first, err := store.CreateOrUpdate(ctx, "github", "456", "old@test.com", "Old Name", "")
@@ -116,7 +74,8 @@ func TestCreateOrUpdateUpsert(t *testing.T) {
 }
 
 func TestFindByIDNotFound(t *testing.T) {
-	store := setupTestDB(t)
+	pool := setupTestDB(t)
+	store := model.NewUserStore(pool)
 	ctx := context.Background()
 
 	_, err := store.FindByID(ctx, "00000000-0000-0000-0000-000000000000")

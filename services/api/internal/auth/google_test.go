@@ -82,11 +82,26 @@ func (m *mockRefreshTokenStore) FindByHash(_ context.Context, hash string) (*mod
 	return nil, model.ErrNotFound
 }
 
+func (m *mockRefreshTokenStore) CreateForDevice(_ context.Context, userID, deviceID, tokenHash string, expiresAt time.Time) error {
+	dev := deviceID
+	m.tokens = append(m.tokens, model.RefreshToken{
+		ID:        "rt-dev-1",
+		UserID:    userID,
+		DeviceID:  &dev,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	})
+	return nil
+}
+
 func (m *mockRefreshTokenStore) RevokeIfActive(_ context.Context, _ string) (bool, error) {
 	return true, nil
 }
 
 func (m *mockRefreshTokenStore) RevokeAllForUser(_ context.Context, _ string) error { return nil }
+
+func (m *mockRefreshTokenStore) RevokeAllForDevice(_ context.Context, _ string) error { return nil }
 
 func setupGoogleTest(t *testing.T, googleServer *httptest.Server) (*auth.OAuthHandler, auth.GoogleConfig) {
 	t.Helper()

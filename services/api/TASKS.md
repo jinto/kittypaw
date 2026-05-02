@@ -455,7 +455,7 @@
 - [ ] 채팅팀에 PR-A 머지 신호 (verifier 통합 테스트 unblock)
 - [ ] PR-B (RS256 cutover) ina:plan kickoff
 
-## Plan 21: RS256/JWKS + device credential — PR-B (RS256 cutover) ✅
+## Plan 21: RS256/JWKS + device credential — PR-B (RS256 cutover) ✅ (`eca6e42`)
 
 > Spec: `~/.claude/plans/silly-wiggling-balloon.md` PR-B
 > Goal: user JWT 발급/검증 HS256 → RS256 cutover. ClaimsVersion v=2 bump. JWKSProvider 와이어링. 사용자 0명 윈도우 활용 (BC 부담 0).
@@ -517,6 +517,52 @@
 - [ ] `fab deploy` — RS256 발급 prod 활성. `JWT_SECRET` env 운영 서버에서 제거 가능 (선택).
 - [ ] `make smoke` 회귀 0 + Google OAuth 직접 1회 (사용자 0명이라 회귀 risk 거의 없음).
 - [ ] 채팅팀에 user JWT가 RS256/v=2로 발급 시작 알림 (kittychat이 user JWT 검증 안 하므로 무영향이지만 contract 변경).
+
+## Plan 22: RS256/JWKS + device credential — PR-C (devices DB + store layer) ← 현재
+
+> Spec: `.claude/plans/plan-22-pr-c-devices-store.md` (Architect/Critic/CEO 3관점 ITERATE 후 합의)
+> Goal: `devices` 테이블 + `refresh_tokens.device_id` 컬럼 + DeviceStore/RefreshTokenStore 확장. **endpoint 미노출** — 그건 PR-D scope.
+> 직전: PR-B `eca6e42` (RS256 cutover) · 후속: PR-D (endpoints + device JWT shape) — 본 PR 머지 후 별도 ina:plan.
+
+**검증 결과** (3관점 합의):
+- Architect APPROVED (7 concerns 박제 후): pgx/v5 jsonb는 `[]byte` round-trip (`pgtype.JSONB` 없음), capabilities CHECK 제약, `device_id` non-NULL DEFAULT 차단 주석, dirty-state 복구 runbook, "3rd device-only column" revisit trigger.
+- Critic APPROVED (8 concerns 박제 후): T1 schema-only로 좁힘 (interface design은 T3에서 driving), setupTestDB refactor 명시, Error contracts 박제 (FindByID/Revoke ErrNotFound + revoked 정상 반환 + Revoke 멱등), capabilities CHECK rejection test, 006/007 down 비대칭 의도 박제.
+- CEO APPROVED (cuts 반영 후): T6 (CASCADE characterization) 컷 — PostgreSQL 동작 테스트는 PostgreSQL 테스트. T8 (down-abort integration) 컷 — 0명 사용자 윈도우 시나리오 발생 불가. `UpdateLastUsed` interface에서 제외 — PR-D scope 밖.
+
+- [x] **T1: 마이그레이션 006 + 007 SQL + reversibility CI 테스트**
+      RED: `internal/model/migration_reversibility_test.go` 신규 — `TestMigrationReversibility_006_007` 작성. up 7 → down 2 → up 7 reversibility + dirty=false 단언. RED.
+      GREEN: `migrations/006_create_devices.up.sql` (CHECK jsonb_typeof = 'object' 포함), `006_create_devices.down.sql` (DROP TABLE), `007_add_device_id_to_refresh_tokens.up.sql` (non-NULL DEFAULT 차단 주석 + partial index), `007.down.sql` (RAISE EXCEPTION abort guard). `Makefile`에 `test-migration` target 추가.
+
+- [x] **T2: setupTestDB refactor — `*pgxpool.Pool` 반환 + DELETE FROM devices**
+      RED: `internal/model/setup_test.go` 신규에서 `setupTestDB(t) *pgxpool.Pool` 정의 → `user_test.go`의 3 호출부 컴파일 실패.
+      GREEN: setup_test.go로 setupTestDB + stripScheme 이동, cleanup에 devices 추가 (`refresh_tokens → devices → users` 순서). `user_test.go` 3 호출부 cascade — `pool := setupTestDB(t); store := model.NewUserStore(pool)`.
+
+- [x] **T3: DeviceStore interface 정의 (test-driven)**
+      RED: `internal/model/device_test.go` 신규 — `TestDeviceStore_CreateAndFindByID_Integration` 작성 → `model.NewDeviceStore` 미존재로 컴파일 실패.
+      GREEN: `internal/model/device.go` (`Device` struct + `DeviceStore` interface 4 메서드 — UpdateLastUsed 제외). `internal/model/device_pg.go` (Create + FindByID 두 메서드만, capabilities marshalling은 `json.Marshal(map) → []byte` 패턴 — pgx/v5는 jsonb 컬럼을 []byte로 round-trip).
+
+- [x] **T4: DeviceStore CRUD 완성 + Error contracts**
+      RED: 6 테스트 신규 — FindByID NotFound + revoked 정상 반환, ListActiveForUser revoked filter, Revoke NotFound, Revoke 멱등, capabilities CHECK rejection (23514).
+      GREEN: device_pg.go에 ListActiveForUser, Revoke (idempotent SQL: `UPDATE ... WHERE id=$1 AND revoked_at IS NULL` + EXISTS 사전 체크) 구현.
+
+- [x] **T5: RefreshTokenStore 확장 — CreateForDevice + RevokeAllForDevice + 의미 분리**
+      RED: `internal/model/refresh_token_test.go` 신규 (build tag integration) — 6 테스트: CreateForDevice round-trip, FK violation NotFound (23503 매핑), RevokeAllForDevice 정상/missing-noop, RevokeAllForDevice user 보존 (characterization), RevokeAllForUser 둘 다 revoke (characterization).
+      GREEN: `refresh_token.go` interface에 두 메서드 + `RefreshToken` struct에 `DeviceID *string` 추가. `refresh_token_pg.go` 두 메서드 구현 + `Create` SQL 무수정 + FindByHash SELECT에 device_id Scan 추가 + 23503 → ErrNotFound 매핑.
+
+- [x] **T6: 회귀 검증 — 기존 user 흐름**
+      RED: `make test-integration -p 1` 전체 실행. 기존 `TestRefresh_Integration_HappyRotation` 등이 GREEN 유지 확인.
+      GREEN: 회귀 0. RefreshToken struct DeviceID 필드 추가가 기존 user refresh path 영향 없음 단언.
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` PASS / `make test-integration -p 1` PASS / `make test-migration` PASS.
+
+**완료 신호**: schema + store layer ready. PR-D unblock — `/auth/devices/{pair, refresh, list, delete}` endpoints + device JWT shape 작업 시작 가능.
+
+**Operational Checklist** (PR-C 머지 후):
+- [ ] prod DB `migrate up 7` 실행 (사용자 0명 → safe).
+- [ ] dirty-state 복구 runbook 박제 (`migrate version` → `migrate force <last_clean_version>`).
+- [ ] `silly-wiggling-balloon.md`에 "3번째 device-only 컬럼 → 테이블 분리" revisit trigger sync.
+- [ ] PR-D ina:plan kickoff.
+- [ ] 채팅팀에 PR-D 머지 ETA 알림.
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 

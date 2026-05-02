@@ -61,6 +61,23 @@ func (s *refreshTestRefreshStore) RevokeAllForUser(_ context.Context, _ string) 
 	return nil
 }
 
+func (s *refreshTestRefreshStore) CreateForDevice(_ context.Context, userID, deviceID, tokenHash string, expiresAt time.Time) error {
+	dev := deviceID
+	s.tokens[tokenHash] = &model.RefreshToken{
+		ID:        "rt-dev-" + tokenHash[:min(8, len(tokenHash))],
+		UserID:    userID,
+		DeviceID:  &dev,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	return nil
+}
+
+func (s *refreshTestRefreshStore) RevokeAllForDevice(_ context.Context, _ string) error {
+	return nil
+}
+
 func setupRefreshTest(t *testing.T) (*auth.OAuthHandler, *refreshTestRefreshStore) {
 	t.Helper()
 	cfg := config.LoadForTest()
