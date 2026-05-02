@@ -17,6 +17,8 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
+var fetchDiscovery = core.FetchDiscovery
+
 func newLoginCmd() *cobra.Command {
 	var (
 		flagCode   bool
@@ -64,7 +66,7 @@ func newLoginCmd() *cobra.Command {
 // exchange/refresh through api_base_url and registryClient through
 // skills_registry_url.
 func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
-	d, err := core.FetchDiscovery(apiURL)
+	d, err := fetchDiscovery(apiURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: %v — falling back to %s\n", err, apiURL)
 		return apiURL
@@ -85,6 +87,39 @@ func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
 		fmt.Fprintf(os.Stderr, "discovery: save skills_registry_url: %v\n", err)
 	}
 	return d.APIBaseURL
+}
+
+func maybePairChatRelayDevice(apiURL string, mgr *core.APITokenManager, accessToken string, out io.Writer) bool {
+	if mgr == nil || strings.TrimSpace(accessToken) == "" {
+		return false
+	}
+	if _, ok := mgr.LoadChatRelayDeviceTokens(apiURL); ok {
+		return false
+	}
+	if relayURL, ok := mgr.LoadChatRelayURL(apiURL); !ok || relayURL == "" {
+		return false
+	}
+	if out == nil {
+		out = io.Discard
+	}
+
+	name := "kittypaw-daemon"
+	if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
+		name = strings.TrimSpace(host)
+	}
+	tokens, err := mgr.PairChatRelayDevice(
+		mgr.ResolveAuthBaseURL(apiURL),
+		apiURL,
+		accessToken,
+		core.ChatRelayDevicePairRequest{Name: name},
+	)
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "chat relay pairing skipped: %v\n", err)
+		_, _ = fmt.Fprintf(out, "Run `kittypaw chat-relay pair` after the API supports device pairing.\n")
+		return false
+	}
+	_, _ = fmt.Fprintf(out, "Chat relay paired (device %s)\n", tokens.DeviceID)
+	return true
 }
 
 func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
@@ -147,6 +182,7 @@ func loginHTTP(apiURL string, mgr *core.APITokenManager) error {
 		if err := mgr.SaveTokens(apiURL, result.accessToken, result.refreshToken); err != nil {
 			return fmt.Errorf("save tokens: %w", err)
 		}
+		maybePairChatRelayDevice(apiURL, mgr, result.accessToken, os.Stderr)
 		return verifyAndPrint(apiURL, result.accessToken)
 
 	case <-time.After(5 * time.Minute):
@@ -199,6 +235,7 @@ func loginCode(apiURL string, mgr *core.APITokenManager) error {
 	if err := mgr.SaveTokens(apiURL, result.AccessToken, result.RefreshToken); err != nil {
 		return fmt.Errorf("save tokens: %w", err)
 	}
+	maybePairChatRelayDevice(apiURL, mgr, result.AccessToken, os.Stderr)
 	return verifyAndPrint(apiURL, result.AccessToken)
 }
 

@@ -1,13 +1,27 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
 )
+
+func stubFetchDiscovery(t *testing.T, resp *core.DiscoveryResponse, err error) {
+	t.Helper()
+	old := fetchDiscovery
+	fetchDiscovery = func(string) (*core.DiscoveryResponse, error) {
+		return resp, err
+	}
+	t.Cleanup(func() {
+		fetchDiscovery = old
+	})
+}
 
 func TestApplyDiscoveryStoresChatRelayURL(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,5 +57,127 @@ func TestApplyDiscoveryStoresChatRelayURL(t *testing.T) {
 	gotAuthBase, ok := mgr.LoadAuthBaseURL(ts.URL)
 	if !ok || gotAuthBase != "https://api.kittypaw.app/auth" {
 		t.Fatalf("LoadAuthBaseURL = (%q, %v), want auth base URL", gotAuthBase, ok)
+	}
+}
+
+func TestApplyDiscoveryFallsBackOnDiscoveryError(t *testing.T) {
+	stubFetchDiscovery(t, nil, errors.New("offline"))
+
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+
+	if got := applyDiscovery(apiURL, mgr); got != apiURL {
+		t.Fatalf("applyDiscovery returned %q, want fallback %q", got, apiURL)
+	}
+}
+
+func TestMaybePairChatRelayDevicePairsWhenRelayDiscovered(t *testing.T) {
+	var gotAuth string
+	var gotName string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/devices/pair" {
+			http.NotFound(w, r)
+			return
+		}
+		gotAuth = r.Header.Get("Authorization")
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		gotName, _ = body["name"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_id":"dev_123","device_access_token":"access-1","device_refresh_token":"refresh-1","expires_in":900}`)
+	}))
+	defer ts.Close()
+
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if err := mgr.SaveAuthBaseURL(apiURL, ts.URL+"/auth"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayURL(apiURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if paired := maybePairChatRelayDevice(apiURL, mgr, "user-access", &out); !paired {
+		t.Fatal("maybePairChatRelayDevice paired = false, want true")
+	}
+	if gotAuth != "Bearer user-access" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotName == "" {
+		t.Fatal("device name must not be empty")
+	}
+	tokens, ok := mgr.LoadChatRelayDeviceTokens(apiURL)
+	if !ok || tokens.DeviceID != "dev_123" || tokens.AccessToken != "access-1" || tokens.RefreshToken != "refresh-1" {
+		t.Fatalf("tokens = (%#v, %v), want stored pair response", tokens, ok)
+	}
+}
+
+func TestMaybePairChatRelayDeviceSkipsAlreadyPaired(t *testing.T) {
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if err := mgr.SaveChatRelayURL(apiURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, core.ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  "access-1",
+		RefreshToken: "refresh-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if paired := maybePairChatRelayDevice(apiURL, mgr, "user-access", &out); paired {
+		t.Fatal("maybePairChatRelayDevice paired = true, want false for already paired")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty skip", out.String())
+	}
+}
+
+func TestMaybePairChatRelayDeviceSkipsWhenNoRelayURL(t *testing.T) {
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+
+	var out strings.Builder
+	if paired := maybePairChatRelayDevice("https://portal.kittypaw.app", mgr, "user-access", &out); paired {
+		t.Fatal("maybePairChatRelayDevice paired = true, want false without relay URL")
+	}
+	if out.String() != "" {
+		t.Fatalf("output = %q, want empty skip", out.String())
+	}
+}
+
+func TestMaybePairChatRelayDeviceWarnsButDoesNotFail(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not ready", http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	secrets := testSecretsStore(t)
+	mgr := core.NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if err := mgr.SaveAuthBaseURL(apiURL, ts.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayURL(apiURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if paired := maybePairChatRelayDevice(apiURL, mgr, "user-access", &out); paired {
+		t.Fatal("maybePairChatRelayDevice paired = true, want false on pair failure")
+	}
+	if !strings.Contains(out.String(), "kittypaw chat-relay pair") {
+		t.Fatalf("warning = %q, want manual fallback command", out.String())
+	}
+	if _, ok := mgr.LoadChatRelayDeviceTokens(apiURL); ok {
+		t.Fatal("device tokens were stored after failed pair")
 	}
 }
