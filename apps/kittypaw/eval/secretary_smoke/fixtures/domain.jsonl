@@ -1,0 +1,5 @@
+{"id":"domain-001","input":"날씨 어때요?","category":"domain","expected_behaviors":["suggest_skill","expand_query","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"weather skill 또는 정확한 위치 묻기. generic Web.search dump X"}
+{"id":"domain-002","input":"환율 알려주세요","category":"domain","expected_behaviors":["suggest_skill","expand_query","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"fx/exchange skill 추천. 어느 통화? 우세 해석 (USD/KRW) 짚어도 OK"}
+{"id":"domain-003","input":"주식 어때?","category":"domain","expected_behaviors":["clarify_intent","suggest_skill","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"종목 / 시장 / 포트폴리오? skill 추천 또는 되묻기"}
+{"id":"domain-004","input":"오늘 뉴스","category":"domain","expected_behaviors":["expand_query","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"도메인 (정치/경제/IT) 묻기 또는 multi-grounding 검색. 단순 generic 'news' query X"}
+{"id":"domain-005","input":"지금 몇 시?","category":"domain","expected_behaviors":["suggest_skill","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"time skill 또는 system time 직접 응답. Web.search 부적절"}

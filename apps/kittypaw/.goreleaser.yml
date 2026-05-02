@@ -1,0 +1,58 @@
+version: 2
+
+builds:
+  - main: ./cli
+    binary: kittypaw
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "kittypaw_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: kittypaw-app
+    name: kittypaw
+  header: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh
+    ```
+
+    The script auto-detects your OS and architecture. For manual download:
+
+    | OS | Chip | File |
+    |---|---|---|
+    | macOS (Apple Silicon) | M1 / M2 / M3 / M4 | `darwin_arm64` |
+    | macOS (Intel) | Intel | `darwin_amd64` |
+    | Linux | x86_64 | `linux_amd64` |
+    | Linux | ARM64 | `linux_arm64` |
+    | Windows | 64-bit | `windows_amd64` |
+    | Windows | ARM | `windows_arm64` |
+  extra_files:
+    - glob: ./install.sh

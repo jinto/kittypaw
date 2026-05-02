@@ -1,0 +1,58 @@
+# Binaries
+/bin/
+/kittypaw
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.txt
+
+# Build
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Profiling
+*.profraw
+*.prof
+
+# Data
+*.db
+*.db-shm
+*.db-wal
+
+# Temp
+/tmp/
+
+# Competitors (cloned for reference, not part of project)
+/competitors/
+
+# Node (legacy)
+node_modules/
+
+# Rust
+target/
+/registry/
+/api/
+
+# Personal workspace (think/spec notes, not shared)
+.ina/
+
+# Autopilot pipeline state (ephemeral, per-session)
+.state/
+
+# Local eval outputs
+eval/secretary_smoke/results/
+eval/user_vision_flows/results/

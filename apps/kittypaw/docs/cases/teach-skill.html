@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>자연어 스킬 생성 — KittyPaw</title>
+  <meta name="description" content="자연어 설명 → JS 코드 생성 → goja syntax 검증 (5/5 pass measured) → SkillStore 저장. 런타임 동작은 패키지마다.">
+  <link rel="canonical" href="https://kittypaw.app/cases/teach-skill.html">
+  <meta property="og:title" content="자연어 스킬 생성 — KittyPaw">
+  <meta property="og:description" content="자연어 설명 → JS 코드 생성 → goja syntax 검증 (5/5 pass measured) → SkillStore 저장. 런타임 동작은 패키지마다.">
+  <meta property="og:url" content="https://kittypaw.app/cases/teach-skill.html">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="../" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">
+      <span class="nav-brand-paw">🐾</span> KittyPaw
+    </a>
+  </div>
+  <div class="nav-links">
+    <a href="../#features" class="nav-link">기능</a>
+    <a href="./" class="nav-link" style="color:var(--blue-600)">사례</a>
+    <a href="../#skills" class="nav-link">스킬</a>
+    <a href="../#tech" class="nav-link">기술</a>
+    <a href="https://github.com/kittypaw-app/kittypaw" class="nav-link nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<div class="case-breadcrumb">
+  <a href="../">홈</a><span class="bc-sep">›</span>
+  <a href="./">활용 사례</a><span class="bc-sep">›</span>
+  자연어 스킬 생성
+</div>
+
+<section class="case-hero">
+  <div class="case-hero-inner">
+    <span class="case-hero-icon">💬</span>
+    <h1>🚧 자연어 스킬 생성</h1>
+    <p class="case-hero-sub">
+      자연어 설명 → LLM JS 코드 생성 → goja syntax 검증 → SkillStore 저장.<br>
+      syntax 통과율 5/5 measured (commit dbdec0d). 런타임 동작은 외부 API / 자체 로직마다.
+    </p>
+    <span class="case-tag">🚧 syntax ✅ runtime partial</span>
+  </div>
+</section>
+
+<section class="case-story">
+  <div class="case-story-header">
+    <span class="section-eyebrow">시나리오</span>
+    <h2 class="section-title">스킬 초안을 만들고 확인하는 흐름</h2>
+  </div>
+
+  <div class="case-step">
+    <div class="case-step-num">1</div>
+    <div class="case-step-body">
+      <h3>원하는 걸 말로 설명합니다</h3>
+      <p>CLI에서 <code>kittypaw skill create</code> 에 자연어로 원하는 자동화를 설명합니다. 복잡한 스케줄은 생성 후 직접 확인하는 것이 좋습니다.</p>
+      <div class="mock-code">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          kittypaw — bash
+        </div>
+        <div class="mock-code-body">
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill create "매주 로또 당첨번호를 확인하는 스킬 초안을 만들어줘"</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="case-step">
+    <div class="case-step-num">2</div>
+    <div class="case-step-body">
+      <h3>LLM 이 JS 코드 생성</h3>
+      <p>LLM 이 KittyPaw primitive (Http / Llm / Skill) 사용하는 JavaScript 코드 작성. prompt 강화 후 syntax 통과율 5/5 measured (commit dbdec0d). 단 외부 API 동작 / 자체 로직 / cron 적정성 까지 보장 X.</p>
+      <div class="mock-code">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          lotto-check.js — generated
+        </div>
+        <div class="mock-code-body">
+          <div><span class="code-cm">// AI가 생성한 코드 (goja sync 모드 — async/await 미지원)</span></div>
+          <div><span class="code-kw">const</span> res = <span class="code-fn">Http.get</span>(<span class="code-str">"https://www.dhlottery.co.kr/..."</span>);</div>
+          <div><span class="code-kw">const</span> data = <span class="code-fn">JSON.parse</span>(res.body);</div>
+          <div>&nbsp;</div>
+          <div><span class="code-kw">const</span> numbers = data.drwtNo1 + <span class="code-str">", "</span> + data.drwtNo2 + <span class="code-str">"..."</span>;</div>
+          <div><span class="code-kw">const</span> summary = <span class="code-fn">Llm.generate</span>(</div>
+          <div>  <span class="code-str">"로또 "</span> + data.drwNo + <span class="code-str">"회 당첨번호: "</span> + numbers</div>
+          <div>);</div>
+          <div>&nbsp;</div>
+          <div><span class="code-kw">return</span> summary.text;</div>
+        </div>
+      </div>
+      <div class="mock-code" style="margin-top:12px">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          kittypaw — bash
+        </div>
+        <div class="mock-code-body">
+          <div class="t-out"><span class="t-highlight">✓</span> goja syntax 검증 통과</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="case-step">
+    <div class="case-step-num">3</div>
+    <div class="case-step-body">
+      <h3>SkillStore 저장 → inspect 후 사용</h3>
+      <p>syntax 통과 시 SkillStore 에 저장. 스케줄 추론은 LLM 자유 의지 — 사용자가 trigger / cron / config inspect 권장. 생성된 스킬은 일반 패키지처럼 <code>kittypaw skill run</code> 으로 manual 실행 가능.</p>
+      <div class="mock-code" style="margin-bottom:16px">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          kittypaw — bash
+        </div>
+        <div class="mock-code-body">
+          <div class="t-out"><span class="t-highlight">✓</span> 'lotto-check' 스킬 저장 완료</div>
+          <div class="t-out"><span class="t-highlight">!</span> 스케줄 후보: every 168h — 필요한 경우 cron으로 직접 조정</div>
+        </div>
+      </div>
+
+      <div class="mock-tg">
+        <div class="mock-tg-header">
+          <div class="mock-tg-avatar">🎱</div>
+          실행 결과 예시
+        </div>
+        <div class="mock-tg-body">
+          <div class="mock-tg-msg">
+            🎱 제1127회 로또 당첨번호<br>
+            <br>
+            3, 15, 22, 29, 36, 41 + 보너스 7<br>
+            <br>
+            1등: 2명 (각 18.2억원)<br>
+            생성된 스킬이 반환할 수 있는 메시지 초안입니다.
+            <div class="mock-tg-time">수동 실행</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top:0;padding-bottom:0">
+    <div class="reveal">
+      <span class="section-eyebrow">작동 원리</span>
+      <h2 class="section-title">Teach Loop 파이프라인</h2>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">🎯</div>
+        <div class="step-num">1</div>
+        <h3>의도 분류</h3>
+        <p>LLM이 요청 유형을 분류합니다</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">🤖</div>
+        <div class="step-num">2</div>
+        <h3>코드 생성</h3>
+        <p>LLM이 프리미티브 API를 활용해 JS 코드 작성</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">🔒</div>
+        <div class="step-num">3</div>
+        <h3>샌드박스 검증</h3>
+        <p>goja에서 syntax를 확인합니다</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section class="case-others">
+  <div class="case-others-inner">
+    <h2 class="section-title" style="text-align:center">다른 활용 사례</h2>
+    <div class="case-others-grid">
+      <a href="morning-briefing.html" class="case-others-card">
+        <div class="case-others-icon">☀️</div>
+        <h4>예약 패키지 실행</h4>
+        <p>cron + 출력 생성</p>
+      </a>
+      <a href="pattern-automation.html" class="case-others-card">
+        <div class="case-others-icon">🔄</div>
+        <h4>반복 의도 분석</h4>
+        <p>Reflection 후보</p>
+      </a>
+      <a href="site-monitoring.html" class="case-others-card">
+        <div class="case-others-icon">🚨</div>
+        <h4>URL 상태 확인</h4>
+        <p>상태 변경 메시지</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw">🐾</span>
+    <h2 class="reveal">GitHub 에서 확인</h2>
+    <p class="reveal reveal-delay-1">
+      teach loop 코드는 <code>engine/teach.go</code> 에. prompt + syntax check + register flow 모두.<br>
+      bug / 의문 / 기여 환영.
+    </p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/kittypaw-app/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHub 저장소
+      </a>
+      <a href="https://github.com/kittypaw-app/kittypaw/issues" class="btn btn-cta-secondary">
+        💬 Issues
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/skills">스킬 레지스트리</a>
+    <span class="footer-sep">·</span>
+    <span>Elastic License 2.0</span>
+  </div>
+  <div class="biz-info">
+    <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>
+    <span>제이케이랩</span>
+    <span class="biz-sep">|</span>
+    <span>사업자등록번호 <span class="obf-b" data-a="851" data-b="-15-" data-c="01677">문의하기</span></span>
+    <span class="biz-sep">|</span>
+    <span>대표 윤남영</span>
+    <span class="biz-sep">|</span>
+    <span>연락처 <span class="obf-p" data-a="010" data-b="-5216" data-c="-0791">문의하기</span></span>
+    <span class="biz-sep">|</span>
+    <span>주소 <span class="obf-a" data-a="서울 동대문구 " data-b="장한로10길 28, " data-c="101동 406호">문의하기</span></span>
+  </div>
+</footer>
+
+<script src="../main.js"></script>
+</body>
+</html>

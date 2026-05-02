@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KittyPaw — A Go-based local AI agent experiment</title>
+  <meta name="description" content="A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+
+  <!-- Canonical & hreflang -->
+  <link rel="canonical" href="https://kittypaw.app/en/">
+  <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
+  <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
+  <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="KittyPaw — A Go-based local AI agent experiment">
+  <meta property="og:description" content="Single Go binary, goja JS sandbox, 5 channel adapters, skill registry. Building local agent components piece by piece.">
+  <meta property="og:url" content="https://kittypaw.app/en/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="KittyPaw — A Go-based local AI agent experiment">
+  <meta name="twitter:description" content="Single Go binary, goja JS sandbox, 5 channel adapters, skill registry. Building local agent components piece by piece.">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "KittyPaw",
+    "description": "A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.",
+    "url": "https://kittypaw.app/en/",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "license": "https://www.elastic.co/licensing/elastic-license",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "jinto", "url": "https://github.com/jinto" }
+  }
+  </script>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     NAV
+============================================================ -->
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="nav-brand-paw">🐾</span>
+    KittyPaw
+  </div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link">Features</a>
+    <a href="../cases/" class="nav-link">Cases</a>
+    <a href="#skills" class="nav-link">Skills</a>
+    <a href="#tech" class="nav-link">Tech</a>
+    <a href="https://github.com/kittypaw-app/kittypaw" class="nav-link nav-cta">GitHub</a>
+    <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/" class="nav-link-active">EN</a> · <a href="https://kittypaw.app/ja/">JA</a></span>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-paw-badge">
+      <div class="hero-paw" role="img" aria-label="Cat paw icon">
+        <div class="paw-toes">
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+        </div>
+        <div class="paw-pad"></div>
+      </div>
+      <div class="hero-badge">
+        <span>🔬</span> v0.0.8 alpha · Go 1.25 · Elastic License 2.0
+      </div>
+    </div>
+
+    <h1>
+      KittyPaw<br>
+      <span class="accent-warm">A local AI agent experiment</span>
+    </h1>
+    <p class="hero-sub">
+      A Go project building chat, skills, scheduler, memory, and permissions in small pieces<br>
+      to see how far it can go. Single binary, no external runtimes.
+    </p>
+
+    <div class="install-box">
+      <span class="install-prompt">$</span>
+      <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh</code>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="Copy">📋</button>
+    </div>
+    <p class="install-hint">macOS · Linux — Windows builds available on the releases page</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/kittypaw-app/kittypaw" class="btn btn-secondary">
+        <span>⭐</span> GitHub repo
+      </a>
+      <a href="https://github.com/kittypaw-app/kittypaw/issues" class="btn btn-ghost">
+        Issues
+      </a>
+    </div>
+
+    <div class="hero-terminal" role="region" aria-label="Terminal example">
+      <div class="terminal-bar">
+        <span class="terminal-dot terminal-dot-r"></span>
+        <span class="terminal-dot terminal-dot-y"></span>
+        <span class="terminal-dot terminal-dot-g"></span>
+        <span class="terminal-label">kittypaw — bash</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
+        <div class="t-out">   LLM provider: Claude (Anthropic)</div>
+        <div class="t-out">   Channel: Telegram</div>
+        <div class="t-out">   ✓ Settings saved · Daemon up</div>
+        <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
+      </div>
+    </div>
+    <p class="hero-note">single Go binary · sqlite (modernc) · goja JS sandbox · macOS / Linux / Windows</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     STATUS BOARD
+============================================================ -->
+<div class="proof-strip">
+  <div class="proof-inner">
+    <div class="proof-item reveal">
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ CLI + local daemon
+    </div>
+    <div class="proof-item reveal reveal-delay-1">
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
+    </div>
+    <div class="proof-item reveal reveal-delay-2">
+      <span class="proof-dot proof-dot-active"></span>
+      🚧 Reflection candidates / NL skill generation
+    </div>
+    <div class="proof-item reveal reveal-delay-3">
+      <span class="proof-dot"></span>
+      🔬 Family account · MoA · live indexing
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">Components</span>
+      <h2 class="section-title">What I'm building</h2>
+      <p class="section-sub">Not a polished SaaS — a source-available project building local AI agent components piece by piece.<br>Each card uses ✅ / 🚧 / 🔬 to mark its current verification state.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">🎯</div>
+        <h3>✅ Skill packages</h3>
+        <p>Install from registry / GitHub URL / local path. <code>package.toml</code>, source-bound config (secrets.json), SHA256 verification.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>🚧 Reflection loop</h3>
+        <p>Recent chats → repeated intent / topic candidates stored. First-turn suffix surface ✅ verified, "yes" reply dispatches ✅, generated code stability 🚧.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">🔒</div>
+        <h3>✅ Sandbox + Permission</h3>
+        <p>All skills run in goja. SSRF guard, hop-by-hop header block, dangerous ops (Shell.exec / Git.push) require approval in supervised mode.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="feature-icon-wrap">🔗</div>
+        <h3>🔬 Skill chaining</h3>
+        <p>Pipeline of skills. Staged execution validated for some packages. A general-purpose chain DSL is still undecided.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-5">
+        <div class="feature-icon-wrap">🌐</div>
+        <h3>🚧 Web search</h3>
+        <p>DuckDuckGo (no-config) + Google API + Tavily option. <code>Web.search</code> + <code>Web.fetch</code> primitives. Source quality / verification ongoing.</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-6">
+        <div class="feature-icon-wrap">🏠</div>
+        <h3>✅ Local LLM</h3>
+        <p>OpenAI-compatible local endpoints (Ollama, LM Studio). Model performance varies — small models often have tool-use limits.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">Workflow</span>
+      <h2 class="section-title">The basic flow</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">From the CLI or local Web UI — all data lives in a local SQLite file.</p>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">📦</div>
+        <div class="step-num">1</div>
+        <h3>Install a skill</h3>
+        <p><code>kittypaw skill install &lt;name&gt;</code> — registry / GitHub URL / local path all supported.</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">⚙️</div>
+        <div class="step-num">2</div>
+        <h3>Configure</h3>
+        <p><code>kittypaw skill config &lt;name&gt; &lt;key&gt; &lt;value&gt;</code> — or <code>kittypaw setup</code> for LLM/channel in one shot. Required fields are in the package's <code>package.toml</code>.</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">⏱</div>
+        <div class="step-num">3</div>
+        <h3>Run / schedule</h3>
+        <p><code>kittypaw skill run &lt;name&gt;</code> for manual, or cron triggers driven by the daemon → output flows through the channel adapter.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     USE CASES
+============================================================ -->
+<section>
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">Real scenarios</span>
+      <h2 class="section-title">Flows built with registry packages</h2>
+      <p class="section-sub">Live-tested ✅ vs in-progress 🚧 — see status on each card.</p>
+    </div>
+    <div class="usecases-grid">
+      <div class="usecase-card reveal reveal-delay-1">
+        <div class="usecase-num-badge">☀️</div>
+        <div>
+          <h3>✅ Scheduled package execution</h3>
+          <p>Install weather / market / RSS packages → cron schedule → telegram setup means delivery at the cron time.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-2">
+        <div class="usecase-num-badge">🔄</div>
+        <div>
+          <h3>✅ Repeat-intent surfacing</h3>
+          <p>Reflection candidates stored → first-turn chat suffix verified (commit 8f2536a). Auto-generated code is 🚧.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-3">
+        <div class="usecase-num-badge">🚨</div>
+        <div>
+          <h3>✅ URL status check</h3>
+          <p>cron HTTP check → alert message on status change. Telegram-routed delivery.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-4">
+        <div class="usecase-num-badge">🌤</div>
+        <div>
+          <h3>✅ Weather briefing</h3>
+          <p>Open-Meteo 7-day forecast + LLM short summary, no API key needed.</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-5">
+        <div class="usecase-num-badge">💬</div>
+        <div>
+          <h3>🚧 Draft a custom skill</h3>
+          <p><code>kittypaw skill create "..."</code> → JS code → goja syntax check (5/5 pass measured) → SkillStore save. Runtime stability depends on the package.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SKILLS GALLERY
+============================================================ -->
+<section id="skills" class="skills-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">Registry</span>
+      <h2 class="section-title">Packages currently in the registry</h2>
+      <p class="section-sub"><code>kittypaw skill install &lt;name&gt;</code> to install. Status reflects live tests.</p>
+    </div>
+    <div class="skills-grid">
+      <div class="skill-card reveal reveal-delay-1">
+        <span class="skill-icon">📈</span>
+        <h4>Macro Economy Report</h4>
+        <p>ETF + AI summary</p>
+        <span class="skill-tag">✅ cron</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-2">
+        <span class="skill-icon">🌤</span>
+        <h4>Weather Briefing</h4>
+        <p>7-day forecast (Open-Meteo)</p>
+        <span class="skill-tag">✅ No API key</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-3">
+        <span class="skill-icon">📰</span>
+        <h4>RSS News Digest</h4>
+        <p>Feed + LLM summary</p>
+        <span class="skill-tag">✅ dupe filter</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-4">
+        <span class="skill-icon">⏰</span>
+        <h4>Reminder</h4>
+        <p>Chat keyword + cron</p>
+        <span class="skill-tag">🚧 partial</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-5">
+        <span class="skill-icon">🔍</span>
+        <h4>URL Monitor</h4>
+        <p>HTTP check + status alert</p>
+        <span class="skill-tag">✅ every 5 min</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     TECH STACK
+============================================================ -->
+<section id="tech" class="tech-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">Tech stack</span>
+      <h2 class="section-title">Pure Go — zero external runtimes</h2>
+      <p class="section-sub">Single binary. No npm, Node, or Python. 20 SQLite migrations and 159 commits in.</p>
+    </div>
+    <div class="tech-grid">
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🐹</div>
+        <div>
+          <div class="tech-card-name">Go</div>
+          <div class="tech-card-desc">Single binary · High performance</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">🖥</div>
+        <div>
+          <div class="tech-card-name">Web UI</div>
+          <div class="tech-card-desc">Chi + WebSocket streaming</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-3">
+        <div class="tech-badge">🔐</div>
+        <div>
+          <div class="tech-card-name">goja Sandbox</div>
+          <div class="tech-card-desc">Safe skill execution</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-4">
+        <div class="tech-badge">🤖</div>
+        <div>
+          <div class="tech-card-name">Claude + OpenAI</div>
+          <div class="tech-card-desc">Multi-LLM support</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-5">
+        <div class="tech-badge">🗄</div>
+        <div>
+          <div class="tech-card-name">SQLite</div>
+          <div class="tech-card-desc">Local data storage</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-6">
+        <div class="tech-badge">🔑</div>
+        <div>
+          <div class="tech-card-name">per-account secrets.json</div>
+          <div class="tech-card-desc">Per-account isolated storage</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🛡</div>
+        <div>
+          <div class="tech-card-name">Permission System</div>
+          <div class="tech-card-desc">Approval-based access control</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">📦</div>
+        <div>
+          <div class="tech-card-name">TOML Package</div>
+          <div class="tech-card-desc">Skill distribution format</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/skills">Skill Registry</a>
+    <span class="footer-sep">·</span>
+    <span>Elastic License 2.0</span>
+  </div>
+</footer>
+
+<!-- Scroll animation (progressive enhancement) -->
+<script src="../main.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,427 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+
+	"github.com/jinto/kittypaw/client"
+	"github.com/jinto/kittypaw/core"
+)
+
+type accountAddFlags struct {
+	telegramToken      string
+	telegramTokenStdin bool
+	adminChatID        string
+	isFamily           bool
+	llmProvider        string
+	llmAPIKey          string
+	llmModel           string
+	noActivate         bool
+	passwordStdin      bool
+}
+
+const accountEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
+
+func newAccountCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "account",
+		Short: "Manage multi-account workspaces",
+		Long:  "Create and inspect account workspaces under ~/.kittypaw/accounts/. Each account owns its own DB, secrets, skills, and channel bindings.",
+	}
+	cmd.AddCommand(newAccountAddCmd())
+	cmd.AddCommand(newAccountRemoveCmd())
+	return cmd
+}
+
+func newAccountAddCmd() *cobra.Command {
+	f := &accountAddFlags{}
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Provision a new account directory",
+		Long: `Create a new account under ~/.kittypaw/accounts/<name>/ with its own
+config.toml, data/, skills/, profiles/, and packages/ subtrees.
+
+Bot-token sources (highest priority wins):
+  1. --telegram-bot-token-stdin  (reads from stdin — recommended)
+  2. $` + accountEnvBotToken + `
+  3. --telegram-bot-token        (visible in process list; prints a warning)
+
+Local Web UI credentials are required for every account. Use
+--password-stdin in non-interactive scripts, or run from a TTY to enter and
+confirm the password interactively. When both stdin flags are set, stdin is
+framed as two lines: Telegram token first, local password second.
+
+Interactive fallback: when no token source AND no LLM key is supplied AND
+stdin is a TTY, a 4-step prompt walks through telegram token, LLM provider,
+api-key, and model. Secrets (token, api-key) are read with terminal echo
+disabled. CI / scripted callers passing any flag/env keep the original
+non-interactive path.
+
+If a server is already running, the account is hot-activated: channels spawn
+and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
+the activation RPC and only stage files on disk.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAccountAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	cmd.Flags().StringVar(&f.telegramToken, "telegram-bot-token", "", "Telegram bot token (visible in ps; prefer --telegram-bot-token-stdin)")
+	cmd.Flags().BoolVar(&f.telegramTokenStdin, "telegram-bot-token-stdin", false, "Read Telegram bot token from stdin")
+	cmd.Flags().StringVar(&f.adminChatID, "admin-chat-id", "", "Telegram admin chat ID (auto-detected from getUpdates when omitted)")
+	cmd.Flags().BoolVar(&f.isFamily, "is-family", false, "Mark this account as the family coordinator (no channels)")
+	cmd.Flags().StringVar(&f.llmProvider, "llm-provider", "", "LLM provider (anthropic|openai|local)")
+	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
+	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")
+	cmd.Flags().BoolVar(&f.noActivate, "no-activate", false, "Stage files only; skip hot-activation against a running server")
+	cmd.Flags().BoolVar(&f.passwordStdin, "password-stdin", false, "Read local Web UI password from stdin")
+	return cmd
+}
+
+// Empty return means no token configured — family/no-token branches are validated by the caller.
+func resolveAccountToken(f *accountAddFlags, stdin io.Reader, stderr io.Writer) (string, error) {
+	if f.telegramTokenStdin {
+		line, err := readStdinLine(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read token from stdin: %w", err)
+		}
+		token := strings.TrimSpace(line)
+		if token == "" {
+			return "", errors.New("--telegram-bot-token-stdin was set but stdin is empty")
+		}
+		return token, nil
+	}
+	if env := strings.TrimSpace(os.Getenv(accountEnvBotToken)); env != "" {
+		if f.telegramToken != "" {
+			_, _ = fmt.Fprintf(stderr, "warning: --telegram-bot-token ignored ($%s is set)\n", accountEnvBotToken)
+		}
+		return env, nil
+	}
+	if f.telegramToken != "" {
+		_, _ = fmt.Fprintln(stderr, "warning: bot token passed via flag is visible in the process list; prefer --telegram-bot-token-stdin")
+		return f.telegramToken, nil
+	}
+	return "", nil
+}
+
+func resolveAccountPassword(f *accountAddFlags, stdin io.Reader) (string, error) {
+	if f.passwordStdin {
+		password, err := readStdinLine(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read password from stdin: %w", err)
+		}
+		if password == "" {
+			return "", errors.New("password is required")
+		}
+		return password, nil
+	}
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return "", errors.New("--password-stdin is required")
+	}
+	return promptLocalPassword()
+}
+
+type stdinLineReader interface {
+	ReadString(byte) (string, error)
+}
+
+func readStdinLine(stdin io.Reader) (string, error) {
+	if lr, ok := stdin.(stdinLineReader); ok {
+		line, err := lr.ReadString('\n')
+		if err != nil && !(errors.Is(err, io.EOF) && line != "") {
+			return "", err
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+	return scanner.Text(), nil
+}
+
+func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
+	// Interactive fallback: if neither a Telegram token source nor an LLM key
+	// is in scope, walk the user through 4 quick prompts instead of erroring
+	// out. CI / scripted callers (any flag/env set) keep the non-interactive
+	// path. Non-TTY shells fall through to the original error so failure modes
+	// stay loud.
+	if needsAccountPrompt(f) && isatty.IsTerminal(os.Stdin.Fd()) {
+		if err := promptAccountSetup(stdin, stdout, f); err != nil {
+			return err
+		}
+	}
+
+	stdin = bufio.NewReader(stdin)
+	token, err := resolveAccountToken(f, stdin, stderr)
+	if err != nil {
+		return err
+	}
+
+	if f.isFamily && token != "" {
+		return fmt.Errorf("--is-family and a telegram bot token are mutually exclusive")
+	}
+	if !f.isFamily && token == "" {
+		return fmt.Errorf("a Telegram bot token is required for non-family accounts (set --telegram-bot-token-stdin, $%s, or --telegram-bot-token, or pass --is-family)", accountEnvBotToken)
+	}
+	if token != "" && !core.ValidateTelegramToken(token) {
+		return errors.New("invalid telegram bot token format")
+	}
+	if !f.passwordStdin && isatty.IsTerminal(os.Stdin.Fd()) {
+		_, _ = fmt.Fprintln(stdout)
+		_, _ = fmt.Fprintln(stdout, accountCredentialsIntroMessage(name))
+		_, _ = fmt.Fprintln(stdout)
+	}
+	password, err := resolveAccountPassword(f, stdin)
+	if err != nil {
+		return err
+	}
+
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("resolve config dir: %w", err)
+	}
+	accountsDir := filepath.Join(cfgDir, "accounts")
+
+	chatID := f.adminChatID
+	if token != "" && chatID == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		detected, derr := core.FetchTelegramChatID(ctx, token)
+		cancel()
+		if derr == nil {
+			chatID = detected
+		} else {
+			_, _ = fmt.Fprintf(stderr, "info: chat_id auto-detect skipped (%v); pass --admin-chat-id later if needed\n", derr)
+		}
+	}
+
+	tt, err := core.InitAccount(accountsDir, name, core.AccountOpts{
+		TelegramToken: token,
+		AdminChatID:   chatID,
+		IsFamily:      f.isFamily,
+		LLMProvider:   f.llmProvider,
+		LLMAPIKey:     f.llmAPIKey,
+		LLMModel:      f.llmModel,
+		LocalPassword: password,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(stdout, "account %q created at %s\n", tt.ID, tt.BaseDir)
+
+	if f.noActivate {
+		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw server start' or re-run without the flag to activate.")
+		return nil
+	}
+	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
+		// Don't fail the whole command — files are already on disk; the user
+		// can recover with a server restart. Surface the error clearly so
+		// they know hot-activate didn't take.
+		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed: %v\n", err)
+		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw server start' to activate, or re-run `kittypaw account add` after starting the server.")
+	}
+	return nil
+}
+
+func newAccountRemoveCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Decommission an account (safe, reversible via .trash/)",
+		Long: `Decommission an account safely:
+
+  1. If a server is running, deactivate the account (stops channels, drains
+     sessions) via admin RPC — no restart required.
+  2. If the removed account is personal and a family account exists, delete
+     the matching [share.<name>] stanza from family/config.toml so stale
+     allowlist entries don't re-grant access if the name is re-used later.
+  3. Move ~/.kittypaw/accounts/<name>/ to ~/.kittypaw/.trash/<name>-<ts>/.
+     The move is atomic (same partition) and reversible by manual rename.
+  4. Print a warning that the Telegram bot token is still valid — the admin
+     must revoke it via @BotFather /revoke.
+
+The command aborts BEFORE touching the family config or the account
+directory if the server returns an error, so a failed step 1 leaves the
+account fully runnable. Re-running after the server reports healthy
+completes the decommission.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAccountRemove(args[0], cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}
+
+func runAccountRemove(name string, stdout, stderr io.Writer) error {
+	if err := core.ValidateAccountID(name); err != nil {
+		return err
+	}
+
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("resolve config dir: %w", err)
+	}
+	accountsDir := filepath.Join(cfgDir, "accounts")
+	accountDir := filepath.Join(accountsDir, name)
+
+	info, err := os.Stat(accountDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("account %q does not exist at %s", name, accountDir)
+	}
+
+	// Load account's own config to learn is_shared (so we can skip the
+	// self-cleanup step and surface the extra warning). A missing
+	// config.toml is treated as personal — the worst case is a no-op scrub.
+	selfCfg, _ := core.LoadConfig(filepath.Join(accountDir, "config.toml"))
+	removedIsShared := selfCfg != nil && selfCfg.IsSharedAccount()
+
+	if err := deactivateAccountOnDaemon(name, stdout, stderr); err != nil {
+		return fmt.Errorf("deactivate on server: %w", err)
+	}
+
+	if !removedIsShared {
+		if err := scrubFamilyShare(accountsDir, name, stderr); err != nil {
+			return fmt.Errorf("update family config: %w", err)
+		}
+	}
+
+	trashedPath, err := moveAccountToTrash(cfgDir, accountsDir, name)
+	if err != nil {
+		return fmt.Errorf("move to trash: %w", err)
+	}
+
+	_, _ = fmt.Fprintf(stdout, "account %q decommissioned → %s\n", name, trashedPath)
+	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for account %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
+	if removedIsShared {
+		_, _ = fmt.Fprintln(stderr, "note: shared account removed — personal accounts will no longer see cross-account shares or fanout until a new shared account is provisioned.")
+	}
+	return nil
+}
+
+// deactivateAccountOnDaemon calls POST /api/v1/admin/accounts/{id}/delete when
+// a server is running. Absence of a server is not an error (AC-RM2 offline
+// path); 404 from the server means the account isn't currently active, which
+// is also fine (already decommissioned or never booted with it).
+func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
+	conn, err := client.NewDaemonConn("")
+	if err != nil {
+		// Missing config.toml (pre-onboarding) is treated as offline — the
+		// filesystem part of decommission still matters even if the user
+		// never booted the daemon with this account.
+		_, _ = fmt.Fprintf(stdout, "Server config unavailable (%v); skipping hot-deactivation.\n", err)
+		return nil
+	}
+	if !conn.IsRunning() {
+		_, _ = fmt.Fprintln(stdout, "Server is not running; skipping hot-deactivation.")
+		return nil
+	}
+
+	cl := client.New(conn.BaseURL, conn.APIKey)
+	if _, err := cl.AccountRemove(name); err != nil {
+		// Treat 404 as benign (already gone). Everything else aborts so the
+		// CLI doesn't mutate family config or the filesystem while a real
+		// drain error is pending — AC-RM5.
+		if strings.Contains(err.Error(), "404") {
+			_, _ = fmt.Fprintf(stderr, "info: server reports account %q not active (already decommissioned?); continuing.\n", name)
+			return nil
+		}
+		return err
+	}
+	_, _ = fmt.Fprintf(stdout, "account %q deactivated on server\n", name)
+	return nil
+}
+
+// scrubFamilyShare removes the [share.<removed>] stanza from the family
+// account's config.toml. No-op if no family account exists (AC-RM4) or the
+// stanza is already absent. Uses WriteConfigAtomic so a crash mid-write
+// never leaves the file truncated (AC-RM6).
+func scrubFamilyShare(accountsDir, removed string, stderr io.Writer) error {
+	accounts, err := core.DiscoverAccounts(accountsDir)
+	if err != nil {
+		return err
+	}
+	var family *core.Account
+	for _, tt := range accounts {
+		if tt != nil && tt.Config != nil && tt.Config.IsSharedAccount() {
+			family = tt
+			break
+		}
+	}
+	if family == nil {
+		return nil
+	}
+	if _, ok := family.Config.Share[removed]; !ok {
+		return nil
+	}
+	delete(family.Config.Share, removed)
+	cfgPath := filepath.Join(family.BaseDir, "config.toml")
+	if err := core.WriteConfigAtomic(family.Config, cfgPath); err != nil {
+		return fmt.Errorf("atomic write %s: %w", cfgPath, err)
+	}
+	_, _ = fmt.Fprintf(stderr, "info: removed [share.%s] from family config at %s\n", removed, cfgPath)
+	return nil
+}
+
+// moveAccountToTrash renames accounts/<name>/ to .trash/<name>-<ts>/ atomically
+// within the same filesystem. On collision (same-second re-runs or prior
+// residue) it appends a -2, -3, ... suffix rather than overwriting (AC-RM8).
+func moveAccountToTrash(cfgDir, accountsDir, name string) (string, error) {
+	trashDir := filepath.Join(cfgDir, ".trash")
+	if err := os.MkdirAll(trashDir, 0o700); err != nil {
+		return "", fmt.Errorf("create trash dir: %w", err)
+	}
+	ts := time.Now().UTC().Format("20060102150405")
+	base := filepath.Join(trashDir, name+"-"+ts)
+	candidate := base
+	for i := 2; ; i++ {
+		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i)
+	}
+	src := filepath.Join(accountsDir, name)
+	if err := os.Rename(src, candidate); err != nil {
+		return "", fmt.Errorf("rename %s → %s: %w", src, candidate, err)
+	}
+	return candidate, nil
+}
+
+// activateAccountOnDaemon calls POST /api/v1/admin/accounts if a daemon is
+// already running locally. Absence of a server is not an error — the user
+// may be provisioning offline before first boot — so we fall back to a
+// restart hint printed by the caller.
+func activateAccountOnDaemon(accountID string, stdout, stderr io.Writer) error {
+	conn, err := client.NewDaemonConn("")
+	if err != nil {
+		return fmt.Errorf("read server config: %w", err)
+	}
+	if !conn.IsRunning() {
+		_, _ = fmt.Fprintln(stdout, "Server is not running; start 'kittypaw server start' to activate this account.")
+		return nil
+	}
+
+	cl := client.New(conn.BaseURL, conn.APIKey)
+	resp, err := cl.AccountActivate(accountID)
+	if err != nil {
+		return err
+	}
+
+	channels, _ := resp["channels"].(float64)
+	isShared, _ := resp["is_shared"].(bool)
+	_, _ = fmt.Fprintf(stdout, "account %q activated (channels=%d, is_shared=%t)\n",
+		accountID, int(channels), isShared)
+	return nil
+}

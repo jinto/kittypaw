@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>URL 상태 확인 — KittyPaw</title>
+  <meta name="description" content="URL 모니터 패키지: cron HTTP 체크 → 상태 변경 시 alert 발송. 5분 주기 default. telegram 라우팅 시 정상 동작.">
+  <link rel="canonical" href="https://kittypaw.app/cases/site-monitoring.html">
+  <meta property="og:title" content="URL 상태 확인 — KittyPaw">
+  <meta property="og:description" content="URL 모니터 패키지: cron HTTP 체크 → 상태 변경 시 alert 발송. 5분 주기 default. telegram 라우팅 시 정상 동작.">
+  <meta property="og:url" content="https://kittypaw.app/cases/site-monitoring.html">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">
+    <a href="../" style="display:flex;align-items:center;gap:8px;color:inherit;text-decoration:none">
+      <span class="nav-brand-paw">🐾</span> KittyPaw
+    </a>
+  </div>
+  <div class="nav-links">
+    <a href="../#features" class="nav-link">기능</a>
+    <a href="./" class="nav-link" style="color:var(--blue-600)">사례</a>
+    <a href="../#skills" class="nav-link">스킬</a>
+    <a href="../#tech" class="nav-link">기술</a>
+    <a href="https://github.com/kittypaw-app/kittypaw" class="nav-link nav-cta">GitHub</a>
+  </div>
+</nav>
+
+<div class="case-breadcrumb">
+  <a href="../">홈</a><span class="bc-sep">›</span>
+  <a href="./">활용 사례</a><span class="bc-sep">›</span>
+  URL 상태 확인
+</div>
+
+<section class="case-hero">
+  <div class="case-hero-inner">
+    <span class="case-hero-icon">🚨</span>
+    <h1>✅ URL 상태 확인</h1>
+    <p class="case-hero-sub">cron HTTP 체크 → 이전 상태 비교 → 변경 시 alert 발송. 5분 주기 default. telegram 라우팅 시 정상 동작.</p>
+    <span class="case-tag">✅ 작동 verified</span>
+  </div>
+</section>
+
+<section class="case-story">
+  <div class="case-story-header">
+    <span class="section-eyebrow">시나리오</span>
+    <h2 class="section-title">상태 변경을 메시지로 남기는 흐름</h2>
+  </div>
+
+  <!-- Step 1 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">1</div>
+    <div class="case-step-body">
+      <h3>URL 모니터 패키지 설치</h3>
+      <p>레지스트리에서 url-monitor 설치 → 감시할 URL 입력. <code>kittypaw setup</code> 으로 telegram 봇 등록 후 alert 가 자동으로 라우팅. cron 주기는 패키지 default 의 <code>*/5 * * * *</code>.</p>
+      <div class="mock-code">
+        <div class="mock-code-header">
+          <span class="mock-code-dot mock-code-dot-r"></span>
+          <span class="mock-code-dot mock-code-dot-y"></span>
+          <span class="mock-code-dot mock-code-dot-g"></span>
+          Terminal
+        </div>
+        <div class="mock-code-body">
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill install url-monitor</span></div>
+          <div class="t-out">Installed package "URL 모니터" (url-monitor) v1.0.0 from registry</div>
+          <div style="height:8px"></div>
+          <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw skill config url-monitor target_url https://api.myservice.com/health</span></div>
+          <div class="t-out"><span class="t-out"># cron 주기 default: */5 * * * *. telegram 봇 setup 후 alert 자동 라우팅.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 2 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">2</div>
+    <div class="case-step-body">
+      <h3>5분마다 HTTP 체크</h3>
+      <p>cron <code>*/5 * * * *</code> 에 따라 daemon 이 URL 에 GET → 상태 코드 / 응답시간 SQLite 에 기록. 정상 (200) 일 때는 alert 0 — 변화만 발송.</p>
+      <div class="mock-status-tl">
+        <div class="mock-status-item">
+          <span class="mock-status-time">14:00</span>
+          <span class="mock-status-dot mock-status-ok"></span>
+          <span class="mock-status-text">✓ 200 OK — 응답시간 142ms</span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">14:05</span>
+          <span class="mock-status-dot mock-status-ok"></span>
+          <span class="mock-status-text">✓ 200 OK — 응답시간 138ms</span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">14:10</span>
+          <span class="mock-status-dot mock-status-ok"></span>
+          <span class="mock-status-text">✓ 200 OK — 응답시간 145ms</span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">14:15</span>
+          <span class="mock-status-dot mock-status-ok"></span>
+          <span class="mock-status-text">✓ 200 OK — 응답시간 139ms</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">3</div>
+    <div class="case-step-body">
+      <h3>상태 변경 → alert 발송</h3>
+      <p>200 → 503 / timeout / 연결 실패 → alert 메시지 생성 → telegram 발송. 다시 200 으로 복구되면 RECOVERY alert.</p>
+      <div class="mock-status-tl">
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:10</span>
+          <span class="mock-status-dot mock-status-ok"></span>
+          <span class="mock-status-text">✓ 200 OK — 응답시간 151ms</span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:15</span>
+          <span class="mock-status-dot mock-status-fail"></span>
+          <span class="mock-status-text"><strong>✗ 503 Service Unavailable</strong></span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:20</span>
+          <span class="mock-status-dot mock-status-fail"></span>
+          <span class="mock-status-text"><strong>✗ Connection timeout</strong></span>
+        </div>
+      </div>
+      <div class="mock-tg" style="margin-top:16px">
+        <div class="mock-tg-header">
+          <div class="mock-tg-avatar">🔴</div>
+          URL 모니터 출력
+        </div>
+        <div class="mock-tg-body">
+          <div class="mock-tg-msg">
+            🔴 <b>ALERT: https://api.myservice.com/health is DOWN</b><br><br>
+            🕐 Checked at: 2026-04-29T03:15:02Z<br>
+            📋 Detail: Was UP since last check. Error: 503 Service Unavailable
+            <div class="mock-tg-time">오전 3:15</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4 -->
+  <div class="case-step reveal">
+    <div class="case-step-num">4</div>
+    <div class="case-step-body">
+      <h3>복구 시 RECOVERY alert</h3>
+      <p>서비스가 다시 정상으로 돌아오면 상태 변경을 감지해 RECOVERY alert 발송. DOWN 시간 (이전 alert 시점부터) 도 포함.</p>
+      <div class="mock-status-tl">
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:25</span>
+          <span class="mock-status-dot mock-status-fail"></span>
+          <span class="mock-status-text"><strong>✗ Connection timeout</strong></span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:30</span>
+          <span class="mock-status-dot mock-status-fail"></span>
+          <span class="mock-status-text"><strong>✗ 503 Service Unavailable</strong></span>
+        </div>
+        <div class="mock-status-item">
+          <span class="mock-status-time">03:35</span>
+          <span class="mock-status-dot mock-status-recover"></span>
+          <span class="mock-status-text"><strong>✓ 200 OK — 복구됨!</strong></span>
+        </div>
+      </div>
+      <div class="mock-tg" style="margin-top:16px">
+        <div class="mock-tg-header">
+          <div class="mock-tg-avatar">✅</div>
+          URL 모니터 출력
+        </div>
+        <div class="mock-tg-body">
+          <div class="mock-tg-msg">
+            ✅ <b>RECOVERY: https://api.myservice.com/health is back UP</b><br><br>
+            🕐 Checked at: 2026-04-29T03:35:00Z<br>
+            📋 Detail: Was DOWN since last check (2026-04-29T03:15:02Z).
+            <div class="mock-tg-time">오전 3:35</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="how-section section-full section-center">
+  <span class="section-eyebrow reveal">작동 원리</span>
+  <h2 class="section-title reveal">상태 변경 감지</h2>
+  <div class="steps-row">
+    <div class="step reveal">
+      <div class="step-emoji">🔍</div>
+      <div class="step-num">1</div>
+      <h3>HTTP 체크</h3>
+      <p>cron 스케줄에 따라 URL에 GET 요청을 보냅니다</p>
+    </div>
+    <div class="step reveal reveal-delay-1">
+      <div class="step-emoji">💾</div>
+      <div class="step-num">2</div>
+      <h3>상태 저장</h3>
+      <p>이전 상태를 Storage에 기록하여 변경만 감지합니다</p>
+    </div>
+    <div class="step reveal reveal-delay-2">
+      <div class="step-emoji">📱</div>
+      <div class="step-num">3</div>
+      <h3>변경 시 발송</h3>
+      <p>상태가 바뀔 때만 alert 메시지 생성 → telegram 발송. 정상 유지 중에는 noise 0.</p>
+    </div>
+  </div>
+</section>
+
+<section class="case-others">
+  <div class="case-others-inner">
+    <h2 class="section-title" style="text-align:center">다른 활용 사례</h2>
+    <div class="case-others-grid">
+      <a href="morning-briefing.html" class="case-others-card">
+        <div class="case-others-icon">☀️</div>
+        <h4>예약 패키지 실행</h4>
+        <p>cron + 출력 생성</p>
+      </a>
+      <a href="pattern-automation.html" class="case-others-card">
+        <div class="case-others-icon">🔄</div>
+        <h4>반복 의도 분석</h4>
+        <p>Reflection 후보</p>
+      </a>
+      <a href="teach-skill.html" class="case-others-card">
+        <div class="case-others-icon">💬</div>
+        <h4>자연어 스킬 생성</h4>
+        <p>생성 + syntax 검증</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <div class="cta-inner">
+    <span class="cta-paw">🐾</span>
+    <h2 class="reveal">GitHub 에서 확인</h2>
+    <p class="reveal reveal-delay-1">
+      URL 모니터 패키지는 <a href="https://github.com/kittypaw-app/skills">레지스트리</a> 에서 source 확인 가능.<br>
+      bug / 의문 / 기여 환영.
+    </p>
+    <div class="cta-buttons reveal reveal-delay-2">
+      <a href="https://github.com/kittypaw-app/kittypaw" class="btn btn-cta-primary">
+        <span>⭐</span> GitHub 저장소
+      </a>
+      <a href="https://github.com/kittypaw-app/kittypaw/issues" class="btn btn-cta-secondary">
+        💬 Issues
+      </a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/skills">스킬 레지스트리</a>
+    <span class="footer-sep">·</span>
+    <span>Elastic License 2.0</span>
+  </div>
+  <div class="biz-info">
+    <span style="display:none">사업자등록번호: 000-00-00000 | 대표: 홍길동 | 02-000-0000 | 서울 중구 세종대로 110</span>
+    <span>제이케이랩</span>
+    <span class="biz-sep">|</span>
+    <span>사업자등록번호 <span class="obf-b" data-a="851" data-b="-15-" data-c="01677">문의하기</span></span>
+    <span class="biz-sep">|</span>
+    <span>대표 윤남영</span>
+    <span class="biz-sep">|</span>
+    <span>연락처 <span class="obf-p" data-a="010" data-b="-5216" data-c="-0791">문의하기</span></span>
+    <span class="biz-sep">|</span>
+    <span>주소 <span class="obf-a" data-a="서울 동대문구 " data-b="장한로10길 28, " data-c="101동 406호">문의하기</span></span>
+  </div>
+</footer>
+
+<script src="../main.js"></script>
+</body>
+</html>

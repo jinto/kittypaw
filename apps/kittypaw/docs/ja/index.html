@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KittyPaw — Goで作るローカルAIエージェントの実験</title>
+  <meta name="description" content="Goシングルバイナリで作るローカルAIエージェントプロジェクト。CLI + デーモン、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。v0.0.8 alpha。">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
+  <link rel="canonical" href="https://kittypaw.app/ja/">
+  <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
+  <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
+  <link rel="alternate" hreflang="ja" href="https://kittypaw.app/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://kittypaw.app/">
+  <meta property="og:title" content="KittyPaw — Goで作るローカルAIエージェントの実験">
+  <meta property="og:description" content="Goシングルバイナリ、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。部品を一つずつ検証する実験プロジェクト。">
+  <meta property="og:url" content="https://kittypaw.app/ja/">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ja_JP">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="KittyPaw — Goで作るローカルAIエージェントの実験">
+  <meta name="twitter:description" content="Goシングルバイナリ、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。部品を一つずつ検証する実験プロジェクト。">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "KittyPaw",
+    "description": "Goシングルバイナリで作るローカルAIエージェントプロジェクト。CLI + デーモン、goja JSサンドボックス、5チャンネルアダプタ、スキルレジストリ。v0.0.8 alpha。",
+    "url": "https://kittypaw.app/ja/",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "license": "https://www.elastic.co/licensing/elastic-license",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "author": { "@type": "Person", "name": "jinto", "url": "https://github.com/jinto" }
+  }
+  </script>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     NAV
+============================================================ -->
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="nav-brand-paw">🐾</span>
+    KittyPaw
+  </div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link">機能</a>
+    <a href="../cases/" class="nav-link">事例</a>
+    <a href="#skills" class="nav-link">スキル</a>
+    <a href="#tech" class="nav-link">技術</a>
+    <a href="https://github.com/kittypaw-app/kittypaw" class="nav-link nav-cta">GitHub</a>
+    <span class="nav-lang"><a href="https://kittypaw.app/">KO</a> · <a href="https://kittypaw.app/en/">EN</a> · <a href="https://kittypaw.app/ja/" class="nav-link-active">JA</a></span>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-paw-badge">
+      <div class="hero-paw" role="img" aria-label="猫の肉球アイコン">
+        <div class="paw-toes">
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+          <div class="paw-toe"></div>
+        </div>
+        <div class="paw-pad"></div>
+      </div>
+      <div class="hero-badge">
+        <span>🔬</span> v0.0.8 alpha · Go 1.25 · Elastic License 2.0
+      </div>
+    </div>
+
+    <h1>
+      KittyPaw<br>
+      <span class="accent-warm">ローカルAIエージェントの実験</span>
+    </h1>
+    <p class="hero-sub">
+      チャット、スキル実行、スケジューラ、メモリ、権限制御を小さな単位で作りながら<br>
+      どこまで行けるかを試しているGoプロジェクトです。シングルバイナリ、外部ランタイム不要。
+    </p>
+
+    <div class="install-box">
+      <span class="install-prompt">$</span>
+      <code class="install-cmd" id="install-cmd">curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh</code>
+      <button class="install-copy" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='✓';setTimeout(function(){document.querySelector('.install-copy').textContent='📋'},1500)" aria-label="コピー">📋</button>
+    </div>
+    <p class="install-hint">macOS · Linux — Windows版はリリースページから直接ダウンロード</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/kittypaw-app/kittypaw" class="btn btn-secondary">
+        <span>⭐</span> GitHubリポジトリ
+      </a>
+      <a href="https://github.com/kittypaw-app/kittypaw/issues" class="btn btn-ghost">
+        Issues
+      </a>
+    </div>
+
+    <div class="hero-terminal" role="region" aria-label="ターミナル例">
+      <div class="terminal-bar">
+        <span class="terminal-dot terminal-dot-r"></span>
+        <span class="terminal-dot terminal-dot-y"></span>
+        <span class="terminal-dot terminal-dot-g"></span>
+        <span class="terminal-label">kittypaw — bash</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
+        <div class="t-out">   LLM provider: Claude (Anthropic)</div>
+        <div class="t-out">   Channel: Telegram</div>
+        <div class="t-out">   ✓ 設定保存 · デーモン起動</div>
+        <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
+      </div>
+    </div>
+    <p class="hero-note">single Go binary · sqlite (modernc) · goja JS sandbox · macOS / Linux / Windows</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     STATUS BOARD
+============================================================ -->
+<div class="proof-strip">
+  <div class="proof-inner">
+    <div class="proof-item reveal">
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ CLI + ローカルデーモン
+    </div>
+    <div class="proof-item reveal reveal-delay-1">
+      <span class="proof-dot proof-dot-done"></span>
+      ✅ 5チャンネルアダプタ (Telegram/Slack/Discord/Kakao/WS)
+    </div>
+    <div class="proof-item reveal reveal-delay-2">
+      <span class="proof-dot proof-dot-active"></span>
+      🚧 Reflection候補 / 自然言語スキル生成
+    </div>
+    <div class="proof-item reveal reveal-delay-3">
+      <span class="proof-dot"></span>
+      🔬 Family account · MoA · live indexing
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">構成要素</span>
+      <h2 class="section-title">作っている部品たち</h2>
+      <p class="section-sub">完成済みSaaSではなく、ローカルAIエージェントの部品を一つずつ作って検証するプロジェクトです。<br>各カードの ✅ / 🚧 / 🔬 は現在の検証状態です。</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon-wrap">🎯</div>
+        <h3>✅ Skillパッケージ</h3>
+        <p>レジストリ / GitHub URL / ローカルパスからインストール。<code>package.toml</code>、source-bound config (secrets.json)、SHA256検証。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon-wrap">🧠</div>
+        <h3>🚧 Reflectionループ</h3>
+        <p>最近の会話 → 繰り返し意図 / トピック候補を保存。初回ターンのsuffix表示 ✅ verified、「はい」回答時のdispatch ✅、生成コードの安定性 🚧。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon-wrap">🔒</div>
+        <h3>✅ Sandbox + Permission</h3>
+        <p>すべてのスキルはgoja内で実行。SSRFブロック、hop-by-hopヘッダーブロック、危険操作 (Shell.exec / Git.push) はsupervisedモードでユーザー承認。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="feature-icon-wrap">🔗</div>
+        <h3>🔬 Skillチェーン</h3>
+        <p>複数スキルをpipelineで接続。一部パッケージで段階実行を検証中。汎用chain DSLは未定。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-5">
+        <div class="feature-icon-wrap">🌐</div>
+        <h3>🚧 Web検索</h3>
+        <p>DuckDuckGo (no-config) + Google API + Tavilyオプション。<code>Web.search</code> + <code>Web.fetch</code> primitive。出典品質 / 結果検証は継続中。</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-6">
+        <div class="feature-icon-wrap">🏠</div>
+        <h3>✅ ローカルLLM</h3>
+        <p>Ollama / LM Studio などOpenAI互換ローカルendpoint。モデル性能の差は大きい — 小さいモデルはtool useに制限あり。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOW IT WORKS
+============================================================ -->
+<div class="how-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">使い方</span>
+      <h2 class="section-title">基本フロー</h2>
+      <p class="section-sub" style="margin-bottom: 52px;">CLIまたはローカルWeb UIから — すべてのデータはローカルSQLiteに保存。</p>
+    </div>
+    <div class="steps-row">
+      <div class="step reveal reveal-delay-1">
+        <div class="step-emoji">📦</div>
+        <div class="step-num">1</div>
+        <h3>Skillインストール</h3>
+        <p><code>kittypaw skill install &lt;name&gt;</code> — レジストリ / GitHub URL / ローカルパス対応。</p>
+      </div>
+      <div class="step reveal reveal-delay-2">
+        <div class="step-emoji">⚙️</div>
+        <div class="step-num">2</div>
+        <h3>Config入力</h3>
+        <p><code>kittypaw skill config &lt;name&gt; &lt;key&gt; &lt;value&gt;</code> — または <code>kittypaw setup</code> でLLM/チャンネルを一括。必要項目はパッケージの <code>package.toml</code> 参照。</p>
+      </div>
+      <div class="step reveal reveal-delay-3">
+        <div class="step-emoji">⏱</div>
+        <div class="step-num">3</div>
+        <h3>実行 / スケジュール</h3>
+        <p><code>kittypaw skill run &lt;name&gt;</code> 手動実行、または cron triggerでデーモンが自動実行 → チャンネルアダプタ経由で発信。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     USE CASES
+============================================================ -->
+<section>
+  <div class="section section-center">
+    <div class="reveal">
+      <span class="section-eyebrow">実シナリオ</span>
+      <h2 class="section-title">レジストリパッケージで作った流れ</h2>
+      <p class="section-sub">Live test 検証済 ✅ / 進行中 🚧 — 各カードのstatus参照。</p>
+    </div>
+    <div class="usecases-grid">
+      <div class="usecase-card reveal reveal-delay-1">
+        <div class="usecase-num-badge">☀️</div>
+        <div>
+          <h3>✅ 予約パッケージ実行</h3>
+          <p>天気 / マーケット / RSSパッケージをインストール → cron schedule → telegram setup後cron時刻に発信。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-2">
+        <div class="usecase-num-badge">🔄</div>
+        <div>
+          <h3>✅ 繰り返し意図のsurface</h3>
+          <p>Reflection候補保存 → chat初回ターンのsuffix surface verified (commit 8f2536a)。自動生成コードは🚧。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-3">
+        <div class="usecase-num-badge">🚨</div>
+        <div>
+          <h3>✅ URL状態確認</h3>
+          <p>cron HTTPチェック → 状態変更時のalertメッセージ。telegram routing時に発信。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-4">
+        <div class="usecase-num-badge">🌤</div>
+        <div>
+          <h3>✅ 天気ブリーフィング</h3>
+          <p>Open-Meteoの7日間予報 + LLM短い要約、APIキー不要。</p>
+        </div>
+      </div>
+      <div class="usecase-card reveal reveal-delay-5">
+        <div class="usecase-num-badge">💬</div>
+        <div>
+          <h3>🚧 自然言語スキル生成</h3>
+          <p><code>kittypaw skill create "..."</code> → JSコード → goja syntax検証 (5/5 pass measured) → SkillStore保存。Runtime動作はパッケージごと。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SKILLS GALLERY
+============================================================ -->
+<section id="skills" class="skills-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">レジストリ</span>
+      <h2 class="section-title">現在レジストリにあるパッケージ</h2>
+      <p class="section-sub"><code>kittypaw skill install &lt;name&gt;</code> でインストール。statusはlive test基準。</p>
+    </div>
+    <div class="skills-grid">
+      <div class="skill-card reveal reveal-delay-1">
+        <span class="skill-icon">📈</span>
+        <h4>マクロ経済レポート</h4>
+        <p>ETF + AI要約</p>
+        <span class="skill-tag">✅ cron</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-2">
+        <span class="skill-icon">🌤</span>
+        <h4>天気ブリーフィング</h4>
+        <p>7日間予報 (Open-Meteo)</p>
+        <span class="skill-tag">✅ APIキー不要</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-3">
+        <span class="skill-icon">📰</span>
+        <h4>RSSニュース要約</h4>
+        <p>フィード + LLM要約</p>
+        <span class="skill-tag">✅ 重複フィルター</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-4">
+        <span class="skill-icon">⏰</span>
+        <h4>リマインダー</h4>
+        <p>チャットkeyword + cron</p>
+        <span class="skill-tag">🚧 partial</span>
+      </div>
+      <div class="skill-card reveal reveal-delay-5">
+        <span class="skill-icon">🔍</span>
+        <h4>URLモニター</h4>
+        <p>HTTPチェック + 状態変更alert</p>
+        <span class="skill-tag">✅ 5分周期</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     TECH STACK
+============================================================ -->
+<section id="tech" class="tech-section section-full">
+  <div class="section section-center" style="padding-top: 0; padding-bottom: 0;">
+    <div class="reveal">
+      <span class="section-eyebrow">技術スタック</span>
+      <h2 class="section-title">Goのみ — 外部ランタイム0</h2>
+      <p class="section-sub">単一バイナリ。npm / Node / Python依存なし。20 SQLite migrations、159 commits 進行中。</p>
+    </div>
+    <div class="tech-grid">
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🐹</div>
+        <div>
+          <div class="tech-card-name">Go</div>
+          <div class="tech-card-desc">シングルバイナリ · 高パフォーマンス</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">🖥</div>
+        <div>
+          <div class="tech-card-name">Web UI</div>
+          <div class="tech-card-desc">Chi + WebSocketストリーミング</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-3">
+        <div class="tech-badge">🔐</div>
+        <div>
+          <div class="tech-card-name">goja Sandbox</div>
+          <div class="tech-card-desc">安全なスキル実行</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-4">
+        <div class="tech-badge">🤖</div>
+        <div>
+          <div class="tech-card-name">Claude + OpenAI</div>
+          <div class="tech-card-desc">マルチLLM対応</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-5">
+        <div class="tech-badge">🗄</div>
+        <div>
+          <div class="tech-card-name">SQLite</div>
+          <div class="tech-card-desc">ローカルデータ保存</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-6">
+        <div class="tech-badge">🔑</div>
+        <div>
+          <div class="tech-card-name">per-account secrets.json</div>
+          <div class="tech-card-desc">account別分離保存</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-1">
+        <div class="tech-badge">🛡</div>
+        <div>
+          <div class="tech-card-name">Permissionシステム</div>
+          <div class="tech-card-desc">承認ベースのアクセス制御</div>
+        </div>
+      </div>
+      <div class="tech-card reveal reveal-delay-2">
+        <div class="tech-badge">📦</div>
+        <div>
+          <div class="tech-card-name">TOMLパッケージ</div>
+          <div class="tech-card-desc">スキル配布フォーマット</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="footer-links">
+    <span>🐾 KittyPaw</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/kittypaw">GitHub</a>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/kittypaw-app/skills">スキルレジストリ</a>
+    <span class="footer-sep">·</span>
+    <span>Elastic License 2.0</span>
+  </div>
+</footer>
+
+<!-- Scroll animation (progressive enhancement) -->
+<script src="../main.js"></script>
+
+</body>
+</html>

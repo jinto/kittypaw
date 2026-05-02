@@ -1,0 +1,56 @@
+{
+  "default": {
+    "thresholds": {
+      "clarify": 1.5,
+      "install_chitchat": 1.5,
+      "install_explicit_request": 1.5,
+      "installed_dispatch": 1.5,
+      "intent_aligned": 1.5,
+      "browse": 1.5,
+      "multimatch": 1.5
+    },
+    "behaviors": {
+      "clarify": [
+        "clarifies_ambiguous_currency",
+        "avoids_rate_fabrication"
+      ],
+      "install_chitchat": [
+        "exchange_rate_data",
+        "skill_install_acknowledged",
+        "helpful_chitchat_after_success"
+      ],
+      "install_explicit_request": [
+        "clarifies_ambiguous_currency",
+        "explicit_install_request_completes",
+        "exchange_rate_data"
+      ],
+      "installed_dispatch": [
+        "exchange_rate_data",
+        "no_repeated_install_offer"
+      ],
+      "intent_aligned": [
+        "exchange_rate_data",
+        "krw_reframed_response",
+        "avoids_rate_fabrication"
+      ],
+      "browse": [
+        "browses_available_skills"
+      ],
+      "multimatch": [
+        "asks_choice_for_news_multimatch"
+      ]
+    }
+  },
+  "anthropic": {
+    "thresholds": {},
+    "behaviors": {}
+  },
+  "openai": {
+    "thresholds": {},
+    "behaviors": {}
+  },
+  "gemini": {
+    "thresholds": {},
+    "behaviors": {}
+  }
+}

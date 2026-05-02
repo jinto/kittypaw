@@ -1,0 +1,8 @@
+{"id":"vague-001","input":"엔화는?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","주신 결과","공유해주신","검색 결과에는","the result you provided","I searched"],"notes":"환율 / 일본어 학습 / 일본 여행 환전 중 어느 쪽? 가장 plausible (환율) 짚어 confirm 가능"}
+{"id":"vague-002","input":"내일?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","주신 결과","검색 결과에는","I searched"],"notes":"시간 reference 의 무엇 — 날씨 / 일정 / 뉴스?"}
+{"id":"vague-003","input":"그건?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"지시어 — 직전 context 필요. 비서답다면 '어떤 것을 말씀하시는지' 되묻거나 turn history 짚음"}
+{"id":"vague-004","input":"왜?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"맥락 부재"}
+{"id":"vague-005","input":"할인?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"도메인 모호 — 쇼핑 / 항공 / 보험?"}
+{"id":"vague-006","input":"방법?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"무엇의 방법?"}
+{"id":"vague-007","input":"오늘은?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"날씨 / 일정 / 뉴스 / 운세?"}
+{"id":"vague-008","input":"좋은가요?","category":"vague","expected_behaviors":["clarify_intent","first_person"],"antipatterns":["제공해주신","검색 결과에는"],"notes":"무엇이 좋은가? 평가 대상 부재"}

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  KittyPaw per-user LaunchAgent template.
+
+  launchd does NOT expand "~" or "$HOME" inside plist values, so the install
+  script (dist/macos/install.sh) substitutes the two tokens below before
+  copying this file to ~/Library/LaunchAgents/dev.kittypaw.daemon.plist:
+
+    __KITTYPAW_BIN__     absolute path to the kittypaw binary
+    __USER_HOME__        absolute path to the current user's home directory
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.kittypaw.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__KITTYPAW_BIN__</string>
+        <string>server</string>
+        <string>start</string>
+        <string>--bind</string>
+        <string>127.0.0.1:3000</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>KITTYPAW_CONFIG_DIR</key>
+        <string>__USER_HOME__/.kittypaw</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart on abnormal exit; don't loop on clean exits. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__USER_HOME__/.kittypaw/logs/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__USER_HOME__/.kittypaw/logs/stderr.log</string>
+
+    <!-- Lightweight per-process limits (launchd enforces these softly). -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>

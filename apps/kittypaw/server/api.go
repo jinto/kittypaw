@@ -1,0 +1,1207 @@
+package server
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
+)
+
+var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
+
+// ---------------------------------------------------------------------------
+// JSON helpers
+// ---------------------------------------------------------------------------
+
+// writeJSON serializes v as JSON with the given status code.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("writeJSON encode", "error", err)
+	}
+}
+
+// writeError writes a structured {"error": msg} response.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// decodeBody deserializes the request body into dst and reports errors.
+// Limits request body to 1 MB to prevent memory exhaustion.
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
+// GET /health
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	s.configMu.RLock()
+	cfg := s.config
+	s.configMu.RUnlock()
+
+	channels := make([]string, 0, len(cfg.Channels))
+	for _, ch := range cfg.Channels {
+		channels = append(channels, string(ch.ChannelType))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"version":  s.version,
+		"model":    cfg.LLM.Model,
+		"channels": channels,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/status
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	stats, err := s.store.TodayStats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_runs":   stats.TotalRuns,
+		"successful":   stats.Successful,
+		"failed":       stats.Failed,
+		"auto_retries": stats.AutoRetries,
+		"total_tokens": stats.TotalTokens,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/executions
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleExecutions(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	skill := r.URL.Query().Get("skill")
+	if skill != "" && !safeSkillName.MatchString(skill) {
+		writeError(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+
+	var (
+		execs any
+		err   error
+	)
+	if skill != "" {
+		execs, err = s.store.SearchExecutions(skill, limit)
+	} else {
+		execs, err = s.store.RecentExecutions(limit)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if execs == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"executions": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"executions": execs})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/agents
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleAgents(w http.ResponseWriter, _ *http.Request) {
+	agents, err := s.store.ListAgents()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if agents == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"agents": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/skills
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkills(w http.ResponseWriter, _ *http.Request) {
+	skills, err := core.LoadAllSkillsFrom(s.session.BaseDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	type skillItem struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Enabled     bool   `json:"enabled"`
+		Version     uint32 `json:"version"`
+		Trigger     string `json:"trigger"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+	}
+	items := make([]skillItem, 0, len(skills))
+	for _, s := range skills {
+		items = append(items, skillItem{
+			Name:        s.Skill.Name,
+			Description: s.Skill.Description,
+			Enabled:     s.Skill.Enabled,
+			Version:     s.Skill.Version,
+			Trigger:     s.Skill.Trigger.Type,
+			CreatedAt:   s.Skill.CreatedAt,
+			UpdatedAt:   s.Skill.UpdatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"skills": items})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/run
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillsRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	// Build a synthetic event that triggers the named skill.
+	payload := core.ChatPayload{
+		ChatID: "api",
+		Text:   "/run " + body.Name,
+	}
+	raw, _ := json.Marshal(payload)
+	event := core.Event{Type: core.EventWebChat, Payload: raw}
+
+	output, err := s.session.Run(r.Context(), event, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"output": output})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/teach
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillsTeach(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Description string `json:"description"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Description == "" {
+		writeError(w, http.StatusBadRequest, "description is required")
+		return
+	}
+
+	result, err := engine.HandleTeach(r.Context(), body.Description, "api", s.session)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/teach/approve
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleTeachApprove(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Code        string `json:"code"`
+		Trigger     string `json:"trigger"`
+		Schedule    string `json:"schedule"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Name == "" || body.Code == "" {
+		writeError(w, http.StatusBadRequest, "name and code are required")
+		return
+	}
+
+	trigger := body.Trigger
+	if trigger == "" {
+		trigger = "manual"
+	}
+	validTriggers := map[string]bool{"manual": true, "schedule": true, "keyword": true, "once": true, "natural": true}
+	if !validTriggers[trigger] {
+		writeError(w, http.StatusBadRequest, "invalid trigger type: "+trigger)
+		return
+	}
+	// Validate syntax before saving — don't trust client-supplied code.
+	ok, syntaxErr := engine.SyntaxCheck(r.Context(), body.Code, nil)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "syntax check failed: "+syntaxErr)
+		return
+	}
+
+	result := &engine.TeachResult{
+		SkillName:   body.Name,
+		Code:        body.Code,
+		SyntaxOK:    true,
+		Description: body.Description,
+		Trigger:     core.SkillTrigger{Type: trigger, Cron: body.Schedule},
+		Permissions: engine.DetectPermissions(body.Code),
+	}
+	if err := engine.ApproveSkill(s.session.BaseDir, result); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "name": body.Name})
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/skills/{name}
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillsDelete(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := core.DeleteSkillFrom(s.session.BaseDir, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/{name}/enable
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillEnable(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := core.EnableSkillFrom(s.session.BaseDir, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/{name}/disable
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillDisable(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := core.DisableSkillFrom(s.session.BaseDir, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/skills/{name}/explain
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSkillExplain(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	skill, code, err := core.LoadSkillFrom(s.session.BaseDir, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if skill == nil {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	// Ask the LLM to explain the skill.
+	prompt := "Explain the following JavaScript skill in plain language.\n\nName: " + skill.Name +
+		"\nDescription: " + skill.Description +
+		"\nCode:\n```js\n" + code + "\n```"
+
+	messages := []core.LlmMessage{
+		{Role: core.RoleUser, Content: prompt},
+	}
+	resp, err := s.session.Provider.Generate(r.Context(), messages)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"name":        skill.Name,
+		"explanation": resp.Content,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/chat
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Text      string `json:"text"`
+		SessionID string `json:"session_id"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Text == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+
+	sessionID := body.SessionID
+	if sessionID == "" {
+		sessionID = "api"
+	}
+
+	payload := core.ChatPayload{
+		ChatID:    sessionID,
+		Text:      body.Text,
+		SessionID: sessionID,
+	}
+	raw, _ := json.Marshal(payload)
+	event := core.Event{Type: core.EventWebChat, Payload: raw}
+
+	output, err := s.session.Run(r.Context(), event, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"response": output})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/config/check
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleConfigCheck(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"channels":       len(s.config.Channels),
+		"agents":         len(s.config.Agents),
+		"models":         len(s.config.Models),
+		"mcp_servers":    len(s.config.MCPServers),
+		"profiles":       len(s.config.Profiles),
+		"autonomy_level": string(s.config.AutonomyLevel),
+		"features": map[string]any{
+			"progressive_retry":  s.config.Features.ProgressiveRetry,
+			"context_compaction": s.config.Features.ContextCompaction,
+			"model_routing":      s.config.Features.ModelRouting,
+			"background_agents":  s.config.Features.BackgroundAgents,
+			"daily_token_limit":  s.config.Features.DailyTokenLimit,
+		},
+	})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/suggestions
+// ---------------------------------------------------------------------------
+
+// Suggestions are stored as user-context keys prefixed with "suggestion:".
+// Each value is a JSON blob with at minimum a skill_id and description.
+
+func (s *Server) handleSuggestionsList(w http.ResponseWriter, _ *http.Request) {
+	kvs, err := s.store.ListUserContextPrefix("suggestion:")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	type suggestion struct {
+		SkillID     string `json:"skill_id"`
+		Description string `json:"description"`
+	}
+	items := make([]suggestion, 0, len(kvs))
+	for _, kv := range kvs {
+		var sg suggestion
+		if err := json.Unmarshal([]byte(kv.Value), &sg); err != nil {
+			// Fall back: treat the entire value as a description.
+			sg = suggestion{SkillID: kv.Key, Description: kv.Value}
+		}
+		if sg.SkillID == "" {
+			sg.SkillID = kv.Key
+		}
+		items = append(items, sg)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": items})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/suggestions/{skill_id}/accept
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSuggestionsAccept(w http.ResponseWriter, r *http.Request) {
+	skillID := chi.URLParam(r, "skill_id")
+	if skillID == "" {
+		writeError(w, http.StatusBadRequest, "skill_id is required")
+		return
+	}
+
+	key := "suggestion:" + skillID
+	val, ok, err := s.store.GetUserContext(key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, "suggestion not found")
+		return
+	}
+
+	// Parse the suggestion so we can create the skill from it.
+	var sg struct {
+		Description string `json:"description"`
+		Code        string `json:"code"`
+		Trigger     string `json:"trigger"`
+	}
+	_ = json.Unmarshal([]byte(val), &sg)
+
+	if sg.Code != "" {
+		trigger := sg.Trigger
+		if trigger == "" {
+			trigger = "manual"
+		}
+		skill := &core.Skill{
+			Name:        skillID,
+			Version:     1,
+			Description: sg.Description,
+			Enabled:     true,
+			Format:      core.SkillFormatNative,
+			Trigger:     core.SkillTrigger{Type: trigger},
+		}
+		if err := core.SaveSkillTo(s.session.BaseDir, skill, sg.Code); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	// Remove the suggestion.
+	_, _ = s.store.DeleteUserContext(key)
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "skill_id": skillID})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/suggestions/{skill_id}/dismiss
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSuggestionsDismiss(w http.ResponseWriter, r *http.Request) {
+	skillID := chi.URLParam(r, "skill_id")
+	if skillID == "" {
+		writeError(w, http.StatusBadRequest, "skill_id is required")
+		return
+	}
+
+	key := "suggestion:" + skillID
+	deleted, err := s.store.DeleteUserContext(key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "suggestion not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/memory/search?q=...
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "q parameter is required")
+		return
+	}
+
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	results, err := s.store.SearchExecutions(q, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if results == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/agents/{id}/checkpoints
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCheckpointsList(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent id is required")
+		return
+	}
+
+	cps, err := s.store.ListCheckpoints(agentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if cps == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"checkpoints": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"checkpoints": cps})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/agents/{id}/checkpoints
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCheckpointsCreate(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent id is required")
+		return
+	}
+
+	var body struct {
+		Label string `json:"label"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.Label == "" {
+		writeError(w, http.StatusBadRequest, "label is required")
+		return
+	}
+
+	cpID, err := s.store.CreateCheckpoint(agentID, body.Label)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"success": true,
+		"id":      cpID,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/checkpoints/{id}/rollback
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCheckpointRollback(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	cpID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid checkpoint id")
+		return
+	}
+
+	deleted, err := s.store.RollbackToCheckpoint(cpID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":       true,
+		"turns_deleted": deleted,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/users/link
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleUsersLink(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		GlobalUserID  string `json:"global_user_id"`
+		Channel       string `json:"channel"`
+		ChannelUserID string `json:"channel_user_id"`
+	}
+	if !decodeBody(w, r, &body) {
+		return
+	}
+	if body.GlobalUserID == "" || body.Channel == "" || body.ChannelUserID == "" {
+		writeError(w, http.StatusBadRequest, "global_user_id, channel, and channel_user_id are required")
+		return
+	}
+	if err := s.store.LinkIdentity(body.GlobalUserID, body.Channel, body.ChannelUserID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/users/{id}/identities
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleUsersIdentities(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	if userID == "" {
+		writeError(w, http.StatusBadRequest, "user id is required")
+		return
+	}
+
+	ids, err := s.store.ListIdentities(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if ids == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"identities": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"identities": ids})
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/users/{id}/identities/{channel}
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "id")
+	channel := chi.URLParam(r, "channel")
+	if userID == "" || channel == "" {
+		writeError(w, http.StatusBadRequest, "user id and channel are required")
+		return
+	}
+	if err := s.store.UnlinkIdentity(userID, channel); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/reload
+// ---------------------------------------------------------------------------
+
+// handleReload reloads config.toml and reconciles each account's channel set.
+//
+// Load-bearing sync contract (pinned by TestHandleReload_WaitsForReconcile):
+// callers — notably cli/cmd_setup.maybeReloadDaemon → runChat — assume this
+// handler returns only AFTER spawner.Reconcile completes, so the subsequent
+// chat REPL connects to a server that already sees the new channel set. Do
+// NOT convert Reconcile to a goroutine without first updating the CLI
+// wiring AND TestHandleReload_WaitsForReconcile.
+//
+// Validation contract (symmetric with StartChannels and AddAccount): the
+// proposed config is checked against live accounts BEFORE any state swap.
+// A duplicate Telegram bot_token or a family account with channels is
+// rejected with 409 Conflict, leaving s.config and the spawner untouched.
+// Pinned by TestHandleReload_DuplicateTelegramToken_Rejects and
+// TestHandleReload_FamilyWithChannels_Rejects.
+//
+// Serialization contract: the entire validate→swap→reconcile sequence
+// runs under accountMu. Releasing the lock between snapshot and reconcile
+// would open a TOCTOU window where a concurrent AddAccount validates
+// against the stale default-account channel list, passes, and spawns a
+// duplicate bot that this reload was about to introduce.
+func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
+	defaultID := s.defaultAccountID()
+	cfgPath, err := core.ConfigPathForAccount(defaultID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reload failed: "+err.Error())
+		return
+	}
+	secrets, err := core.LoadAccountSecrets(defaultID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reload secrets failed: "+err.Error())
+		return
+	}
+	core.HydrateRuntimeSecrets(cfg, secrets)
+
+	s.accountMu.Lock()
+	defer s.accountMu.Unlock()
+
+	// Build the would-be-final snapshot (selected default account substituted with
+	// the proposed cfg, all other accounts as-is) and run the same two
+	// validators StartChannels / AddAccount do.
+	snapshot := make(map[string][]core.ChannelConfig, len(s.accountList)+1)
+	accounts := make([]*core.Account, 0, len(s.accountList)+1)
+	defaultSeen := false
+	for _, peer := range s.accountList {
+		if peer == nil || peer.Config == nil {
+			continue
+		}
+		if peer.ID == defaultID {
+			// Substitute a proposed copy so validators see the would-be-final
+			// state without mutating the live pointer.
+			proposedAccount := *peer
+			proposedCfg := *cfg
+			proposedAccount.Config = &proposedCfg
+			accounts = append(accounts, &proposedAccount)
+			snapshot[peer.ID] = accountChannelsForValidation(peer.ID, cfg.Channels, "")
+			defaultSeen = true
+		} else {
+			accounts = append(accounts, peer)
+			snapshot[peer.ID] = accountChannelsForValidation(peer.ID, peer.Config.Channels, "")
+		}
+	}
+	if !defaultSeen {
+		accounts = append(accounts, &core.Account{ID: defaultID, Config: cfg})
+		snapshot[defaultID] = accountChannelsForValidation(defaultID, cfg.Channels, "")
+	}
+
+	if err := core.ValidateAccountChannels(snapshot); err != nil {
+		slog.Error("reload rejected", "reason", "channel_duplicate", "error", err)
+		writeError(w, http.StatusConflict, "channel validation: "+err.Error())
+		return
+	}
+	if err := core.ValidateFamilyAccounts(accounts); err != nil {
+		slog.Error("reload rejected", "reason", "family_with_channels", "error", err)
+		writeError(w, http.StatusConflict, "family validation: "+err.Error())
+		return
+	}
+
+	// Swap the live config under configMu so HTTP handlers reading via
+	// getConfig() see a consistent snapshot. The session shares this
+	// pointer and picks up new values on the next Run().
+	s.configMu.Lock()
+	*s.config = *cfg
+	s.configMu.Unlock()
+	slog.Info("config reloaded")
+
+	result := map[string]any{"success": true}
+	if reconcile := s.reconcileFunc(); reconcile != nil {
+		if err := reconcile(defaultID, cfg.Channels); err != nil {
+			slog.Warn("reload: channel reconcile partial failure", "error", err)
+			result["warnings"] = []string{err.Error()}
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// reconcileFunc returns the effective reconcile function: a test-injected
+// hook if set, otherwise the live spawner's Reconcile method, otherwise nil
+// (pre-StartChannels case, where reload is still safe but a no-op).
+func (s *Server) reconcileFunc() func(string, []core.ChannelConfig) error {
+	if s.reloadReconcile != nil {
+		return s.reloadReconcile
+	}
+	if s.spawner != nil {
+		return s.spawner.Reconcile
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/channels
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleChannels(w http.ResponseWriter, _ *http.Request) {
+	if s.spawner == nil {
+		writeJSON(w, http.StatusOK, []ChannelStatus{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.spawner.List())
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/install
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source string `json:"source"`
+		MdMode string `json:"md_mode"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.Source == "" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+
+	cfg := s.getConfig()
+	mdMode := req.MdMode
+	if mdMode == "" {
+		mdMode = cfg.SkillInstall.MdExecutionMode
+	}
+	if mdMode == "" {
+		mdMode = "prompt" // final fallback
+	}
+
+	// Determine if source is GitHub URL or local path.
+	var result *core.InstallResult
+	var err error
+
+	if owner, repo, parseErr := core.ParseGitHubURL(req.Source); parseErr == nil {
+		// GitHub URL — resolve source.
+		source, resolveErr := core.ResolveGitHubSource("https://raw.githubusercontent.com", owner, repo)
+		if resolveErr != nil {
+			writeError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+		// For native packages, install from temp dir.
+		if source.Format == core.SourceFormatNative {
+			defer os.RemoveAll(source.TempDir)
+			result, err = core.InstallSkillSource(s.session.BaseDir, source.TempDir, core.InstallOptions{
+				SourceURL: source.SourceURL,
+			})
+		} else {
+			// For SKILL.md, write to temp dir and install.
+			tmpDir, tmpErr := os.MkdirTemp("", "kittypaw-install-")
+			if tmpErr != nil {
+				writeError(w, http.StatusInternalServerError, tmpErr.Error())
+				return
+			}
+			defer os.RemoveAll(tmpDir)
+			if wErr := os.WriteFile(filepath.Join(tmpDir, "SKILL.md"), []byte(source.SkillMdContent), 0o644); wErr != nil {
+				writeError(w, http.StatusInternalServerError, wErr.Error())
+				return
+			}
+			result, err = core.InstallSkillSource(s.session.BaseDir, tmpDir, core.InstallOptions{
+				MdExecutionMode: mdMode,
+				SourceURL:       source.SourceURL,
+			})
+		}
+	} else {
+		// Local path — validate before passing to installer.
+		cleanPath := filepath.Clean(req.Source)
+		if !filepath.IsAbs(cleanPath) {
+			writeError(w, http.StatusBadRequest, "local install path must be absolute")
+			return
+		}
+		fi, statErr := os.Lstat(cleanPath)
+		if statErr != nil {
+			writeError(w, http.StatusBadRequest, "source path not found")
+			return
+		}
+		if !fi.IsDir() {
+			writeError(w, http.StatusBadRequest, "source path must be a directory")
+			return
+		}
+		result, err = core.InstallSkillSource(s.session.BaseDir, cleanPath, core.InstallOptions{
+			MdExecutionMode: mdMode,
+		})
+	}
+
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/search?q=...
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	keyword := r.URL.Query().Get("q")
+
+	cfg := s.getConfig()
+	registryURL := core.DefaultRegistryURL
+	if cfg.Registry.URL != "" {
+		registryURL = cfg.Registry.URL
+	}
+
+	rc, err := core.NewRegistryClient(registryURL)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "registry unavailable: " + err.Error()})
+		return
+	}
+
+	entries, err := rc.FetchIndex()
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "fetch registry: " + err.Error()})
+		return
+	}
+
+	results := core.SearchEntries(entries, keyword)
+	writeJSON(w, 200, map[string]any{"results": results})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/packages — list installed packages with config schema
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackagesList(w http.ResponseWriter, _ *http.Request) {
+	packages, err := s.pkgManager.ListInstalled()
+	if err != nil {
+		writeError(w, 500, "list packages: "+err.Error())
+		return
+	}
+
+	type pkgResp struct {
+		Meta         core.PackageMeta  `json:"meta"`
+		ConfigSchema []configFieldDTO  `json:"config_schema"`
+		ConfigValues map[string]string `json:"config_values"`
+	}
+
+	var result []pkgResp
+	for _, pkg := range packages {
+		vals, _ := s.pkgManager.GetConfig(pkg.Meta.ID)
+		schema := configFieldsToDTO(pkg.Config)
+		masked := maskSecrets(pkg.Config, vals)
+		result = append(result, pkgResp{
+			Meta:         pkg.Meta,
+			ConfigSchema: schema,
+			ConfigValues: masked,
+		})
+	}
+	if result == nil {
+		result = []pkgResp{}
+	}
+	writeJSON(w, 200, map[string]any{"packages": result})
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/packages/{id} — package detail with README
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageDetail(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+
+	pkg, _, err := s.pkgManager.LoadPackage(id)
+	if err != nil {
+		writeError(w, 404, "package not found: "+err.Error())
+		return
+	}
+
+	vals, _ := s.pkgManager.GetConfig(id)
+	schema := configFieldsToDTO(pkg.Config)
+	masked := maskSecrets(pkg.Config, vals)
+
+	// Read README if available.
+	var readme string
+	pkgDir, dirErr := core.PackagesDirFrom(s.session.BaseDir)
+	if dirErr == nil {
+		if data, readErr := os.ReadFile(filepath.Join(pkgDir, id, "README.md")); readErr == nil {
+			readme = string(data)
+		}
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"meta":          pkg.Meta,
+		"config_schema": schema,
+		"config_values": masked,
+		"permissions":   pkg.Permissions,
+		"readme":        readme,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/packages/{id}/config — batch set config values
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageConfigSet(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+
+	var req struct {
+		Values map[string]string `json:"values"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if len(req.Values) == 0 {
+		writeError(w, 400, "values is required")
+		return
+	}
+
+	// Validate all keys exist before writing any.
+	pkg, _, err := s.pkgManager.LoadPackage(id)
+	if err != nil {
+		writeError(w, 404, "package not found: "+err.Error())
+		return
+	}
+
+	knownKeys := make(map[string]bool)
+	for _, f := range pkg.Config {
+		knownKeys[f.Key] = true
+	}
+	for k := range req.Values {
+		if !knownKeys[k] {
+			writeError(w, 400, "unknown config key: "+k)
+			return
+		}
+	}
+
+	for k, v := range req.Values {
+		if err := s.pkgManager.SetConfig(id, k, v); err != nil {
+			writeError(w, 500, "set config "+k+": "+err.Error())
+			return
+		}
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/v1/packages/{id} — uninstall a package
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageUninstall(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, 400, "package id is required")
+		return
+	}
+	if err := s.pkgManager.Uninstall(id); err != nil {
+		writeError(w, 500, "uninstall: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/packages/install-from-registry — install by registry ID
+// ---------------------------------------------------------------------------
+
+func (s *Server) handlePackageInstallFromRegistry(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string            `json:"id"`
+		Config map[string]string `json:"config"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.ID == "" {
+		writeError(w, 400, "id is required")
+		return
+	}
+
+	cfg := s.getConfig()
+	registryURL := core.DefaultRegistryURL
+	if cfg.Registry.URL != "" {
+		registryURL = cfg.Registry.URL
+	}
+
+	rc, err := core.NewRegistryClient(registryURL)
+	if err != nil {
+		writeError(w, 500, "registry unavailable: "+err.Error())
+		return
+	}
+
+	entry, err := rc.FindEntry(req.ID)
+	if err != nil {
+		writeError(w, 404, "package not found in registry: "+err.Error())
+		return
+	}
+
+	pkg, err := s.pkgManager.InstallFromRegistry(rc, *entry)
+	if err != nil {
+		writeError(w, 500, "install failed: "+err.Error())
+		return
+	}
+
+	// Set config values if provided.
+	for k, v := range req.Config {
+		if setErr := s.pkgManager.SetConfig(pkg.Meta.ID, k, v); setErr != nil {
+			slog.Warn("post-install config set failed", "package", pkg.Meta.ID, "key", k, "error", setErr)
+		}
+	}
+
+	writeJSON(w, 200, map[string]any{
+		"meta":          pkg.Meta,
+		"config_schema": configFieldsToDTO(pkg.Config),
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Package API helpers
+// ---------------------------------------------------------------------------
+
+// configFieldDTO is the JSON representation with resolved type.
+type configFieldDTO struct {
+	Key      string   `json:"key"`
+	Label    string   `json:"label"`
+	Type     string   `json:"type"`
+	Default  string   `json:"default,omitempty"`
+	Required bool     `json:"required"`
+	Options  []string `json:"options,omitempty"`
+	Source   string   `json:"source,omitempty"`
+}
+
+func configFieldsToDTO(fields []core.ConfigField) []configFieldDTO {
+	out := make([]configFieldDTO, len(fields))
+	for i, f := range fields {
+		out[i] = configFieldDTO{
+			Key:      f.Key,
+			Label:    f.Label,
+			Type:     f.ResolvedType(),
+			Default:  f.Default,
+			Required: f.Required,
+			Options:  f.Options,
+			Source:   f.Source,
+		}
+	}
+	return out
+}
+
+func maskSecrets(fields []core.ConfigField, vals map[string]string) map[string]string {
+	masked := make(map[string]string, len(vals))
+	for k, v := range vals {
+		masked[k] = v
+	}
+	for _, f := range fields {
+		if f.IsSecret() {
+			if v, ok := masked[f.Key]; ok && v != "" {
+				masked[f.Key] = "****"
+			}
+		}
+	}
+	return masked
+}
