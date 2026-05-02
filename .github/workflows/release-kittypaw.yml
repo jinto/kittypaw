@@ -185,7 +185,18 @@ jobs:
             fi
 
             tar czf "${WORKDIR}/${ASSET}" -C "$WORKDIR" kittypaw
+            VERIFYDIR="$(mktemp -d)"
+            tar xzf "${WORKDIR}/${ASSET}" -C "$VERIFYDIR"
+            codesign --verify --verbose "${VERIFYDIR}/kittypaw"
+            rm -rf "$VERIFYDIR"
+
             gh release upload "$TAG" "${WORKDIR}/${ASSET}" --clobber --repo "$REPO"
+
+            UPLOAD_VERIFY_DIR="$(mktemp -d)"
+            gh release download "$TAG" --pattern "$ASSET" --dir "$UPLOAD_VERIFY_DIR" --repo "$REPO"
+            tar xzf "${UPLOAD_VERIFY_DIR}/${ASSET}" -C "$UPLOAD_VERIFY_DIR"
+            codesign --verify --verbose "${UPLOAD_VERIFY_DIR}/kittypaw"
+            rm -rf "$UPLOAD_VERIFY_DIR"
 
             echo "=== ${ASSET} done ==="
             rm -rf "$WORKDIR"
