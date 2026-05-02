@@ -9,5 +9,13 @@ server {
   location / {
     proxy_pass http://kittyapi;
     include proxy_params;
+
+    # Strip headers that proxy_params does NOT canonicalize. Without
+    # these, an attacker could rotate True-Client-IP / X-Forwarded-For
+    # per request to bypass the anonymous rate limit. The kittyapi side
+    # only trusts X-Real-IP (which proxy_params overrides safely with
+    # $remote_addr); these resets are defense-in-depth.
+    proxy_set_header True-Client-IP "";
+    proxy_set_header X-Forwarded-For $remote_addr;
   }
 }

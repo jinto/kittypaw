@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 
@@ -50,7 +51,24 @@ func Middleware(limiter *Limiter) func(http.Handler) http.Handler {
 	}
 }
 
+// realIP returns the IP to key anonymous rate limits on. Only X-Real-IP is
+// trusted — nginx canonically overrides this header with the actual TCP
+// peer (`proxy_set_header X-Real-IP $remote_addr;` in the standard
+// proxy_params snippet). True-Client-IP and X-Forwarded-For are NOT
+// consulted: the same proxy_params either leaves True-Client-IP untouched
+// or *appends* the real peer to the end of X-Forwarded-For, both of which
+// leave attacker-supplied values at the head of the header. Trusting them
+// would let any caller rotate the rate-limit key per request.
+//
+// Without a reverse proxy (X-Real-IP unset), falls back to the host
+// portion of r.RemoteAddr (Go's TCP peer).
 func realIP(r *http.Request) string {
-	// Chi's RealIP middleware already sets RemoteAddr.
-	return r.RemoteAddr
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return v
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

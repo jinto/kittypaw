@@ -147,6 +147,38 @@ func TestTokenRefreshReuseDetection(t *testing.T) {
 	}
 }
 
+// TestTokenRefreshBodyTooLarge pins the body-size cap on
+// /auth/token/refresh. Without a MaxBytesReader, json.Decode happily
+// parses an arbitrarily large refresh_token string before the handler
+// even reaches the lookup — letting an unauthenticated caller burn
+// memory by streaming a multi-MB body. Cap is matched to the existing
+// /auth/cli/exchange handler (1 KiB) since both endpoints take a single
+// short opaque token in JSON.
+//
+// Verification mechanic: a 10 KiB body must be rejected at the body
+// reader (400 from the MaxBytesReader-wrapped Decode error), NOT at the
+// FindByHash step (which would 401 with "invalid refresh token"). The
+// distinction is what tells us the cap is the actual gate.
+func TestTokenRefreshBodyTooLarge(t *testing.T) {
+	h, _ := setupRefreshTest(t)
+
+	// Build a syntactically valid JSON whose refresh_token value is 10 KiB —
+	// would parse fine without the cap, then 401 on FindByHash lookup.
+	huge := make([]byte, 10*1024)
+	for i := range huge {
+		huge[i] = 'a'
+	}
+	body, _ := json.Marshal(map[string]string{"refresh_token": string(huge)})
+	req := httptest.NewRequest(http.MethodPost, "/auth/token/refresh", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	h.HandleTokenRefresh().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 (oversize body must trip MaxBytesReader before lookup), got %d", w.Code)
+	}
+}
+
 func TestTokenRefreshUnknown(t *testing.T) {
 	h, _ := setupRefreshTest(t)
 

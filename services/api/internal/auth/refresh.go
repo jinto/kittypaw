@@ -13,6 +13,7 @@ type refreshRequest struct {
 
 func (h *OAuthHandler) HandleTokenRefresh() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 		var req refreshRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
 			http.Error(w, "invalid request", http.StatusBadRequest)

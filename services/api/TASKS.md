@@ -362,6 +362,35 @@
 - JWKS public endpoint + RS256 마이그레이션
 - pairing flow (registration code)
 
+## Plan 18: 코드 리뷰 — Phase 1 보안 즉시 처치 ✅
+
+> Spec: `~/.claude/plans/silly-wiggling-balloon.md` (전체 7 phase 코드 리뷰 종합 계획, 사용자 결정 2026-05-02 ina:build 진입)
+> Goal: rate-limit 헤더 우회 차단 + /auth/token/refresh body size cap. Phase 2-7은 별도 PR.
+
+- [x] **P1-1**: `cmd/server/main.go:51`의 `chi.middleware.RealIP` 제거. `internal/ratelimit/middleware.go`의 `realIP()`가 X-Real-IP 헤더만 신뢰 (nginx canonical override) + fallback `r.RemoteAddr` host. 이유: chi RealIP는 True-Client-IP / X-Real-IP / X-Forwarded-For 순으로 신뢰하나, 표준 nginx `proxy_params`는 X-Real-IP만 override (True-Client-IP 미터치, X-Forwarded-For append) → 공격자가 헤더 회전으로 ratelimit 키 우회 가능했음.
+  - 신규 router-level 테스트 3건 (cmd/server/main_test.go): TrueClientIP/XForwardedFor 우회 시도 → 6번째 429 (RED→GREEN), X-Real-IP 정상 작동 (regression guard).
+  - `deploy/kittyapi.nginx`: defense-in-depth — `proxy_set_header True-Client-IP "";` + `proxy_set_header X-Forwarded-For $remote_addr;` (코드 측 잠금 + nginx 측 잠금 양쪽).
+- [x] **P1-3**: `internal/auth/refresh.go`의 `HandleTokenRefresh()`에 `MaxBytesReader(maxAuthBodyBytes=1024)` 추가. `/auth/cli/exchange` (cli.go:194)와 공유 const 추출 (`internal/auth/handler.go`).
+  - 신규 테스트 1건 (refresh_test.go): 10 KiB body → 400 (`MaxBytesReader` reject), NOT 401 (FindByHash miss).
+- [x] 리뷰: Lane B (Security OWASP) + Lane C (Simplify) 병렬. 적용된 fix-first — 주석 DRY (main.go ↔ middleware.go 중복 압축), `1024` 상수 추출 (`maxAuthBodyBytes`).
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` 전 패키지 PASS (회귀 0).
+
+**Operational Checklist** (이 PR 머지 후):
+- [ ] **fab deploy** — nginx 변경 반영. 미배포 상태에선 nginx defense-in-depth 미적용 (코드 측 잠금만 활성).
+- [ ] **`make smoke`** — 26/26 회귀 0 확인.
+- [ ] **수동 검증** — `curl -H 'True-Client-IP: 1.2.3.4' https://api.kittypaw.app/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01` 6회 → 6번째 429.
+
+**Follow-up (silly-wiggling-balloon Phase 2-7)**:
+- [ ] **Phase 2** (graceful shutdown + slog 도입) — 별도 ina:build kickoff
+- [ ] **Phase 3** (JWT claims에 email/name 박제 → middleware DB 조회 제거)
+- [ ] **Phase 4** (인메모리 store 통합: cache + state + cli_code → generic ttl.Store)
+- [ ] **Phase 5** (5개 proxy handler 통합 — TASKS.md D4 follow-up과 정합, KMA + AirKorea까지 확장)
+- [ ] **Phase 6** (OAuth Provider interface 추출 — google + github 통합)
+- [ ] **Phase 7** (운영 강화: JWT secret rotation, cache/ratelimit max-entries, CLI exchange 401 burst cool-down, seed-wikidata 분할)
+- [ ] **마이크로 follow-up**: IPv6 형태 r.RemoteAddr fallback 보강 (`net.ParseIP` + bracket strip) — 운영 영향 극미하나 깔끔함
+- [ ] **테스트 인프라 flake**: `make test-integration` 이 패키지 병렬 실행 (`go test -p`)으로 인해 model 패키지 마이그레이션과 proxy/places_integration_test 가 race. `setupGeoIntegration` 이 마이그레이션을 적용하지 않고 model 테스트가 적용한 결과에 의존. 임시 회피: `-p 1` 또는 model 먼저 실행. 본질 fix: `setupGeoIntegration` 자체 마이그레이션 적용 또는 packages 간 dependency 명시.
+
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 

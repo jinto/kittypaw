@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -160,6 +161,122 @@ func TestAlmanacRouteWiredWithRateLimit(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429 on 6th call, got %d", w.Code)
+	}
+}
+
+// TestRouter_TrueClientIPHeaderDoesNotBypassRateLimit pins the rate-limit
+// key against client-supplied headers. chi.middleware.RealIP trusted the
+// True-Client-IP / X-Real-IP / X-Forwarded-For headers and overwrote
+// r.RemoteAddr — but standard nginx proxy_params only override X-Real-IP
+// (it appends to X-Forwarded-For and ignores True-Client-IP), leaving the
+// attacker-supplied value at index 0 and letting them rotate the rate-limit
+// key per request. The fix: trust only X-Real-IP (which nginx canonically
+// overrides) and otherwise fall back to the actual TCP peer (r.RemoteAddr).
+func TestRouter_TrueClientIPHeaderDoesNotBypassRateLimit(t *testing.T) {
+	r := testRouter()
+
+	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
+	const peer = "192.0.2.71:1234"
+
+	// Five anonymous calls from the same TCP peer, each rotating the
+	// True-Client-IP header — would defeat the limit if the middleware
+	// trusted the header.
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = peer
+		req.Header.Set("True-Client-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d unexpectedly throttled: %d", i+1, w.Code)
+		}
+	}
+
+	// 6th call from the same peer (rotated header again) must trip the
+	// limiter — the rate-limit key follows the TCP peer, not the header.
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.RemoteAddr = peer
+	req.Header.Set("True-Client-IP", "198.51.100.99")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th call (True-Client-IP rotation must not bypass), got %d", w.Code)
+	}
+}
+
+// TestRouter_XForwardedForHeaderDoesNotBypassRateLimit pins the same
+// guarantee for the X-Forwarded-For header. nginx proxy_params APPENDS the
+// real peer to any client-supplied X-Forwarded-For, leaving the attacker
+// value at index 0 — which chi.RealIP took as the canonical IP.
+func TestRouter_XForwardedForHeaderDoesNotBypassRateLimit(t *testing.T) {
+	r := testRouter()
+
+	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
+	const peer = "192.0.2.72:1234"
+
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d, 10.0.0.1", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d unexpectedly throttled: %d", i+1, w.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.RemoteAddr = peer
+	req.Header.Set("X-Forwarded-For", "198.51.100.99, 10.0.0.1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th call (X-Forwarded-For rotation must not bypass), got %d", w.Code)
+	}
+}
+
+// TestRouter_XRealIPHeaderTrustedForRateLimit pins the dual side: the
+// X-Real-IP header IS trusted because nginx canonically overrides it
+// (proxy_set_header X-Real-IP $remote_addr;). Without this, all anonymous
+// traffic behind nginx would share the loopback IP key and trip the limit
+// after 5 total requests across the entire user base.
+func TestRouter_XRealIPHeaderTrustedForRateLimit(t *testing.T) {
+	r := testRouter()
+
+	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
+	const nginxPeer = "127.0.0.1:8443"
+
+	// Five distinct end users (different X-Real-IP) all coming through the
+	// same nginx loopback — each must get their own bucket.
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = nginxPeer
+		req.Header.Set("X-Real-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("user %d throttled — distinct X-Real-IP must get distinct buckets", i+1)
+		}
+	}
+
+	// And the 6th request from the SAME X-Real-IP must trip the limit
+	// (proves we actually used the header, not just ignored it). The
+	// outer loop above already populated 5 distinct user buckets; here
+	// we top up bucket 198.51.100.42 with 5 hits, then assert the 6th.
+	const samePeer = "198.51.100.42"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.RemoteAddr = nginxPeer
+		req.Header.Set("X-Real-IP", samePeer)
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.RemoteAddr = nginxPeer
+	req.Header.Set("X-Real-IP", samePeer)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th X-Real-IP=%s call, got %d", samePeer, w.Code)
 	}
 }
 

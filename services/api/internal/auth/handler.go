@@ -12,6 +12,13 @@ import (
 const (
 	AccessTokenTTL  = 15 * time.Minute
 	RefreshTokenTTL = 7 * 24 * time.Hour
+
+	// maxAuthBodyBytes caps the JSON request body for endpoints that take
+	// a single short opaque token (refresh token, CLI exchange code).
+	// Without this, an unauthenticated caller can stream a multi-MB body
+	// before the handler rejects the lookup. Values fit comfortably:
+	// refresh tokens are 43-char base64, CLI codes are 8 chars + dash.
+	maxAuthBodyBytes = 1024
 )
 
 type TokenResponse struct {

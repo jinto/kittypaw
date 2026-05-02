@@ -48,7 +48,9 @@ func main() {
 func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, placeStore model.PlaceStore) *chi.Mux {
 	r := chi.NewRouter()
 
-	r.Use(middleware.RealIP)
+	// chi.middleware.RealIP intentionally omitted — it trusts attacker-
+	// rotatable headers (True-Client-IP / X-Forwarded-For). Trust model
+	// lives in ratelimit.realIP() — see that function's doc comment.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{

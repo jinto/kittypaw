@@ -191,7 +191,7 @@ func (h *OAuthHandler) HandleCLICallback(cfg CLILoginConfig) http.HandlerFunc {
 // POST /auth/cli/exchange  {"code": "XXXX-YYYY"}
 func (h *OAuthHandler) HandleCLIExchange(cfg CLILoginConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1024)
+		r.Body = http.MaxBytesReader(w, r.Body, maxAuthBodyBytes)
 		var req struct {
 			Code string `json:"code"`
 		}
