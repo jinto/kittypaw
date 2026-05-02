@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -36,6 +39,7 @@ type chatTUIOptions struct {
 	Send        func(chatTurn) tea.Cmd
 	NewTurnID   func() string
 	HistoryPath string
+	CursorState *chatTUICursorState
 }
 
 type chatTUIModel struct {
@@ -56,6 +60,7 @@ type chatTUIModel struct {
 	send      func(chatTurn) tea.Cmd
 	newTurnID func() string
 	history   *chatInputHistory
+	cursor    *chatTUICursorState
 }
 
 func newChatTUIModel(opts chatTUIOptions) chatTUIModel {
@@ -64,6 +69,7 @@ func newChatTUIModel(opts chatTUIOptions) chatTUIModel {
 	input.Placeholder = ""
 	input.CharLimit = 0
 	input.Width = 80
+	input.SetCursorMode(textinput.CursorHide)
 	input.Focus()
 
 	send := opts.Send
@@ -84,11 +90,12 @@ func newChatTUIModel(opts chatTUIOptions) chatTUIModel {
 		send:       send,
 		newTurnID:  newTurnID,
 		history:    loadChatInputHistory(opts.HistoryPath),
+		cursor:     opts.CursorState,
 	}
 }
 
 func (m chatTUIModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.ShowCursor
 }
 
 func (m chatTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -137,6 +144,7 @@ func (m chatTUIModel) View() string {
 	}
 
 	footer := m.footerView()
+	m.trackTerminalCursor()
 	return header + "\n" + m.viewport.View() + "\n" + footer
 }
 
@@ -226,6 +234,116 @@ func (m *chatTUIModel) refreshViewport() {
 func (m chatTUIModel) footerView() string {
 	line := strings.Repeat("-", max(0, m.width))
 	return line + "\n" + m.input.View()
+}
+
+func (m chatTUIModel) trackTerminalCursor() {
+	if m.cursor == nil || !m.ready {
+		return
+	}
+	m.cursor.setPosition(m.height, chatInputCursorColumn(m.input))
+}
+
+func chatInputCursorColumn(input textinput.Model) int {
+	value := []rune(input.Value())
+	pos := input.Position()
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(value) {
+		pos = len(value)
+	}
+
+	start := 0
+	if input.Width > 0 && runewidth.StringWidth(string(value)) > input.Width {
+		start = chatInputVisibleStart(value, pos, input.Width)
+	}
+	beforeCursor := string(value[start:pos])
+	return runewidth.StringWidth(input.Prompt) + runewidth.StringWidth(beforeCursor) + 1
+}
+
+func chatInputVisibleStart(value []rune, pos, width int) int {
+	if pos <= 0 || width <= 0 {
+		return 0
+	}
+	used := 0
+	for i := pos - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(value[i])
+		if used+rw > width {
+			return i + 1
+		}
+		used += rw
+	}
+	return 0
+}
+
+type chatTUICursorState struct {
+	mu     sync.Mutex
+	row    int
+	col    int
+	active bool
+}
+
+func (s *chatTUICursorState) setPosition(row, col int) {
+	if s == nil {
+		return
+	}
+	if row < 1 {
+		row = 1
+	}
+	if col < 1 {
+		col = 1
+	}
+	s.mu.Lock()
+	s.row = row
+	s.col = col
+	s.active = true
+	s.mu.Unlock()
+}
+
+func (s *chatTUICursorState) position() (int, int, bool) {
+	if s == nil {
+		return 0, 0, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.row, s.col, s.active
+}
+
+func (s *chatTUICursorState) sequence() string {
+	row, col, ok := s.position()
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("\x1b[?25h\x1b[%d;%dH", row, col)
+}
+
+type chatTUICursorWriter struct {
+	out    io.Writer
+	file   *os.File
+	cursor *chatTUICursorState
+}
+
+func (w *chatTUICursorWriter) Write(p []byte) (int, error) {
+	n, err := w.out.Write(p)
+	if err != nil || n != len(p) {
+		return n, err
+	}
+	if !bytes.Contains(p, []byte("\n")) {
+		return n, nil
+	}
+	if seq := w.cursor.sequence(); seq != "" {
+		if _, err := io.WriteString(w.out, seq); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func (w *chatTUICursorWriter) Fd() uintptr {
+	if w.file == nil {
+		return ^uintptr(0)
+	}
+	return w.file.Fd()
 }
 
 func formatChatTranscript(messages []chatMessage, width int) string {
@@ -407,12 +525,15 @@ func runInteractiveChatTUI(ctx context.Context, conn *client.DaemonConn, cs *cli
 	manager := &chatSessionManager{ctx: ctx, conn: conn, session: cs}
 	defer manager.Close()
 
+	cursorState := &chatTUICursorState{}
 	model := newChatTUIModel(chatTUIOptions{
 		Header:      header,
 		Warning:     warning,
 		Send:        manager.sendCmd,
 		HistoryPath: historyFile,
+		CursorState: cursorState,
 	})
-	_, err := tea.NewProgram(model, tea.WithAltScreen()).Run()
+	output := &chatTUICursorWriter{out: os.Stdout, file: os.Stdout, cursor: cursorState}
+	_, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithOutput(output)).Run()
 	return err
 }

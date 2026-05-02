@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -150,5 +151,64 @@ func TestChatTUIViewDoesNotExceedSmallTerminalHeight(t *testing.T) {
 	got := strings.Count(model.View(), "\n") + 1
 	if got != 5 {
 		t.Fatalf("small View line count = %d, want 5", got)
+	}
+}
+
+func TestChatTUIViewTracksTerminalCursorAtInputCursor(t *testing.T) {
+	cursor := &chatTUICursorState{}
+	model := newChatTUIModel(chatTUIOptions{
+		Header:      "KittyPaw chat",
+		CursorState: cursor,
+	})
+	model.setSize(40, 10)
+	model.input.SetValue("너는 누")
+
+	_ = model.View()
+
+	row, col, ok := cursor.position()
+	if !ok {
+		t.Fatal("cursor position was not tracked")
+	}
+	if row != 10 {
+		t.Fatalf("cursor row = %d, want 10", row)
+	}
+	if col != 13 {
+		t.Fatalf("cursor col = %d, want 13", col)
+	}
+}
+
+func TestChatTUICursorWriterAppendsCursorAfterRenderedFrame(t *testing.T) {
+	cursor := &chatTUICursorState{}
+	cursor.setPosition(10, 13)
+	var out bytes.Buffer
+	writer := &chatTUICursorWriter{out: &out, cursor: cursor}
+
+	n, err := writer.Write([]byte("frame\nline"))
+
+	if err != nil {
+		t.Fatalf("Write returned error: %v", err)
+	}
+	if n != len("frame\nline") {
+		t.Fatalf("Write returned n = %d, want %d", n, len("frame\nline"))
+	}
+	want := "frame\nline\x1b[?25h\x1b[10;13H"
+	if got := out.String(); got != want {
+		t.Fatalf("writer output = %q, want %q", got, want)
+	}
+}
+
+func TestChatTUICursorWriterLeavesControlWritesAlone(t *testing.T) {
+	cursor := &chatTUICursorState{}
+	cursor.setPosition(10, 13)
+	var out bytes.Buffer
+	writer := &chatTUICursorWriter{out: &out, cursor: cursor}
+
+	_, err := writer.Write([]byte("\x1b[?25l"))
+
+	if err != nil {
+		t.Fatalf("Write returned error: %v", err)
+	}
+	if got := out.String(); got != "\x1b[?25l" {
+		t.Fatalf("writer output = %q, want raw control write", got)
 	}
 }
