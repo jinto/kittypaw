@@ -1,0 +1,15 @@
+[Unit]
+Description=KittyChat — chat relay for local KittyPaw daemons
+After=network.target
+
+[Service]
+User={{SERVICE_USER}}
+Group={{SERVICE_GROUP}}
+WorkingDirectory={{REMOTE_DIR}}
+EnvironmentFile={{REMOTE_DIR}}/.env
+ExecStart={{REMOTE_DIR}}/kittychat
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: pre-commit run gitleaks
+    fmt:
+      glob: "*.go"
+      run: |
+        gofmt -w {staged_files}
+        git add {staged_files}
+    lint:
+      glob: "*.go"
+      run: |
+        if [ -f go.mod ]; then
+          golangci-lint run ./...
+        else
+          echo "go.mod not found; skipping golangci-lint"
+        fi
+
+commit-msg:
+  commands:
+    conventional:
+      run: |
+        msg=$(head -1 {1})
+        if ! echo "$msg" | grep -qE '^(feat|fix|refactor|perf|docs|chore|test|ci|build|merge)(\(.+\))?: .+'; then
+          echo "commit message must follow conventional commits: type(scope): description"
+          echo "  types: feat, fix, refactor, perf, docs, chore, test, ci, build, merge"
+          echo "  got: $msg"
+          exit 1
+        fi
