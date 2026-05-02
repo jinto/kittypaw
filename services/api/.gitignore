@@ -1,0 +1,30 @@
+# Binary
+kittypaw-api
+kittypaw-api-linux
+/server
+
+# Environment
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Profiling
+*.profraw
+*.prof
+
+# State
+.state/
+.ina/
+
+# Local data dumps (juso DB downloads, etc — never commit, ~1GB)
+tmp/
