@@ -96,8 +96,9 @@ func run() error {
 	userStore := model.NewUserStore(pool)
 	refreshStore := model.NewRefreshTokenStore(pool)
 	placeStore := model.NewPlaceStore(pool)
+	deviceStore := model.NewDeviceStore(pool)
 
-	router, cleanup := NewRouter(cfg, userStore, refreshStore, placeStore)
+	router, cleanup := NewRouter(cfg, userStore, refreshStore, deviceStore, placeStore)
 	defer cleanup()
 
 	srv := &http.Server{
@@ -150,7 +151,7 @@ func run() error {
 // cleanup when the server stops — main() defers it; tests use
 // t.Cleanup. Without this hook the goroutines leak past process
 // shutdown intent.
-func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, placeStore model.PlaceStore) (*chi.Mux, func()) {
+func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, deviceStore model.DeviceStore, placeStore model.PlaceStore) (*chi.Mux, func()) {
 	r := chi.NewRouter()
 
 	// chi.middleware.RealIP intentionally omitted — it trusts attacker-
@@ -176,22 +177,25 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// audience pinned to AudienceAPI — user JWTs only. cross-audience
 	// leak guard (device JWT with aud=chat) lives in auth.Verify.
 	authMW := auth.Middleware(jwksProvider, auth.AudienceAPI, userStore)
-	r.Use(authMW)
 
-	// Rate limiting — after auth MW so it knows if user is authenticated.
+	// Rate limiter (used after authMW).
 	limiter := ratelimit.New()
-	r.Use(ratelimit.Middleware(limiter))
 
-	// OAuth handler.
+	// OAuth handler — wired here (before route registration) so the
+	// device refresh route can be registered Authorization-free below.
 	states := auth.NewStateStore()
 	oauthHandler := &auth.OAuthHandler{
 		UserStore:         userStore,
 		RefreshTokenStore: refreshStore,
+		DeviceStore:       deviceStore,
 		StateStore:        states,
 		JWTPrivateKey:     cfg.JWTPrivateKey,
 		JWTKID:            cfg.JWTKID,
 		HTTPClient:        &http.Client{Timeout: 10 * time.Second},
 	}
+
+	// CLI OAuth for kittypaw login (HTTP callback + code-paste modes).
+	cliCodes := auth.NewCLICodeStore()
 
 	googleCfg := auth.GoogleConfig{
 		ClientID:     cfg.GoogleClientID,
@@ -246,67 +250,92 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		discovery["chat_relay_url"] = cfg.ChatRelayURL
 	}
 
-	// Routes.
-	r.Get("/health", handleHealth)
-	r.Get("/.well-known/jwks.json", auth.HandleJWKS(jwksProvider))
-	r.Get("/discovery", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(discovery); err != nil {
-			slog.Error("encode discovery", "err", err)
+	// Routes split into two chi.Groups (Plan 23 PR-D 결정 3):
+	//
+	//   Group 1: Authorization-FREE — device refresh only. Sits outside
+	//     authMW so a daemon's stale Authorization header (e.g. revoked
+	//     device JWT with aud=chat) can't trip the user-aud middleware
+	//     and 401 before the handler ever runs. The opaque refresh
+	//     token in the body is the credential.
+	//
+	//   Group 2: authMW + rate-limit — every other route. Anonymous
+	//     callers fall through (User=nil in context); auth'd callers
+	//     get *User populated.
+	//
+	// chi requires Use() before any route registration on a mux, so
+	// the split MUST be expressed via Groups (not via positional Use()).
+	r.Group(func(r chi.Router) {
+		r.Post("/auth/devices/refresh", oauthHandler.HandleDeviceRefresh())
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(authMW)
+		r.Use(ratelimit.Middleware(limiter))
+
+		r.Get("/health", handleHealth)
+		r.Get("/.well-known/jwks.json", auth.HandleJWKS(jwksProvider))
+		r.Get("/discovery", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(discovery); err != nil {
+				slog.Error("encode discovery", "err", err)
+			}
+		})
+
+		cliCfg := auth.CLILoginConfig{
+			GoogleCfg: googleCfg,
+			CodeStore: cliCodes,
+			BaseURL:   cfg.BaseURL,
 		}
-	})
+		r.Route("/auth", func(r chi.Router) {
+			r.Get("/google", oauthHandler.HandleGoogleLogin(googleCfg))
+			r.Get("/google/callback", oauthHandler.HandleGoogleCallback(googleCfg))
+			r.Get("/github", oauthHandler.HandleGitHubLogin(githubCfg))
+			r.Get("/github/callback", oauthHandler.HandleGitHubCallback(githubCfg))
+			r.Post("/token/refresh", oauthHandler.HandleTokenRefresh())
+			r.Get("/me", auth.HandleMe)
 
-	// CLI OAuth for kittypaw login (HTTP callback + code-paste modes).
-	cliCodes := auth.NewCLICodeStore()
-	cliCfg := auth.CLILoginConfig{
-		GoogleCfg: googleCfg,
-		CodeStore: cliCodes,
-		BaseURL:   cfg.BaseURL,
-	}
+			// CLI OAuth routes.
+			r.Get("/cli/{provider}", oauthHandler.HandleCLILogin(cliCfg))
+			r.Get("/cli/callback", oauthHandler.HandleCLICallback(cliCfg))
+			r.Post("/cli/exchange", oauthHandler.HandleCLIExchange(cliCfg))
 
-	r.Route("/auth", func(r chi.Router) {
-		r.Get("/google", oauthHandler.HandleGoogleLogin(googleCfg))
-		r.Get("/google/callback", oauthHandler.HandleGoogleCallback(googleCfg))
-		r.Get("/github", oauthHandler.HandleGitHubLogin(githubCfg))
-		r.Get("/github/callback", oauthHandler.HandleGitHubCallback(githubCfg))
-		r.Post("/token/refresh", oauthHandler.HandleTokenRefresh())
-		r.Get("/me", auth.HandleMe)
+			// Device endpoints (Plan 23 PR-D). Refresh is registered
+			// outside authMW above; pair/list/delete require user JWT.
+			r.Post("/devices/pair", oauthHandler.HandlePair())
+			r.Get("/devices", oauthHandler.HandleDevicesList())
+			r.Delete("/devices/{id}", oauthHandler.HandleDeviceDelete())
+		})
 
-		// CLI OAuth routes.
-		r.Get("/cli/{provider}", oauthHandler.HandleCLILogin(cliCfg))
-		r.Get("/cli/callback", oauthHandler.HandleCLICallback(cliCfg))
-		r.Post("/cli/exchange", oauthHandler.HandleCLIExchange(cliCfg))
-	})
+		r.Route("/v1/air/airkorea", func(r chi.Router) {
+			r.Get("/realtime/station", airKorea.RealtimeByStation())
+			r.Get("/realtime/city", airKorea.RealtimeByCity())
+			r.Get("/forecast", airKorea.Forecast())
+			r.Get("/forecast/weekly", airKorea.WeeklyForecast())
+			r.Get("/unhealthy", airKorea.UnhealthyStations())
+		})
 
-	r.Route("/v1/air/airkorea", func(r chi.Router) {
-		r.Get("/realtime/station", airKorea.RealtimeByStation())
-		r.Get("/realtime/city", airKorea.RealtimeByCity())
-		r.Get("/forecast", airKorea.Forecast())
-		r.Get("/forecast/weekly", airKorea.WeeklyForecast())
-		r.Get("/unhealthy", airKorea.UnhealthyStations())
-	})
+		r.Route("/v1/calendar", func(r chi.Router) {
+			r.Get("/holidays", holiday.Holidays())
+			r.Get("/anniversaries", holiday.Anniversaries())
+			r.Get("/solar-terms", holiday.SolarTerms())
+		})
 
-	r.Route("/v1/calendar", func(r chi.Router) {
-		r.Get("/holidays", holiday.Holidays())
-		r.Get("/anniversaries", holiday.Anniversaries())
-		r.Get("/solar-terms", holiday.SolarTerms())
-	})
+		r.Route("/v1/weather/kma", func(r chi.Router) {
+			r.Get("/village-fcst", weather.VillageForecast())
+			r.Get("/ultra-srt-ncst", weather.UltraShortNowcast())
+			r.Get("/ultra-srt-fcst", weather.UltraShortForecast())
+		})
 
-	r.Route("/v1/weather/kma", func(r chi.Router) {
-		r.Get("/village-fcst", weather.VillageForecast())
-		r.Get("/ultra-srt-ncst", weather.UltraShortNowcast())
-		r.Get("/ultra-srt-fcst", weather.UltraShortForecast())
-	})
+		r.Route("/v1/almanac", func(r chi.Router) {
+			r.Get("/lunar-date", almanac.LunarDate())
+			r.Get("/solar-date", almanac.SolarDate())
+			r.Get("/sun", almanac.Sun())
+		})
 
-	r.Route("/v1/almanac", func(r chi.Router) {
-		r.Get("/lunar-date", almanac.LunarDate())
-		r.Get("/solar-date", almanac.SolarDate())
-		r.Get("/sun", almanac.Sun())
-	})
-
-	r.Route("/v1/geo", func(r chi.Router) {
-		r.Get("/resolve", places.Resolve())
-	})
+		r.Route("/v1/geo", func(r chi.Router) {
+			r.Get("/resolve", places.Resolve())
+		})
+	}) // close authMW + ratelimit Group
 
 	cleanup := func() {
 		dataCache.Close()

@@ -32,6 +32,7 @@ type TokenResponse struct {
 type OAuthHandler struct {
 	UserStore         model.UserStore
 	RefreshTokenStore model.RefreshTokenStore
+	DeviceStore       model.DeviceStore // Plan 23 PR-D: device pairing/refresh/list/delete
 	StateStore        *StateStore
 	JWTPrivateKey     *rsa.PrivateKey // Plan 21 PR-B: HS256 secret → RS256 key
 	JWTKID            string          // RFC 7638 thumbprint, embedded in JWT header

@@ -117,6 +117,41 @@ kittychat 측 codex 가 결정 (그쪽 영역):
   - kittychat 측: HTTP fetch + cache (10min) — 본 spec 외부, 그쪽 구현 자유.
 - **사용자 0명 윈도우 cutover** (BC 부담 0): HS256 ship 후 마이그레이션이 아니라 PR-A 부터 RS256 직진. ClaimsVersion v1 → v2 bump (PR-B). user JWT + device JWT 동일 cutover.
 
+### D5b. device JWT 발급 — production endpoints (Plan 23 PR-D 박제)
+
+PR-D 머지 시점에 4 endpoints + production issue 함수 활성. PR-A `c75c238`, PR-B `eca6e42`, PR-C `d275a86`, PR-D 다음 commit으로 cutover 완성.
+
+**Production issue 함수**: `auth.SignDeviceJWT(userID, deviceID string, key *rsa.PrivateKey, kid string, ttl time.Duration) (string, error)`. testfixture의 `IssueDeviceJWT` 와 wire-format 동일 (TestSignDeviceJWT_WireFormatMatchesIssueDeviceJWT 가 cross-team contract 회귀 검출).
+
+**Endpoint contracts**:
+
+| Method/Path | Auth | Body | Response |
+|---|---|---|---|
+| `POST /auth/devices/pair` | Bearer user JWT | `{name, capabilities}` | 200 + `{device_id, device_access_token, device_refresh_token, expires_in: 900}` |
+| `POST /auth/devices/refresh` | **none** (opaque body token만) | `{refresh_token}` | 200 동일 shape, rotation. 401 if reuse → `RevokeAllForDevice` 호출 |
+| `GET /auth/devices` | Bearer user JWT | — | 200 array (paired_at DESC, revoked_at IS NULL filter). 0 devices = `[]` (NOT `null`) |
+| `DELETE /auth/devices/{id}` | Bearer user JWT | — | 200 `{}`. soft-delete + RevokeAllForDevice. 다른 user의 device → 404 (non-disclosure) |
+
+**Refresh route is OUTSIDE authMW** (Plan 23 결정 3): chi.Group으로 분리. daemon이 stale Authorization header (만료된 device JWT) 함께 보내도 user-aud middleware 통과 시도 → 401 차단되지 않고 handler 도달. opaque token만 credential.
+
+**Pair atomicity** (결정 2): sequential explicit revoke. DeviceStore.Create 성공 후 어떤 단계 (SignDeviceJWT / GenerateRefreshToken / CreateForDevice) 실패 시 즉시 `DeviceStore.Revoke(dev.ID)` 호출 — orphan device row 방지.
+
+**Error mapping table** (운영자/디버거 reference):
+
+| 시나리오 | HTTP | 비고 |
+|---|---|---|
+| Pair: anonymous | 401 | UserFromContext nil |
+| Pair: malformed/large/empty body | 400 | 4KiB cap |
+| Pair: capabilities is array | 400 | Go decode type-mismatch |
+| Pair: post-Create 단계 실패 | 500 | compensating revoke 후 |
+| Refresh: malformed/large body | 400 | 1KiB cap |
+| Refresh: unknown/expired/user-scoped/revoked | 401 silent | 정보 누출 회피 |
+| Refresh: revoked refresh (reuse) | 401 + RevokeAllForDevice | reuse detection |
+| List: anonymous | 401 | |
+| List: 0 devices | 200 + `[]` | NOT `null` |
+| Delete: anonymous | 401 | |
+| Delete: not found / different user / already revoked / invalid UUID | 404 | non-disclosure |
+
 ### D6. device 개념 — schema 만, 발급 endpoint defer
 
 - `users` (1) → `devices` (N) 1:N 박제 (다음 slice)

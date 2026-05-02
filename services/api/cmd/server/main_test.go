@@ -25,7 +25,7 @@ func testJWTKey(t *testing.T) (*rsa.PrivateKey, string) {
 func testRouter(t *testing.T) http.Handler {
 	t.Helper()
 	cfg := config.LoadForTest()
-	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
 	t.Cleanup(cleanup)
 	return r
 }
@@ -59,7 +59,7 @@ func TestHealthEndpoint(t *testing.T) {
 func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.KakaoRelayURL = "https://kakao.kittypaw.app"
-	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
 	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
@@ -89,7 +89,7 @@ func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.ChatRelayURL = "https://chat.kittypaw.app"
-	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
 	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
@@ -116,7 +116,7 @@ func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.BaseURL = "http://localhost:8080/" // trailing slash — TrimRight defends
-	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
 	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
@@ -190,7 +190,7 @@ func TestJWKSEndpoint_CacheControl(t *testing.T) {
 // leak detection itself is out of scope for a unit test.
 func TestNewRouter_CleanupReleasesStores(t *testing.T) {
 	cfg := config.LoadForTest()
-	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
 	if r == nil {
 		t.Fatal("expected non-nil router")
 	}
@@ -200,6 +200,55 @@ func TestNewRouter_CleanupReleasesStores(t *testing.T) {
 	// Two calls must be safe — Phase 2 sync.Once contract on each store.
 	cleanup()
 	cleanup()
+}
+
+// Plan 23 PR-D — devices routes wired into main router.
+// Verifies that pair/refresh/list/delete are reachable AND that
+// refresh sits OUTSIDE the user-aud middleware (decision 3 — daemon
+// can refresh with a stale Authorization header without tripping
+// authMW). The other three routes return 401 anonymous, refresh
+// returns 400 (no body) — never 404.
+func TestDevicesRoutesWired_Pair_NoAuth_401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/devices/pair", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (route must exist + require auth)", w.Code)
+	}
+}
+
+func TestDevicesRoutesWired_Refresh_NoBody_400(t *testing.T) {
+	r := testRouter(t)
+	// Refresh route is OUTSIDE authMW — no Authorization header,
+	// missing body should hit the handler's body-decode error path
+	// (400), NOT 401 from middleware.
+	req := httptest.NewRequest(http.MethodPost, "/auth/devices/refresh", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (route exists, body required, NO auth required)", w.Code)
+	}
+}
+
+func TestDevicesRoutesWired_List_NoAuth_401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/devices", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestDevicesRoutesWired_Delete_NoAuth_401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodDelete, "/auth/devices/00000000-0000-0000-0000-000000000000", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
 }
 
 func TestNotFound(t *testing.T) {

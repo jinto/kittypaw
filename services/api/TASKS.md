@@ -518,7 +518,7 @@
 - [ ] `make smoke` 회귀 0 + Google OAuth 직접 1회 (사용자 0명이라 회귀 risk 거의 없음).
 - [ ] 채팅팀에 user JWT가 RS256/v=2로 발급 시작 알림 (kittychat이 user JWT 검증 안 하므로 무영향이지만 contract 변경).
 
-## Plan 22: RS256/JWKS + device credential — PR-C (devices DB + store layer) ← 현재
+## Plan 22: RS256/JWKS + device credential — PR-C (devices DB + store layer) ✅ (`d275a86`)
 
 > Spec: `.claude/plans/plan-22-pr-c-devices-store.md` (Architect/Critic/CEO 3관점 ITERATE 후 합의)
 > Goal: `devices` 테이블 + `refresh_tokens.device_id` 컬럼 + DeviceStore/RefreshTokenStore 확장. **endpoint 미노출** — 그건 PR-D scope.
@@ -557,12 +557,62 @@
 
 **완료 신호**: schema + store layer ready. PR-D unblock — `/auth/devices/{pair, refresh, list, delete}` endpoints + device JWT shape 작업 시작 가능.
 
-**Operational Checklist** (PR-C 머지 후):
-- [ ] prod DB `migrate up 7` 실행 (사용자 0명 → safe).
-- [ ] dirty-state 복구 runbook 박제 (`migrate version` → `migrate force <last_clean_version>`).
-- [ ] `silly-wiggling-balloon.md`에 "3번째 device-only 컬럼 → 테이블 분리" revisit trigger sync.
-- [ ] PR-D ina:plan kickoff.
-- [ ] 채팅팀에 PR-D 머지 ETA 알림.
+**Operational Checklist** (PR-C 머지 후): ✅ 모두 완료
+- [x] prod DB `migrate up 7` 실행 — `fab migrate` 6/u + 7/u 적용 완료.
+- [x] dirty-state 복구 runbook 박제 — Plan 22 결정 9에 박제됨.
+- [x] `silly-wiggling-balloon.md` revisit trigger sync — `b8bc9d7` follow-up commit.
+- [x] PR-D ina:plan kickoff — Plan 23 박제 (`.claude/plans/plan-23-pr-d-devices-endpoints.md`).
+- [ ] 채팅팀에 PR-D 머지 ETA 알림 (PR-D 머지 후).
+
+## Plan 23: RS256/JWKS + device credential — PR-D (devices endpoints + device JWT shape) ← 현재
+
+> Spec: `.claude/plans/plan-23-pr-d-devices-endpoints.md` (Architect/Critic/CEO 3관점 ITERATE 후 합의)
+> Goal: `/auth/devices/{pair, refresh, list, delete}` 4 endpoints + `SignDeviceJWT`. silly-wiggling-balloon.md 4단계 cutover의 종착.
+> 직전: PR-C `d275a86` (devices DB + store layer)
+> 채팅팀 cross-repo verifier가 PR-D 머지 후 첫 device JWT로 E2E 검증 가능.
+
+**3관점 합의 결과**:
+- Architect APPROVED (7 concerns 박제 후): pair atomicity, refresh middleware, D1/D2 split 재검토, wire-format specificity
+- Critic APPROVED (10 concerns 박제 후): T6 sub-step, mock 전략, mockDeviceStore, error mapping table, edge cases
+- CEO 4 cuts 반영: T6 collapse 단일, T4/T5 integration-only, sequential explicit revoke (defer+bool 대신), refresh route을 authMW 밖 chi.Group으로 분리 (pull forward)
+
+- [x] **T1: `SignDeviceJWT` 단위 + wire-format guard**
+      RED: `internal/auth/devices_test.go` 신규 — `TestSignDeviceJWT_RoundTrip` (verify 통과 + sub=device:<id>, user_id, aud=chat, scope=daemon:connect, v=2 단언) + `TestSignDeviceJWT_WireFormatMatchesIssueDeviceJWT` (claim 구조 비교 — header alg/typ/kid + payload key set + sub prefix + iss + aud[0] + scope[0] + v=2; iat/exp는 type만).
+      GREEN: `internal/auth/devices.go` 신규 + `SignDeviceJWT(userID, deviceID, key *rsa.PrivateKey, kid string, ttl time.Duration) (string, error)` 구현. `deviceClaimsPayload` (testfixture/jwt.go:25-30 패턴 동일) + `jwt.SigningMethodRS256` + header kid set.
+
+- [x] **T2: Pair handler + atomicity (compensating revoke)**
+      RED: `devices_test.go` (mock) + `devices_integration_test.go` (real DB) — Happy/Anonymous/BodyTooLarge/MalformedJSON/EmptyName/CapabilitiesArray/RefreshCreateFails_RevokesDevice (mock RefreshTokenStore 강제 에러 → device.RevokedAt 단언).
+      GREEN: `OAuthHandler.DeviceStore` 필드 추가 + `HandlePair()` 구현. body decode (4KB cap), name validation, sequential explicit revoke (CEO 권고 — defer+bool 대신).
+
+- [x] **T3: Refresh handler**
+      RED: Happy_Rotation/ReuseDetection/Expired/UnknownHash/UserScopedRefresh_401/RevokedDevice/RevokeRace/AuthorizationHeaderIgnored.
+      GREEN: `HandleDeviceRefresh()` 구현. body decode (1KB cap), `FindByHash` → 분기 (DeviceID nil / RevokedAt non-nil → reuse + RevokeAllForDevice / Expired) → `RevokeIfActive` (race check) → `DeviceStore.FindByID` (revoked check) → `SignDeviceJWT` + `CreateForDevice`.
+
+- [x] **T4: List handler (integration only)**
+      RED: `devices_integration_test.go` — Happy_2Devices (paired_at DESC) / RevokedFiltered / Anonymous_401 / OtherUserDevicesHidden / ZeroDevices_EmptyArray (`[]` not `null`).
+      GREEN: `HandleDevicesList()` 구현. `auth.UserFromContext` nil → 401, `DeviceStore.ListActiveForUser(user.ID)` → JSON array (nil slice → `[]*model.Device{}` 강제).
+
+- [x] **T5: Delete handler (integration only)**
+      RED: Happy_200 / NotFound_404 / DifferentUser_404 / AlreadyRevoked_404 / Anonymous_401 / InvalidUUID_404.
+      GREEN: `HandleDeviceDelete()` 구현. URL param 추출, `FindByID` 분기 모두 404, `RefreshTokenStore.RevokeAllForDevice` → `DeviceStore.Revoke` → `200 {}`.
+
+- [x] **T6: 라우팅 wiring + spec + smoke (단일)**
+      RED: `cmd/server/main_test.go`에 `TestDevicesRoutesWired_*` (4 routes liveness).
+      GREEN:
+      - `cmd/server/main.go` chi.Group 분리 (refresh authMW 밖) + 4 라우트 등록 + DeviceStore 와이어링
+      - `internal/auth/handler.go` `OAuthHandler.DeviceStore` 필드 추가
+      - `docs/specs/kittychat-credential-foundation.md` D5에 production issue 경로 + Error mapping table 박제
+      - `deploy/smoke.sh`에 4 endpoints liveness check 추가
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` PASS / `make test-integration -p 1` PASS / `make test-migration` PASS.
+
+**완료 신호**: silly-wiggling-balloon.md 4단계 cutover (PR-A/B/C/D) 종착. daemon E2E 가능. 채팅팀 cross-repo verifier가 첫 device JWT로 검증 시작.
+
+**Operational Checklist** (PR-D 머지 후):
+- [ ] `fab deploy` (binary upload + restart) — 마이그레이션 불필요 (PR-C에서 schema 7 완료)
+- [ ] `make smoke` 회귀 0 + auth/devices/* 4 endpoints liveness PASS
+- [ ] 채팅팀에 머지 신호 — cross-repo verifier가 첫 device JWT E2E 검증 가능
+- [ ] daemon 첫 pairing 수동 검증 (kittypaw CLI ready 시점)
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 

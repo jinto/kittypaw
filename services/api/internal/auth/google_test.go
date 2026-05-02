@@ -59,7 +59,10 @@ func (m *mockUserStore) FindByID(_ context.Context, id string) (*model.User, err
 }
 
 type mockRefreshTokenStore struct {
-	tokens []model.RefreshToken
+	tokens                  []model.RefreshToken
+	createForDeviceErr      error  // forced error for pair-atomicity tests (T2)
+	revokeIfActiveSeq       []bool // per-call return values (T3 race tests)
+	revokeAllForDeviceCalls int    // counter for T3 reuse-detect assertions
 }
 
 func (m *mockRefreshTokenStore) Create(_ context.Context, userID, tokenHash string, expiresAt time.Time) error {
@@ -83,9 +86,12 @@ func (m *mockRefreshTokenStore) FindByHash(_ context.Context, hash string) (*mod
 }
 
 func (m *mockRefreshTokenStore) CreateForDevice(_ context.Context, userID, deviceID, tokenHash string, expiresAt time.Time) error {
+	if m.createForDeviceErr != nil {
+		return m.createForDeviceErr
+	}
 	dev := deviceID
 	m.tokens = append(m.tokens, model.RefreshToken{
-		ID:        "rt-dev-1",
+		ID:        "rt-dev-" + tokenHash[:min(8, len(tokenHash))],
 		UserID:    userID,
 		DeviceID:  &dev,
 		TokenHash: tokenHash,
@@ -95,13 +101,46 @@ func (m *mockRefreshTokenStore) CreateForDevice(_ context.Context, userID, devic
 	return nil
 }
 
-func (m *mockRefreshTokenStore) RevokeIfActive(_ context.Context, _ string) (bool, error) {
-	return true, nil
+func (m *mockRefreshTokenStore) RevokeIfActive(_ context.Context, id string) (bool, error) {
+	// Sequence-driven for T3 race tests; default true.
+	if len(m.revokeIfActiveSeq) > 0 {
+		v := m.revokeIfActiveSeq[0]
+		m.revokeIfActiveSeq = m.revokeIfActiveSeq[1:]
+		// Mark the token as revoked when the seq says success — keeps
+		// FindByHash subsequent calls consistent with reality.
+		if v {
+			for i := range m.tokens {
+				if m.tokens[i].ID == id && m.tokens[i].RevokedAt == nil {
+					now := time.Now()
+					m.tokens[i].RevokedAt = &now
+					break
+				}
+			}
+		}
+		return v, nil
+	}
+	for i := range m.tokens {
+		if m.tokens[i].ID == id && m.tokens[i].RevokedAt == nil {
+			now := time.Now()
+			m.tokens[i].RevokedAt = &now
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *mockRefreshTokenStore) RevokeAllForUser(_ context.Context, _ string) error { return nil }
 
-func (m *mockRefreshTokenStore) RevokeAllForDevice(_ context.Context, _ string) error { return nil }
+func (m *mockRefreshTokenStore) RevokeAllForDevice(_ context.Context, deviceID string) error {
+	m.revokeAllForDeviceCalls++
+	now := time.Now()
+	for i := range m.tokens {
+		if m.tokens[i].DeviceID != nil && *m.tokens[i].DeviceID == deviceID && m.tokens[i].RevokedAt == nil {
+			m.tokens[i].RevokedAt = &now
+		}
+	}
+	return nil
+}
 
 func setupGoogleTest(t *testing.T, googleServer *httptest.Server) (*auth.OAuthHandler, auth.GoogleConfig) {
 	t.Helper()

@@ -252,6 +252,16 @@ check_status "/auth/cli/callback" "400" "auth/cli/callback (no params)"
 check_status "/auth/token/refresh" "400" "auth/token/refresh POST (no body)" "POST"
 check_status "/auth/cli/exchange" "400" "auth/cli/exchange POST (no body)" "POST"
 
+# Plan 23 PR-D — device endpoints. Auth-required routes return 401 to
+# anonymous probes; refresh sits OUTSIDE authMW so it returns 400 (no body)
+# instead of 401 — that asymmetry is the wire test for 결정 3.
+echo
+echo "--- Auth (device endpoints, Plan 23 PR-D) ---"
+check_status "/auth/devices/pair" "401" "auth/devices/pair (no auth)" "POST"
+check_status "/auth/devices/refresh" "400" "auth/devices/refresh (no body, no auth required)" "POST"
+check_status "/auth/devices" "401" "auth/devices GET (no auth)"
+check_status "/auth/devices/00000000-0000-0000-0000-000000000000" "401" "auth/devices/{id} DELETE (no auth)" "DELETE"
+
 TOTAL=$((PASS + FAIL))
 echo
 echo "=== Summary ==="
