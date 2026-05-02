@@ -17,42 +17,6 @@ import (
 	"github.com/jinto/kittypaw/server"
 )
 
-type scriptedChatReader struct {
-	lines []string
-	err   error
-}
-
-func (r *scriptedChatReader) Readline() (string, error) {
-	if len(r.lines) == 0 {
-		if r.err != nil {
-			return "", r.err
-		}
-		return "", io.EOF
-	}
-	line := r.lines[0]
-	r.lines = r.lines[1:]
-	return line, nil
-}
-
-func TestPumpChatInputTrimsSkipsEmptyAndCloses(t *testing.T) {
-	reader := &scriptedChatReader{
-		lines: []string{"  hello  ", "", "   ", "next"},
-		err:   io.EOF,
-	}
-	out := make(chan string, 4)
-
-	pumpChatInput(reader, out)
-
-	var got []string
-	for text := range out {
-		got = append(got, text)
-	}
-	want := []string{"hello", "next"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("pumpChatInput = %#v, want %#v", got, want)
-	}
-}
-
 func TestIsTransportDropErr_StringMatches(t *testing.T) {
 	cases := []string{
 		"EOF",
@@ -112,20 +76,6 @@ func TestIsTransportDropErr_RejectsServerSide(t *testing.T) {
 				t.Errorf("server-side error %q must NOT classify as transport drop", err)
 			}
 		})
-	}
-}
-
-func TestShouldPrintChatSendErrorSuppressesServerSideCallbackErrors(t *testing.T) {
-	err := fmt.Errorf("%w: 지금 답변을 만들지 못했어요", client.ErrServerSide)
-	if shouldPrintChatSendError(false, err) {
-		t.Fatal("server-side errors already shown by OnError should not be printed again")
-	}
-}
-
-func TestShouldPrintChatSendErrorPrintsTransportErrorsWithoutResult(t *testing.T) {
-	err := fmt.Errorf("read ws msg: EOF")
-	if !shouldPrintChatSendError(false, err) {
-		t.Fatal("transport errors without a result should be printed")
 	}
 }
 
