@@ -78,6 +78,32 @@ check_status_at() {
     sleep "$THROTTLE"
 }
 
+check_health_at() {
+    local base="$1"
+    local desc="$2"
+    do_curl "${base}/health"
+    if [[ "$CODE" != "200" ]]; then
+        printf "${R}✗${N} %s health [expected 200, got %s]\n" "$desc" "$CODE"
+        FAIL=$((FAIL + 1))
+        FAIL_LIST+=("$desc health")
+        sleep "$THROTTLE"
+        return
+    fi
+    local status version commit
+    status=$(printf '%s' "$BODY" | jq -r '.status // ""' 2>/dev/null || echo "")
+    version=$(printf '%s' "$BODY" | jq -r '.version // "unknown"' 2>/dev/null || echo "unknown")
+    commit=$(printf '%s' "$BODY" | jq -r '.commit // "unknown"' 2>/dev/null || echo "unknown")
+    if [[ "$status" != "healthy" ]]; then
+        printf "${R}✗${N} %s health [unexpected body: %s]\n" "$desc" "$BODY"
+        FAIL=$((FAIL + 1))
+        FAIL_LIST+=("$desc health")
+    else
+        printf "${G}✓${N} %s health [%s %s]\n" "$desc" "$version" "$commit"
+        PASS=$((PASS + 1))
+    fi
+    sleep "$THROTTLE"
+}
+
 check_envelope() {
     local path="$1"
     local desc="${2:-$path}"
@@ -211,7 +237,8 @@ echo "=== portal identity smoke: ${PORTAL_BASE} ==="
 
 echo
 echo "--- Infrastructure ---"
-check_status "/health" "200"
+check_health_at "$BASE" "api"
+check_health_at "$PORTAL_BASE" "portal"
 check_discovery_keys
 if [[ "$BASE" != "$PORTAL_BASE" ]]; then
     check_status "/discovery" "404" "api/discovery closed on resource host"

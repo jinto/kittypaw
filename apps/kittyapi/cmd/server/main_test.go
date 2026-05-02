@@ -36,6 +36,12 @@ func TestHealthEndpoint(t *testing.T) {
 	if body["status"] != "healthy" {
 		t.Fatalf("expected status=healthy, got %q", body["status"])
 	}
+	if body["version"] == "" {
+		t.Fatalf("expected non-empty version in health body: %v", body)
+	}
+	if body["commit"] == "" {
+		t.Fatalf("expected non-empty commit in health body: %v", body)
+	}
 }
 
 func TestAPIDoesNotServePortalRoutes(t *testing.T) {

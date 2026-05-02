@@ -36,6 +36,12 @@ func TestNewServerBuildsRunnableRouter(t *testing.T) {
 	}
 }
 
+func TestBuildValuePrefersInjectedBuildVersionOverRuntimePlaceholder(t *testing.T) {
+	if got := buildValue("prod", "kittypaw/v0.4.2-3-gabc1234"); got != "kittypaw/v0.4.2-3-gabc1234" {
+		t.Fatalf("buildValue() = %q, want injected build version", got)
+	}
+}
+
 func TestNewServerMountsHostedWebLogin(t *testing.T) {
 	cfg := testConfig()
 	router, err := newRouter(cfg)

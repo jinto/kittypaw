@@ -75,7 +75,7 @@ def setup(ctx):
 
 @task
 def deploy(ctx):
-    """Build, upload binary, restart service."""
+    """Build, upload binary, restart service, then run prod smoke."""
     binary_path = _local_build()
 
     c = _conn()
@@ -92,6 +92,23 @@ def deploy(ctx):
     c.run("sleep 1")
     c.sudo(f"systemctl is-active {SERVICE}")
     print("Deployed.")
+    smoke(ctx)
+
+
+@task
+def smoke(ctx):
+    """Run prod smoke against kakao.kittypaw.app (or BASE_URL override)."""
+    env = {**os.environ}
+    if "BASE_URL" not in env and DOMAIN:
+        env["BASE_URL"] = f"https://{DOMAIN}"
+    result = subprocess.run(
+        ["bash", str(LOCAL_ROOT / "deploy" / "smoke.sh")],
+        cwd=LOCAL_ROOT,
+        env=env,
+    )
+    if result.returncode != 0:
+        print("Smoke failed — see above for the failing endpoint.")
+        sys.exit(result.returncode)
 
 
 @task

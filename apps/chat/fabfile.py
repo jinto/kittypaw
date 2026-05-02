@@ -18,6 +18,7 @@ SERVICE = "kittychat"
 BINARY = "kittychat"
 
 LOCAL_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = LOCAL_ROOT.parent.parent
 
 
 def _conn():
@@ -28,10 +29,19 @@ def _conn():
 
 def _local_build():
     """Cross-compile for Linux x86_64 (static binary, no CGO)."""
-    print(f"Building {BINARY} for linux/amd64 ...")
+    version, commit = _build_metadata()
+    print(f"Building {BINARY} for linux/amd64 ({version} {commit}) ...")
     env = {**os.environ, "GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "0"}
     result = subprocess.run(
-        ["go", "build", "-o", f"{BINARY}-linux", "./cmd/kittychat"],
+        [
+            "go",
+            "build",
+            "-ldflags",
+            f"-s -w -X main.version={version} -X main.commit={commit}",
+            "-o",
+            f"{BINARY}-linux",
+            "./cmd/kittychat",
+        ],
         cwd=LOCAL_ROOT,
         env=env,
     )
@@ -39,6 +49,19 @@ def _local_build():
         print("Build failed.")
         sys.exit(1)
     return LOCAL_ROOT / f"{BINARY}-linux"
+
+
+def _git(*args, default="unknown"):
+    try:
+        return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True).strip()
+    except Exception:
+        return default
+
+
+def _build_metadata():
+    version = os.environ.get("VERSION") or _git("describe", "--tags", "--always", default="dev")
+    commit = os.environ.get("COMMIT") or _git("rev-parse", "--short=12", "HEAD")
+    return version, commit
 
 
 def _remote_binary_path(suffix=""):

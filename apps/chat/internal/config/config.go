@@ -17,6 +17,7 @@ type Config struct {
 	PublicBaseURL  string
 	APIAuthBaseURL string
 	Version        string
+	Commit         string
 }
 
 func Load() (Config, error) {
@@ -32,6 +33,7 @@ func Load() (Config, error) {
 		PublicBaseURL:  env("KITTYCHAT_PUBLIC_BASE_URL", "https://chat.kittypaw.app"),
 		APIAuthBaseURL: env("KITTYCHAT_API_AUTH_BASE_URL", "https://portal.kittypaw.app/auth"),
 		Version:        env("KITTYCHAT_VERSION", "dev"),
+		Commit:         os.Getenv("KITTYCHAT_COMMIT"),
 	}
 
 	hasJWTVerifier := cfg.JWTSecret != "" || cfg.JWKSURL != ""

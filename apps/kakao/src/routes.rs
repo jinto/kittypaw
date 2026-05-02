@@ -43,6 +43,7 @@ struct SecretQuery {
 
 async fn handle_health() -> Json<HealthResponse> {
     Json(HealthResponse {
+        status: "healthy",
         version: env!("CARGO_PKG_VERSION"),
         commit: env!("GIT_HASH"),
     })
@@ -50,6 +51,7 @@ async fn handle_health() -> Json<HealthResponse> {
 
 #[derive(Debug, Serialize)]
 struct HealthResponse {
+    status: &'static str,
     version: &'static str,
     commit: &'static str,
 }

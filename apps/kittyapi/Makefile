@@ -1,10 +1,13 @@
 BINARY := kittypaw-api
 PKG    := ./cmd/server
+VERSION ?= $(shell git -C ../.. describe --tags --always 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git -C ../.. rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 .PHONY: build test test-integration test-integration-all test-integration-calendar test-integration-air test-integration-down test-migration lint run clean seed-wikidata seed-seoul-metro benchmark-resolve smoke
 
 build:
-	go build -o $(BINARY) $(PKG)
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 test:
 	go test ./... -v -count=1

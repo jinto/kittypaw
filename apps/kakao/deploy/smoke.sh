@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="${BASE_URL:-https://chat.kittypaw.app}"
+BASE="${BASE_URL:-https://kakao.kittypaw.app}"
 
 body="$(curl -fsS "$BASE/health")"
 

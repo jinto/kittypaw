@@ -455,6 +455,10 @@ async fn test_health_endpoint() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
+    let body: Value = resp.json().await.unwrap();
+    assert_eq!(body["status"], "healthy");
+    assert!(body["version"].as_str().unwrap_or("").len() > 0);
+    assert!(body["commit"].as_str().unwrap_or("").len() > 0);
 }
 
 // ── Test: Admin stats ──

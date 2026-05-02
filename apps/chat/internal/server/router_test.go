@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 func TestRouterHealth(t *testing.T) {
 	router := NewRouter(Config{
 		Version:       "dev",
+		Commit:        "abc1234",
 		OpenAIHandler: openai.NewHandler(nilAuth{}, nilBroker{}),
 	})
 
@@ -25,8 +27,18 @@ func TestRouterHealth(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
-	if rr.Body.String() != `{"status":"healthy","version":"dev"}`+"\n" {
-		t.Fatalf("body = %q", rr.Body.String())
+	var body map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["status"] != "healthy" {
+		t.Fatalf("status = %q, want healthy", body["status"])
+	}
+	if body["version"] != "dev" {
+		t.Fatalf("version = %q, want dev", body["version"])
+	}
+	if body["commit"] != "abc1234" {
+		t.Fatalf("commit = %q, want abc1234", body["commit"])
 	}
 }
 

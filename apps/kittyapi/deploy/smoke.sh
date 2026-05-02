@@ -28,6 +28,21 @@ expect_status() {
 }
 
 expect_status "/health" "200" "health"
+
+health_body="$(curl -fsS "${BASE}/health")"
+python3 - "$health_body" <<'PY'
+import json
+import sys
+
+body = sys.argv[1]
+data = json.loads(body)
+if data.get("status") != "healthy":
+    raise SystemExit(f"unexpected health body: {body}")
+version = data.get("version") or "unknown"
+commit = data.get("commit") or "unknown"
+print(f"ok - health version {version} ({commit})")
+PY
+
 expect_status "/discovery" "404" "discovery closed on api host"
 expect_status "/.well-known/jwks.json" "404" "jwks closed on api host"
 expect_status "/auth/google" "404" "auth closed on api host"

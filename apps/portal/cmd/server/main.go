@@ -28,6 +28,11 @@ import (
 
 const shutdownGrace = 30 * time.Second
 
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	initLogging()
 
@@ -248,7 +253,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "healthy",
+		"version": version,
+		"commit":  commit,
+	})
 }
 
 func hostBoundaryMiddleware(identityBaseURL, resourceBaseURL, allowedBaseURL string) func(http.Handler) http.Handler {

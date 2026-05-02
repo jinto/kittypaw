@@ -14,11 +14,18 @@ import (
 	"github.com/kittypaw-app/kittychat/internal/webapp"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	cfg.Version = buildValue(cfg.Version, version)
+	cfg.Commit = buildValue(cfg.Commit, commit)
 	router, err := newRouter(cfg)
 	if err != nil {
 		log.Fatalf("router: %v", err)
@@ -51,6 +58,7 @@ func newRouter(cfg config.Config) (http.Handler, error) {
 
 	return server.NewRouter(server.Config{
 		Version:    cfg.Version,
+		Commit:     cfg.Commit,
 		WebHandler: hostedWebHandler,
 		DaemonHandler: daemonws.NewHandler(identity.DeviceAuthenticator{
 			Verifier: verifier,
@@ -109,4 +117,17 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 		return jwtVerifier, nil
 	}
 	return verifier, nil
+}
+
+func buildValue(configured, built string) string {
+	if built != "" && built != "dev" && built != "unknown" {
+		return built
+	}
+	if configured != "" {
+		return configured
+	}
+	if built != "" {
+		return built
+	}
+	return configured
 }

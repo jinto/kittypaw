@@ -16,6 +16,7 @@ var staticAssets embed.FS
 
 type Config struct {
 	Version    string
+	Commit     string
 	WebHandler interface {
 		MountRoutes(chi.Router)
 	}
@@ -36,10 +37,15 @@ func NewRouter(cfg Config) http.Handler {
 		if version == "" {
 			version = "dev"
 		}
+		commit := cfg.Commit
+		if commit == "" {
+			commit = "unknown"
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":  "healthy",
 			"version": version,
+			"commit":  commit,
 		})
 	})
 	if cfg.WebHandler != nil {
