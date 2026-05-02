@@ -3,12 +3,15 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jinto/kittypaw/core"
+	"nhooyr.io/websocket"
 )
 
 func TestFromConfigTelegram(t *testing.T) {
@@ -295,6 +298,76 @@ func TestKakaoIncomingFixtureBuildsEvent(t *testing.T) {
 	}
 	if payload.Text != "강남역에 비오나? 지금?" {
 		t.Fatalf("Text = %q", payload.Text)
+	}
+}
+
+func TestKakaoChannelWebSocketRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	replies := make(chan kakaoReplyMessage, 1)
+	relay := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+		if err := conn.Write(ctx, websocket.MessageText, []byte(`{"id":"kakao-action-1","text":"환율 알려줘","user_id":"kakao-user-1"}`)); err != nil {
+			t.Errorf("write relay frame: %v", err)
+			return
+		}
+
+		_, raw, err := conn.Read(ctx)
+		if err != nil {
+			t.Errorf("read reply frame: %v", err)
+			return
+		}
+		var reply kakaoReplyMessage
+		if err := json.Unmarshal(raw, &reply); err != nil {
+			t.Errorf("decode reply frame: %v", err)
+			return
+		}
+		replies <- reply
+	}))
+	defer relay.Close()
+
+	events := make(chan core.Event, 1)
+	ch := NewKakao("alice", "ws"+strings.TrimPrefix(relay.URL, "http"))
+	errCh := make(chan error, 1)
+	go func() { errCh <- ch.Start(ctx, events) }()
+
+	var event core.Event
+	select {
+	case event = <-events:
+	case err := <-errCh:
+		t.Fatalf("channel stopped before event: %v", err)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for relay event")
+	}
+
+	if event.Type != core.EventKakaoTalk || event.AccountID != "alice" {
+		t.Fatalf("event identity = (%s,%s), want kakao_talk/alice", event.Type, event.AccountID)
+	}
+	payload, err := event.ParsePayload()
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if payload.ChatID != "kakao-action-1" || payload.SessionID != "kakao-user-1" || payload.Text != "환율 알려줘" {
+		t.Fatalf("payload = %+v", payload)
+	}
+
+	if err := ch.SendResponse(ctx, "kakao-action-1", "1 USD = 1477 KRW", "ignored"); err != nil {
+		t.Fatalf("SendResponse: %v", err)
+	}
+
+	select {
+	case reply := <-replies:
+		if reply.ID != "kakao-action-1" || reply.Text != "1 USD = 1477 KRW" {
+			t.Fatalf("reply = %+v", reply)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for relay reply")
 	}
 }
 

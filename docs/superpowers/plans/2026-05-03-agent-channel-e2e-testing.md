@@ -8,6 +8,15 @@
 
 **Tech Stack:** Go tests, `httptest`, existing Kittypaw engine/server/channel packages, root `Makefile`, existing Docker compose E2E harness.
 
+**Status 2026-05-03:** Fast deterministic coverage is in place for registry
+seams, chat-driven exchange-rate/weather install flows, Telegram/Kakao captured
+fixtures, `/persona`, assistant mention routing, chat-created personas, and
+reflection/evolution over `conversation_turns`. The Docker-backed
+`make e2e-local` harness now also covers Portal fake-Google login, device
+pairing, browser cookie session auth, Chat relay routing to a real Kittypaw
+dispatcher, fake registry exchange-rate install consent, and installed skill
+execution through the Chat BFF.
+
 ---
 
 ### Task 1: Local Registry Test Seam

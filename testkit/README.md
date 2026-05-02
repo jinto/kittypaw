@@ -2,11 +2,15 @@
 
 Reusable helpers for cross-service tests belong here.
 
+Current coverage:
+
+- Docker-backed Portal + Chat browser-session E2E.
+- Chat relay -> real Kittypaw dispatcher -> fake registry skill install E2E.
+
 Initial candidates:
 
 - JWKS fixture server
 - API token issuer fixtures
-- fake Kittypaw daemon for Chat relay tests
 - fake Kakao callback server
 - contract validation helpers
 

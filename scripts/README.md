@@ -34,8 +34,13 @@ make e2e-local
 
 It starts a disposable PostgreSQL container, migrates Portal's schema from the
 Go harness, starts real Portal and Chat binaries, uses a fake Google OAuth
-server, connects a Kittypaw chat relay connector, and verifies the Chat BFF
+server, connects Kittypaw chat relay connectors, and verifies the Chat BFF
 session can reach `/app/api/*` without a browser `Authorization` header.
+
+The harness also runs a heavier local agent flow: browser chat -> Chat relay ->
+real Kittypaw dispatcher -> fake skill registry. It verifies that a user can ask
+for exchange rates, receive an install offer, approve it, and get the installed
+skill result back through the Chat BFF.
 
 Set `KITTY_E2E_KEEP_DB=1` to keep the database container after the run. Set
 `KITTY_E2E_SKIP_COMPOSE=1` and provide `DATABASE_URL` to use an already-running

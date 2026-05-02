@@ -30,7 +30,12 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 	"github.com/jinto/kittypaw/remote/chatrelay"
+	"github.com/jinto/kittypaw/sandbox"
+	kittypawserver "github.com/jinto/kittypaw/server"
+	"github.com/jinto/kittypaw/store"
 )
 
 const localAccountID = "alice"
@@ -127,6 +132,102 @@ func TestPortalChatBrowserSessionRelay(t *testing.T) {
 	assertBrowserSession(t, browser, chatURL)
 	waitForBrowserRoute(ctx, t, browser, chatURL, device.DeviceID)
 	assertBrowserChatCompletion(t, browser, chatURL, device.DeviceID)
+}
+
+func TestPortalChatRelayRunsKittypawSkillInstallFlow(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	requireTestDatabase(t, dbURL)
+
+	root := repoRoot(t)
+	migratePortalDB(t, root, dbURL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+
+	fakeGoogle := newFakeGoogle(t)
+	defer fakeGoogle.Close()
+
+	registry := newFakeRegistry(t, exchangeRateRegistryPackage())
+	defer registry.Close()
+	t.Setenv("KITTYPAW_ALLOW_INSECURE_REGISTRY", "1")
+
+	portalAddr := reserveAddr(t)
+	chatAddr := reserveAddr(t)
+	portalURL := "http://" + portalAddr
+	chatURL := "http://" + chatAddr
+	chatCallback := chatURL + "/auth/callback"
+
+	portal := startGoRun(ctx, t, "portal", filepath.Join(root, "apps/portal"), []string{"./cmd/server"}, map[string]string{
+		"PORT":                       portOnly(portalAddr),
+		"DATABASE_URL":               dbURL,
+		"JWT_PRIVATE_KEY_PEM_B64":    generatePrivateKeyB64(t),
+		"BASE_URL":                   portalURL,
+		"API_BASE_URL":               portalURL,
+		"CHAT_RELAY_URL":             chatURL,
+		"CORS_ORIGINS":               chatURL,
+		"WEB_REDIRECT_URI_ALLOWLIST": chatCallback,
+		"GOOGLE_CLIENT_ID":           "local-e2e-client",
+		"GOOGLE_CLIENT_SECRET":       "local-e2e-secret",
+		"GOOGLE_AUTH_URL":            fakeGoogle.URL + "/o/oauth2/v2/auth",
+		"GOOGLE_TOKEN_URL":           fakeGoogle.URL + "/token",
+		"GOOGLE_USERINFO_URL":        fakeGoogle.URL + "/userinfo",
+	})
+	waitForHealth(ctx, t, portalURL+"/health", portal)
+
+	chat := startGoRun(ctx, t, "chat", filepath.Join(root, "apps/chat"), []string{"./cmd/kittychat"}, map[string]string{
+		"KITTYCHAT_BIND_ADDR":         chatAddr,
+		"KITTYCHAT_PUBLIC_BASE_URL":   chatURL,
+		"KITTYCHAT_API_AUTH_BASE_URL": portalURL + "/auth",
+		"KITTYCHAT_JWKS_URL":          portalURL + "/.well-known/jwks.json",
+		"KITTYCHAT_VERSION":           "local-e2e",
+	})
+	waitForHealth(ctx, t, chatURL+"/health", chat)
+
+	apiClient := &http.Client{Timeout: 10 * time.Second}
+	userTokens := portalGoogleLogin(t, apiClient, portalURL)
+	device := pairDevice(t, apiClient, portalURL, userTokens.AccessToken)
+	kittypaw := newKittypawRelayServer(t, registry.URL)
+
+	relayCtx, relayCancel := context.WithCancel(ctx)
+	t.Cleanup(relayCancel)
+	connector := &chatrelay.Connector{
+		Config: chatrelay.ConnectorConfig{
+			RelayURL:      chatURL,
+			Credential:    device.DeviceAccessToken,
+			DeviceID:      device.DeviceID,
+			LocalAccounts: []string{localAccountID},
+			DaemonVersion: "local-e2e",
+			Capabilities:  []string{chatrelay.OperationOpenAIChatCompletions, chatrelay.OperationOpenAIModels},
+		},
+		Dispatcher: kittypawserver.NewChatRelayDispatcher(kittypaw),
+	}
+	go connector.Run(relayCtx, chatrelay.RunOptions{
+		RetryInitialDelay: 100 * time.Millisecond,
+		RetryMaxDelay:     250 * time.Millisecond,
+		Logf: func(format string, args ...any) {
+			t.Logf("chat relay: "+format, args...)
+		},
+	})
+
+	browser := newBrowserClient(t)
+	chatBrowserLogin(t, browser, chatURL)
+	assertBrowserSession(t, browser, chatURL)
+	waitForBrowserRoute(ctx, t, browser, chatURL, device.DeviceID)
+
+	offer := browserChatCompletion(t, browser, chatURL, device.DeviceID, "환율 알려줘")
+	if !strings.Contains(offer, "환율 조회") || !strings.Contains(offer, "설치") {
+		t.Fatalf("first chat response did not offer exchange-rate install:\n%s", offer)
+	}
+
+	installed := browserChatCompletion(t, browser, chatURL, device.DeviceID, "네")
+	for _, want := range []string{"설치했어요", "환율", "1 USD = 1477 KRW"} {
+		if !strings.Contains(installed, want) {
+			t.Fatalf("install chat response missing %q:\n%s", want, installed)
+		}
+	}
 }
 
 func newFakeGoogle(t *testing.T) *httptest.Server {
@@ -351,7 +452,18 @@ func browserRouteExists(t *testing.T, browser *http.Client, chatURL, deviceID st
 
 func assertBrowserChatCompletion(t *testing.T, browser *http.Client, chatURL, deviceID string) {
 	t.Helper()
-	body := strings.NewReader(`{"model":"local-e2e","messages":[{"role":"user","content":"hello from browser"}],"stream":true}`)
+	raw := browserChatCompletion(t, browser, chatURL, deviceID, "hello from browser")
+	if !bytes.Contains([]byte(raw), []byte("hello from local e2e daemon")) {
+		t.Fatalf("chat completion body = %s, want daemon response", raw)
+	}
+}
+
+func browserChatCompletion(t *testing.T, browser *http.Client, chatURL, deviceID, message string) string {
+	t.Helper()
+	body := strings.NewReader(fmt.Sprintf(
+		`{"model":"local-e2e","messages":[{"role":"user","content":%q}],"stream":true}`,
+		message,
+	))
 	req, err := http.NewRequest(http.MethodPost, chatURL+"/app/api/nodes/"+deviceID+"/accounts/"+localAccountID+"/v1/chat/completions", body)
 	if err != nil {
 		t.Fatalf("new chat completion request: %v", err)
@@ -369,9 +481,7 @@ func assertBrowserChatCompletion(t *testing.T, browser *http.Client, chatURL, de
 	if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
 		t.Fatalf("chat completion content-type = %q, want text/event-stream", got)
 	}
-	if !bytes.Contains(raw, []byte("hello from local e2e daemon")) {
-		t.Fatalf("chat completion body = %s, want daemon response", raw)
-	}
+	return string(raw)
 }
 
 type e2eDispatcher struct{}
@@ -576,3 +686,124 @@ func contains(values []string, want string) bool {
 	}
 	return false
 }
+
+type registryPackage struct {
+	ID   string
+	TOML string
+	JS   string
+}
+
+func newFakeRegistry(t *testing.T, packages ...registryPackage) *httptest.Server {
+	t.Helper()
+	byID := make(map[string]registryPackage, len(packages))
+	for _, pkg := range packages {
+		byID[pkg.ID] = pkg
+	}
+
+	var serverURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/index.json" {
+			entries := make([]map[string]string, 0, len(packages))
+			for _, pkg := range packages {
+				entries = append(entries, map[string]string{
+					"id":          pkg.ID,
+					"name":        registryPackageName(pkg.TOML),
+					"version":     "1.0.0",
+					"description": "local e2e package",
+					"url":         serverURL + "/" + pkg.ID,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"version": 1, "packages": entries})
+			return
+		}
+
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) != 2 {
+			http.NotFound(w, r)
+			return
+		}
+		pkg, ok := byID[parts[0]]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		switch parts[1] {
+		case "package.toml":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(pkg.TOML))
+		case "main.js":
+			w.Header().Set("Content-Type", "application/javascript")
+			_, _ = w.Write([]byte(pkg.JS))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	serverURL = srv.URL
+	return srv
+}
+
+func registryPackageName(toml string) string {
+	for _, line := range strings.Split(toml, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name = ") {
+			return strings.Trim(strings.TrimPrefix(line, "name = "), `"`)
+		}
+	}
+	return "Local E2E Package"
+}
+
+func exchangeRateRegistryPackage() registryPackage {
+	return registryPackage{
+		ID: "exchange-rate",
+		TOML: `[meta]
+id = "exchange-rate"
+name = "환율 조회"
+version = "1.0.0"
+description = "키 없이 환율 표를 바로 조회합니다."
+`,
+		JS: `return "📈 환율 (2026-05-03)\n\n1 USD = 1477 KRW\n1 USD = 156.56 JPY";`,
+	}
+}
+
+func newKittypawRelayServer(t *testing.T, registryURL string) *kittypawserver.Server {
+	t.Helper()
+	baseDir := filepath.Join(t.TempDir(), "accounts", localAccountID)
+	cfg := core.DefaultConfig()
+	cfg.Registry.URL = registryURL
+	cfg.Sandbox.TimeoutSecs = 5
+
+	account := &core.Account{ID: localAccountID, BaseDir: baseDir, Config: &cfg}
+	if err := account.EnsureDirs(); err != nil {
+		t.Fatalf("ensure account dirs: %v", err)
+	}
+	st, err := store.Open(account.DBPath())
+	if err != nil {
+		t.Fatalf("open kittypaw store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	deps := &kittypawserver.AccountDeps{
+		Account:     account,
+		Store:       st,
+		Provider:    e2eLLMProvider{},
+		Sandbox:     sandbox.New(cfg.Sandbox),
+		PkgMgr:      core.NewPackageManagerFrom(baseDir, nil),
+		APITokenMgr: core.NewAPITokenManager(baseDir, nil),
+	}
+	return kittypawserver.New([]*kittypawserver.AccountDeps{deps}, "local-e2e")
+}
+
+type e2eLLMProvider struct{}
+
+func (e2eLLMProvider) Generate(context.Context, []core.LlmMessage) (*llm.Response, error) {
+	return &llm.Response{Content: "local e2e provider fallback"}, nil
+}
+
+func (p e2eLLMProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return p.Generate(ctx, msgs)
+}
+
+func (e2eLLMProvider) ContextWindow() int { return 128_000 }
+
+func (e2eLLMProvider) MaxTokens() int { return 4_096 }
