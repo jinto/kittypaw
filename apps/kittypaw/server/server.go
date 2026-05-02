@@ -409,11 +409,6 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/skills/{name}/disable", s.handleSkillDisable)
 		r.Post("/skills/{name}/explain", s.handleSkillExplain)
 
-		// Suggestions
-		r.Get("/suggestions", s.handleSuggestionsList)
-		r.Post("/suggestions/{skill_id}/accept", s.handleSuggestionsAccept)
-		r.Post("/suggestions/{skill_id}/dismiss", s.handleSuggestionsDismiss)
-
 		// Checkpoints
 		r.Post("/checkpoints/{id}/rollback", s.handleCheckpointRollback)
 
@@ -457,14 +452,6 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/users/link", s.handleUsersLink)
 		r.Get("/users/{id}/identities", s.handleUsersIdentities)
 		r.Delete("/users/{id}/identities/{channel}", s.handleUsersUnlink)
-
-		// Reflection
-		r.Get("/reflection", s.handleReflectionList)
-		r.Post("/reflection/{key}/approve", s.handleReflectionApprove)
-		r.Post("/reflection/{key}/reject", s.handleReflectionReject)
-		r.Post("/reflection/clear", s.handleReflectionClear)
-		r.Post("/reflection/run", s.handleReflectionRun)
-		r.Get("/reflection/weekly-report", s.handleWeeklyReport)
 
 		// Persona evolution
 		r.Get("/persona/evolution", s.handleEvolutionList)

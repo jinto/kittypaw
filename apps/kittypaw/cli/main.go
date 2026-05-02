@@ -129,7 +129,6 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(),
 		newAgentCmd(),
 		newPersonaCmd(),
-		newReflectionCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
 		newLoginCmd(),
@@ -752,6 +751,12 @@ func newSkillCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
 		Short: "Manage skills",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
+			return cmd.Help()
+		},
 	}
 	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(
@@ -768,7 +773,6 @@ func newSkillCmd() *cobra.Command {
 		newSkillLogCmd(),
 		newSkillStatsCmd(),
 		newSkillConfigCmd(),
-		newSkillSuggestCmd(),
 	)
 	return cmd
 }
@@ -1249,73 +1253,6 @@ func newSkillConfigCmd() *cobra.Command {
 			return fmt.Errorf("usage: kittypaw skill config <name> [key value]")
 		},
 	}
-}
-
-// --- skill suggest ---
-
-func newSkillSuggestCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "suggest",
-		Short: "Manage skill suggestions",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			// Default action: list suggestions.
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			res, err := cl.SuggestionsList()
-			if err != nil {
-				return err
-			}
-			items := jsonSlice(res, "suggestions")
-			if len(items) == 0 {
-				fmt.Println("No suggestions found.")
-				return nil
-			}
-			fmt.Printf("%s %s\n", padW("SKILL_ID", 20), "DESCRIPTION")
-			fmt.Println(strings.Repeat("-", 60))
-			for _, s := range items {
-				desc := truncW(jsonStr(s, "description"), 50)
-				fmt.Printf("%s %s\n", padW(jsonStr(s, "skill_id"), 20), desc)
-			}
-			return nil
-		},
-	}
-	cmd.AddCommand(
-		&cobra.Command{
-			Use:   "accept <skill-id>",
-			Short: "Accept a suggestion",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectServerForCLIAccount()
-				if err != nil {
-					return err
-				}
-				if _, err := cl.SuggestionsAccept(args[0]); err != nil {
-					return err
-				}
-				fmt.Printf("Suggestion %q accepted.\n", args[0])
-				return nil
-			},
-		},
-		&cobra.Command{
-			Use:   "dismiss <skill-id>",
-			Short: "Dismiss a suggestion",
-			Args:  cobra.ExactArgs(1),
-			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectServerForCLIAccount()
-				if err != nil {
-					return err
-				}
-				if _, err := cl.SuggestionsDismiss(args[0]); err != nil {
-					return err
-				}
-				fmt.Printf("Suggestion %q dismissed.\n", args[0])
-				return nil
-			},
-		},
-	)
-	return cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -2254,149 +2191,6 @@ func newServerReloadCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println("Config reloaded.")
-			return nil
-		},
-	}
-}
-
-// ---------------------------------------------------------------------------
-// reflection
-// ---------------------------------------------------------------------------
-
-func newReflectionCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "reflection",
-		Short: "Manage reflection system",
-	}
-	addPersistentAccountFlag(cmd)
-	cmd.AddCommand(
-		newReflectionListCmd(),
-		newReflectionApproveCmd(),
-		newReflectionRejectCmd(),
-		newReflectionClearCmd(),
-		newReflectionRunCmd(),
-		newReflectionReportCmd(),
-	)
-	return cmd
-}
-
-func newReflectionListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List reflection candidates",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			res, err := cl.ReflectionList()
-			if err != nil {
-				return err
-			}
-			candidates := jsonSlice(res, "candidates")
-			if len(candidates) == 0 {
-				fmt.Println("No reflection candidates found.")
-				return nil
-			}
-			fmt.Printf("%s %s\n", padW("KEY", 30), "VALUE")
-			fmt.Println(strings.Repeat("-", 60))
-			for _, c := range candidates {
-				val := truncW(jsonStr(c, "Value"), 40)
-				fmt.Printf("%s %s\n", padW(jsonStr(c, "Key"), 30), val)
-			}
-			return nil
-		},
-	}
-}
-
-func newReflectionApproveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "approve <key>",
-		Short: "Approve a reflection candidate",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.ReflectionApprove(args[0]); err != nil {
-				return err
-			}
-			fmt.Println("Pattern approved.")
-			return nil
-		},
-	}
-}
-
-func newReflectionRejectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reject <key>",
-		Short: "Reject a reflection candidate",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.ReflectionReject(args[0]); err != nil {
-				return err
-			}
-			fmt.Println("Pattern rejected.")
-			return nil
-		},
-	}
-}
-
-func newReflectionClearCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "clear",
-		Short: "Clear all reflection candidates",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.ReflectionClear(); err != nil {
-				return err
-			}
-			fmt.Println("Reflection data cleared.")
-			return nil
-		},
-	}
-}
-
-func newReflectionRunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run",
-		Short: "Trigger reflection cycle",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.ReflectionRun(); err != nil {
-				return err
-			}
-			fmt.Println("Reflection cycle triggered.")
-			return nil
-		},
-	}
-}
-
-func newReflectionReportCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "report",
-		Short: "Show reflection report",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			res, err := cl.WeeklyReport()
-			if err != nil {
-				return err
-			}
-			fmt.Println(jsonStr(res, "report"))
 			return nil
 		},
 	}

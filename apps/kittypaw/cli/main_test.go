@@ -187,26 +187,13 @@ func TestRootCommandPlacesLogUnderSkill(t *testing.T) {
 	}
 }
 
-func TestReflectionCommandUsesReportName(t *testing.T) {
+func TestRootCommandDoesNotExposeReflection(t *testing.T) {
 	root := newRootCmd()
 
-	reflectionCmd, _, err := root.Find([]string{"reflection"})
-	if err != nil || reflectionCmd == nil || reflectionCmd.Name() != "reflection" {
-		t.Fatalf("root Find(reflection) = %v, %v; want reflection command", reflectionCmd, err)
-	}
-	children := map[string]*cobra.Command{}
-	for _, cmd := range reflectionCmd.Commands() {
-		children[cmd.Name()] = cmd
-	}
-	if _, ok := children["weekly-report"]; ok {
-		t.Fatal("reflection command must not expose weekly-report; use report instead")
-	}
-	reportCmd := children["report"]
-	if reportCmd == nil {
-		t.Fatalf("reflection command missing report child; got %#v", children)
-	}
-	if reportCmd.Short != "Show reflection report" {
-		t.Fatalf("reflection report short = %q", reportCmd.Short)
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "reflection" {
+			t.Fatal("root command must not expose reflection internals")
+		}
 	}
 }
 
@@ -236,6 +223,24 @@ func TestRootCommandPlacesStatsUnderSkill(t *testing.T) {
 	}
 	if statsCmd.Short != "Show skill execution stats" {
 		t.Fatalf("skill stats short = %q", statsCmd.Short)
+	}
+	if _, ok := children["suggest"]; ok {
+		t.Fatal("skill command must not expose unused suggestion management")
+	}
+}
+
+func TestSkillCommandRejectsRemovedSuggest(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"skill", "suggest"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("kittypaw skill suggest must fail after suggestion management is removed")
+	}
+	if !strings.Contains(err.Error(), `unknown command "suggest" for "kittypaw skill"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -319,7 +324,6 @@ func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
 		{"agent"},
 		{"agent", "reset"},
 		{"persona"},
-		{"reflection"},
 		{"memory"},
 		{"channels"},
 	} {

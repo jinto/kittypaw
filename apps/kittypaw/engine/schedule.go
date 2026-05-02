@@ -92,40 +92,23 @@ func (s *Scheduler) runReflectionLoop(ctx context.Context) {
 	}
 }
 
-// TriggerReflectionTick runs the reflection + evolution + weekly-report
-// cycle on demand, bypassing the daily cron gate. Used by the manual
-// HTTP trigger (POST /api/v1/reflection/run) so a single button press
-// exercises the same delivery path the daily scheduler uses — without
-// it, the manual trigger would only run RunReflectionCycle and silently
-// skip the weekly-report dispatch that scheduled runs include.
-//
-// Weekly-report dedup (23h last-run) still applies so a manual trigger
-// during the same weekday window does not double-send. Tests verify by
-// resetting the __weekly_report__ last-run before the call.
-func (s *Scheduler) TriggerReflectionTick(ctx context.Context) {
-	s.runReflectionTick(ctx, true)
-}
-
 // reflectionTick runs one reflection + evolution check with panic recovery
 // so a failure in the daily cycle does not exit the reflection goroutine
 // for the whole process lifetime.
 func (s *Scheduler) reflectionTick(ctx context.Context) {
-	s.runReflectionTick(ctx, false)
+	s.runReflectionTick(ctx)
 }
 
-// runReflectionTick is the shared body. force=true skips the daily-cron
-// "due" gate so manual triggers can fire any hour; the per-feature dedup
-// (23h last-run for both reflection and weekly report) still applies.
-func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
+func (s *Scheduler) runReflectionTick(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			RecoverAccountPanic(s.session, "scheduler.reflection", r)
 		}
 	}()
-	if !force && !s.isReflectionDue() {
+	if !s.isReflectionDue() {
 		return
 	}
-	slog.Info("scheduler: running reflection cycle", "manual", force)
+	slog.Info("scheduler: running reflection cycle")
 	if err := RunReflectionCycle(ctx, s.session, &s.session.Config.Reflection); err != nil {
 		slog.Error("scheduler: reflection cycle failed", "error", err)
 	}
@@ -142,8 +125,6 @@ func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 
 	// Weekly report: if today matches WeeklyReportDay, emit the report
 	// to the account's first configured Telegram channel and allowed chat id.
-	// Skipped silently when there's no telegram channel — the report is
-	// still queryable on demand via GET /api/v1/reflection/weekly-report.
 	s.deliverWeeklyReport(ctx)
 
 	// Record last run.
@@ -188,9 +169,7 @@ func (s *Scheduler) deliverWeeklyReport(ctx context.Context) {
 	if token == "" || chatID == "" {
 		// No telegram channel configured. Don't burn the dedup window —
 		// when the user wires up telegram later, the next tick should
-		// still attempt delivery within the same weekday window. The
-		// admin API GET /api/v1/reflection/weekly-report stays available
-		// regardless.
+		// still attempt delivery within the same weekday window.
 		slog.Info("weekly report: no telegram channel configured, skipping dispatch")
 		return
 	}

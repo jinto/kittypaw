@@ -161,51 +161,6 @@ func (c *Client) ExplainSkill(name string) (map[string]any, error) {
 	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/explain", nil)
 }
 
-// SuggestionsList returns all pending suggestions.
-func (c *Client) SuggestionsList() (map[string]any, error) {
-	return c.get("/api/v1/suggestions")
-}
-
-// SuggestionsAccept accepts a suggestion by skill ID.
-func (c *Client) SuggestionsAccept(skillID string) (map[string]any, error) {
-	return c.post("/api/v1/suggestions/"+url.PathEscape(skillID)+"/accept", nil)
-}
-
-// SuggestionsDismiss dismisses a suggestion by skill ID.
-func (c *Client) SuggestionsDismiss(skillID string) (map[string]any, error) {
-	return c.post("/api/v1/suggestions/"+url.PathEscape(skillID)+"/dismiss", nil)
-}
-
-// ReflectionList returns reflection candidates.
-func (c *Client) ReflectionList() (map[string]any, error) {
-	return c.get("/api/v1/reflection")
-}
-
-// ReflectionApprove approves a reflection candidate.
-func (c *Client) ReflectionApprove(key string) (map[string]any, error) {
-	return c.post("/api/v1/reflection/"+url.PathEscape(key)+"/approve", nil)
-}
-
-// ReflectionReject rejects a reflection candidate.
-func (c *Client) ReflectionReject(key string) (map[string]any, error) {
-	return c.post("/api/v1/reflection/"+url.PathEscape(key)+"/reject", nil)
-}
-
-// ReflectionClear clears all reflection candidates.
-func (c *Client) ReflectionClear() (map[string]any, error) {
-	return c.post("/api/v1/reflection/clear", nil)
-}
-
-// ReflectionRun triggers a reflection cycle.
-func (c *Client) ReflectionRun() (map[string]any, error) {
-	return c.post("/api/v1/reflection/run", nil)
-}
-
-// WeeklyReport returns the weekly reflection report.
-func (c *Client) WeeklyReport() (map[string]any, error) {
-	return c.get("/api/v1/reflection/weekly-report")
-}
-
 // EvolutionList returns pending persona evolutions.
 func (c *Client) EvolutionList() (map[string]any, error) {
 	return c.get("/api/v1/persona/evolution")
