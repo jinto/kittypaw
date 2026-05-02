@@ -121,14 +121,14 @@ git commit -m "chore(apps): move services under apps"
 - Modify: `docs/ports.md`
 - Modify: `docs/decisions/0001-monorepo-service-boundaries.md`
 - Modify: `docs/superpowers/specs/2026-05-02-portal-auth-discovery-design.md`
-- Modify: `docs/superpowers/plans/2026-05-02-services-portal-extraction.md`
+- Modify: `docs/superpowers/plans/2026-05-02-apps-portal-extraction.md`
 
 - [ ] **Step 1: Find current-path references**
 
 Run:
 
 ```bash
-rg -n "services/(api|chat|kakao|portal)|services and apps|services/" README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-services-portal-extraction.md
+rg -n "services/(api|chat|kakao|portal)|services and apps|services/" README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-apps-portal-extraction.md
 ```
 
 Expected: matches show current docs that still describe `services/*`.
@@ -178,7 +178,7 @@ Update deployment bullets to use `apps/<name>`.
 
 In `docs/decisions/0001-monorepo-service-boundaries.md`, use "apps" instead of "services" for deployable units while keeping the rule that each app deploys separately.
 
-In `docs/superpowers/specs/2026-05-02-portal-auth-discovery-design.md` and `docs/superpowers/plans/2026-05-02-services-portal-extraction.md`, change active target paths:
+In `docs/superpowers/specs/2026-05-02-portal-auth-discovery-design.md` and `docs/superpowers/plans/2026-05-02-apps-portal-extraction.md`, change active target paths:
 
 ```text
 services/api    -> apps/kittyapi
@@ -200,7 +200,7 @@ kakao.kittypaw.app
 Run:
 
 ```bash
-rg -n "services/(api|chat|kakao|portal)|services and apps" README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-services-portal-extraction.md
+rg -n "services/(api|chat|kakao|portal)|services and apps" README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-apps-portal-extraction.md
 ```
 
 Expected: no output.
@@ -208,7 +208,7 @@ Expected: no output.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-services-portal-extraction.md
+git add README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-apps-portal-extraction.md
 git commit -m "docs(apps): describe deployables under apps"
 ```
 
@@ -281,7 +281,7 @@ services/api/deploy/e2e_devices.sh      -> apps/kittyapi/deploy/e2e_devices.sh
 Run:
 
 ```bash
-rg -n "services/(api|chat|kakao)|go test ./services|cargo test --manifest-path services" .github deploy README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-services-portal-extraction.md scripts Makefile
+rg -n "services/(api|chat|kakao)|go test ./services|cargo test --manifest-path services" .github deploy README.md ARCHITECTURE.md docs/ports.md docs/decisions docs/superpowers/specs docs/superpowers/plans/2026-05-02-apps-portal-extraction.md scripts Makefile
 ```
 
 Expected: no output.

@@ -20,19 +20,19 @@ The local product surface:
 This remains a modular local monolith and should normally be released as one
 KittyPaw binary.
 
-### `services/api`
+### `apps/kittyapi`
 
 The cloud resource API surface:
 
 - public data proxy endpoints
 - API resource audience: `https://api.kittypaw.app`
-- transition host for identity implementation until `services/portal` is
+- transition host for identity implementation until `apps/portal` is
   extracted
 
 During the phase-1 portal split, the binary can still contain identity code,
 but public identity routes are served only on `portal.kittypaw.app`.
 
-### `services/portal`
+### `apps/portal`
 
 The identity and bootstrap surface. In phase 1 this is a logical service hosted
 by the API binary; phase 2 extracts it into its own deployable:
@@ -46,7 +46,7 @@ by the API binary; phase 2 extracts it into its own deployable:
 
 Canonical issuer: `https://portal.kittypaw.app/auth`.
 
-### `services/chat`
+### `apps/chat`
 
 The hosted chat resource server:
 
@@ -59,7 +59,7 @@ The hosted chat resource server:
 The service forwards a narrow chat surface. It must not become a generic
 localhost tunnel.
 
-### `services/kakao`
+### `apps/kakao`
 
 The Kakao gateway:
 
@@ -88,23 +88,23 @@ service boundary.
 ## Dependency Direction
 
 ```text
-services and apps
+apps
   -> contracts
   -> testkit
 ```
 
-Services may depend on contracts and testkit. Services must not depend on other
-services' internal packages.
+Apps may depend on contracts and testkit. Apps must not depend on other apps'
+internal packages.
 
 ## Deployment
 
-Each service remains independently deployed:
+Each app remains independently deployed or released:
 
 - `apps/kittypaw`: GitHub release assets and install script
-- `services/api`: service binary and API database migrations
-- `services/portal`: identity service binary and auth database migrations
+- `apps/kittyapi`: service binary and API database migrations
+- `apps/portal`: identity service binary and auth database migrations
   after extraction
-- `services/chat`: service binary and hosted chat static assets
-- `services/kakao`: service binary and Kakao gateway data store
+- `apps/chat`: service binary and hosted chat static assets
+- `apps/kakao`: service binary and Kakao gateway data store
 
 Databases remain owned by their service.

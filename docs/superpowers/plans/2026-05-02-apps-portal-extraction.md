@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extract the logical portal identity surface from `services/api` into a separately deployable Go service at `services/portal`.
+**Goal:** Extract the logical portal identity surface from `apps/kittyapi` into a separately deployable Go service at `apps/portal`.
 
-**Architecture:** Keep the phase-1 public contract unchanged: `portal.kittypaw.app` owns discovery, OAuth, token issuance, JWKS, and device credentials; `api.kittypaw.app` owns `/v1/*` resource routes. Move identity code and identity-owned tables to `services/portal`, then remove identity routes from `services/api`. Keep services independently deployed and verify the split through shared contracts, fixtures, and smoke tests.
+**Architecture:** Keep the phase-1 public contract unchanged: `portal.kittypaw.app` owns discovery, OAuth, token issuance, JWKS, and device credentials; `api.kittypaw.app` owns `/v1/*` resource routes. Move identity code and identity-owned tables to `apps/portal`, then remove identity routes from `apps/kittyapi`. Keep services independently deployed and verify the split through shared contracts, fixtures, and smoke tests.
 
 **Tech Stack:** Go 1.26 workspace, chi router, pgx, RS256/JWKS, root JSON contracts, bash smoke scripts, nginx/systemd deployment on `second`.
 
@@ -12,32 +12,32 @@
 
 ## File Structure
 
-- Create `services/portal/go.mod`: new module `github.com/kittypaw-app/kittyportal`.
-- Create `services/portal/cmd/server/main.go`: portal process entrypoint.
-- Create `services/portal/internal/config/config.go`: portal env loading. Required: `DATABASE_URL`, `JWT_PRIVATE_KEY_PEM_B64`, OAuth client secrets, `BASE_URL=https://portal.kittypaw.app`, `API_BASE_URL=https://api.kittypaw.app`.
-- Create `services/portal/internal/server/router.go`: portal routes only: `/health`, `/discovery`, `/.well-known/jwks.json`, `/auth/*`.
-- Move identity packages from `services/api/internal/auth` to `services/portal/internal/auth`.
-- Move identity-owned model files from `services/api/internal/model` to `services/portal/internal/model`: `user*`, `refresh_token*`, `device*`, and shared DB pool helpers needed by those stores.
-- Keep resource-owned model files in `services/api/internal/model`: places and addresses.
-- Move identity migrations to `services/portal/migrations`: `001_create_users`, `002_create_refresh_tokens`, `006_create_devices`, `007_add_device_id_to_refresh_tokens`, `008_add_lifecycle_indexes`.
-- Keep resource migrations in `services/api/migrations`: places, alias overrides, addresses.
-- Modify `services/api/cmd/server/main.go`: remove auth/discovery/JWKS/device routes, remove JWT signing config, keep `/health` and `/v1/*`.
-- Modify `services/api/internal/ratelimit`: remove hard dependency on `internal/auth` or keep API traffic anonymous until resource auth is explicitly needed.
-- Create `services/portal/deploy/*` and update root CI/contracts checks.
+- Create `apps/portal/go.mod`: new module `github.com/kittypaw-app/kittyportal`.
+- Create `apps/portal/cmd/server/main.go`: portal process entrypoint.
+- Create `apps/portal/internal/config/config.go`: portal env loading. Required: `DATABASE_URL`, `JWT_PRIVATE_KEY_PEM_B64`, OAuth client secrets, `BASE_URL=https://portal.kittypaw.app`, `API_BASE_URL=https://api.kittypaw.app`.
+- Create `apps/portal/internal/server/router.go`: portal routes only: `/health`, `/discovery`, `/.well-known/jwks.json`, `/auth/*`.
+- Move identity packages from `apps/kittyapi/internal/auth` to `apps/portal/internal/auth`.
+- Move identity-owned model files from `apps/kittyapi/internal/model` to `apps/portal/internal/model`: `user*`, `refresh_token*`, `device*`, and shared DB pool helpers needed by those stores.
+- Keep resource-owned model files in `apps/kittyapi/internal/model`: places and addresses.
+- Move identity migrations to `apps/portal/migrations`: `001_create_users`, `002_create_refresh_tokens`, `006_create_devices`, `007_add_device_id_to_refresh_tokens`, `008_add_lifecycle_indexes`.
+- Keep resource migrations in `apps/kittyapi/migrations`: places, alias overrides, addresses.
+- Modify `apps/kittyapi/cmd/server/main.go`: remove auth/discovery/JWKS/device routes, remove JWT signing config, keep `/health` and `/v1/*`.
+- Modify `apps/kittyapi/internal/ratelimit`: remove hard dependency on `internal/auth` or keep API traffic anonymous until resource auth is explicitly needed.
+- Create `apps/portal/deploy/*` and update root CI/contracts checks.
 
 ## Task 1: Portal Module Skeleton
 
 **Files:**
-- Create: `services/portal/go.mod`
-- Create: `services/portal/cmd/server/main.go`
-- Create: `services/portal/internal/config/config.go`
-- Create: `services/portal/internal/server/router.go`
-- Create: `services/portal/internal/server/router_test.go`
+- Create: `apps/portal/go.mod`
+- Create: `apps/portal/cmd/server/main.go`
+- Create: `apps/portal/internal/config/config.go`
+- Create: `apps/portal/internal/server/router.go`
+- Create: `apps/portal/internal/server/router_test.go`
 - Modify: `go.work`
 
 - [ ] **Step 1: Write failing router contract tests**
 
-Add `services/portal/internal/server/router_test.go`:
+Add `apps/portal/internal/server/router_test.go`:
 
 ```go
 package server
@@ -92,10 +92,10 @@ func TestPortalDoesNotServeResourceRoutes(t *testing.T) {
 Run:
 
 ```bash
-go test ./services/portal/internal/server -count=1
+go test ./apps/portal/internal/server -count=1
 ```
 
-Expected: FAIL because `services/portal` does not exist yet.
+Expected: FAIL because `apps/portal` does not exist yet.
 
 - [ ] **Step 3: Implement minimal skeleton**
 
@@ -106,8 +106,8 @@ Create module, config, and router. `NewRouter` should return only `/health` and 
 Run:
 
 ```bash
-go work use ./services/portal
-go test ./services/portal/internal/server -count=1
+go work use ./apps/portal
+go test ./apps/portal/internal/server -count=1
 ```
 
 Expected: PASS.
@@ -115,21 +115,21 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add go.work services/portal
+git add go.work apps/portal
 git commit -m "feat(portal): scaffold identity service"
 ```
 
 ## Task 2: Move JWT Issuer and JWKS Publication
 
 **Files:**
-- Move: `services/api/internal/auth/jwks*.go` to `services/portal/internal/auth/`
-- Move: `services/api/internal/auth/jwt.go`, `scopes.go`, and related tests to `services/portal/internal/auth/`
+- Move: `apps/kittyapi/internal/auth/jwks*.go` to `apps/portal/internal/auth/`
+- Move: `apps/kittyapi/internal/auth/jwt.go`, `scopes.go`, and related tests to `apps/portal/internal/auth/`
 - Modify: `contracts/auth/*`
-- Modify: `services/chat/internal/identity/*` tests only if contract drift appears
+- Modify: `apps/chat/internal/identity/*` tests only if contract drift appears
 
 - [ ] **Step 1: Write failing portal JWKS and issuer tests**
 
-Add tests in `services/portal/internal/auth/jwt_test.go` asserting:
+Add tests in `apps/portal/internal/auth/jwt_test.go` asserting:
 
 ```go
 if auth.Issuer != "https://portal.kittypaw.app/auth" {
@@ -148,7 +148,7 @@ Expected: 200 JSON JWK Set with one `kid`.
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-go test ./services/portal/internal/auth ./services/portal/internal/server -count=1
+go test ./apps/portal/internal/auth ./apps/portal/internal/server -count=1
 ```
 
 Expected: FAIL because JWKS is not wired in portal yet.
@@ -161,8 +161,8 @@ Use `git mv` for files that are no longer needed by API. If API still needs toke
 
 ```bash
 make contracts-check
-go test ./services/portal/internal/auth ./services/portal/internal/server -count=1
-go test ./services/chat/internal/identity -count=1
+go test ./apps/portal/internal/auth ./apps/portal/internal/server -count=1
+go test ./apps/chat/internal/identity -count=1
 ```
 
 Expected: PASS.
@@ -177,14 +177,14 @@ git commit -m "feat(portal): own jwt issuer and jwks"
 ## Task 3: Move OAuth and Device Identity Routes
 
 **Files:**
-- Move: `services/api/internal/auth/google*.go`, `github*.go`, `devices*.go`, `refresh*.go`, `state*.go`, `web*.go`, `me.go`, and tests to `services/portal/internal/auth/`
-- Move: identity model stores and tests to `services/portal/internal/model/`
-- Move: identity migrations to `services/portal/migrations/`
-- Modify: `services/portal/internal/server/router.go`
+- Move: `apps/kittyapi/internal/auth/google*.go`, `github*.go`, `devices*.go`, `refresh*.go`, `state*.go`, `web*.go`, `me.go`, and tests to `apps/portal/internal/auth/`
+- Move: identity model stores and tests to `apps/portal/internal/model/`
+- Move: identity migrations to `apps/portal/migrations/`
+- Modify: `apps/portal/internal/server/router.go`
 
 - [ ] **Step 1: Write failing route wiring tests**
 
-In `services/portal/internal/server/router_test.go`, add checks:
+In `apps/portal/internal/server/router_test.go`, add checks:
 
 ```go
 func TestDeviceRoutesAreWired(t *testing.T) {
@@ -212,7 +212,7 @@ func TestDeviceRoutesAreWired(t *testing.T) {
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-go test ./services/portal/internal/server ./services/portal/internal/auth ./services/portal/internal/model -count=1
+go test ./apps/portal/internal/server ./apps/portal/internal/auth ./apps/portal/internal/model -count=1
 ```
 
 Expected: FAIL because routes and stores are not moved yet.
@@ -224,7 +224,7 @@ Use `git mv` for identity files. Keep package names stable where possible. Repla
 - [ ] **Step 4: Run portal identity tests**
 
 ```bash
-go test ./services/portal/... -count=1
+go test ./apps/portal/... -count=1
 ```
 
 Expected: PASS.
@@ -239,15 +239,15 @@ git commit -m "feat(portal): move identity routes and stores"
 ## Task 4: Slim API to Resource Server
 
 **Files:**
-- Modify: `services/api/cmd/server/main.go`
-- Modify: `services/api/internal/config/config.go`
-- Modify: `services/api/internal/ratelimit/middleware.go`
-- Modify: `services/api/migrations/`
-- Modify: `services/api/deploy/smoke.sh`
+- Modify: `apps/kittyapi/cmd/server/main.go`
+- Modify: `apps/kittyapi/internal/config/config.go`
+- Modify: `apps/kittyapi/internal/ratelimit/middleware.go`
+- Modify: `apps/kittyapi/migrations/`
+- Modify: `apps/kittyapi/deploy/smoke.sh`
 
 - [ ] **Step 1: Write failing API boundary tests**
 
-In `services/api/cmd/server/main_test.go`, keep or add:
+In `apps/kittyapi/cmd/server/main_test.go`, keep or add:
 
 ```go
 func TestAPIDoesNotServeIdentityRoutes(t *testing.T) {
@@ -266,7 +266,7 @@ func TestAPIDoesNotServeIdentityRoutes(t *testing.T) {
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-go test ./services/api/cmd/server -count=1
+go test ./apps/kittyapi/cmd/server -count=1
 ```
 
 Expected: FAIL while API still wires identity routes.
@@ -277,12 +277,12 @@ Remove OAuth handlers, JWT signing key loading, user/refresh/device stores, and 
 
 - [ ] **Step 4: Split migrations**
 
-Move identity migrations to portal and renumber only if the migration tool requires a contiguous local sequence. Keep a mapping note in `services/portal/DEPLOY.md` so production DB history is not ambiguous.
+Move identity migrations to portal and renumber only if the migration tool requires a contiguous local sequence. Keep a mapping note in `apps/portal/DEPLOY.md` so production DB history is not ambiguous.
 
 - [ ] **Step 5: Run API tests**
 
 ```bash
-go test ./services/api/... -count=1
+go test ./apps/kittyapi/... -count=1
 ```
 
 Expected: PASS.
@@ -297,12 +297,12 @@ git commit -m "refactor(api): keep only resource routes"
 ## Task 5: Deployment Split on `second`
 
 **Files:**
-- Create: `services/portal/deploy/kittyportal.service`
-- Create: `services/portal/deploy/kittyportal.nginx`
-- Create: `services/portal/deploy/env.example`
-- Create: `services/portal/fabfile.py`
-- Modify: `services/api/deploy/kittyapi.nginx`
-- Modify: `services/chat/deploy/env.example`
+- Create: `apps/portal/deploy/kittyportal.service`
+- Create: `apps/portal/deploy/kittyportal.nginx`
+- Create: `apps/portal/deploy/env.example`
+- Create: `apps/portal/fabfile.py`
+- Modify: `apps/kittyapi/deploy/kittyapi.nginx`
+- Modify: `apps/chat/deploy/env.example`
 
 - [ ] **Step 1: Write smoke script expectations**
 
@@ -329,7 +329,7 @@ Use service name `kittyportal`, remote dir `/home/jinto/kittyportal`, port `9714
 - [ ] **Step 3: Run local build/tests**
 
 ```bash
-go test ./services/portal/... ./services/api/... ./services/chat/... -count=1
+go test ./apps/portal/... ./apps/kittyapi/... ./apps/chat/... -count=1
 make contracts-check
 ```
 
@@ -340,7 +340,7 @@ Expected: PASS.
 Deploy portal first, then chat env JWKS URL if needed, then slim API:
 
 ```bash
-cd services/portal && DEPLOY_DOMAIN=portal.kittypaw.app fab setup deploy
+cd apps/portal && DEPLOY_DOMAIN=portal.kittypaw.app fab setup deploy
 cd ../chat && fab deploy
 cd ../api && DEPLOY_DOMAIN=api.kittypaw.app fab deploy
 ```
@@ -379,7 +379,7 @@ Prefer local httptest servers for CI; live smoke remains bash-based and opt-in.
 
 - [ ] **Step 4: Add CI target**
 
-Root CI should run portal, API, chat tests when any file under `contracts/`, `services/portal/`, `services/api/`, `services/chat/`, or `apps/kittypaw/` changes.
+Root CI should run portal, API, chat tests when any file under `contracts/`, `apps/portal/`, `apps/kittyapi/`, `apps/chat/`, or `apps/kittypaw/` changes.
 
 - [ ] **Step 5: Commit**
 

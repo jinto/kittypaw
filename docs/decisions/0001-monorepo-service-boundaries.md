@@ -4,7 +4,7 @@ Date: 2026-05-02
 
 ## Decision
 
-Use a monorepo for KittyPaw product development, but keep deployable services
+Use a monorepo for KittyPaw product development, but keep deployable apps
 separate.
 
 ## Rationale
@@ -22,7 +22,7 @@ verification without requiring a single runtime or shared database.
 
 ## Consequences
 
-- Existing deployables remain separate.
+- Existing deployable apps remain separate.
 - Product release tags must be namespaced.
 - Contracts become first-class source files.
 - Shared runtime code remains intentionally small.
