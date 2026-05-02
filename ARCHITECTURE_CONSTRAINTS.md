@@ -7,22 +7,22 @@ These rules keep the monorepo from turning into a tightly coupled monolith.
 Each deployable unit must be buildable and releasable on its own.
 
 - `apps/kittypaw` releases the local product binary.
-- `services/api` releases the cloud API service.
-- `services/chat` releases the chat relay service.
-- `services/kakao` releases the Kakao gateway service.
+- `apps/kittyapi` releases the cloud API service.
+- `apps/chat` releases the chat relay service.
+- `apps/kakao` releases the Kakao gateway service.
 
-## 2. Service-Owned Data
+## 2. App-Owned Data
 
-Each service owns its persistence.
+Each app owns its persistence.
 
-- Direct cross-service database access is prohibited.
-- Migrations live with the service that owns the database.
+- Direct cross-app database access is prohibited.
+- Migrations live with the app that owns the database.
 - Data sharing happens through published APIs, relay frames, or documented
   events.
 
 ## 3. Contracts Before Shared Code
 
-Cross-service agreement starts in `contracts/`, not in shared runtime packages.
+Cross-app agreement starts in `contracts/`, not in shared runtime packages.
 
 Good shared contract material:
 
@@ -35,8 +35,8 @@ Good shared contract material:
 
 Avoid:
 
-- importing another service's internal Go packages
-- sharing database entities across services
+- importing another app's internal Go packages
+- sharing database entities across apps
 - creating a common package for convenience before contract tests exist
 
 ## 4. Minimal Shared Runtime Libraries
@@ -68,7 +68,7 @@ Product release tags must be namespaced:
 
 ```text
 kittypaw/v0.1.0
-api/v0.1.0
+kittyapi/v0.1.0
 chat/v0.1.0
 kakao/v0.1.0
 ```

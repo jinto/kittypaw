@@ -12,7 +12,7 @@ KittyPaw Client ──► portal.kittypaw.app ──► discovery, OAuth, JWKS
 ## Features
 
 - **Data proxy** — cached access to public APIs (AirKorea air quality: realtime, forecast, weekly, unhealthy stations)
-- **Portal identity transition** — OAuth, token issuance, JWKS, and discovery are exposed on `portal.kittypaw.app` until `services/portal` is extracted.
+- **Portal identity transition** — OAuth, token issuance, JWKS, and discovery are exposed on `portal.kittypaw.app` until `apps/portal` is extracted.
 - **CLI login** — `kittypaw login` via HTTP callback or one-time code paste
 - **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection. Issuer is `https://portal.kittypaw.app/auth`; resource audiences remain URL-form API/chat origins.
 - **Rate limiting** — per-IP anonymous (5/min) + per-user authenticated (60/min), daily 10K cap

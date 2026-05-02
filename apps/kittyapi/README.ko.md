@@ -10,7 +10,7 @@ KittyPaw 클라이언트 ──► portal.kittypaw.app ──► discovery, OAut
 ## 주요 기능
 
 - **데이터 프록시** — 공공 API 캐싱 접근 (에어코리아 대기질: 실시간, 예보, 주간, 초과 측정소)
-- **Portal identity 전환** — OAuth, 토큰 발급, JWKS, discovery는 `services/portal` 추출 전까지 `portal.kittypaw.app`에서 제공합니다.
+- **Portal identity 전환** — OAuth, 토큰 발급, JWKS, discovery는 `apps/portal` 추출 전까지 `portal.kittypaw.app`에서 제공합니다.
 - **CLI 로그인** — `kittypaw login` HTTP 콜백 또는 일회용 코드 입력 방식
 - **JWT + 리프레시 토큰** — 15분 액세스, 7일 리프레시 (로테이션 + 재사용 탐지). issuer는 `https://portal.kittypaw.app/auth`, resource audience는 API/chat URL form입니다.
 - **속도 제한** — IP 기반 비인증 (5/분) + 사용자 기반 인증 (60/분), 일일 10K 상한

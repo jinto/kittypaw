@@ -5,7 +5,7 @@ Future GitHub Actions workflows should be product-scoped.
 Expected release workflows:
 
 - `release-kittypaw.yml` for `kittypaw/v*`
-- `release-api.yml` for `api/v*`
+- `release-kittyapi.yml` for `kittyapi/v*`
 - `release-chat.yml` for `chat/v*`
 - `release-kakao.yml` for `kakao/v*`
 

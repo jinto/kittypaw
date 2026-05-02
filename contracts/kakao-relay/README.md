@@ -1,6 +1,6 @@
 # Kakao Relay Contract
 
-Produced by `services/kakao`.
+Produced by `apps/kakao`.
 
 Consumed by `apps/kittypaw`.
 

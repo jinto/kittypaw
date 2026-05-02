@@ -4,7 +4,7 @@ Deployment assets are grouped by deployable unit.
 
 ```text
 deploy/
-  api/
+  kittyapi/
   chat/
   kakao/
 ```

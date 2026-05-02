@@ -1,6 +1,6 @@
 # OpenAI Relay Contract
 
-Produced by `services/chat`.
+Produced by `apps/chat`.
 
 Consumed by OpenAI-compatible clients and forwarded to `apps/kittypaw`.
 

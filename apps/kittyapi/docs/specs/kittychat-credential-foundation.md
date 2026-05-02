@@ -181,7 +181,7 @@ PR-D 머지 시점에 4 endpoints + production issue 함수 활성. PR-A `c75c23
 **2026-05-02 portal split update**:
 - `portal.kittypaw.app` 가 canonical auth/discovery/JWKS host.
 - `api.kittypaw.app/auth/*`, `/discovery`, `/.well-known/jwks.json` compatibility 없음.
-- 별 process 추출은 `services/portal` phase 2에서 수행.
+- 별 process 추출은 `apps/portal` phase 2에서 수행.
 
 **책임 분리 명시**:
 | 역할 | host (지금) | path | 책임 |
@@ -190,7 +190,7 @@ PR-D 머지 시점에 4 endpoints + production issue 함수 활성. PR-A `c75c23
 | api resource server | `api.kittypaw.app` | `/v1/*` | 데이터 프록시 (검증만) |
 | chat resource server | `chat.kittypaw.app` | `/*` | relay (검증만) |
 
-지금은 *auth authority + api resource server* 가 한 process 박제 (kittyapi)지만 host boundary는 분리되어 있다. 다음 단계에서 `services/portal`로 process를 나눈다.
+지금은 *auth authority + api resource server* 가 한 process 박제 (kittyapi)지만 host boundary는 분리되어 있다. 다음 단계에서 `apps/portal`로 process를 나눈다.
 
 ## Plan 17 — TDD 태스크 분해 (kickoff 시 ina:plan)
 

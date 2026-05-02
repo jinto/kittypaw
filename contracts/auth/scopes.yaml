@@ -1,10 +1,10 @@
 scopes:
   chat:relay:
-    owner: services/chat
+    owner: apps/chat
     grants: Relay OpenAI-compatible chat requests through Chat.
   models:read:
-    owner: services/chat
+    owner: apps/chat
     grants: Read model list through Chat.
   daemon:connect:
-    owner: services/chat
+    owner: apps/chat
     grants: Open daemon outbound WebSocket connection.
