@@ -79,7 +79,7 @@ were created under the older `0755` default.
 ### Machine-wide binary install (once, by the first administrator)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
 # → /usr/local/bin/kittypaw
 ```
 
