@@ -150,7 +150,7 @@ func TestProvisionMember_AlreadyExistsSkips(t *testing.T) {
 }
 
 // If the token is bogus the wizard must record a FAILED entry and leave disk
-// untouched — swallowing the error would mint a broken account the daemon
+// untouched — swallowing the error would mint a broken account the server
 // can't boot.
 func TestProvisionMember_InvalidTokenFails(t *testing.T) {
 	accountsDir := t.TempDir()
@@ -270,7 +270,7 @@ func TestPromptMembers_InvalidNameRePrompts(t *testing.T) {
 }
 
 // D6: two members cannot share a bot token — silently accepting it would
-// land a second account with a duplicate token that blocks daemon startup.
+// land a second account with a duplicate token that blocks server startup.
 func TestPromptMembers_DuplicateTokenRejected(t *testing.T) {
 	accountsDir := t.TempDir()
 	seen := &seenSet{accounts: map[string]struct{}{}, tokens: map[string]string{}}

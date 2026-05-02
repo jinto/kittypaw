@@ -13,7 +13,7 @@ import (
 
 // AC-RELOAD-SYNC: pin the load-bearing contract that `POST /api/v1/reload`
 // returns ONLY AFTER spawner.Reconcile completes. `cli/cmd_setup.go`'s
-// maybeReloadDaemon → runChat sequence assumes handleReload is synchronous
+// maybeReloadServer -> runChat sequence assumes handleReload is synchronous
 // — if someone converts Reconcile to a background goroutine, the subsequent
 // chat REPL will race the new channel set and connect to a server still
 // holding the old config.

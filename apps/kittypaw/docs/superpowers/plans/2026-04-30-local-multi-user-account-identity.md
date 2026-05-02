@@ -4,7 +4,7 @@
 
 **Goal:** Make fresh setup create `~/.kittypaw/accounts/<username>/` with local login credentials, and route Web UI/API access by authenticated account instead of implicit `default`.
 
-**Architecture:** Add a server-wide local auth store, account-aware setup/account-add flows, explicit CLI account selection, and request-scoped account resolution in the daemon. Keep `default` only for legacy migration and compatibility.
+**Architecture:** Add a server-wide local auth store, account-aware setup/account-add flows, explicit CLI account selection, and request-scoped account resolution in the server. Keep `default` only for legacy migration and compatibility.
 
 **Tech Stack:** Go, Cobra CLI, chi middleware, existing `core.Account`, `server.AccountRouter`, JSON auth store, Argon2id password hashing.
 
@@ -37,7 +37,7 @@
   Add `--password-stdin` and interactive password prompts for `account add`.
 
 - Modify: `client/daemon.go`  
-  Stop assuming `accounts/default/config.toml` when resolving daemon endpoint.
+  Stop assuming `accounts/default/config.toml` when resolving server endpoint.
 
 - Modify: `server/server.go`  
   Store deps by account ID, choose default only for compatibility, add request account helpers.
@@ -397,7 +397,7 @@ Keep existing callers compiling initially.
 
 - [ ] **Step 4: Implement CLI account resolver**
 
-In `cli/main.go` add a helper near daemon/config helpers:
+In `cli/main.go` add a helper near server/config helpers:
 
 ```go
 func resolveCLIAccount(explicit string) (string, error) {
@@ -671,7 +671,7 @@ git commit -m "feat: create local credentials for added accounts"
 
 ---
 
-### Task 5: Daemon Boot And Client Discovery Stop Assuming Default
+### Task 5: Server Boot And Client Discovery Stop Assuming Default
 
 **Files:**
 - Modify: `core/config.go`
@@ -719,14 +719,14 @@ go test ./client -run 'TestDaemonConnSingleNonDefaultAccount|TestDaemonConnMulti
 
 Expected: failure because discovery checks `accounts/default`.
 
-- [ ] **Step 3: Update daemon endpoint resolution**
+- [ ] **Step 3: Update server endpoint resolution**
 
 In `client/daemon.go`:
 
 1. Keep `server.toml` as highest priority.
 2. If exactly one account exists, use that account config.
 3. If multiple accounts exist and `server.toml` is incomplete, fail with an actionable message.
-4. Keep legacy root config fallback for pre-serve state only when accounts are absent.
+4. Keep legacy root config fallback for pre-start state only when accounts are absent.
 
 - [ ] **Step 4: Update server default selection**
 

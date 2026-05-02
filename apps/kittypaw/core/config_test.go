@@ -247,7 +247,7 @@ read = ["summary.md"]
 // TestFamilyShareDefaults locks in the zero-state contract — a personal
 // account config with no [share] blocks must decode to IsFamily=false and
 // a nil Share map. If this drifts (e.g. share becomes a required field),
-// every existing account breaks at daemon start.
+// every existing account breaks at server start.
 func TestFamilyShareDefaults(t *testing.T) {
 	var cfg Config
 	if _, err := toml.Decode(`autonomy_level = "full"`, &cfg); err != nil {

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Provide `chat.kittypaw.app` and OpenAI-compatible hosted API access that can reach a user's home or server Kittypaw daemon without requiring Tailscale, port forwarding, or inbound firewall changes.
+Provide `chat.kittypaw.app` and OpenAI-compatible hosted API access that can reach a user's home or server Kittypaw server without requiring Tailscale, port forwarding, or inbound firewall changes.
 
 The hosted service is first-party: account login, device registration, API keys, and relay authorization are owned by Kittypaw. Cloudflare sits in front as the edge/TLS/WAF layer, not as the product's trust model.
 
@@ -34,17 +34,17 @@ Browser / Open WebUI
       - OpenAI-compatible API gateway
       - WebSocket relay broker
   -> outbound WSS connection
-  -> local kittypaw daemon connector
+  -> local kittypaw server connector
   -> account-scoped local OpenAI-compatible API
 ```
 
-The local daemon initiates a persistent outbound WebSocket to the relay. The relay never opens inbound connections to the user's machine.
+The local server initiates a persistent outbound WebSocket to the relay. The relay never opens inbound connections to the user's machine.
 
 ## Components
 
 ### Local OpenAI-Compatible API
 
-The local daemon exposes a narrow account-scoped API:
+The local server exposes a narrow account-scoped API:
 
 ```text
 GET  /v1/models
@@ -56,7 +56,7 @@ The API must not become a generic localhost proxy. It calls existing Kittypaw en
 
 ### Remote Protocol
 
-Daemon and relay communicate with JSON frames over WSS for the MVP:
+Server and relay communicate with JSON frames over WSS for the MVP:
 
 ```json
 {"type":"hello","device_id":"dev_...","local_accounts":["alice"],"version":"..."}
@@ -80,7 +80,7 @@ Cloud auth is separate from local auth:
 Cloud credentials:
 
 - browser session cookie for `chat.kittypaw.app`
-- device credential for daemon WSS
+- device credential for server WSS
 - OpenAI-compatible API key for Open WebUI
 
 Each credential type is independently revocable.
@@ -104,7 +104,7 @@ Pairing flow:
    cloud_user_id, device_id, local_account_id
    ```
 
-6. Local daemon stores the credential under the selected account or device-level remote config.
+6. Local server stores the credential under the selected account or device-level remote config.
 
 ### Hosted API
 

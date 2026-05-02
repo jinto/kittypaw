@@ -52,7 +52,7 @@ func unlockPidFile(f *os.File) {
 
 // processStartTime returns a stable per-platform identifier for
 // when pid started. Used by Phase 13.4 PID file hardening to detect
-// PID reuse: the daemon records its own start time alongside its
+// PID reuse: the server records its own start time alongside its
 // PID, and `kittypaw server stop` re-queries the live process's start time
 // before signaling — a mismatch means the recorded PID was
 // recycled by an unrelated process.
@@ -119,7 +119,7 @@ func procStartTimeBSD(pid int) (int64, error) {
 	// Sanitized env: locale fixed to C so date format is predictable,
 	// timezone fixed to UTC so the same process produces the same
 	// fingerprint across DST transitions or TZ changes between the
-	// daemon's WritePidFile call and the later VerifyDaemonStartTime
+	// server's WritePidFile call and the later VerifyDaemonStartTime
 	// call. PATH is constrained to system bins as defense in depth.
 	cmd.Env = []string{
 		"LC_ALL=C",

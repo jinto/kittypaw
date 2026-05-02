@@ -23,7 +23,7 @@ JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
 RUN_ACCOUNT="${KITTYPAW_ACCOUNT:-auto}"
 RUN_PROVIDER="${KITTYPAW_EVAL_PROVIDER:-configured}"
 RUN_MODEL="${KITTYPAW_EVAL_MODEL:-configured}"
-RUN_DAEMON="${KITTYPAW_EVAL_DAEMON:-local}"
+RUN_SERVER="${KITTYPAW_EVAL_SERVER:-${KITTYPAW_EVAL_DAEMON:-local}}"
 FINISHED=0
 
 mkdir -p "$OUT_DIR"
@@ -38,7 +38,7 @@ write_summary_header() {
     echo "Model: $RUN_MODEL"
     echo "Judge model: $JUDGE_MODEL"
     echo "Account: $RUN_ACCOUNT"
-    echo "Daemon: $RUN_DAEMON"
+    echo "Server: $RUN_SERVER"
     echo
   } > "$SUMMARY"
 }

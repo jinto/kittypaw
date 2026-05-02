@@ -28,7 +28,7 @@ func New(baseURL, apiKey string) *Client {
 	}
 }
 
-// Health checks daemon liveness. Returns nil if healthy.
+// Health checks server liveness. Returns nil if healthy.
 func (c *Client) Health() error {
 	_, err := c.get("/health")
 	return err
@@ -133,7 +133,7 @@ func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
 }
 
-// AccountActivate registers an on-disk account with the running daemon, spawning
+// AccountActivate registers an on-disk account with the running server, spawning
 // its channels without a restart. The account directory must already exist
 // (typically created by `kittypaw account add`). Errors surface the HTTP status
 // verbatim so callers can distinguish 404 (not-provisioned) from 409 (already
@@ -146,7 +146,7 @@ func (c *Client) AccountActivate(accountID string) (map[string]any, error) {
 
 // AccountRemove deactivates a live account. Mirrors AccountActivate. 200 on
 // success, 404 if not currently active (caller treats as "nothing to do"),
-// 400 on malformed ID, 500 if the daemon can't drain channels cleanly.
+// 400 on malformed ID, 500 if the server can't drain channels cleanly.
 func (c *Client) AccountRemove(accountID string) (map[string]any, error) {
 	return c.post("/api/v1/admin/accounts/"+url.PathEscape(accountID)+"/delete", nil)
 }

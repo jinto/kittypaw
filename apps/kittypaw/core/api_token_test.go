@@ -539,7 +539,7 @@ func TestAPITokenManager_ClearTokens(t *testing.T) {
 // that a login flow's write (per-account secrets) is visible to a
 // separately constructed APITokenManager reading from the same
 // per-account store — the inverse of the bug where login wrote globally
-// and the daemon read per-account. The asymmetry guard asserts no global
+// and the server read per-account. The asymmetry guard asserts no global
 // secrets file is produced.
 func TestAPITokenManager_PerAccount_LoginToDaemonRoundTrip(t *testing.T) {
 	root := t.TempDir()
@@ -558,10 +558,10 @@ func TestAPITokenManager_PerAccount_LoginToDaemonRoundTrip(t *testing.T) {
 		t.Fatalf("SaveTokens: %v", err)
 	}
 
-	// Daemon simulation — independently open the same per-account store.
+	// Server simulation — independently open the same per-account store.
 	readerSecrets, err := LoadAccountSecrets("default")
 	if err != nil {
-		t.Fatalf("daemon-side LoadAccountSecrets: %v", err)
+		t.Fatalf("server-side LoadAccountSecrets: %v", err)
 	}
 	readerMgr := NewAPITokenManager("", readerSecrets)
 
@@ -570,7 +570,7 @@ func TestAPITokenManager_PerAccount_LoginToDaemonRoundTrip(t *testing.T) {
 		t.Fatalf("LoadAccessToken: %v", err)
 	}
 	if got != validToken {
-		t.Errorf("daemon-side token = %q, want %q", got, validToken)
+		t.Errorf("server-side token = %q, want %q", got, validToken)
 	}
 
 	// Asymmetry guard: a global secrets.json must NOT have been created.

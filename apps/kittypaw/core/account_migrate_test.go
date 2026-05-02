@@ -81,7 +81,7 @@ func TestMigrateLegacyLayout_Moves(t *testing.T) {
 }
 
 // TestMigrateLegacyLayout_Idempotent ensures re-running the migration on
-// an already-migrated layout is a no-op and does not error. Daemon
+// an already-migrated layout is a no-op and does not error. Server
 // bootstrap runs this on every start — failing the second run would wedge
 // the user out of their account.
 func TestMigrateLegacyLayout_Idempotent(t *testing.T) {

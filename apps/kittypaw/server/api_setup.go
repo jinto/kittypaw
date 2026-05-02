@@ -359,7 +359,7 @@ func (s *Server) handleSetupKakaoRegister(w http.ResponseWriter, r *http.Request
 	_ = acct.Store.SetUserContext("setup:kakao_relay_base", relayURL, "setup")
 	_ = acct.Store.SetUserContext("setup:kakao_relay_token", reg.Token, "setup")
 	// Persist apiURL so generateConfig writes it to the bare "kittypaw-api"
-	// namespace that InjectKakaoWSURL reads at serve time — without this,
+	// namespace that InjectKakaoWSURL reads at server start time — without this,
 	// users who only complete the Kakao step end up with an unroutable channel.
 	_ = acct.Store.SetUserContext("setup:api_server_url", apiURL, "setup")
 

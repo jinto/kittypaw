@@ -233,13 +233,13 @@ func (c *Connector) handleFrame(ctx context.Context, writer *frameWriter, data [
 		return writer.writeError(ctx, envelope.ID, "unsupported_frame", "unsupported chat relay frame type")
 	}
 	if !containsString(c.Config.LocalAccounts, envelope.AccountID) {
-		return writer.writeError(ctx, envelope.ID, "unknown_account", "account is not active on this daemon connection")
+		return writer.writeError(ctx, envelope.ID, "unknown_account", "account is not active on this server connection")
 	}
 	if !SupportedOperation(envelope.Operation) {
 		return writer.writeError(ctx, envelope.ID, "unsupported_operation", "unsupported chat relay operation")
 	}
 	if !containsString(EffectiveCapabilities(c.Config.Capabilities), envelope.Operation) {
-		return writer.writeError(ctx, envelope.ID, "unsupported_capability", "operation was not advertised by this daemon connection")
+		return writer.writeError(ctx, envelope.ID, "unsupported_capability", "operation was not advertised by this server connection")
 	}
 	if c.Dispatcher == nil {
 		return writer.writeError(ctx, envelope.ID, "not_implemented", "chat relay operation dispatch is not implemented")

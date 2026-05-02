@@ -57,7 +57,7 @@ type ChannelFanout struct {
 // implementation rejects that ID as a target to prevent self-loops.
 //
 // Panics if eventCh or registry is nil: a misconfigured Fanout would
-// nil-deref on the first Send and crash the shared daemon, so fail at
+// nil-deref on the first Send and crash the shared server, so fail at
 // construction instead.
 func NewChannelFanout(eventCh chan<- Event, registry *AccountRegistry, source string) *ChannelFanout {
 	if eventCh == nil {

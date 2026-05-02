@@ -17,7 +17,7 @@ const (
 	setupPromptAutoChat       = "> 지금 바로 대화를 시작할까요?"
 	setupPromptInstallService = "> 서버가 자동으로 실행되게 할까요?"
 	setupMsgReloaded          = "✓ 서버 설정 재적용"
-	setupMsgDaemonOff         = "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
+	setupMsgServerOff         = "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
 	setupMsgReloadFailedFmt   = "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."
 	setupMsgAutoChatBlocked   = "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
 	setupMsgServiceInstalled  = "✓ 서비스 등록 완료 — 'kittypaw server status' 로 상태 확인"
@@ -39,7 +39,7 @@ func serviceInstallEligible(f setupFlags, stdinIsTTY, stdoutIsTTY bool) bool {
 	return stdinIsTTY && stdoutIsTTY
 }
 
-// maybeInstallService asks the user whether to register the daemon with the
+// maybeInstallService asks the user whether to register the server with the
 // platform init system. Returns true on successful install so callers can
 // adjust downstream messaging. A failure — including a port conflict — is
 // surfaced on stderr but is non-fatal: the chat auto-entry should still
@@ -75,27 +75,27 @@ func autoChatEligible(f setupFlags, stdinIsTTY, stdoutIsTTY bool) bool {
 	return stdinIsTTY && stdoutIsTTY
 }
 
-// daemonSession is the slice of client.DaemonConn+Client that maybeReloadDaemon
+// serverSession is the slice of client.DaemonConn+Client that maybeReloadServer
 // needs. The narrow interface keeps unit tests free of real network/PID state.
-type daemonSession interface {
+type serverSession interface {
 	IsRunning() bool
 	Reload() error
 }
 
-// daemonDialer resolves a daemonSession lazily so callers can defer the
-// expensive setup (config load, PID probe) until maybeReloadDaemon actually
-// runs. A dial error is treated as "daemon off" — we want a hint, not a
+// serverDialer resolves a serverSession lazily so callers can defer the
+// expensive setup (config load, PID probe) until maybeReloadServer actually
+// runs. A dial error is treated as "server off" — we want a hint, not a
 // crash, when the config isn't ready.
-type daemonDialer func() (daemonSession, error)
+type serverDialer func() (serverSession, error)
 
 // reloadOutcome tells runSetup whether it's safe to auto-enter `kittypaw chat`
 // after setup finishes. Three outcomes, three auto-entry rules:
 //
-//   - reloadOutcomeDaemonOff: no live daemon — the next `kittypaw chat` will
+//   - reloadOutcomeServerOff: no live server — the next `kittypaw chat` will
 //     spawn one that reads the fresh config, so auto-entry is safe.
-//   - reloadOutcomeReloaded:  the running daemon accepted Reload — its
+//   - reloadOutcomeReloaded:  the running server accepted Reload — its
 //     in-memory channel set now matches config.toml, auto-entry is safe.
-//   - reloadOutcomeFailed:    the daemon is live but rejected Reload — chat
+//   - reloadOutcomeFailed:    the server is live but rejected Reload — chat
 //     would attach to a server that still holds the PREVIOUS config (stale
 //     LLM key, stale channel tokens). Auto-entry MUST be blocked and the
 //     user pointed at a manual restart. Closes the adversarial-review
@@ -103,22 +103,22 @@ type daemonDialer func() (daemonSession, error)
 type reloadOutcome int
 
 const (
-	reloadOutcomeDaemonOff reloadOutcome = iota
+	reloadOutcomeServerOff reloadOutcome = iota
 	reloadOutcomeReloaded
 	reloadOutcomeFailed
 )
 
-// maybeReloadDaemon asks a running daemon to re-read config and reconcile
+// maybeReloadServer asks a running server to re-read config and reconcile
 // channels so the subsequent `kittypaw chat` REPL connects to a server that
 // already sees the new setup. The happy path prints a single success line on
 // stdout; the failure paths print recovery hints on stderr. The returned
 // outcome decides whether runSetup may auto-enter chat (see reloadOutcome).
 // See AC-4 / AC-5 / AC-6.
-func maybeReloadDaemon(dial daemonDialer, stdout, stderr io.Writer) reloadOutcome {
+func maybeReloadServer(dial serverDialer, stdout, stderr io.Writer) reloadOutcome {
 	s, err := dial()
 	if err != nil || s == nil || !s.IsRunning() {
-		_, _ = fmt.Fprintln(stderr, setupMsgDaemonOff)
-		return reloadOutcomeDaemonOff
+		_, _ = fmt.Fprintln(stderr, setupMsgServerOff)
+		return reloadOutcomeServerOff
 	}
 	if err := s.Reload(); err != nil {
 		_, _ = fmt.Fprintf(stderr, setupMsgReloadFailedFmt+"\n", err)
@@ -128,27 +128,27 @@ func maybeReloadDaemon(dial daemonDialer, stdout, stderr io.Writer) reloadOutcom
 	return reloadOutcomeReloaded
 }
 
-// defaultDaemonDial wires maybeReloadDaemon to the production DaemonConn +
+// defaultServerDial wires maybeReloadServer to the production DaemonConn +
 // Client pair. Kept as a var so tests can swap in a stub without reaching
 // through a whole injection framework.
-var defaultDaemonDial daemonDialer = func() (daemonSession, error) {
+var defaultServerDial serverDialer = func() (serverSession, error) {
 	conn, err := client.NewDaemonConn(flagRemote)
 	if err != nil {
 		return nil, err
 	}
-	return &daemonSessionAdapter{conn: conn}, nil
+	return &serverSessionAdapter{conn: conn}, nil
 }
 
-// daemonSessionAdapter bridges a *DaemonConn (IsRunning) + *Client (Reload)
-// onto the single daemonSession interface. The adapter lazily constructs the
+// serverSessionAdapter bridges a *DaemonConn (IsRunning) + *Client (Reload)
+// onto the single serverSession interface. The adapter lazily constructs the
 // Client on first Reload call — IsRunning alone doesn't need one.
-type daemonSessionAdapter struct {
+type serverSessionAdapter struct {
 	conn *client.DaemonConn
 }
 
-func (a *daemonSessionAdapter) IsRunning() bool { return a.conn.IsRunning() }
+func (a *serverSessionAdapter) IsRunning() bool { return a.conn.IsRunning() }
 
-func (a *daemonSessionAdapter) Reload() error {
+func (a *serverSessionAdapter) Reload() error {
 	cl := client.New(a.conn.BaseURL, a.conn.APIKey)
 	_, err := cl.Reload()
 	return err

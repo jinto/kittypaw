@@ -63,7 +63,7 @@ const DefaultAccountID = "default"
 
 // New wires together all dependencies and returns a ready-to-serve Server.
 // Callers must pass at least one AccountDeps; New panics on an empty slice
-// because a daemon with no accounts has nothing to route to.
+// because a server with no accounts has nothing to route to.
 //
 // One engine.Session is built per account. The family account (IsFamily=true)
 // receives a ChannelFanout wired to the shared eventCh so its skills can
@@ -329,7 +329,7 @@ func (s *Server) setupRoutes() chi.Router {
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(s.corsMiddleware)
 
-	// Health check (unauthenticated — daemon liveness probe).
+	// Health check (unauthenticated — server liveness probe).
 	r.Get("/health", s.handleHealth)
 
 	r.Route("/api/auth", func(r chi.Router) {
@@ -360,7 +360,7 @@ func (s *Server) setupRoutes() chi.Router {
 
 	// Setup / onboarding routes are open for first-run setup only. Existing
 	// installs require the local Web UI session because localhost checks are
-	// not enough when the daemon is reached through a tunnel.
+	// not enough when the server is reached through a tunnel.
 	r.Route("/api/setup", func(r chi.Router) {
 		r.Use(s.requireWebSessionIfAuthUsers)
 
@@ -425,7 +425,7 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Post("/reload", s.handleReload)
 
 		// Admin — runtime account lifecycle. Localhost-only on top of the
-		// /api/v1 requireAPIKey gate: the daemon binds to 127.0.0.1 by
+		// /api/v1 requireAPIKey gate: the server binds to 127.0.0.1 by
 		// default, but if a future deployment exposes it, admin mutations
 		// still require local access.
 		r.Route("/admin", func(r chi.Router) {
@@ -662,7 +662,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				// Health marked Degraded inside the recover helper.
 				// Drop this event — re-invoking the same panicking run
 				// on the same input would loop; AC-T8 only requires that
-				// the daemon survive and other accounts keep ticking.
+				// the server survive and other accounts keep ticking.
 				continue
 			}
 			if runErr != nil {
@@ -856,7 +856,7 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 				accountID := p.AccountID
 				if accountID == "" {
 					// Pre-migration rows: safe to route to default ONLY while
-					// the daemon is single-account. Once a second account is
+					// the server is single-account. Once a second account is
 					// registered, an empty account_id is ambiguous and could
 					// leak across the privacy boundary (spec C1) — drop it
 					// instead of guessing. Uses MarkResponseDelivered for

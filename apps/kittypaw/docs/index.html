@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KittyPaw — Go 로 만드는 로컬 AI 에이전트 실험</title>
-  <meta name="description" content="Go 단일 binary 로 만드는 로컬 AI 에이전트 프로젝트. CLI + daemon, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.">
+  <meta name="description" content="Go 단일 binary 로 만드는 로컬 AI 에이전트 프로젝트. CLI + local server, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.">
   <link rel="canonical" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="ko" href="https://kittypaw.app/">
   <link rel="alternate" hreflang="en" href="https://kittypaw.app/en/">
@@ -23,7 +23,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "Go 단일 binary 로 만드는 로컬 AI 에이전트 실험 프로젝트. CLI + daemon, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.",
+    "description": "Go 단일 binary 로 만드는 로컬 AI 에이전트 실험 프로젝트. CLI + local server, goja JS sandbox, 5 채널 어댑터, 레지스트리 스킬. v0.0.8 alpha.",
     "url": "https://kittypaw.app/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux, Windows",
@@ -126,7 +126,7 @@
   <div class="proof-inner">
     <div class="proof-item reveal">
       <span class="proof-dot proof-dot-done"></span>
-      ✅ CLI + 로컬 daemon
+      ✅ CLI + 로컬 서버
     </div>
     <div class="proof-item reveal reveal-delay-1">
       <span class="proof-dot proof-dot-done"></span>
@@ -301,7 +301,7 @@
         <div class="step-emoji">⏱</div>
         <div class="step-num">3</div>
         <h3>실행 / 스케줄</h3>
-        <p><code>kittypaw skill run &lt;name&gt;</code> 수동 실행, 또는 cron trigger 에 따라 daemon 이 자동 실행 → 채널 어댑터 통해 발송.</p>
+        <p><code>kittypaw skill run &lt;name&gt;</code> 수동 실행, 또는 cron trigger 에 따라 서버가 자동 실행 → 채널 어댑터 통해 발송.</p>
       </div>
     </div>
   </div>

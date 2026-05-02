@@ -141,7 +141,7 @@ func TestSetupStrings_Golden(t *testing.T) {
 	}{
 		{"prompt base", setupPromptAutoChat, "> 지금 바로 대화를 시작할까요?"},
 		{"reloaded", setupMsgReloaded, "✓ 서버 설정 재적용"},
-		{"server off", setupMsgDaemonOff, "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."},
+		{"server off", setupMsgServerOff, "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."},
 		{"reload failed", setupMsgReloadFailedFmt, "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."},
 		{"auto-chat blocked", setupMsgAutoChatBlocked, "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."},
 		{"account credentials intro ko", accountCredentialsIntroKo, "KittyPaw 사용자 계정을 설정합니다.\n계정 ID와 비밀번호를 입력해주세요.\n계정 ID와 비밀번호 정보는 이 컴퓨터에만 저장됩니다."},
@@ -234,31 +234,31 @@ func TestAccountCredentialsIntroLocalizedWithoutAccountID(t *testing.T) {
 	})
 }
 
-// fakeDaemon implements daemonSession for maybeReloadDaemon tests.
-type fakeDaemon struct {
+// fakeServer implements serverSession for maybeReloadServer tests.
+type fakeServer struct {
 	running   bool
 	reloadErr error
 	reloadN   int
 }
 
-func (f *fakeDaemon) IsRunning() bool { return f.running }
-func (f *fakeDaemon) Reload() error {
+func (f *fakeServer) IsRunning() bool { return f.running }
+func (f *fakeServer) Reload() error {
 	f.reloadN++
 	return f.reloadErr
 }
 
-// AC-5: daemon not running → print hint, don't attempt reload, return
-// reloadOutcomeDaemonOff so runSetup still allows auto-entry (a fresh daemon
+// AC-5: server not running -> print hint, don't attempt reload, return
+// reloadOutcomeServerOff so runSetup still allows auto-entry (a fresh server
 // will pick up the new config when chat spawns it).
-func TestMaybeReloadDaemon_Off(t *testing.T) {
+func TestMaybeReloadServer_Off(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	fd := &fakeDaemon{running: false}
-	dial := func() (daemonSession, error) { return fd, nil }
+	fd := &fakeServer{running: false}
+	dial := func() (serverSession, error) { return fd, nil }
 
-	got := maybeReloadDaemon(dial, &out, &errBuf)
+	got := maybeReloadServer(dial, &out, &errBuf)
 
-	if got != reloadOutcomeDaemonOff {
-		t.Fatalf("outcome = %v, want reloadOutcomeDaemonOff", got)
+	if got != reloadOutcomeServerOff {
+		t.Fatalf("outcome = %v, want reloadOutcomeServerOff", got)
 	}
 	if fd.reloadN != 0 {
 		t.Fatalf("Reload called %d times, expected 0", fd.reloadN)
@@ -271,14 +271,14 @@ func TestMaybeReloadDaemon_Off(t *testing.T) {
 	}
 }
 
-// AC-4: daemon running + reload OK → 1 Reload call + success line on stdout
+// AC-4: server running + reload OK -> 1 Reload call + success line on stdout
 // + reloadOutcomeReloaded so runSetup may auto-enter chat.
-func TestMaybeReloadDaemon_Happy(t *testing.T) {
+func TestMaybeReloadServer_Happy(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	fd := &fakeDaemon{running: true}
-	dial := func() (daemonSession, error) { return fd, nil }
+	fd := &fakeServer{running: true}
+	dial := func() (serverSession, error) { return fd, nil }
 
-	got := maybeReloadDaemon(dial, &out, &errBuf)
+	got := maybeReloadServer(dial, &out, &errBuf)
 
 	if got != reloadOutcomeReloaded {
 		t.Fatalf("outcome = %v, want reloadOutcomeReloaded", got)
@@ -294,17 +294,17 @@ func TestMaybeReloadDaemon_Happy(t *testing.T) {
 	}
 }
 
-// AC-6: daemon running + reload err → warning on stderr + recovery hint, no
+// AC-6: server running + reload err -> warning on stderr + recovery hint, no
 // success on stdout, and reloadOutcomeFailed so runSetup blocks auto-entry
 // (chat would otherwise attach to a server still holding the previous
 // config — stale LLM key / channels). Closes the adversarial-review finding
 // that stale state was silently sent.
-func TestMaybeReloadDaemon_Error(t *testing.T) {
+func TestMaybeReloadServer_Error(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	fd := &fakeDaemon{running: true, reloadErr: errors.New("boom")}
-	dial := func() (daemonSession, error) { return fd, nil }
+	fd := &fakeServer{running: true, reloadErr: errors.New("boom")}
+	dial := func() (serverSession, error) { return fd, nil }
 
-	got := maybeReloadDaemon(dial, &out, &errBuf)
+	got := maybeReloadServer(dial, &out, &errBuf)
 
 	if got != reloadOutcomeFailed {
 		t.Fatalf("outcome = %v, want reloadOutcomeFailed", got)
@@ -323,17 +323,17 @@ func TestMaybeReloadDaemon_Error(t *testing.T) {
 	}
 }
 
-// dial error is treated as "daemon off" — same hint, no Reload attempt,
-// reloadOutcomeDaemonOff so auto-entry still works. Protects against a
+// dial error is treated as "server off" — same hint, no Reload attempt,
+// reloadOutcomeServerOff so auto-entry still works. Protects against a
 // transient dial failure silently skipping the hint.
-func TestMaybeReloadDaemon_DialError(t *testing.T) {
+func TestMaybeReloadServer_DialError(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	dial := func() (daemonSession, error) { return nil, errors.New("no config") }
+	dial := func() (serverSession, error) { return nil, errors.New("no config") }
 
-	got := maybeReloadDaemon(dial, &out, &errBuf)
+	got := maybeReloadServer(dial, &out, &errBuf)
 
-	if got != reloadOutcomeDaemonOff {
-		t.Fatalf("outcome = %v, want reloadOutcomeDaemonOff", got)
+	if got != reloadOutcomeServerOff {
+		t.Fatalf("outcome = %v, want reloadOutcomeServerOff", got)
 	}
 	if !strings.Contains(errBuf.String(), "kittypaw server start") {
 		t.Fatalf("stderr missing hint: %q", errBuf.String())

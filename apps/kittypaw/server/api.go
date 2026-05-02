@@ -727,7 +727,7 @@ func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
 // handleReload reloads config.toml and reconciles each account's channel set.
 //
 // Load-bearing sync contract (pinned by TestHandleReload_WaitsForReconcile):
-// callers — notably cli/cmd_setup.maybeReloadDaemon → runChat — assume this
+// callers — notably cli/cmd_setup.maybeReloadServer -> runChat — assume this
 // handler returns only AFTER spawner.Reconcile completes, so the subsequent
 // chat REPL connects to a server that already sees the new channel set. Do
 // NOT convert Reconcile to a goroutine without first updating the CLI

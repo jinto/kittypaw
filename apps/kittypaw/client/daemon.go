@@ -13,7 +13,7 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-// DaemonConn manages daemon discovery and auto-start.
+// DaemonConn manages local server discovery and auto-start.
 type DaemonConn struct {
 	BaseURL   string
 	APIKey    string
@@ -22,7 +22,7 @@ type DaemonConn struct {
 }
 
 // NewDaemonConn creates a DaemonConn. If remoteURL is non-empty, connects
-// directly to that URL. Otherwise resolves the daemon's bind address and
+// directly to that URL. Otherwise resolves the server's bind address and
 // API key from disk using the server config plus account-local secrets — see
 // resolveDaemonEndpointForAccount for the exact resolution order.
 func NewDaemonConn(remoteURL string) (*DaemonConn, error) {
@@ -56,7 +56,7 @@ func NewDaemonConnForAccount(remoteURL, accountID string) (*DaemonConn, error) {
 	}, nil
 }
 
-// resolveDaemonEndpoint finds daemon Bind + API key across the supported
+// resolveDaemonEndpoint finds server Bind + API key across the supported
 // v2 account layout:
 //
 //  1. ~/.kittypaw/server.toml       — the designed-for-server-wide path
@@ -66,7 +66,7 @@ func NewDaemonConnForAccount(remoteURL, accountID string) (*DaemonConn, error) {
 //     client discovery and server bootstrap pick the same account.
 //  2. ~/.kittypaw/accounts/<id>/config.toml — the named-account layout.
 //     Exactly one account is unambiguous. Multiple accounts require
-//     server.toml because there is no safe client-side daemon endpoint to
+//     server.toml because there is no safe client-side server endpoint to
 //     infer from per-account configs.
 //
 // This mirrors the read-side of the designed multi-account contract while
@@ -229,8 +229,8 @@ func selectDaemonEndpointAccount(accounts []*core.Account, configuredDefault str
 		strings.Join(ids, ", "), "server.toml")
 }
 
-// Connect returns a Client connected to a running daemon.
-// If no daemon is running, auto-starts one and polls until healthy.
+// Connect returns a Client connected to a running server.
+// If no server is running, auto-starts one and polls until healthy.
 func (d *DaemonConn) Connect() (*Client, error) {
 	cl := New(d.BaseURL, d.APIKey)
 
@@ -239,7 +239,7 @@ func (d *DaemonConn) Connect() (*Client, error) {
 		return nil, err
 	}
 
-	// Try existing daemon first.
+	// Try existing server first.
 	if pid, ok := readPid(pidPath); ok {
 		if isKittypawProcess(pid) {
 			if cl.Health() == nil {
@@ -255,7 +255,7 @@ func (d *DaemonConn) Connect() (*Client, error) {
 		os.Remove(pidPath)
 	}
 
-	// No daemon running — try to start one.
+	// No server running — try to start one.
 	if err := d.spawnDaemon(pidPath); err != nil {
 		return nil, err
 	}
@@ -267,7 +267,7 @@ func (d *DaemonConn) Connect() (*Client, error) {
 	return cl, nil
 }
 
-// IsRunning checks if a daemon is already running (without starting one).
+// IsRunning checks if a server is already running (without starting one).
 func (d *DaemonConn) IsRunning() bool {
 	pidPath, err := daemonPidPath()
 	if err != nil {
@@ -370,10 +370,10 @@ func readPid(path string) (int, bool) {
 }
 
 // WritePidFile writes pid + its start-time fingerprint in 2-line
-// text format ("<pid>\n<start_time>\n"). Phase 13.4: when daemons
+// text format ("<pid>\n<start_time>\n"). Phase 13.4: when servers
 // became persistent across chat sessions (Phase 12), the PID-only
 // validation in `kittypaw server stop` started carrying real PID-reuse
-// risk — a sleeping laptop could let the daemon's PID get recycled
+// risk — a sleeping laptop could let the server's PID get recycled
 // before the user remembered to stop it. Recording the start time
 // alongside the PID lets stop refuse to signal a process that
 // happens to share the recorded PID but has a different start
@@ -395,7 +395,7 @@ func WritePidFile(path string, pid int) error {
 // recordedStart=0 is reserved for the *legitimate* legacy single-
 // line format written before Phase 13.4. VerifyDaemonStartTime
 // treats 0 as "skip verification" so an in-place upgrade (old
-// daemon, new CLI) keeps working until the daemon restarts.
+// server, new CLI) keeps working until the server restarts.
 func ReadPidFile(path string) (pid int, recordedStart int64, ok bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -426,7 +426,7 @@ func ReadPidFile(path string) (pid int, recordedStart int64, ok bool) {
 // Two distinct paths around the recorded value:
 //
 //   - recordedStart=0 is the legacy / unsupported-platform marker.
-//     Always returns true so a daemon written before Phase 13.4 (or
+//     Always returns true so a server written before Phase 13.4 (or
 //     on a platform whose start time we can't read, e.g. Windows)
 //     keeps working — there's nothing to verify against, and the
 //     pre-Phase-13.4 PID-only contract is the best we can do.

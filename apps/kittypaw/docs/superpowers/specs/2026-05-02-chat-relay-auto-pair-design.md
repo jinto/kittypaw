@@ -8,7 +8,7 @@ Make hosted chat relay usable after API login without requiring users to know ab
 
 ## Scope
 
-This slice is daemon/CLI-side only. Kittyapi still owns device credential issuance. Kittychat still verifies device access tokens.
+This slice is server/CLI-side only. Kittyapi still owns device credential issuance. Kittychat still verifies device access tokens.
 
 ## Behavior
 
@@ -26,4 +26,4 @@ Pairing is best-effort. Failure does not fail login or setup because the API end
 
 ## Out Of Scope
 
-This does not add user-facing device revocation, user-facing disconnect, OS keyring storage, or automatic pairing from `kittypaw serve`. Stale device cleanup belongs to the API/chat services as an automatic lifecycle policy.
+This does not add user-facing device revocation, user-facing disconnect, OS keyring storage, or automatic pairing from `kittypaw server start`. Stale device cleanup belongs to the API/chat services as an automatic lifecycle policy.

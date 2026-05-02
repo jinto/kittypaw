@@ -66,7 +66,7 @@ func TestHealthState_MarkReadyAfterDegraded(t *testing.T) {
 func TestHealthState_StoppedIsTerminal(t *testing.T) {
 	s := NewHealthState()
 	s.MarkStopped()
-	// Attempts to leave Stopped must be ignored — a shutting-down daemon
+	// Attempts to leave Stopped must be ignored — a shutting-down server
 	// should never appear to resume from a stale goroutine tick.
 	s.MarkReady()
 	if got := s.Load(); got != AccountHealthStopped {

@@ -160,7 +160,7 @@ func TestShareRead_AuditLog(t *testing.T) {
 }
 
 // TestShareRead_NoRegistry protects against the "Session wired without
-// account context" case — e.g. a legacy single-account daemon or a test
+// account context" case — e.g. a legacy single-account server or a test
 // setup that forgot to inject the registry. Rather than panic on nil,
 // surface a clear "unavailable" error so skill authors see what's
 // missing instead of debugging a segfault.

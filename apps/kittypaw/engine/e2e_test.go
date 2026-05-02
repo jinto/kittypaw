@@ -591,6 +591,6 @@ func TestE2EWeatherBriefingLive(t *testing.T) {
 		t.Skip("set KITTYPAW_E2E_LIVE=1 to run live E2E tests")
 	}
 	t.Log("Live E2E: kittypaw skill install weather-briefing && kittypaw chat '오늘 날씨 알려줘'")
-	t.Log("This test requires a running daemon with a valid LLM API key.")
+	t.Log("This test requires a running server with a valid LLM API key.")
 	t.Log("Run manually: ./kittypaw skill install weather-briefing && ./kittypaw chat '오늘 날씨 알려줘'")
 }

@@ -26,7 +26,7 @@ const DefaultAccountID = "default"
 
 // LoadSecrets reads the global secrets file. Retained for migration
 // tooling; production code paths now use LoadAccountSecrets so that
-// CLI writes and daemon reads target the same per-account store.
+// CLI writes and server reads target the same per-account store.
 //
 // Deprecated: use LoadAccountSecrets. The old "OAuth-once-per-host"
 // global model was retired so each account on a shared host can have

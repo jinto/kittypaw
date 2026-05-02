@@ -503,7 +503,7 @@ func executeFile(ctx context.Context, call core.SkillCall, s *Session) (string, 
 
 	// Resolve the path once and use it for both validation and all file operations.
 	// Relative paths are interpreted inside the account's default workspace, not
-	// the daemon's current working directory.
+	// the server's current working directory.
 	resolvedPath, err := resolveFileToolPath(rawPath, s.AllowedPaths())
 	if err != nil {
 		return "", err

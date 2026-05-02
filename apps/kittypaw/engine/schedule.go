@@ -152,7 +152,7 @@ func (s *Scheduler) runReflectionTick(ctx context.Context, force bool) {
 
 // deliverWeeklyReport sends the topic-preference summary on the configured
 // weekday. Idempotency is anchored on `__weekly_report__` last-run so a
-// daemon restart on the same day does not double-send. Best-effort: any
+// server restart on the same day does not double-send. Best-effort: any
 // dispatch failure is logged warn and does not abort the reflection cycle.
 func (s *Scheduler) deliverWeeklyReport(ctx context.Context) {
 	cfg := s.session.Config.Reflection

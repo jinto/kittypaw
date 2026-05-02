@@ -49,15 +49,15 @@ func duplicateBotMessage() string {
 	case strings.HasPrefix(lang, "ko"):
 		return "\n  ⚠ 같은 봇 토큰으로 다른 인스턴스가 실행 중입니다.\n" +
 			"    기존 프로세스를 종료한 뒤 다시 실행하세요.\n\n" +
-			"    pkill -f kittypaw\n    kittypaw serve\n"
+			"    pkill -f kittypaw\n    kittypaw server start\n"
 	case strings.HasPrefix(lang, "ja"):
 		return "\n  ⚠ 同じボットトークンで別のインスタンスが実行中です。\n" +
 			"    既存のプロセスを終了してから再実行してください。\n\n" +
-			"    pkill -f kittypaw\n    kittypaw serve\n"
+			"    pkill -f kittypaw\n    kittypaw server start\n"
 	default:
 		return "\n  ⚠ Another instance is already running with the same bot token.\n" +
 			"    Stop the existing process and try again.\n\n" +
-			"    pkill -f kittypaw\n    kittypaw serve\n"
+			"    pkill -f kittypaw\n    kittypaw server start\n"
 	}
 }
 

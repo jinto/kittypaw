@@ -19,7 +19,7 @@ func writeTestPidFile(t *testing.T, content string) string {
 
 func TestReadPidFile_Legacy1Line(t *testing.T) {
 	// PID files written before Phase 13.4 carry only the PID. Must
-	// remain readable so an in-place CLI upgrade against a daemon
+	// remain readable so an in-place CLI upgrade against a server
 	// that hasn't restarted yet keeps working.
 	path := writeTestPidFile(t, "12345\n")
 	pid, recordedStart, ok := ReadPidFile(path)
@@ -156,7 +156,7 @@ func TestVerifyDaemonStartTime_Mismatch(t *testing.T) {
 }
 
 func TestVerifyDaemonStartTime_LookupFailureFailsClosed(t *testing.T) {
-	// recordedStart!=0 means the daemon committed to Phase 13.4
+	// recordedStart!=0 means the server committed to Phase 13.4
 	// hardening when it wrote the PID file. If the live process's
 	// start time can't be read (ps blocked, /proc hidden, exec
 	// failure, attacker-installed fake ps refusing to respond), we

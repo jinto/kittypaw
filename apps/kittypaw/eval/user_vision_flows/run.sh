@@ -30,7 +30,7 @@ JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
 RUN_ACCOUNT="${KITTYPAW_ACCOUNT:-auto}"
 RUN_PROVIDER="${KITTYPAW_EVAL_PROVIDER:-configured}"
 RUN_MODEL="${KITTYPAW_EVAL_MODEL:-configured}"
-RUN_DAEMON="${KITTYPAW_EVAL_DAEMON:-local}"
+RUN_SERVER="${KITTYPAW_EVAL_SERVER:-${KITTYPAW_EVAL_DAEMON:-local}}"
 FINISHED=0
 LAST_FLOW_DETAIL=""
 
@@ -64,7 +64,7 @@ write_summary_header() {
     echo "Model: $RUN_MODEL"
     echo "Judge model: $JUDGE_MODEL"
     echo "Account: $RUN_ACCOUNT"
-    echo "Daemon: $RUN_DAEMON"
+    echo "Server: $RUN_SERVER"
     echo
     echo "| Flow | State | Detail |"
     echo "|---|---|---|"
@@ -162,9 +162,9 @@ load_provider_baselines() {
 
 load_provider_baselines "$PROVIDER_FAMILY"
 
-reset_daemon() {
-  "$KITTY_BIN" stop >/dev/null 2>&1 || true
-  pkill -9 -f "kittypaw serve" 2>/dev/null || true
+reset_server() {
+  "$KITTY_BIN" server stop >/dev/null 2>&1 || true
+  pkill -9 -f "kittypaw server start" 2>/dev/null || true
   rm -rf "$HOME/.kittypaw/tenants/default/packages/"* \
          "$HOME/.kittypaw/tenants/default/skills/"* 2>/dev/null || true
   sleep 1
@@ -172,7 +172,7 @@ reset_daemon() {
 
 run_flow() {
   local name="$1" input="$2"
-  reset_daemon
+  reset_server
   local raw
   if ! raw=$(printf '%s' "$input" | "$KITTY_BIN" chat 2>&1); then
     echo "chat command failed for flow $name:" >&2

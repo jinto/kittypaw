@@ -138,8 +138,8 @@ func (m *APITokenManager) LoadChatRelayDeviceID(apiURL string) (string, bool) {
 	return m.secrets.Get(NamespaceForURL(apiURL), chatRelayDeviceIDKey)
 }
 
-// ChatRelayDeviceTokens are the API-issued credentials the local daemon uses
-// to connect outbound to the hosted chat relay. The daemon treats AccessToken
+// ChatRelayDeviceTokens are the API-issued credentials the local server uses
+// to connect outbound to the hosted chat relay. The server treats AccessToken
 // as an opaque Bearer token; kittychat validates the RS256 JWT.
 type ChatRelayDeviceTokens struct {
 	DeviceID     string

@@ -177,7 +177,7 @@ func (s *Session) RefreshAllowedPaths() error {
 //
 // The cache entry is evicted after turnCacheTTL by a time.AfterFunc;
 // retries arriving later re-execute (Phase 12 client.ErrServerSide
-// guard catches the false-positive cases). Daemon restart wipes the
+// guard catches the false-positive cases). Server restart wipes the
 // in-memory cache — true cross-restart idempotency is deferred to a
 // future store-backed phase.
 func (s *Session) RunTurn(ctx context.Context, turnID string, event core.Event, opts *RunOptions) (string, error) {
@@ -386,7 +386,7 @@ proposal is a coda, not the main course; never derail the answer.`
 	messages[0].Content += fmt.Sprintf(augmentTemplate, candidate)
 
 	// Record the surface time so this candidate stays silent for
-	// suggestionSilenceWindow, even across daemon restarts. Best-effort:
+	// suggestionSilenceWindow, even across server restarts. Best-effort:
 	// a write failure is logged warn but does not block delivery — at
 	// worst the same suggestion surfaces again on the next session.
 	if err := st.SetUserContext(

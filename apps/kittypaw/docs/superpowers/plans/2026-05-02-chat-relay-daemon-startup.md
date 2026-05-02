@@ -1,10 +1,10 @@
-# Chat Relay Daemon Startup Implementation Plan
+# Chat Relay Server Startup Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Start the outbound chat relay connector from `kittypaw serve` when an account already has relay topology and a device credential stored.
+**Goal:** Start the outbound chat relay connector from `kittypaw server start` when an account already has relay topology and a device credential stored.
 
-**Architecture:** Keep API device issuance out of this slice. The daemon loads per-account secrets, builds connector configs only when `chat_relay_url`, `chat_relay_device_id`, and `chat_daemon_credential` are all present, groups accounts by `relay_url + daemon credential + device_id`, and starts background retry loops that do not block daemon startup.
+**Architecture:** Keep API device issuance out of this slice. The server loads per-account secrets, builds connector configs only when `chat_relay_url`, `chat_relay_device_id`, and `chat_daemon_credential` are all present, groups accounts by `relay_url + device credential + device_id`, and starts background retry loops that do not block server startup.
 
 **Tech Stack:** Go 1.25, existing `core.APITokenManager`, existing `server.AccountDeps`, `remote/chatrelay` WebSocket connector.
 
@@ -17,10 +17,10 @@ In scope:
 - Store/load `chat_relay_device_id` beside `chat_daemon_credential`.
 - Add a retrying connector loop to `remote/chatrelay`.
 - Keep the relay WebSocket alive after hello and explicitly reject unsupported request frames with `error` frames.
-- Resolve connector configs from account dependencies during `serve`.
-- Advertise all active local accounts that share the same daemon credential in one hello frame.
+- Resolve connector configs from account dependencies during server startup.
+- Advertise all active local accounts that share the same device credential in one hello frame.
 - Advertise an empty capability set until request dispatch is wired; the connection is a lifecycle/routing advertisement, not an operation-ready endpoint yet.
-- Start configured connectors in the `serve` context; if relay is missing or down, local daemon still starts.
+- Start configured connectors in the `server start` context; if relay is missing or down, local server still starts.
 
 Out of scope:
 
@@ -113,7 +113,7 @@ While request dispatch is still out of scope, `Run` must not silently drop relay
 - request for a supported operation not advertised in hello capabilities: `unsupported_capability`
 - request for an advertised-but-unimplemented operation: `not_implemented`
 
-## Task 3: Serve Config Resolution
+## Task 3: Server Start Config Resolution
 
 - [ ] Add failing tests in `cli/chat_relay_test.go`:
 
@@ -147,7 +147,7 @@ func startChatRelayConnectors(ctx context.Context, deps []*server.AccountDeps, d
 
 The helper must use `kittypaw-api/api_url` from account secrets when present, otherwise `core.DefaultAPIServerURL`. Each complete account creates one connector advertising only that local account ID.
 
-## Task 4: Wire Into Serve
+## Task 4: Wire Into Server Start
 
 - [ ] Modify `runServe` after `srv.StartChannels(ctx)`:
 
@@ -155,7 +155,7 @@ The helper must use `kittypaw-api/api_url` from account secrets when present, ot
 startChatRelayConnectors(ctx, deps, version)
 ```
 
-No error is returned to `serve`; relay failures are background-only.
+No error is returned to `server start`; relay failures are background-only.
 
 ## Final Verification
 

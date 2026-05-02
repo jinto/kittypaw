@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Go relay/control-plane that lets `chat.kittypaw.app` and Open WebUI reach a user's local Kittypaw daemon through outbound WSS, with first-party auth and account-scoped routing.
+**Goal:** Build a Go relay/control-plane that lets `chat.kittypaw.app` and Open WebUI reach a user's local Kittypaw server through outbound WSS, with first-party auth and account-scoped routing.
 
-**Architecture:** Cloudflare fronts a Go `kittypaw-relayd` origin. Local Kittypaw daemons connect outbound over WSS, advertise paired local accounts, and serve a narrow OpenAI-compatible API through relay request frames. Hosted browser/API traffic authenticates to cloud users, selects a device, and streams responses through the tunnel.
+**Architecture:** Cloudflare fronts a Go `kittypaw-relayd` origin. Local Kittypaw servers connect outbound over WSS, advertise paired local accounts, and serve a narrow OpenAI-compatible API through relay request frames. Hosted browser/API traffic authenticates to cloud users, selects a device, and streams responses through the tunnel.
 
 **Tech Stack:** Go, chi, nhooyr WebSocket, Postgres via `pgx`, existing Kittypaw server/engine packages, JSON-over-WebSocket MVP protocol, Cloudflare as edge.
 
@@ -37,7 +37,7 @@ This is not optional. The remote relay must target `device_id + local_account_id
   Round-trip and validation tests.
 
 - Create: `remote/connector/connector.go`  
-  Local daemon outbound WSS connector.
+  Local server outbound WSS connector.
 
 - Create: `remote/connector/connector_test.go`  
   Reconnect, heartbeat, request dispatch, stream forwarding tests.
@@ -379,9 +379,9 @@ type LocalRoundTripper interface {
 
 This keeps connector independent from server internals.
 
-- [ ] **Step 4: Wire connector into daemon**
+- [ ] **Step 4: Wire connector into server**
 
-Daemon startup loads active device credentials and starts connectors after HTTP server construction. If relay is unreachable, daemon startup should continue and connector should retry in the background.
+Server startup loads active device credentials and starts connectors after HTTP server construction. If relay is unreachable, server startup should continue and connector should retry in the background.
 
 - [ ] **Step 5: Run tests**
 
@@ -696,7 +696,7 @@ POST /nodes/{device_id}/v1/chat/completions
 GET  /health
 ```
 
-`/connect` upgrades daemon WSS connections and registers the device in the broker.
+`/connect` upgrades server WSS connections and registers the device in the broker.
 
 - [ ] **Step 4: Add Makefile target**
 

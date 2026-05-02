@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current mixed account config with a clean v2 layout: per-account `account.toml`, non-secret `config.toml`, and per-account `secrets.json`.
 
-**Architecture:** The user-visible TOML shape becomes the source of truth for non-secret account settings. Secrets stay in `secrets.json` and are injected into runtime channel/model configs before daemon startup. Local Web UI credentials move from root `auth.json` to `accounts/<id>/account.toml`; the account id remains the folder name.
+**Architecture:** The user-visible TOML shape becomes the source of truth for non-secret account settings. Secrets stay in `secrets.json` and are injected into runtime channel/model configs before server startup. Local Web UI credentials move from root `auth.json` to `accounts/<id>/account.toml`; the account id remains the folder name.
 
 **Tech Stack:** Go, BurntSushi/toml, existing `core.SecretsStore`, existing `store.Workspace` table, existing `engine.Session` allowed-path cache.
 

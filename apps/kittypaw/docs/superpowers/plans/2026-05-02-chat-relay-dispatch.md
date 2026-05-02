@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Route chat relay `openai.models` and `openai.chat_completions` requests from the outbound daemon WebSocket into the correct local account session.
+**Goal:** Route chat relay `openai.models` and `openai.chat_completions` requests from the outbound server WebSocket into the correct local account session.
 
-**Architecture:** `remote/chatrelay` owns the wire protocol and WebSocket frame lifecycle. It calls a small `Dispatcher` interface after account/capability validation, keeping relay framing independent from `server` and `engine`. `server` provides the daemon-local OpenAI-compatible adapter that maps `account_id` to an active account session.
+**Architecture:** `remote/chatrelay` owns the wire protocol and WebSocket frame lifecycle. It calls a small `Dispatcher` interface after account/capability validation, keeping relay framing independent from `server` and `engine`. `server` provides the server-local OpenAI-compatible adapter that maps `account_id` to an active account session.
 
 **Tech Stack:** Go 1.25, `nhooyr.io/websocket`, existing `engine.Session.RunTurn`, existing `core.Config` model metadata.
 
@@ -25,7 +25,7 @@ In scope:
   - `user`
   - fallback to relay request id
 - Keep permission callbacks out of this slice. Operations requiring approval remain denied by existing engine behavior when no callback is provided.
-- Advertise default capabilities from `serve` once dispatcher is wired.
+- Advertise default capabilities from server startup once dispatcher is wired.
 
 Out of scope:
 
@@ -72,7 +72,7 @@ Out of scope:
 - [ ] Implement chat request parsing and `Session.RunTurn`.
 - [ ] Run `go test ./server -run ChatRelay -count=1`.
 
-### Task 3: Serve Wiring
+### Task 3: Server Start Wiring
 
 - [ ] Add failing CLI config test proving dispatcher presence advertises default capabilities.
 - [ ] Add `Dispatcher` to connector config.

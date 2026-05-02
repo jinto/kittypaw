@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KittyPaw — A Go-based local AI agent experiment</title>
-  <meta name="description" content="A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.">
+  <meta name="description" content="A single-Go-binary local AI agent project. CLI + local server, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 
   <!-- Canonical & hreflang -->
@@ -31,7 +31,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "KittyPaw",
-    "description": "A single-Go-binary local AI agent project. CLI + daemon, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.",
+    "description": "A single-Go-binary local AI agent project. CLI + local server, goja JS sandbox, 5 channel adapters, skill registry. v0.0.8 alpha.",
     "url": "https://kittypaw.app/en/",
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS, Linux, Windows",
@@ -117,7 +117,7 @@
         <div><span class="t-prompt">$</span> <span class="t-cmd">kittypaw setup</span></div>
         <div class="t-out">   LLM provider: Claude (Anthropic)</div>
         <div class="t-out">   Channel: Telegram</div>
-        <div class="t-out">   ✓ Settings saved · Daemon up</div>
+        <div class="t-out">   ✓ Settings saved · Server up</div>
         <div><span class="t-highlight">🐾 KittyPaw started on :3000</span> <span class="t-cursor"></span></div>
       </div>
     </div>
@@ -132,7 +132,7 @@
   <div class="proof-inner">
     <div class="proof-item reveal">
       <span class="proof-dot proof-dot-done"></span>
-      ✅ CLI + local daemon
+      ✅ CLI + local server
     </div>
     <div class="proof-item reveal reveal-delay-1">
       <span class="proof-dot proof-dot-done"></span>
@@ -221,7 +221,7 @@
         <div class="step-emoji">⏱</div>
         <div class="step-num">3</div>
         <h3>Run / schedule</h3>
-        <p><code>kittypaw skill run &lt;name&gt;</code> for manual, or cron triggers driven by the daemon → output flows through the channel adapter.</p>
+        <p><code>kittypaw skill run &lt;name&gt;</code> for manual, or cron triggers driven by the server → output flows through the channel adapter.</p>
       </div>
     </div>
   </div>

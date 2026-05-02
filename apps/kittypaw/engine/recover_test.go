@@ -133,7 +133,7 @@ func TestAccountPanicIsolation_AC_T8(t *testing.T) {
 // Scheduler.Start loop actually calls every minute — survives a panic
 // inside checkAndRun. If this guard ever regresses, a single bad skill
 // load would silently kill the scheduler goroutine for the whole
-// daemon lifetime.
+// server lifetime.
 func TestSchedulerTickRecovers(t *testing.T) {
 	// Build a minimal Scheduler whose session has no Store — checkAndRun
 	// will nil-deref on Store.GetLastRun or LoadAllSkillsFrom and panic.

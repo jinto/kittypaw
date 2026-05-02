@@ -1,10 +1,10 @@
-# Chat Relay Daemon Foundation Implementation Plan
+# Chat Relay Server Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the daemon-side foundation for chat relay without guessing the unfinished API-server credential issuance or cloud broker behavior.
+**Goal:** Add the server-side foundation for chat relay without guessing the unfinished API-server credential issuance or cloud broker behavior.
 
-**Architecture:** The daemon stores a per-account device credential under the API-server namespace, builds an operation-based protocol v1 hello frame, and can open an outbound WebSocket to `{chat_relay_url}/daemon/connect`. Request dispatch and retry loops are deliberately kept separate so the wire contract can stabilize before `/v1/models` and `/v1/chat/completions` execution is attached. Credential issuance and JWT verification are owned by `api.kittypaw.app` and `kittychat`; the daemon only stores and presents the API-issued bearer credential.
+**Architecture:** The server stores a per-account device credential under the API-server namespace, builds an operation-based protocol v1 hello frame, and can open an outbound WebSocket to `{chat_relay_url}/daemon/connect`. Request dispatch and retry loops are deliberately kept separate so the wire contract can stabilize before `/v1/models` and `/v1/chat/completions` execution is attached. Credential issuance and JWT verification are owned by `api.kittypaw.app` and `kittychat`; the server only stores and presents the API-issued bearer credential.
 
 **Tech Stack:** Go 1.25, `nhooyr.io/websocket`, existing `core.SecretsStore`, existing per-account `core.APITokenManager`.
 
@@ -12,10 +12,10 @@
 
 ## Scope
 
-This plan implements the first daemon-side slice only:
+This plan implements the first server-side slice only:
 
 - `chat_relay_url` is already fetched and persisted by discovery.
-- Add storage helpers for the API-issued daemon/device credential.
+- Add storage helpers for the API-issued server/device credential.
 - Add a small `remote/chatrelay` package for the wire protocol constants, scope vocabulary, operation vocabulary, and frame structs.
 - Add URL building and one-shot WebSocket dial + hello send.
 
@@ -32,8 +32,8 @@ Those need the API-server credential contract and kittychat broker endpoint to l
 API-side source of truth:
 
 - `apps/portal/docs/specs/kittychat-credential-foundation.md`
-- daemon credential claims are expected to carry `aud=["kittychat"]`, `scope=["daemon:connect"]`, and `v=1`.
-- API-client credentials use `chat:relay` and `models:read`; daemon code records these names only as shared vocabulary.
+- device credential claims are expected to carry `aud=["kittychat"]`, `scope=["daemon:connect"]`, and `v=1`.
+- API-client credentials use `chat:relay` and `models:read`; server code records these names only as shared vocabulary.
 
 ## File Map
 
@@ -211,7 +211,7 @@ type HelloFrame struct {
 }
 ```
 
-Include request/response/error structs even if dispatch is not wired in this slice, so kittychat and daemon share one vocabulary. Response frames must preserve the existing relay JSON shape:
+Include request/response/error structs even if dispatch is not wired in this slice, so kittychat and local server share one vocabulary. Response frames must preserve the existing relay JSON shape:
 
 ```json
 {"type":"response_headers","id":"req_1","status":200,"headers":{"content-type":"text/event-stream"}}
@@ -315,6 +315,6 @@ Expected: all commands pass.
 After this slice, the next implementation slice should add:
 
 - API-issued credential exchange/pairing command once `api.kittypaw.app` endpoint is ready.
-- Daemon startup wiring that loads `chat_relay_url` + `chat_daemon_credential`.
+- Server startup wiring that loads `chat_relay_url` + `chat_daemon_credential`.
 - Background reconnect loop with health logging.
 - Operation dispatch for `openai.models` and `openai.chat_completions` against account-scoped local handlers.

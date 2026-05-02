@@ -397,7 +397,7 @@ func TestNewDaemonConn_RejectsTopLevelConfigWithoutAccount(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", dir)
 
-	// v2 does not resolve daemon credentials from top-level config.toml.
+	// v2 does not resolve server credentials from top-level config.toml.
 	writeFile(t, filepath.Join(dir, "config.toml"),
 		"[server]\nbind = \"127.0.0.1:5678\"\n")
 

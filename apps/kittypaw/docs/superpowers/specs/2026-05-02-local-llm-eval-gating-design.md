@@ -46,7 +46,7 @@ Every eval runner should produce one of these states:
   failure.
 - `INFRA`: the eval could not judge product behavior because an external
   dependency failed, such as missing API keys, provider outage, network failure,
-  daemon startup failure, or exhausted quota.
+  server startup failure, or exhausted quota.
 - `NOT_RUN`: the eval was intentionally skipped by configuration.
 
 Exit code contract:
@@ -109,7 +109,7 @@ The summary should include:
 Provider: openai
 Model: gpt-5.5
 Account: jinto
-Daemon: local
+Server: local
 ```
 
 ## Runner UX

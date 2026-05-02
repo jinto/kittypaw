@@ -351,7 +351,7 @@ func MigrateTenantsToAccounts(baseDir string) error {
 
 // MigrateLegacyLayout moves a pre-multi-account ~/.kittypaw layout into
 // accounts/default/ so existing v0.x installs upgrade without manual file
-// surgery. It is a one-way, idempotent operation invoked at daemon
+// surgery. It is a one-way, idempotent operation invoked at server
 // bootstrap.
 //
 // Detection: legacy layout has config.toml at baseDir AND no accounts/

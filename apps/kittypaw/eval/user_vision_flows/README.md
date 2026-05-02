@@ -26,7 +26,7 @@ FLOW=clarify ./eval/user_vision_flows/run.sh   # just one
 KITTYPAW_EVAL_PROVIDER=openai ./eval/user_vision_flows/run.sh
 ```
 
-Each flow stops the daemon, wipes installed packages/skills, then
+Each flow stops the server, wipes installed packages/skills, then
 pipes a multi-turn input into `kittypaw chat`. The cleaned transcript
 is judged with `JUDGE_MODEL` (default Claude Haiku) using the behavior
 baselines in `provider_baselines.json`.

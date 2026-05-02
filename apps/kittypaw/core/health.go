@@ -7,8 +7,8 @@ import (
 )
 
 // AccountHealth is the observable liveness of an account Session inside the
-// single-daemon multi-account server. It is NOT a process-level health —
-// the daemon can only tell you "my own goroutines for this account are
+// single-server multi-account server. It is NOT a process-level health —
+// the server can only tell you "my own goroutines for this account are
 // looking OK right now", not "the account is reachable end-to-end".
 //
 // States and their meanings:
@@ -19,7 +19,7 @@ import (
 //     by a defer recover(). The account may self-heal on the next tick
 //     that completes cleanly — callers should not treat Degraded as
 //     terminal. See family-multi-account AC-T8.
-//   - Stopped: the daemon is shutting this account down. Terminal — once
+//   - Stopped: the server is shutting this account down. Terminal — once
 //     Stopped, the state never moves back to Ready or Degraded, so a
 //     late goroutine that wakes up and tries to MarkReady cannot make
 //     the account appear live again.

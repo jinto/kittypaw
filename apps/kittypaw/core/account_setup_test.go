@@ -157,7 +157,7 @@ func TestInitAccount_DuplicateID(t *testing.T) {
 	}
 }
 
-// Collision must surface before any filesystem write — otherwise the error only appears at daemon startup.
+// Collision must surface before any filesystem write — otherwise the error only appears at server startup.
 func TestInitAccount_DuplicateTelegramToken(t *testing.T) {
 	accountsDir := t.TempDir()
 	if _, err := InitAccount(accountsDir, "alice", AccountOpts{TelegramToken: "shared"}); err != nil {

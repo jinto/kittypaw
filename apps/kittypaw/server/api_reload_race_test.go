@@ -14,7 +14,7 @@ import (
 // AC-RACE: re-runs the Reload→observe loop 50 times under -race to confirm
 // that the happens-before edge established by handleReload (POST returns
 // after Reconcile completes) is also a memory fence from the client's
-// perspective. In production, `cli/cmd_setup.maybeReloadDaemon` returns and
+// perspective. In production, `cli/cmd_setup.maybeReloadServer` returns and
 // the same goroutine immediately calls `runChat`, which reaches back to the
 // server via a new HTTP request. That HTTP round-trip carries a happens-
 // before edge, but if a future refactor collapses Reload into an in-process

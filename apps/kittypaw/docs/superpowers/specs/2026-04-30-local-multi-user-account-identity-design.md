@@ -4,7 +4,7 @@
 
 Make `~/.kittypaw/accounts/<id>/` a first-class human account from the first setup, instead of creating `accounts/default/` and treating account selection as a later concern.
 
-This is a prerequisite for hosted relay access. `chat.kittypaw.app` can only route safely if the local daemon already knows which local account is being accessed and if the Web UI/API surface is scoped to that account.
+This is a prerequisite for hosted relay access. `chat.kittypaw.app` can only route safely if the local server already knows which local account is being accessed and if the Web UI/API surface is scoped to that account.
 
 ## Current State
 
@@ -128,7 +128,7 @@ The local Web UI becomes session-based:
 
 Authenticated browser sessions use `HttpOnly`, `Secure` when TLS is present, and `SameSite=Lax` cookies. The session contains the local account ID and expires.
 
-After login, every Web UI API request is routed to the logged-in account. This is the important behavioral change: two local users opening the same daemon Web UI must not share the default session, default DB, or default config.
+After login, every Web UI API request is routed to the logged-in account. This is the important behavioral change: two local users opening the same server Web UI must not share the default session, default DB, or default config.
 
 ## HTTP And WebSocket Routing
 

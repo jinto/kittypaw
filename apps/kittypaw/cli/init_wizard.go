@@ -589,7 +589,7 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 	}
 
 	// Persist apiURL so runSetup writes it to secrets under the bare
-	// "kittypaw-api" namespace that InjectKakaoWSURL reads at serve time.
+	// "kittypaw-api" namespace that InjectKakaoWSURL reads at server start time.
 	w.APIServerURL = apiURL
 	w.KakaoEnabled = true
 	wizardKakaoPairing(scanner, d.KakaoRelayURL, reg)

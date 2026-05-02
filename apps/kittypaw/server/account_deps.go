@@ -17,8 +17,8 @@ import (
 )
 
 // AccountDeps is the per-account set of dependencies server.New needs to
-// build an engine.Session for one account. The daemon entry point (CLI
-// serve) opens these per-account resources (DB, LLM provider, sandbox)
+// build an engine.Session for one account. The server entry point (CLI
+// server start) opens these per-account resources (DB, LLM provider, sandbox)
 // before handing the slice to server.New — the server package stays out
 // of discovery/migration business.
 //
@@ -70,7 +70,7 @@ func (td *AccountDeps) Close() error {
 // manager, and — when [mcp] is declared in config — a connected MCP
 // registry.
 //
-// Used by both the CLI daemon boot path (cli/main.go bootstrap) and the
+// Used by both the CLI server start path (cli/main.go bootstrap) and the
 // runtime account-add path (Server.AddAccount). Keeping the construction
 // in one place ensures hot-added accounts are indistinguishable from
 // accounts loaded at startup.

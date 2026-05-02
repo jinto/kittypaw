@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add daemon-side lifecycle management for API-issued chat relay device credentials.
+**Goal:** Add server-side lifecycle management for API-issued chat relay device credentials.
 
-**Architecture:** Store auth topology and device tokens in the existing per-account `SecretsStore`. Refresh access tokens before `/daemon/connect` and after unauthorized relay dials. Keep RS256/JWKS verification out of the daemon; kittychat verifies Bearer tokens.
+**Architecture:** Store auth topology and device tokens in the existing per-account `SecretsStore`. Refresh access tokens before `/daemon/connect` and after unauthorized relay dials. Keep RS256/JWKS verification out of the server; kittychat verifies Bearer tokens.
 
 **Tech Stack:** Go 1.25, `core.APITokenManager`, `remote/chatrelay`, Cobra CLI, `nhooyr.io/websocket`.
 
@@ -33,7 +33,7 @@
 - [x] Implement typed unauthorized dial errors and `RefreshCredential func(context.Context) (string, error)`.
 - [x] Run `go test ./remote/chatrelay -run 'Unauthorized|Retry|Connector' -count=1`.
 
-## Task 3: Serve Wiring
+## Task 3: Server Start Wiring
 
 **Files:**
 - Modify `cli/chat_relay.go`
@@ -41,7 +41,7 @@
 
 - [x] Update connector config resolution to use `chat_relay_access_token` and refresh via `chat_relay_refresh_token`.
 - [x] Remove use of `chat_daemon_credential` from new connector config tests.
-- [x] Attach the refresh callback to the connector started by `kittypaw serve`.
+- [x] Attach the refresh callback to the connector started by `kittypaw server start`.
 - [x] Run `go test ./cli -run TestChatRelayConnectorConfigs -count=1`.
 
 ## Task 4: Internal CLI Diagnostics

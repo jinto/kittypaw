@@ -351,10 +351,10 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 		return fmt.Errorf("ensure default profile: %w", err)
 	}
 
-	// Ask a live daemon to reload before we display the completion box — a
+	// Ask a live server to reload before we display the completion box — a
 	// subsequent `kittypaw chat` connects to a server that already sees the
 	// new config (AC-RELOAD-SYNC). Outcome gates auto-entry below.
-	reloadRes := maybeReloadDaemon(defaultDaemonDial, os.Stdout, os.Stderr)
+	reloadRes := maybeReloadServer(defaultServerDial, os.Stdout, os.Stderr)
 
 	printSetupBox(cfgPath)
 
@@ -381,7 +381,7 @@ func runSetup(cmd *cobra.Command, flags *setupFlags) error {
 	if !chatEligible {
 		return nil
 	}
-	// If a live daemon refused our reload, chat would attach to a server that
+	// If a live server refused our reload, chat would attach to a server that
 	// still holds the PREVIOUS config — silently running the old LLM key /
 	// channels. Surface that and bail out instead of auto-entering.
 	if reloadRes == reloadOutcomeFailed {
@@ -715,7 +715,7 @@ func newStatusCmd() *cobra.Command {
 }
 
 func runStatus(_ *cobra.Command, _ []string) error {
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -797,7 +797,7 @@ func newSkillListCmd() *cobra.Command {
 
 			var skills []map[string]any
 			if filterType == "" || filterType == "skill" {
-				if cl, err := connectDaemon(); err == nil {
+				if cl, err := connectServer(); err == nil {
 					if res, err := cl.Skills(); err == nil {
 						skills = jsonSlice(res, "skills")
 					}
@@ -915,9 +915,9 @@ func newSkillInstallCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			arg := args[0]
 
-			// GitHub URL or local path → daemon install.
+			// GitHub URL or local path -> server install.
 			if strings.HasPrefix(arg, "https://") || strings.HasPrefix(arg, "http://") {
-				return installViaDaemon(arg, mdMode)
+				return installViaServer(arg, mdMode)
 			}
 
 			fi, statErr := os.Stat(arg)
@@ -926,7 +926,7 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 			if statErr == nil && fi.IsDir() {
 				absPath, _ := filepath.Abs(arg)
-				return installViaDaemon(absPath, mdMode)
+				return installViaServer(absPath, mdMode)
 			}
 
 			// Otherwise treat as a registry package ID.
@@ -1018,8 +1018,8 @@ func newSkillInstallCmd() *cobra.Command {
 	return cmd
 }
 
-func installViaDaemon(source, mdMode string) error {
-	cl, err := connectDaemon()
+func installViaServer(source, mdMode string) error {
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1051,7 +1051,7 @@ func newSkillUninstallCmd() *cobra.Command {
 			}
 
 			// Fall back to skill deletion via server.
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1083,7 +1083,7 @@ func newSkillInfoCmd() *cobra.Command {
 			}
 
 			// Fall back to skill via server.
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1172,7 +1172,7 @@ func newSkillEnableCmd() *cobra.Command {
 		Short: "Enable a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1191,7 +1191,7 @@ func newSkillDisableCmd() *cobra.Command {
 		Short: "Disable a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1210,7 +1210,7 @@ func newSkillExplainCmd() *cobra.Command {
 		Short: "Explain what a skill does",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1268,7 +1268,7 @@ func newSkillSuggestCmd() *cobra.Command {
 		Short: "Manage skill suggestions",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			// Default action: list suggestions.
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1296,7 +1296,7 @@ func newSkillSuggestCmd() *cobra.Command {
 			Short: "Accept a suggestion",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectDaemon()
+				cl, err := connectServer()
 				if err != nil {
 					return err
 				}
@@ -1312,7 +1312,7 @@ func newSkillSuggestCmd() *cobra.Command {
 			Short: "Dismiss a suggestion",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectDaemon()
+				cl, err := connectServer()
 				if err != nil {
 					return err
 				}
@@ -1346,7 +1346,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 	name := args[0]
 
 	if flagDryRun {
-		// Dry run stays local — no daemon needed.
+		// Dry run stays local; no server needed.
 		skill, code, err := core.LoadSkill(name)
 		if err != nil {
 			return fmt.Errorf("load skill: %w", err)
@@ -1362,7 +1362,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1384,7 +1384,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 func runTeach(_ *cobra.Command, args []string) error {
 	description := strings.Join(args, " ")
 
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1526,7 +1526,7 @@ func newAgentListCmd() *cobra.Command {
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1566,7 +1566,7 @@ func newLogCmd() *cobra.Command {
 }
 
 func runLog(_ *cobra.Command, _ []string) error {
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1650,7 +1650,7 @@ func newServerStopCmd() *cobra.Command {
 }
 
 func runStop(_ *cobra.Command, _ []string) error {
-	pidPath, err := daemonPidPath()
+	pidPath, err := serverPidPath()
 	if err != nil {
 		return err
 	}
@@ -1745,7 +1745,7 @@ func printPortInUseMessage(addr string) {
 }
 
 func writePidFile() {
-	pidPath, err := daemonPidPath()
+	pidPath, err := serverPidPath()
 	if err != nil {
 		return
 	}
@@ -1753,7 +1753,7 @@ func writePidFile() {
 }
 
 func removePidFile() {
-	pidPath, err := daemonPidPath()
+	pidPath, err := serverPidPath()
 	if err != nil {
 		return
 	}
@@ -1798,7 +1798,7 @@ func newEvolutionListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List pending evolutions",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1828,7 +1828,7 @@ func newEvolutionApproveCmd() *cobra.Command {
 		Short: "Approve an evolution",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1847,7 +1847,7 @@ func newEvolutionRejectCmd() *cobra.Command {
 		Short: "Reject an evolution",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -1869,7 +1869,7 @@ func newPersonaListCmd() *cobra.Command {
 }
 
 func runPersonaList(_ *cobra.Command, _ []string) error {
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -1922,7 +1922,7 @@ func runPersonaApply(_ *cobra.Command, args []string) error {
 		profileID = args[1]
 	}
 
-	cl, err := connectDaemon()
+	cl, err := connectServer()
 	if err != nil {
 		return err
 	}
@@ -2063,7 +2063,7 @@ func promptPackageConfig(pm *core.PackageManager, pkg *core.SkillPackage) error 
 // should use for local account-scoped files. A mere accounts/default/
 // directory is not enough — it must be the selected valid account, otherwise
 // stale dev folders make `skill list`, `reset`, and chat history point at a
-// different account than the daemon.
+// different account than the server.
 func defaultAccountBase() (string, error) {
 	accountID, err := resolveCLIAccount(flagAccount)
 	if err != nil {
@@ -2088,7 +2088,7 @@ func accountBaseForID(accountID string) (string, error) {
 }
 
 // localPackageManager returns a PackageManager bound to the default account's
-// BaseDir so CLI commands see the same packages the daemon does. CLI
+// BaseDir so CLI commands see the same packages the server does. CLI
 // commands that touch packages (list/info/config/install/uninstall) MUST go
 // through this helper — the bare `core.NewPackageManager` is baseDir-empty
 // and only finds packages at the legacy path, which has been wrong since
@@ -2143,7 +2143,7 @@ func newMemorySearchCmd() *cobra.Command {
 		Short: "Search execution memory",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2197,7 +2197,7 @@ func newChannelsListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List active channels",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2238,7 +2238,7 @@ func newReloadCmd() *cobra.Command {
 		Use:   "reload",
 		Short: "Reload server configuration",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2276,7 +2276,7 @@ func newReflectionListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List reflection candidates",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2306,7 +2306,7 @@ func newReflectionApproveCmd() *cobra.Command {
 		Short: "Approve a reflection candidate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2325,7 +2325,7 @@ func newReflectionRejectCmd() *cobra.Command {
 		Short: "Reject a reflection candidate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2343,7 +2343,7 @@ func newReflectionClearCmd() *cobra.Command {
 		Use:   "clear",
 		Short: "Clear all reflection candidates",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2361,7 +2361,7 @@ func newReflectionRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Trigger reflection cycle",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2379,7 +2379,7 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 		Use:   "weekly-report",
 		Short: "Show weekly reflection report",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectDaemon()
+			cl, err := connectServer()
 			if err != nil {
 				return err
 			}
@@ -2397,9 +2397,9 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 // Thin Client helpers
 // ---------------------------------------------------------------------------
 
-// connectDaemon returns a Client connected to the daemon via DaemonConn.
-// Uses --remote flag if set, otherwise auto-discovers/starts local daemon.
-func connectDaemon() (*client.Client, error) {
+// connectServer returns a Client connected through client.DaemonConn.
+// Uses --remote flag if set, otherwise auto-discovers/starts the local server.
+func connectServer() (*client.Client, error) {
 	conn, err := client.NewDaemonConn(flagRemote)
 	if err != nil {
 		return nil, err
@@ -2457,7 +2457,7 @@ func jsonSlice(m map[string]any, key string) []map[string]any {
 // Before discovery, a legacy ~/.kittypaw layout (config.toml at root, no
 // accounts/) is migrated into accounts/default/ via MigrateLegacyLayout so
 // v0.x installs upgrade transparently. Discovery fails loudly when no
-// accounts are present — a daemon with nothing to route is not useful.
+// accounts are present; a server with nothing to route is not useful.
 func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 	baseDir, err := core.ConfigDir()
 	if err != nil {
@@ -2628,8 +2628,9 @@ func openStoreForAccount(accountID string) (*store.Store, error) {
 	return st, nil
 }
 
-// daemonPidPath returns the path to the daemon pid file.
-func daemonPidPath() (string, error) {
+// serverPidPath returns the path to the server PID file. The filename remains
+// daemon.pid for compatibility with existing installs.
+func serverPidPath() (string, error) {
 	dir, err := core.ConfigDir()
 	if err != nil {
 		return "", err

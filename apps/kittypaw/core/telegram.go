@@ -20,7 +20,7 @@ func ValidateTelegramToken(token string) bool {
 
 // FetchTelegramChatID calls the Telegram Bot API getUpdates to discover the
 // chat ID from the most recent message, and ACKs every update it saw so the
-// daemon that takes over afterwards does not inherit a backlog and replay
+// server that takes over afterwards does not inherit a backlog and replay
 // every /start as a fresh conversation.
 func FetchTelegramChatID(ctx context.Context, token string) (string, error) {
 	if !ValidateTelegramToken(token) {
@@ -73,7 +73,7 @@ func FetchTelegramChatID(ctx context.Context, token string) (string, error) {
 	// ACK: a second getUpdates with offset=last.UpdateID+1 confirms every
 	// update up to `last` and drops them from Telegram's server-side queue.
 	// Best-effort — if it fails the chat_id is still valid, but the user
-	// may see replayed messages when the daemon starts.
+	// may see replayed messages when the server starts.
 	ackURL := fmt.Sprintf(
 		"https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=0",
 		token, last.UpdateID+1,

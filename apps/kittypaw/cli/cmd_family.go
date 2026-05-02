@@ -283,7 +283,7 @@ func provisionMember(accountsDir, name, token, chatID string, stdout, stderr io.
 
 	_, _ = fmt.Fprintf(stdout, "account %q created at %s\n", tt.ID, tt.BaseDir)
 
-	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnServer(tt.ID, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed for %q: %v\n", name, err)
 	}
 	return memberEntry{Name: name, Status: statusOK}
@@ -342,7 +342,7 @@ func createFamilyAccount(accountsDir string, seen *seenSet, stdout, stderr io.Wr
 
 	_, _ = fmt.Fprintf(stdout, "family account created at %s\n", tt.BaseDir)
 
-	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnServer(tt.ID, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed for family: %v\n", err)
 	}
 

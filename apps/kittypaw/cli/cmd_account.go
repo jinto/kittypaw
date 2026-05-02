@@ -227,7 +227,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw server start' or re-run without the flag to activate.")
 		return nil
 	}
-	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
+	if err := activateAccountOnServer(tt.ID, stdout, stderr); err != nil {
 		// Don't fail the whole command — files are already on disk; the user
 		// can recover with a server restart. Surface the error clearly so
 		// they know hot-activate didn't take.
@@ -288,7 +288,7 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 	selfCfg, _ := core.LoadConfig(filepath.Join(accountDir, "config.toml"))
 	removedIsShared := selfCfg != nil && selfCfg.IsSharedAccount()
 
-	if err := deactivateAccountOnDaemon(name, stdout, stderr); err != nil {
+	if err := deactivateAccountOnServer(name, stdout, stderr); err != nil {
 		return fmt.Errorf("deactivate on server: %w", err)
 	}
 
@@ -311,16 +311,16 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// deactivateAccountOnDaemon calls POST /api/v1/admin/accounts/{id}/delete when
+// deactivateAccountOnServer calls POST /api/v1/admin/accounts/{id}/delete when
 // a server is running. Absence of a server is not an error (AC-RM2 offline
 // path); 404 from the server means the account isn't currently active, which
 // is also fine (already decommissioned or never booted with it).
-func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
+func deactivateAccountOnServer(name string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
 	if err != nil {
 		// Missing config.toml (pre-onboarding) is treated as offline — the
 		// filesystem part of decommission still matters even if the user
-		// never booted the daemon with this account.
+		// never booted the server with this account.
 		_, _ = fmt.Fprintf(stdout, "Server config unavailable (%v); skipping hot-deactivation.\n", err)
 		return nil
 	}
@@ -399,11 +399,11 @@ func moveAccountToTrash(cfgDir, accountsDir, name string) (string, error) {
 	return candidate, nil
 }
 
-// activateAccountOnDaemon calls POST /api/v1/admin/accounts if a daemon is
+// activateAccountOnServer calls POST /api/v1/admin/accounts if a server is
 // already running locally. Absence of a server is not an error — the user
 // may be provisioning offline before first boot — so we fall back to a
 // restart hint printed by the caller.
-func activateAccountOnDaemon(accountID string, stdout, stderr io.Writer) error {
+func activateAccountOnServer(accountID string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
 	if err != nil {
 		return fmt.Errorf("read server config: %w", err)

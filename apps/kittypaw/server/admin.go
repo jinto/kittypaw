@@ -18,13 +18,13 @@ import (
 var ErrAccountAlreadyActive = errors.New("account already active")
 
 // ErrAccountNotActive is returned by RemoveAccount when the target account
-// isn't registered on this daemon. HTTP callers translate this to 404.
+// isn't registered on this server. HTTP callers translate this to 404.
 var ErrAccountNotActive = errors.New("account not active")
 
 // AddAccount registers an account that already exists on disk with the
-// live daemon: opens its deps, builds a session, hot-wires it into
+// live server: opens its deps, builds a session, hot-wires it into
 // the AccountRegistry / AccountRouter / ChannelSpawner, and spawns its
-// channels — all without a daemon restart. This powers AC-U3 (30-second
+// channels — all without a server restart. This powers AC-U3 (30-second
 // add of a new family member).
 //
 // Invariants (enforced under accountMu so two concurrent admin calls
@@ -151,7 +151,7 @@ func (s *Server) AddAccount(t *core.Account) error {
 // AddAccount's build order), and finally closes the SQLite store + MCP
 // registry held in accountDeps. The filesystem layout is NOT touched; the
 // CLI that invoked this RPC owns the disk-side move-to-trash step so the
-// daemon's trust boundary stays clean.
+// server's trust boundary stays clean.
 //
 // Caller contract: ID must be a live account — unknown IDs return
 // ErrAccountNotActive so HTTP callers can respond 404 without retry.
@@ -263,7 +263,7 @@ func (s *Server) handleAdminAccountAdd(w http.ResponseWriter, r *http.Request) {
 // is accepted. This symmetry with handleAdminAccountAdd keeps the admin
 // surface narrow: no JSON attacks, no token leakage through request body.
 //
-// The daemon does NOT touch the filesystem — that's the CLI's job after a
+// The server does NOT touch the filesystem — that's the CLI's job after a
 // 200 response. Status mapping: 200 on success, 404 if not active, 400 on
 // malformed ID, 500 on reconcile-drain failure (AC-RM5: CLI aborts before
 // touching family config or disk).

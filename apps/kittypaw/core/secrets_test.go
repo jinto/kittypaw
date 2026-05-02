@@ -231,7 +231,7 @@ func TestSecretsStore_FreshLoadAfterPeerWrite(t *testing.T) {
 
 	// Step 2 — second caller opens fresh and writes a different key.
 	// (This mirrors the post-fix server/api_setup.go pattern: every
-	// daemon-side Set goes through a freshly loaded store.)
+	// server-side Set goes through a freshly loaded store.)
 	peerB, err := LoadAccountSecrets("default")
 	if err != nil {
 		t.Fatal(err)

@@ -33,7 +33,7 @@ const (
 )
 
 // TopLevelServerConfig holds server-wide settings loaded from server.toml.
-// This is separate from per-account Config — it controls the daemon itself.
+// This is separate from per-account Config — it controls the server itself.
 type TopLevelServerConfig struct {
 	Bind           string `toml:"bind"`
 	MasterAPIKey   string `toml:"master_api_key"`
@@ -134,7 +134,7 @@ type UserConfig struct {
 // LiveIndex toggles the fsnotify-backed live indexer. When true (default),
 // workspace file changes are reflected in the FTS index within one debounce
 // window without requiring explicit File.reindex calls. When false, the
-// daemon falls back to v1 behavior: index at startup and on explicit
+// server falls back to v1 behavior: index at startup and on explicit
 // Reindex only.
 type WorkspaceConfig struct {
 	Default   string          `toml:"default"`
