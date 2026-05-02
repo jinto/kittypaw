@@ -17,6 +17,42 @@ import (
 	"github.com/jinto/kittypaw/server"
 )
 
+type scriptedChatReader struct {
+	lines []string
+	err   error
+}
+
+func (r *scriptedChatReader) Readline() (string, error) {
+	if len(r.lines) == 0 {
+		if r.err != nil {
+			return "", r.err
+		}
+		return "", io.EOF
+	}
+	line := r.lines[0]
+	r.lines = r.lines[1:]
+	return line, nil
+}
+
+func TestPumpChatInputTrimsSkipsEmptyAndCloses(t *testing.T) {
+	reader := &scriptedChatReader{
+		lines: []string{"  hello  ", "", "   ", "next"},
+		err:   io.EOF,
+	}
+	out := make(chan string, 4)
+
+	pumpChatInput(reader, out)
+
+	var got []string
+	for text := range out {
+		got = append(got, text)
+	}
+	want := []string{"hello", "next"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("pumpChatInput = %#v, want %#v", got, want)
+	}
+}
+
 func TestIsTransportDropErr_StringMatches(t *testing.T) {
 	cases := []string{
 		"EOF",

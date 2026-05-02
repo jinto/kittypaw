@@ -607,8 +607,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		historyFile = filepath.Join(base, "chat_history")
 	}
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:      "you> ",
-		HistoryFile: historyFile,
+		Prompt:         "you> ",
+		HistoryFile:    historyFile,
+		UniqueEditLine: true,
 	})
 	if err != nil {
 		cs.Close()
@@ -659,38 +660,27 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return chatErr
 	}
 
-	for {
-		text, err := rl.Readline()
-		if err != nil { // Ctrl-D or error
-			break
-		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			continue
-		}
+	turnCh := make(chan string, 32)
+	go pumpChatInput(rl, turnCh)
 
+	for text := range turnCh {
 		// turnID is allocated once per user input. The transport-drop
 		// retry path below replays sendOnce with the same turnID so
 		// the server's RunTurn dedupes — the LLM is invoked once, the
 		// retry waits for the in-flight result.
 		turnID := uuid.NewString()
 
-		// sendOnce drives one Send attempt with its own spinner. Stopping
-		// the spinner inside the callbacks (before any Printf) is what
-		// keeps "paw> ⠧paw> ..." double-prefix garbage from leaking out.
+		// sendOnce drives one Send attempt. Output goes through readline's
+		// writer so a response can appear while the next user input remains
+		// editable at the bottom prompt.
 		sendOnce := func() (gotResult bool, sendErr error) {
-			spin := newSpinner("paw> ")
-			spin.Start()
-			defer spin.Stop()
 			opts := client.ChatOptions{
 				OnDone: func(result string, _ *int64) {
-					spin.Stop()
 					gotResult = true
-					fmt.Printf("paw> %s\n\n", result)
+					writeChatLine(rl, "paw> %s\n\n", result)
 				},
 				OnError: func(msg string) {
-					spin.Stop()
-					fmt.Fprintf(os.Stderr, "paw> %s\n\n", msg)
+					writeChatLine(rl, "paw> %s\n\n", msg)
 				},
 			}
 			sendErr = cs.SendTurn(text, turnID, opts)
@@ -712,7 +702,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 			gotResult, sendErr = sendOnce()
 		}
 		if shouldPrintChatSendError(gotResult, sendErr) {
-			fmt.Fprintf(os.Stderr, "error: %v\n\n", sendErr)
+			writeChatLine(rl, "error: %v\n\n", sendErr)
 		}
 	}
 
@@ -720,6 +710,29 @@ func runChat(cmd *cobra.Command, args []string) error {
 	closeResources() // restore terminal before any post-chat output
 
 	return nil
+}
+
+type chatLineReader interface {
+	Readline() (string, error)
+}
+
+func pumpChatInput(reader chatLineReader, out chan<- string) {
+	defer close(out)
+	for {
+		text, err := reader.Readline()
+		if err != nil {
+			return
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+		out <- text
+	}
+}
+
+func writeChatLine(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 func formatChatHeader(cliVersion, serverVersion, model, accountID string, channels []string) string {
