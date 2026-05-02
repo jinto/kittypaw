@@ -268,7 +268,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// chi requires Use() before any route registration on a mux, so
 	// the split MUST be expressed via Groups (not via positional Use()).
 	r.Group(func(r chi.Router) {
-		r.Use(ratelimit.Middleware(limiter))
+		// Per-route bucket "refresh:ip:<peer>" — isolated from the
+		// shared anonymous bucket so noisy data-fetch IPs cannot
+		// starve daemon refresh from the same source (Round 3
+		// review MED 0.80 follow-up).
+		r.Use(ratelimit.Middleware(limiter, "refresh"))
 		r.Post("/auth/devices/refresh", oauthHandler.HandleDeviceRefresh())
 	})
 

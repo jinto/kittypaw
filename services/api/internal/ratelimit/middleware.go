@@ -14,7 +14,19 @@ const (
 	GlobalDailyLimit = 10000
 )
 
-func Middleware(limiter *Limiter) func(http.Handler) http.Handler {
+// Middleware creates rate-limit middleware. Optional bucketPrefix
+// isolates this route's quota from the shared per-IP / per-user
+// buckets — e.g. Middleware(limiter, "refresh") prevents a noisy
+// data-fetch IP from starving daemon refresh from the same source.
+//
+// Empty prefix (Middleware(limiter) without args) keeps the original
+// "ip:<peer>" / "user:<id>" buckets, used by every non-route-specific
+// caller.
+func Middleware(limiter *Limiter, bucketPrefix ...string) func(http.Handler) http.Handler {
+	prefix := ""
+	if len(bucketPrefix) > 0 && bucketPrefix[0] != "" {
+		prefix = bucketPrefix[0] + ":"
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Global daily limit.
@@ -30,10 +42,10 @@ func Middleware(limiter *Limiter) func(http.Handler) http.Handler {
 			var key string
 			var limit int
 			if user != nil {
-				key = "user:" + user.ID
+				key = prefix + "user:" + user.ID
 				limit = AuthLimitPerMin
 			} else {
-				key = "ip:" + realIP(r)
+				key = prefix + "ip:" + realIP(r)
 				limit = AnonLimitPerMin
 			}
 

@@ -251,6 +251,51 @@ func TestDevicesRoutesWired_Delete_NoAuth_401(t *testing.T) {
 	}
 }
 
+// TestRatelimit_RefreshBucketIsolated pins the bucket-prefix fix
+// (Round 3 follow-up MED 0.80). Pre-fix, /auth/devices/refresh shared
+// the same anonymous "ip:<peer>" bucket as /v1/air and other anonymous
+// proxy routes — a noisy data-fetch IP could starve daemon refresh
+// requests from the same source. With per-route prefixes, the two
+// quotas are independent.
+//
+// Setup: 5 anonymous /v1/air calls from peer X exhaust the anon
+// bucket (5/min cap). A 6th /v1/air call returns 429. But a refresh
+// call from the same peer X must still succeed (status != 429) —
+// it lives in a SEPARATE "refresh:ip:<peer>" bucket.
+func TestRatelimit_RefreshBucketIsolated(t *testing.T) {
+	r := testRouter(t)
+	const peer = "192.0.2.99:1234"
+
+	// Burn the anonymous bucket on a non-refresh route.
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01", nil)
+		req.RemoteAddr = peer
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d already throttled", i+1)
+		}
+	}
+	// 6th non-refresh call MUST 429 (anonymous bucket full).
+	req := httptest.NewRequest(http.MethodGet, "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01", nil)
+	req.RemoteAddr = peer
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("non-refresh #6 status = %d, want 429 (anon bucket exhausted)", w.Code)
+	}
+
+	// Refresh from same peer MUST NOT be throttled — separate bucket.
+	// (No body → handler returns 400, not 429.)
+	req = httptest.NewRequest(http.MethodPost, "/auth/devices/refresh", nil)
+	req.RemoteAddr = peer
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusTooManyRequests {
+		t.Fatal("refresh request throttled despite separate bucket — anonymous bucket starved daemon refresh")
+	}
+}
+
 func TestNotFound(t *testing.T) {
 	r := testRouter(t)
 
