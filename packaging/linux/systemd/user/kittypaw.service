@@ -1,12 +1,12 @@
 [Unit]
-Description=KittyPaw AI agent daemon (user)
+Description=KittyPaw AI agent server (user)
 Documentation=https://github.com/kittypaw-app/kittypaw
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/kittypaw serve --bind 127.0.0.1:3000
+ExecStart=/usr/local/bin/kittypaw server start --bind 127.0.0.1:3000
 Restart=on-failure
 RestartSec=2s
 
@@ -15,7 +15,7 @@ Environment=KITTYPAW_CONFIG_DIR=%h/.kittypaw
 
 # --- Resource ceilings (for post-mortem observability, not true isolation) ---
 # These prevent a runaway skill from consuming the host; they do NOT isolate
-# skills from each other inside a single kittypaw daemon. cgroup v2 delegation
+# skills from each other inside a single kittypaw server. cgroup v2 delegation
 # must be enabled (see dist/linux/install.sh) or these directives are silently
 # ignored in user scope.
 MemoryMax=2G

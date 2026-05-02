@@ -53,7 +53,7 @@ func unlockPidFile(f *os.File) {
 // processStartTime returns a stable per-platform identifier for
 // when pid started. Used by Phase 13.4 PID file hardening to detect
 // PID reuse: the daemon records its own start time alongside its
-// PID, and `kittypaw stop` re-queries the live process's start time
+// PID, and `kittypaw server stop` re-queries the live process's start time
 // before signaling — a mismatch means the recorded PID was
 // recycled by an unrelated process.
 //

@@ -19,7 +19,8 @@
     <key>ProgramArguments</key>
     <array>
         <string>__KITTYPAW_BIN__</string>
-        <string>serve</string>
+        <string>server</string>
+        <string>start</string>
         <string>--bind</string>
         <string>127.0.0.1:3000</string>
     </array>

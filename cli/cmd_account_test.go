@@ -211,9 +211,9 @@ func TestRunAccountAdd_HappyPath(t *testing.T) {
 	if !strings.Contains(stdout.String(), "alice") {
 		t.Errorf("stdout should confirm account name, got %q", stdout.String())
 	}
-	// No daemon running → fallback hint should surface; exact phrasing
+	// No server running → fallback hint should surface; exact phrasing
 	// may shift, but the operator must see a recovery path.
-	if !strings.Contains(stdout.String(), "kittypaw serve") {
+	if !strings.Contains(stdout.String(), "kittypaw server start") {
 		t.Errorf("stdout should mention how to activate, got %q", stdout.String())
 	}
 }
@@ -273,7 +273,7 @@ func TestRunAccountAdd_InvalidTokenFormat(t *testing.T) {
 
 // --- account remove ---
 
-// Shared daemon-down fixture: HOME override means client.NewDaemonConn
+// Shared server-down fixture: HOME override means client.NewDaemonConn
 // reads an empty secrets tree → IsRunning() returns false → CLI takes the
 // offline path (no RPC attempt, filesystem mutations still happen).
 func setupRemoveFixture(t *testing.T, members map[string]bool) string {
@@ -307,8 +307,8 @@ func TestRunAccountRemove_AccountNotFound(t *testing.T) {
 	}
 }
 
-// AC-RM2: no daemon → no RPC, filesystem mutations still run.
-func TestRunAccountRemove_DaemonDown_OfflinePath(t *testing.T) {
+// AC-RM2: no server → no RPC, filesystem mutations still run.
+func TestRunAccountRemove_ServerDown_OfflinePath(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{"alice": false})
 	accountDir := filepath.Join(home, ".kittypaw", "accounts", "alice")
 	trashRoot := filepath.Join(home, ".kittypaw", ".trash")
@@ -329,7 +329,7 @@ func TestRunAccountRemove_DaemonDown_OfflinePath(t *testing.T) {
 		t.Errorf("trash entry should be alice-<ts>, got %q", entries[0].Name())
 	}
 	if !strings.Contains(stdout.String(), "skipping hot-deactivation") {
-		t.Errorf("stdout should note daemon offline path, got %q", stdout.String())
+		t.Errorf("stdout should note server offline path, got %q", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "BotFather") {
 		t.Errorf("stderr should warn about BotFather /revoke, got %q", stderr.String())

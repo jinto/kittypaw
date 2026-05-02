@@ -1,16 +1,16 @@
-# Deployment — per-user daemon
+# Deployment — per-user server
 
-KittyPaw ships as **one daemon per OS user**. Each user's data lives under
-`~/.kittypaw/` and the daemon runs under that user's UID, so on multi-user
+KittyPaw ships as **one local server per OS user**. Each user's data lives under
+`~/.kittypaw/` and the server runs under that user's UID, so on multi-user
 hosts the kernel's existing file-permission check already prevents cross-user
-data access. This document covers registering the daemon with the platform
+data access. This document covers registering the server with the platform
 init system so it starts at login / boot and restarts on failure.
 
 **Scope of this deployment model:**
 - ✅ User A's kittypaw cannot read User B's `/home/B/.kittypaw` (Unix UID).
-- ✅ Daemon auto-starts, auto-restarts, logs to the standard platform facility.
-- ❌ A skill running inside User A's daemon can still touch anything User A
-  has access to (`~/.ssh`, browser cookies, etc.). In-daemon skill isolation
+- ✅ Server auto-starts, auto-restarts, logs to the standard platform facility.
+- ❌ A skill running inside User A's server can still touch anything User A
+  has access to (`~/.ssh`, browser cookies, etc.). In-server skill isolation
   is out of scope for this document.
 
 ---
@@ -18,11 +18,11 @@ init system so it starts at login / boot and restarts on failure.
 ## Quick start
 
 ```bash
-# One-shot: registers per-user unit/plist, starts the daemon.
-kittypaw service install
+# One-shot: registers per-user unit/plist, starts the server.
+kittypaw server install
 
 # Second user on the same host picks a free port.
-kittypaw service install --bind-port 3001
+kittypaw server install --bind-port 3001
 ```
 
 For a single-host, single-user install, the quick start stops here.
@@ -31,28 +31,30 @@ binary paths, logs, or uninstall.
 
 ---
 
-## The `kittypaw service` command family
+## The `kittypaw server` command family
 
 | Command | Effect |
 |---|---|
-| `kittypaw service install` | Write the unit/plist, start the daemon, enable auto-start |
-| `kittypaw service install --bind-port 3001` | Same, but listen on a non-default port (for second users or when :3000 is taken) |
-| `kittypaw service install --binary /custom/path` | Register an explicit binary path instead of the currently running one |
-| `kittypaw service uninstall` | Stop the daemon and remove the unit/plist |
-| `kittypaw service status` | Show active state, bind, PID, cgroup delegation (Linux) |
-| `kittypaw service logs [-f]` | Tail `journalctl --user -u kittypaw` (Linux) or `~/.kittypaw/logs/stderr.log` (macOS) |
+| `kittypaw server start` | Run the local server in the current terminal |
+| `kittypaw server stop` | Stop the local server process tracked by the PID file |
+| `kittypaw server install` | Write the unit/plist, start the server, enable auto-start |
+| `kittypaw server install --bind-port 3001` | Same, but listen on a non-default port (for second users or when :3000 is taken) |
+| `kittypaw server install --binary /custom/path` | Register an explicit binary path instead of the currently running one |
+| `kittypaw server uninstall` | Stop the server and remove the unit/plist |
+| `kittypaw server status` | Show active state, bind, PID, cgroup delegation (Linux) |
+| `kittypaw server logs [-f]` | Tail `journalctl --user -u kittypaw` (Linux) or `~/.kittypaw/logs/stderr.log` (macOS) |
 
-`install` is idempotent — the second run stops the existing daemon, rewrites
+`install` is idempotent — the second run stops the existing server, rewrites
 the unit/plist, and starts it again. A port probe runs before rewrite, so a
 collision surfaces with a copy-paste hint:
 
 ```
 error: port 127.0.0.1:3000 is already in use.
 
-  Another process — likely another OS user's kittypaw daemon — is
+  Another process — likely another OS user's kittypaw server — is
   bound to this port. Pick a free port and retry:
 
-    kittypaw service install --bind-port 3001
+    kittypaw server install --bind-port 3001
 
   Then point your client at the same port:
     kittypaw chat --server http://127.0.0.1:3001
@@ -94,15 +96,15 @@ kittypaw setup --account alice
 # Non-interactive / CI equivalent:
 printf '%s\n' "$LOCAL_WEB_PASSWORD" |
   kittypaw setup --account alice --password-stdin --no-service --provider anthropic --api-key "$KEY"
-kittypaw service install
+kittypaw server install
 ```
 
 When `kittypaw setup` runs with TTY stdin/stdout it prompts for service
 install right after the completion box, so a typical first-time user never
-has to learn the `service` subcommand explicitly. `--no-service` skips the
-prompt; the `service install` command stays available as an explicit path.
+has to learn the `server install` subcommand explicitly. `--no-service` skips the
+prompt; the `server install` command stays available as an explicit path.
 
-`service install` auto-detects the running binary via `os.Executable()` and
+`server install` auto-detects the running binary via `os.Executable()` and
 substitutes its absolute path into the unit/plist, so a user-local install
 under `~/.local/bin` also works without hand editing.
 
@@ -122,23 +124,21 @@ Additional local accounts are provisioned with their own Web UI credentials:
 printf '%s\n' "$BOB_WEB_PASSWORD" | kittypaw account add bob --password-stdin
 ```
 
-**Web onboarding.** Once a daemon is listening, `kittypaw setup --web` opens
-the wizard UI in a browser (served by the daemon itself at `http://127.0.0.1:3000/`).
-If no daemon is up the command prints recovery steps instead of silently
-spawning a foreground server — use `kittypaw service install` or
-`kittypaw serve` first. Once `~/.kittypaw/auth.json` contains local users, the
-Web UI requires login and setup/configuration applies to the logged-in account.
+**Local Web UI.** Onboarding stays in the CLI: run `kittypaw setup` before
+opening the browser UI. Once a server is listening, the local Web UI is served
+at `http://127.0.0.1:3000/`, requires login, and settings changes apply to the
+logged-in account.
 
 ### Second user (User B, same host)
 
 ```bash
 # Log in as User B.
 kittypaw setup --account bob --no-service     # wizard alone; skip the install prompt
-kittypaw service install --bind-port 3001     # :3000 is taken by User A
+kittypaw server install --bind-port 3001      # :3000 is taken by User A
 ```
 
 User B passes `--no-service` because the default port probe in the prompt
-would fail against User A's live daemon. Installing with an explicit
+would fail against User A's live server. Installing with an explicit
 `--bind-port` surfaces the port choice clearly.
 
 The CLI probes the target port before rewriting any files — if User A is
@@ -152,7 +152,7 @@ the same `--server http://127.0.0.1:3001`.
 
 ### Prerequisites that require admin rights
 
-`kittypaw service install` runs without root, but two system-wide settings
+`kittypaw server install` runs without root, but two system-wide settings
 change the experience; the CLI warns about both if absent.
 
 **1. Cgroup delegation** — `MemoryMax` / `CPUQuota` / `TasksMax` in the unit
@@ -168,10 +168,10 @@ sudo systemctl daemon-reload
 
 These directives are only post-mortem observability ("find the runaway
 skill"), not a security boundary — a skill that trips the limit OOM-kills
-the whole daemon, which is what you want as a signal.
+the whole server, which is what you want as a signal.
 
 **2. Linger** — without linger, the user systemd manager exits when you log
-out, taking the daemon with it. To keep kittypaw alive across logouts and
+out, taking the server with it. To keep kittypaw alive across logouts and
 to start it at boot:
 
 ```bash
@@ -194,7 +194,7 @@ sh packaging/linux/register-service.sh
 KITTYPAW_BIND_PORT=3001 sh packaging/linux/register-service.sh
 ```
 
-The script does the same work as `kittypaw service install` but in POSIX
+The script does the same work as `kittypaw server install` but in POSIX
 sh — useful for AUR / .deb / .rpm post-install hooks.
 
 ---
@@ -229,14 +229,14 @@ KITTYPAW_BIND_PORT=3001 sh packaging/macos/register-service.sh
 ## Verification
 
 ```bash
-kittypaw service status
+kittypaw server status
 # active: yes
 # ExecStart={ argv[...] }
 # MainPID=12345
 # ActiveState=active
 # Delegate=yes       (Linux only)
 
-kittypaw service logs -f
+kittypaw server logs -f
 ```
 
 ### Linux — check cgroup limits are actually applied
@@ -255,10 +255,10 @@ If these files show `max` / `max 100000`, cgroup delegation is not enabled
 ## Uninstall
 
 ```bash
-kittypaw service uninstall
+kittypaw server uninstall
 ```
 
-This stops the daemon and removes the unit/plist. It does NOT remove
+This stops the server and removes the unit/plist. It does NOT remove
 `~/.kittypaw/` (your data). If you want that too:
 
 ```bash
@@ -278,7 +278,7 @@ rm -rf ~/.kittypaw
 - **Auto-update of `/usr/local/bin/kittypaw`** — in-place binary replacement
   works because the unit's ExecStart resolves at restart time. Binary path
   *moves* (e.g. `/usr/local/bin` → `/opt/kittypaw/bin`) require
-  `kittypaw service install` to be re-run.
+  `kittypaw server install` to be re-run.
 - **Second user who forgets `--bind-port`** — CLI catches this with the
   port probe, but the failure mode is a loud error rather than auto-port
   allocation. This is deliberate: auto-allocating ports would hide from

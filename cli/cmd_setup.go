@@ -17,12 +17,12 @@ const (
 	// Base prompt (no hint) — promptYesNo appends " (Y/n): " itself.
 	setupPromptAutoChat        = "> 지금 바로 대화를 시작할까요?"
 	setupPromptInstallService  = "> 서버가 자동으로 실행되게 할까요?"
-	setupMsgReloaded           = "✓ 데몬 설정 재적용"
-	setupMsgDaemonOff          = "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
-	setupMsgReloadFailedFmt    = "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."
-	setupMsgAutoChatBlocked    = "자동 채팅 진입을 건너뜁니다 — 현재 데몬이 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
-	setupMsgServiceInstalled   = "✓ 서비스 등록 완료 — 'kittypaw service status' 로 상태 확인"
-	setupMsgServiceSkipped     = "서비스 등록을 건너뜁니다. 나중에 'kittypaw service install' 로 등록할 수 있습니다."
+	setupMsgReloaded           = "✓ 서버 설정 재적용"
+	setupMsgDaemonOff          = "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
+	setupMsgReloadFailedFmt    = "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."
+	setupMsgAutoChatBlocked    = "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
+	setupMsgServiceInstalled   = "✓ 서비스 등록 완료 — 'kittypaw server status' 로 상태 확인"
+	setupMsgServiceSkipped     = "서비스 등록을 건너뜁니다. 나중에 'kittypaw server install' 로 등록할 수 있습니다."
 	setupMsgServiceUnsupported = "현재 플랫폼에서는 자동 서비스 등록을 지원하지 않습니다 — docs/deployment.md 참고."
 	setupMsgServiceFailedFmt   = "서비스 등록 실패: %v"
 )

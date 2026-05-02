@@ -79,7 +79,7 @@ func serviceInstall(stdout, stderr io.Writer, f *serviceFlags) error {
 	_ = run(stdout, stderr, "launchctl", "enable", target)
 	_ = run(stdout, stderr, "launchctl", "kickstart", "-k", target)
 
-	_, _ = fmt.Fprintf(stdout, "\ndone. tail the log with:  %s service logs -f\n", os.Args[0])
+	_, _ = fmt.Fprintf(stdout, "\ndone. tail the log with:  %s server logs -f\n", os.Args[0])
 	return nil
 }
 

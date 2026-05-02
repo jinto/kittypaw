@@ -1,6 +1,6 @@
 // Package packaging bundles per-user init-system templates that the CLI
 // writes to ~/.config/systemd/user (Linux) or ~/Library/LaunchAgents (macOS)
-// when the user runs `kittypaw service install`.
+// when the user runs `kittypaw server install`.
 //
 // Templates are kept as text source under packaging/{linux,macos}/ so package
 // maintainers (Homebrew, AUR, .deb) can inspect or ship them verbatim; the

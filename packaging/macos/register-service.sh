@@ -1,5 +1,5 @@
 #!/bin/sh
-# Register the KittyPaw daemon as a per-user LaunchAgent.
+# Register the KittyPaw server as a per-user LaunchAgent.
 #
 # launchd does not expand "~" or "$HOME" inside plist values, so this script
 # substitutes absolute-path tokens in the template before copying it to
@@ -51,7 +51,7 @@ port_in_use() {
 if port_in_use "$KITTYPAW_BIND_PORT"; then
   echo "error: 127.0.0.1:${KITTYPAW_BIND_PORT} is already in use." >&2
   echo "" >&2
-  echo "  Another process — likely another OS user's kittypaw daemon — is" >&2
+  echo "  Another process — likely another OS user's kittypaw server — is" >&2
   echo "  bound to this port. Pick a free port and retry:" >&2
   echo "" >&2
   echo "    KITTYPAW_BIND_PORT=3001 sh $(basename "$0")" >&2

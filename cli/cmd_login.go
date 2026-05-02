@@ -103,7 +103,7 @@ func maybePairChatRelayDevice(apiURL string, mgr *core.APITokenManager, accessTo
 		out = io.Discard
 	}
 
-	name := "kittypaw-daemon"
+	name := "kittypaw-server"
 	if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
 		name = strings.TrimSpace(host)
 	}

@@ -108,7 +108,7 @@ func resolveDaemonEndpointForAccount(accountID string) (bind, apiKey, resolvedAc
 			apiKey = serverCfg.MasterAPIKey
 		}
 		if apiKey == "" {
-			return "", "", "", fmt.Errorf("account %q has no API key; run `kittypaw setup` or restart the daemon once", accountID)
+			return "", "", "", fmt.Errorf("account %q has no API key; run `kittypaw setup` or restart the server once", accountID)
 		}
 		return bind, apiKey, account.ID, nil
 	}
@@ -292,25 +292,25 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 	lockPath := pidPath + ".lock"
 	lockFile, err := lockPidFile(lockPath)
 	if err != nil {
-		// Another process is starting the daemon — fall through to health polling.
-		fmt.Fprintln(os.Stderr, "daemon이 시작 중입니다. 대기합니다...")
+		// Another process is starting the server — fall through to health polling.
+		fmt.Fprintln(os.Stderr, "서버가 시작 중입니다. 대기합니다...")
 		return nil
 	}
 	defer unlockPidFile(lockFile)
 
-	// Double-check after acquiring lock — daemon may have appeared.
+	// Double-check after acquiring lock — server may have appeared.
 	if pid, ok := readPid(pidPath); ok && isKittypawProcess(pid) {
 		return nil
 	}
 
-	fmt.Fprintln(os.Stderr, "daemon이 실행 중이 아닙니다. 시작 중...")
+	fmt.Fprintln(os.Stderr, "서버가 실행 중이 아닙니다. 시작 중...")
 
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
 
-	args := []string{"serve"}
+	args := []string{"server", "start"}
 	if d.bindAddr != "" {
 		args = append(args, "--bind", d.bindAddr)
 	}
@@ -330,7 +330,7 @@ func (d *DaemonConn) spawnDaemon(pidPath string) error {
 	setSysProcAttr(proc)
 
 	if err := proc.Start(); err != nil {
-		return fmt.Errorf("daemon 시작 실패: %w", err)
+		return fmt.Errorf("서버 시작 실패: %w", err)
 	}
 
 	if err := WritePidFile(pidPath, proc.Process.Pid); err != nil {
@@ -351,7 +351,7 @@ func (d *DaemonConn) pollHealth(cl *Client) error {
 		}
 		time.Sleep(healthPollInterval)
 	}
-	return fmt.Errorf("daemon 시작 타임아웃 (10초). `kittypaw daemon start`로 직접 시작하세요")
+	return fmt.Errorf("서버 시작 타임아웃 (10초). `kittypaw server start`로 직접 시작하세요")
 }
 
 // lockPidFile and unlockPidFile are in proc_{unix,windows}.go
@@ -372,7 +372,7 @@ func readPid(path string) (int, bool) {
 // WritePidFile writes pid + its start-time fingerprint in 2-line
 // text format ("<pid>\n<start_time>\n"). Phase 13.4: when daemons
 // became persistent across chat sessions (Phase 12), the PID-only
-// validation in `kittypaw stop` started carrying real PID-reuse
+// validation in `kittypaw server stop` started carrying real PID-reuse
 // risk — a sleeping laptop could let the daemon's PID get recycled
 // before the user remembered to stop it. Recording the start time
 // alongside the PID lets stop refuse to signal a process that

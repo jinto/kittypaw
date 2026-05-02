@@ -140,10 +140,10 @@ func TestSetupStrings_Golden(t *testing.T) {
 		want string
 	}{
 		{"prompt base", setupPromptAutoChat, "> 지금 바로 대화를 시작할까요?"},
-		{"reloaded", setupMsgReloaded, "✓ 데몬 설정 재적용"},
-		{"daemon off", setupMsgDaemonOff, "다음 단계: 'kittypaw serve' 로 데몬을 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."},
-		{"reload failed", setupMsgReloadFailedFmt, "경고: 데몬 reload 실패: %v — 'kittypaw stop && kittypaw serve' 로 재시작하세요."},
-		{"auto-chat blocked", setupMsgAutoChatBlocked, "자동 채팅 진입을 건너뜁니다 — 현재 데몬이 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."},
+		{"reloaded", setupMsgReloaded, "✓ 서버 설정 재적용"},
+		{"server off", setupMsgDaemonOff, "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."},
+		{"reload failed", setupMsgReloadFailedFmt, "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."},
+		{"auto-chat blocked", setupMsgAutoChatBlocked, "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."},
 		{"account credentials intro ko", accountCredentialsIntroKo, "KittyPaw 사용자 계정을 설정합니다.\n계정 ID와 비밀번호를 입력해주세요.\n계정 ID와 비밀번호 정보는 이 컴퓨터에만 저장됩니다."},
 		{"account credentials intro en", accountCredentialsIntroEn, "Set up a KittyPaw user account.\nEnter an account ID and password to continue.\nYour account ID and password data are stored only on this computer."},
 	}
@@ -263,7 +263,7 @@ func TestMaybeReloadDaemon_Off(t *testing.T) {
 	if fd.reloadN != 0 {
 		t.Fatalf("Reload called %d times, expected 0", fd.reloadN)
 	}
-	if !strings.Contains(errBuf.String(), "kittypaw serve") {
+	if !strings.Contains(errBuf.String(), "kittypaw server start") {
 		t.Fatalf("stderr missing hint: %q", errBuf.String())
 	}
 	if out.Len() != 0 {
@@ -312,10 +312,10 @@ func TestMaybeReloadDaemon_Error(t *testing.T) {
 	if fd.reloadN != 1 {
 		t.Fatalf("Reload called %d times, expected 1", fd.reloadN)
 	}
-	if !strings.Contains(errBuf.String(), "경고: 데몬 reload 실패") {
+	if !strings.Contains(errBuf.String(), "경고: 서버 reload 실패") {
 		t.Fatalf("stderr missing warning: %q", errBuf.String())
 	}
-	if !strings.Contains(errBuf.String(), "kittypaw stop && kittypaw serve") {
+	if !strings.Contains(errBuf.String(), "kittypaw server stop && kittypaw server start") {
 		t.Fatalf("stderr missing recovery hint: %q", errBuf.String())
 	}
 	if strings.Contains(out.String(), setupMsgReloaded) {
@@ -335,7 +335,7 @@ func TestMaybeReloadDaemon_DialError(t *testing.T) {
 	if got != reloadOutcomeDaemonOff {
 		t.Fatalf("outcome = %v, want reloadOutcomeDaemonOff", got)
 	}
-	if !strings.Contains(errBuf.String(), "kittypaw serve") {
+	if !strings.Contains(errBuf.String(), "kittypaw server start") {
 		t.Fatalf("stderr missing hint: %q", errBuf.String())
 	}
 	if out.Len() != 0 {
