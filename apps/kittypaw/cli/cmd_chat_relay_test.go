@@ -61,8 +61,11 @@ func TestRunChatRelayPairStoresDeviceTokens(t *testing.T) {
 	if gotName != "m3-enuma" {
 		t.Fatalf("pair name = %q", gotName)
 	}
-	if !strings.Contains(out, "device_id: dev_123") {
-		t.Fatalf("stdout = %q, want device id", out)
+	if !strings.Contains(out, "Hosted chat ready") {
+		t.Fatalf("stdout = %q, want hosted chat ready message", out)
+	}
+	if strings.Contains(out, "dev_123") || strings.Contains(out, "device_id") {
+		t.Fatalf("stdout exposed device internals: %q", out)
 	}
 	secretsAfterPair, err := core.LoadAccountSecrets("alice")
 	if err != nil {
@@ -74,7 +77,7 @@ func TestRunChatRelayPairStoresDeviceTokens(t *testing.T) {
 	}
 }
 
-func TestRunChatRelayStatusDoesNotPrintTokens(t *testing.T) {
+func TestRunChatRelayStatusDoesNotPrintDeviceInternals(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
@@ -105,46 +108,26 @@ func TestRunChatRelayStatusDoesNotPrintTokens(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runChatRelayStatus: %v", runErr)
 	}
-	for _, want := range []string{"device_id: dev_123", "access_token: stored", "refresh_token: stored"} {
+	for _, want := range []string{"account: alice", "hosted_chat: ready"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout = %q, missing %q", out, want)
 		}
 	}
-	if strings.Contains(out, "refresh-secret") || strings.Contains(out, "access-secret") {
-		t.Fatalf("status leaked token material: %q", out)
+	for _, leaked := range []string{"dev_123", "device_id", "access_token", "refresh_token", "refresh-secret", "access-secret"} {
+		if strings.Contains(out, leaked) {
+			t.Fatalf("status exposed %q in %q", leaked, out)
+		}
 	}
 }
 
-func TestRunChatRelayDisconnectClearsDeviceTokens(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("KITTYPAW_CONFIG_DIR", root)
-	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
-
-	secrets, err := core.LoadAccountSecrets("alice")
-	if err != nil {
-		t.Fatal(err)
+func TestNewChatRelayCmdIsHiddenAndDoesNotExposeDisconnect(t *testing.T) {
+	cmd := newChatRelayCmd()
+	if !cmd.Hidden {
+		t.Fatal("chat-relay command should be hidden from normal help")
 	}
-	mgr := core.NewAPITokenManager("", secrets)
-	if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
-		DeviceID:     "dev_123",
-		AccessToken:  chatRelayTestAccessToken("access-secret"),
-		RefreshToken: "refresh-secret",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	var runErr error
-	_ = captureStdout(t, func() {
-		runErr = runChatRelayDisconnect(&chatRelayFlags{account: "alice", apiURL: core.DefaultAPIServerURL})
-	})
-	if runErr != nil {
-		t.Fatalf("runChatRelayDisconnect: %v", runErr)
-	}
-	secretsAfterDisconnect, err := core.LoadAccountSecrets("alice")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := core.NewAPITokenManager("", secretsAfterDisconnect).LoadChatRelayDeviceTokens(core.DefaultAPIServerURL); ok || got != (core.ChatRelayDeviceTokens{}) {
-		t.Fatalf("tokens after disconnect = (%#v, %v), want cleared", got, ok)
+	for _, child := range cmd.Commands() {
+		if child.Name() == "disconnect" {
+			t.Fatal("chat-relay disconnect should not be exposed")
+		}
 	}
 }

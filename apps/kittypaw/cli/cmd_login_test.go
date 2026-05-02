@@ -174,8 +174,11 @@ func TestMaybePairChatRelayDeviceWarnsButDoesNotFail(t *testing.T) {
 	if paired := maybePairChatRelayDevice(apiURL, mgr, "user-access", &out); paired {
 		t.Fatal("maybePairChatRelayDevice paired = true, want false on pair failure")
 	}
-	if !strings.Contains(out.String(), "kittypaw chat-relay pair") {
-		t.Fatalf("warning = %q, want manual fallback command", out.String())
+	if strings.Contains(out.String(), "chat-relay") {
+		t.Fatalf("warning exposed internal chat-relay command: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "Hosted chat setup skipped") {
+		t.Fatalf("warning = %q, want hosted chat setup skip message", out.String())
 	}
 	if _, ok := mgr.LoadChatRelayDeviceTokens(apiURL); ok {
 		t.Fatal("device tokens were stored after failed pair")
