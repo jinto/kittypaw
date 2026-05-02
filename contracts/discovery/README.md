@@ -1,6 +1,6 @@
 # Discovery Contract
 
-Produced by `apps/kittyapi`.
+Produced by `apps/portal`.
 
 Consumed by `apps/kittypaw`.
 

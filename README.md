@@ -14,7 +14,7 @@ apps/
   kittyapi/          api.kittypaw.app hosted Kitty API surface
   chat/              chat.kittypaw.app hosted chat UI and daemon relay
   kakao/             kakao.kittypaw.app Kakao webhook and bridge
-  portal/            Future portal.kittypaw.app identity/bootstrap service
+  portal/            portal.kittypaw.app identity/bootstrap service
 contracts/           Wire-level schemas, examples, and version policies
 testkit/             Cross-app verification helpers and fakes
 deploy/              Repository-level deployment notes and shared assets
@@ -42,6 +42,7 @@ kittypaw/v0.1.0
 kittyapi/v0.1.0
 chat/v0.1.0
 kakao/v0.1.0
+portal/v0.1.0
 ```
 
 `apps/kittypaw` keeps its own release workflow. The install script must resolve

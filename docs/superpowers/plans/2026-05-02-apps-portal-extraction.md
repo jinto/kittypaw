@@ -15,7 +15,7 @@
 - Create `apps/portal/go.mod`: new module `github.com/kittypaw-app/kittyportal`.
 - Create `apps/portal/cmd/server/main.go`: portal process entrypoint.
 - Create `apps/portal/internal/config/config.go`: portal env loading. Required: `DATABASE_URL`, `JWT_PRIVATE_KEY_PEM_B64`, OAuth client secrets, `BASE_URL=https://portal.kittypaw.app`, `API_BASE_URL=https://api.kittypaw.app`.
-- Create `apps/portal/internal/server/router.go`: portal routes only: `/health`, `/discovery`, `/.well-known/jwks.json`, `/auth/*`.
+- Create `apps/portal/cmd/server/main.go`: portal routes only: `/health`, `/discovery`, `/.well-known/jwks.json`, `/auth/*`.
 - Move identity packages from `apps/kittyapi/internal/auth` to `apps/portal/internal/auth`.
 - Move identity-owned model files from `apps/kittyapi/internal/model` to `apps/portal/internal/model`: `user*`, `refresh_token*`, `device*`, and shared DB pool helpers needed by those stores.
 - Keep resource-owned model files in `apps/kittyapi/internal/model`: places and addresses.
@@ -31,13 +31,13 @@
 - Create: `apps/portal/go.mod`
 - Create: `apps/portal/cmd/server/main.go`
 - Create: `apps/portal/internal/config/config.go`
-- Create: `apps/portal/internal/server/router.go`
-- Create: `apps/portal/internal/server/router_test.go`
+- Create: `apps/portal/cmd/server/main.go`
+- Create: `apps/portal/cmd/server/main_test.go`
 - Modify: `go.work`
 
 - [ ] **Step 1: Write failing router contract tests**
 
-Add `apps/portal/internal/server/router_test.go`:
+Add `apps/portal/cmd/server/main_test.go`:
 
 ```go
 package server
@@ -92,7 +92,7 @@ func TestPortalDoesNotServeResourceRoutes(t *testing.T) {
 Run:
 
 ```bash
-go test ./apps/portal/internal/server -count=1
+go test ./apps/portal/cmd/server -count=1
 ```
 
 Expected: FAIL because `apps/portal` does not exist yet.
@@ -107,7 +107,7 @@ Run:
 
 ```bash
 go work use ./apps/portal
-go test ./apps/portal/internal/server -count=1
+go test ./apps/portal/cmd/server -count=1
 ```
 
 Expected: PASS.
@@ -148,7 +148,7 @@ Expected: 200 JSON JWK Set with one `kid`.
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-go test ./apps/portal/internal/auth ./apps/portal/internal/server -count=1
+go test ./apps/portal/internal/auth ./apps/portal/cmd/server -count=1
 ```
 
 Expected: FAIL because JWKS is not wired in portal yet.
@@ -161,7 +161,7 @@ Use `git mv` for files that are no longer needed by API. If API still needs toke
 
 ```bash
 make contracts-check
-go test ./apps/portal/internal/auth ./apps/portal/internal/server -count=1
+go test ./apps/portal/internal/auth ./apps/portal/cmd/server -count=1
 go test ./apps/chat/internal/identity -count=1
 ```
 
@@ -180,11 +180,11 @@ git commit -m "feat(portal): own jwt issuer and jwks"
 - Move: `apps/kittyapi/internal/auth/google*.go`, `github*.go`, `devices*.go`, `refresh*.go`, `state*.go`, `web*.go`, `me.go`, and tests to `apps/portal/internal/auth/`
 - Move: identity model stores and tests to `apps/portal/internal/model/`
 - Move: identity migrations to `apps/portal/migrations/`
-- Modify: `apps/portal/internal/server/router.go`
+- Modify: `apps/portal/cmd/server/main.go`
 
 - [ ] **Step 1: Write failing route wiring tests**
 
-In `apps/portal/internal/server/router_test.go`, add checks:
+In `apps/portal/cmd/server/main_test.go`, add checks:
 
 ```go
 func TestDeviceRoutesAreWired(t *testing.T) {
@@ -212,7 +212,7 @@ func TestDeviceRoutesAreWired(t *testing.T) {
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-go test ./apps/portal/internal/server ./apps/portal/internal/auth ./apps/portal/internal/model -count=1
+go test ./apps/portal/cmd/server ./apps/portal/internal/auth ./apps/portal/internal/model -count=1
 ```
 
 Expected: FAIL because routes and stores are not moved yet.

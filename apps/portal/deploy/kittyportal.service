@@ -1,0 +1,15 @@
+[Unit]
+Description=Kitty Portal - identity and discovery
+After=network.target postgresql.service
+
+[Service]
+User=jinto
+Group=jinto
+WorkingDirectory=/home/jinto/kittyportal
+EnvironmentFile=/home/jinto/kittyportal/.env
+ExecStart=/home/jinto/kittyportal/kittyportal
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

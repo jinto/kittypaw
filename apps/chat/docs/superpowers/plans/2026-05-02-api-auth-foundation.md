@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Gate KittyChat relay access through an API-issued credential verifier boundary and stabilize daemon requests around versioned operations.
+**Goal:** Gate KittyChat relay access through an portal-issued credential verifier boundary and stabilize daemon requests around versioned operations.
 
 **Architecture:** Add `internal/identity` as the verifier layer. The first verifier is env-seeded memory data, but the public interface is `CredentialVerifier` returning claims with `audiences`, `version`, and `scopes` so JWT/JWKS or introspection can replace it later. Add protocol v1 `operation`, `protocol_version`, and `capabilities` fields so daemon contracts are not coupled only to HTTP paths.
 

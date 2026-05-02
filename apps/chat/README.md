@@ -19,7 +19,7 @@ This repository currently contains the relay core:
   - `POST /nodes/{device_id}/v1/chat/completions`
 - JSON relay frames over WebSocket
 - in-memory single-instance device broker
-- API-issued JWT verifier for web chat, OpenAI-compatible clients, and daemon
+- Portal-issued JWT verifier for web chat, OpenAI-compatible clients, and daemon
   device credentials
 - env-seeded static credential fallback for MVP/manual testing
 - operation-based daemon protocol v1 for OpenAI-compatible relay requests
@@ -33,7 +33,7 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `KITTYCHAT_JWKS_URL` | unset | kittyapi JWKS endpoint for RS256 API-issued access tokens and daemon device credentials |
+| `KITTYCHAT_JWKS_URL` | unset | Portal JWKS endpoint for RS256 access tokens and daemon device credentials |
 | `KITTYCHAT_JWT_SECRET` | unset | Legacy HS256 shared-secret fallback. Falls back to `JWT_SECRET` when unset |
 | `KITTYCHAT_API_TOKEN` | required when no JWT verifier is configured | Static MVP bearer token fallback for web chat and OpenAI-compatible client requests |
 | `KITTYCHAT_DEVICE_TOKEN` | required when no JWT verifier is configured | Static MVP bearer token fallback for daemon WebSocket connections |
@@ -71,7 +71,7 @@ make run
 ```
 
 API client tokens submitted directly to KittyChat are expected to use the
-kittyapi wire format and include the KittyChat audience:
+portal wire format and include the KittyChat audience:
 
 ```json
 {
@@ -89,7 +89,7 @@ account, and the broker verifies that the selected route belongs to the token's
 `sub` user. If a future token includes `device_id`, kittychat treats it as an
 additional restriction.
 
-Daemon device credentials are also accepted as kittyapi JWTs:
+Daemon device credentials are also accepted as portal JWTs:
 
 ```json
 {

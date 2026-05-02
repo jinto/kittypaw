@@ -1,5 +1,5 @@
 [Unit]
-Description=KittyAPI — kittypaw data proxy + auth
+Description=KittyAPI - kittypaw data API
 After=network.target postgresql.service
 
 [Service]

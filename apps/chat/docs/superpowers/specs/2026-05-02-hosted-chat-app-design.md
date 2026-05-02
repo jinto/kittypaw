@@ -9,8 +9,8 @@ Make `https://chat.kittypaw.app` the user-facing chat surface instead of a manua
 ## Current State
 
 - `/manual/` is an operator QA surface. It requires pasting a bearer token.
-- `kittychat` already verifies API-issued RS256 user JWTs through JWKS.
-- `kittychat` already accepts daemon WSS connections with API-issued RS256 device JWTs.
+- `kittychat` already verifies portal-issued RS256 user JWTs through JWKS.
+- `kittychat` already accepts daemon WSS connections with portal-issued RS256 device JWTs.
 - `api.kittypaw.app` device credential E2E passed in prod.
 - `kittyapi` Plan 25 contract is Authorization Code with PKCE. The API redirects only `code` + `state` back to chat; `kittychat` exchanges the code server-to-server and keeps the token pair out of browser JavaScript.
 

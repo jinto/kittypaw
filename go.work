@@ -4,4 +4,5 @@ use (
 	./apps/chat
 	./apps/kittyapi
 	./apps/kittypaw
+	./apps/portal
 )

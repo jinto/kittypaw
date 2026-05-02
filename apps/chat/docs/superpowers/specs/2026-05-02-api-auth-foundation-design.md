@@ -85,7 +85,7 @@ Add a small identity package with:
   credential contract.
 - Scope constants for `chat:relay`, `models:read`, and `daemon:connect`.
 - `MemoryCredentialVerifier` implementation optionally seeded at process startup.
-- `JWTCredentialVerifier` implementation for API-issued access tokens and daemon
+- `JWTCredentialVerifier` implementation for portal-issued access tokens and daemon
   device credentials.
 - `ChainCredentialVerifier` implementation that tries JWT first and static
   fallback second during rollout.
@@ -156,7 +156,7 @@ Keep the current static fallback environment variables:
 - `KITTYCHAT_LOCAL_ACCOUNT_ID`
 
 `cmd/kittychat` seeds an in-memory verifier from this config only when a static
-token is present. If `KITTYCHAT_JWT_SECRET` is set, the router accepts API-issued
+token is present. If `KITTYCHAT_JWT_SECRET` is set, the router accepts portal-issued
 JWTs for both API clients and daemon devices; static tokens remain a fallback
 when configured. This keeps local development and existing tests working while
 moving the production boundary into one place.

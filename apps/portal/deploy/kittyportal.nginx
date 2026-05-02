@@ -1,0 +1,15 @@
+upstream kittyportal {
+  server 127.0.0.1:9714;
+}
+
+server {
+  listen 80;
+  server_name {{DOMAIN}};
+
+  location / {
+    proxy_pass http://kittyportal;
+    include proxy_params;
+    proxy_set_header True-Client-IP "";
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+}

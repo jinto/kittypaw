@@ -51,8 +51,8 @@ func TestNewServerMountsHostedWebLogin(t *testing.T) {
 		t.Fatalf("status = %d, want 302; body=%s", rr.Code, rr.Body.String())
 	}
 	location := rr.Header().Get("Location")
-	if !strings.HasPrefix(location, "http://api.test/auth/web/google?") {
-		t.Fatalf("Location = %q, want API web OAuth redirect", location)
+	if !strings.HasPrefix(location, "http://portal.test/auth/web/google?") {
+		t.Fatalf("Location = %q, want portal web OAuth redirect", location)
 	}
 	if !strings.Contains(location, "redirect_uri=http%3A%2F%2Fchat.test%2Fauth%2Fcallback") {
 		t.Fatalf("Location missing chat callback: %q", location)
@@ -316,7 +316,7 @@ func testConfig() config.Config {
 		DeviceID:       "dev_1",
 		LocalAccountID: "alice",
 		PublicBaseURL:  "http://chat.test",
-		APIAuthBaseURL: "http://api.test/auth",
+		APIAuthBaseURL: "http://portal.test/auth",
 		Version:        "test",
 	}
 }

@@ -26,16 +26,13 @@ The cloud resource API surface:
 
 - public data proxy endpoints
 - API resource audience: `https://api.kittypaw.app`
-- transition host for identity implementation until `apps/portal` is
-  extracted
+- anonymous IP rate limiting for upstream protection
 
-During the phase-1 portal split, the binary can still contain identity code,
-but public identity routes are served only on `portal.kittypaw.app`.
+Identity, discovery, and JWKS routes are intentionally not served by this app.
 
 ### `apps/portal`
 
-The identity and bootstrap surface. In phase 1 this is a logical service hosted
-by the API binary; phase 2 extracts it into its own deployable:
+The identity and bootstrap surface:
 
 - OAuth login
 - JWT and refresh token issuance
@@ -103,8 +100,10 @@ Each app remains independently deployed or released:
 - `apps/kittypaw`: GitHub release assets and install script
 - `apps/kittyapi`: service binary and API database migrations
 - `apps/portal`: identity service binary and auth database migrations
-  after extraction
 - `apps/chat`: service binary and hosted chat static assets
 - `apps/kakao`: service binary and Kakao gateway data store
 
-Databases remain owned by their service.
+Databases remain owned by their service. The first portal split keeps the
+existing production database physical layout; identity migrations are copied to
+`apps/portal`, while `apps/kittyapi` keeps historical migrations until the DB
+cutover is planned separately.

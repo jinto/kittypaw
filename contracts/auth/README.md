@@ -1,10 +1,9 @@
 # Auth Contract
 
-Produced by `apps/kittyapi`.
+Produced by `apps/portal`.
 
 Consumed by:
 
-- `apps/kittyapi` middleware for API audience checks
 - `apps/chat` verifier for Chat audience checks
 - `apps/kittypaw` as opaque bearer credentials
 

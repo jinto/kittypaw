@@ -31,7 +31,7 @@ Those need the API-server credential contract and kittychat broker endpoint to l
 
 API-side source of truth:
 
-- `https://github.com/kittypaw-app/kittyapi/blob/main/docs/specs/kittychat-credential-foundation.md`
+- `apps/portal/docs/specs/kittychat-credential-foundation.md`
 - daemon credential claims are expected to carry `aud=["kittychat"]`, `scope=["daemon:connect"]`, and `v=1`.
 - API-client credentials use `chat:relay` and `models:read`; daemon code records these names only as shared vocabulary.
 

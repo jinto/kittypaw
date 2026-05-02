@@ -1,0 +1,387 @@
+package main
+
+import (
+	"crypto/rsa"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/kittypaw-app/kittyportal/internal/auth"
+	"github.com/kittypaw-app/kittyportal/internal/config"
+)
+
+func testJWTKey(t *testing.T) (*rsa.PrivateKey, string) {
+	t.Helper()
+	cfg := config.LoadForTest()
+	return cfg.JWTPrivateKey, cfg.JWTKID
+}
+
+func testRouter(t *testing.T) http.Handler {
+	t.Helper()
+	cfg := config.LoadForTest()
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+	return r
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	r := testRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if body["status"] != "healthy" {
+		t.Fatalf("expected status=healthy, got %q", body["status"])
+	}
+}
+
+func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.KakaoRelayURL = "https://kakao.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["kakao_relay_url"]; got != "https://kakao.kittypaw.app" {
+		t.Fatalf("expected kakao_relay_url=https://kakao.kittypaw.app, got %q", got)
+	}
+	if _, ok := body["relay_url"]; ok {
+		t.Fatalf("legacy relay_url key must not be present: %v", body)
+	}
+}
+
+func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.ChatRelayURL = "https://chat.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["chat_relay_url"]; got != "https://chat.kittypaw.app" {
+		t.Fatalf("expected chat_relay_url=https://chat.kittypaw.app, got %q", got)
+	}
+}
+
+func TestDiscoveryReturnsPortalAuthBaseURLAndAPIBaseURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app/"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["api_base_url"]; got != "https://api.kittypaw.app" {
+		t.Fatalf("api_base_url = %q, want api host", got)
+	}
+	if got := body["auth_base_url"]; got != "https://portal.kittypaw.app/auth" {
+		t.Fatalf("auth_base_url = %q, want portal auth host", got)
+	}
+}
+
+func TestSplitHostsRestrictIdentityRoutesToPortalHost(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/discovery"},
+		{method: http.MethodGet, path: "/.well-known/jwks.json"},
+		{method: http.MethodGet, path: "/auth/google"},
+		{method: http.MethodPost, path: "/auth/devices/refresh"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Host = "api.kittypaw.app"
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 on api host", w.Code)
+			}
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("portal discovery status = %d, want 200", w.Code)
+	}
+}
+
+func TestPortalDoesNotServeResourceRoutes(t *testing.T) {
+	r := testRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/geo/resolve", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("resource route status = %d, want 404", w.Code)
+	}
+}
+
+func TestJWKSEndpointAnonymous200(t *testing.T) {
+	r := testRouter(t)
+	_, wantKID := testJWTKey(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+
+	var got auth.JWKSet
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(got.Keys) != 1 {
+		t.Fatalf("keys len = %d, want 1", len(got.Keys))
+	}
+	if got.Keys[0].Kid != wantKID {
+		t.Fatalf("kid = %q, want %q", got.Keys[0].Kid, wantKID)
+	}
+}
+
+func TestJWKSEndpointCacheControl(t *testing.T) {
+	r := testRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	const want = "public, max-age=600"
+	if got := w.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+}
+
+func TestNewRouterCleanupReleasesStores(t *testing.T) {
+	cfg := config.LoadForTest()
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	if r == nil {
+		t.Fatal("expected non-nil router")
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup")
+	}
+	cleanup()
+	cleanup()
+}
+
+func TestDevicesRoutesWiredPairNoAuth401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/devices/pair", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestDevicesRoutesWiredRefreshNoBody400(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/auth/devices/refresh", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestDevicesRoutesWiredListNoAuth401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/devices", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestDevicesRoutesWiredDeleteNoAuth401(t *testing.T) {
+	r := testRouter(t)
+	req := httptest.NewRequest(http.MethodDelete, "/auth/devices/00000000-0000-0000-0000-000000000000", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestRatelimitRefreshBucketIsolated(t *testing.T) {
+	r := testRouter(t)
+	const peer = "192.0.2.99:1234"
+
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+		req.RemoteAddr = peer
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d already throttled", i+1)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.RemoteAddr = peer
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("discovery #6 status = %d, want 429", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/auth/devices/refresh", nil)
+	req.RemoteAddr = peer
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusTooManyRequests {
+		t.Fatal("refresh request throttled despite separate bucket")
+	}
+}
+
+func TestNotFound(t *testing.T) {
+	r := testRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestRouterTrueClientIPHeaderDoesNotBypassRateLimit(t *testing.T) {
+	r := testRouter(t)
+
+	const peer = "192.0.2.71:1234"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("True-Client-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d unexpectedly throttled: %d", i+1, w.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.RemoteAddr = peer
+	req.Header.Set("True-Client-IP", "198.51.100.99")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th call, got %d", w.Code)
+	}
+}
+
+func TestRouterXForwardedForHeaderDoesNotBypassRateLimit(t *testing.T) {
+	r := testRouter(t)
+
+	const peer = "192.0.2.72:1234"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d, 10.0.0.1", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("call #%d unexpectedly throttled: %d", i+1, w.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.RemoteAddr = peer
+	req.Header.Set("X-Forwarded-For", "198.51.100.99, 10.0.0.1")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th call, got %d", w.Code)
+	}
+}
+
+func TestRouterXRealIPHeaderTrustedForRateLimit(t *testing.T) {
+	r := testRouter(t)
+
+	const nginxPeer = "127.0.0.1:8443"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+		req.RemoteAddr = nginxPeer
+		req.Header.Set("X-Real-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("user %d throttled", i+1)
+		}
+	}
+
+	const samePeer = "198.51.100.42"
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+		req.RemoteAddr = nginxPeer
+		req.Header.Set("X-Real-IP", samePeer)
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.RemoteAddr = nginxPeer
+	req.Header.Set("X-Real-IP", samePeer)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on 6th X-Real-IP=%s call, got %d", samePeer, w.Code)
+	}
+}

@@ -8,6 +8,7 @@ use different conventions.
 | apps/kittypaw | 0 | Local daemon chooses or configures its own port |
 | apps/kittyapi | 9712 | Hosted Kitty API service |
 | apps/chat | 9713 | Hosted chat and relay service |
+| apps/portal | 9714 | Hosted identity and discovery service |
 | apps/kakao | 8787 | Kakao gateway service |
 
 Keep this file updated before adding local docker-compose or dev-server scripts.

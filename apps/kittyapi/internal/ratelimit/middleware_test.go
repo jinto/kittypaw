@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kittypaw-app/kittyapi/internal/auth"
-	"github.com/kittypaw-app/kittyapi/internal/model"
 	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
 )
 
@@ -55,33 +53,32 @@ func TestMiddlewareAnonymousExceeded(t *testing.T) {
 	}
 }
 
-func TestMiddlewareAuthenticatedHigherLimit(t *testing.T) {
+func TestMiddlewareBucketPrefixIsolatesQuota(t *testing.T) {
 	l := ratelimit.New()
 	defer l.Close()
 
-	handler := ratelimit.Middleware(l)(http.HandlerFunc(ok200))
+	defaultHandler := ratelimit.Middleware(l)(http.HandlerFunc(ok200))
+	prefixedHandler := ratelimit.Middleware(l, "other")(http.HandlerFunc(ok200))
 
-	user := &model.User{ID: "user-1"}
-
-	for range 60 {
+	for range 5 {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		ctx := auth.ContextWithUser(req.Context(), user)
-		req = req.WithContext(ctx)
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d", w.Code)
-		}
+		req.RemoteAddr = "192.0.2.10:1234"
+		defaultHandler.ServeHTTP(httptest.NewRecorder(), req)
 	}
 
-	// 61st should be denied.
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := auth.ContextWithUser(req.Context(), user)
-	req = req.WithContext(ctx)
+	req.RemoteAddr = "192.0.2.10:1234"
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
+	defaultHandler.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 for 61st request, got %d", w.Code)
+		t.Fatalf("expected default bucket exhausted, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	w = httptest.NewRecorder()
+	prefixedHandler.ServeHTTP(w, req)
+	if w.Code == http.StatusTooManyRequests {
+		t.Fatal("prefixed bucket unexpectedly shared quota with default bucket")
 	}
 }

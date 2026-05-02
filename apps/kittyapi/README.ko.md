@@ -1,112 +1,70 @@
 # KittyAPI
 
-[KittyPaw](https://github.com/kittypaw-app)를 위한 백엔드 API 서버. 공공데이터 프록시를 제공하고, portal 분리 전환 단계에서는 같은 바이너리가 `portal.kittypaw.app`의 identity route도 제공합니다.
+[English](README.md)
 
+KittyPaw의 데이터 API 서버입니다. 이 앱은 `/v1/*` 공공데이터 프록시를
+소유합니다. 인증, 서비스 디스커버리, OAuth, JWKS, device credential은
+`apps/portal`로 분리되어 있습니다.
+
+```text
+KittyPaw client -> portal.kittypaw.app -> discovery, OAuth, JWKS
+               -> api.kittypaw.app    -> /v1 public data APIs
 ```
-KittyPaw 클라이언트 ──► portal.kittypaw.app ──► discovery, OAuth, JWKS
-             └──► api.kittypaw.app ───────► /v1 공공데이터 API
-```
 
-## 주요 기능
+## 기능
 
-- **데이터 프록시** — 공공 API 캐싱 접근 (에어코리아 대기질: 실시간, 예보, 주간, 초과 측정소)
-- **Portal identity 전환** — OAuth, 토큰 발급, JWKS, discovery는 `apps/portal` 추출 전까지 `portal.kittypaw.app`에서 제공합니다.
-- **CLI 로그인** — `kittypaw login` HTTP 콜백 또는 일회용 코드 입력 방식
-- **JWT + 리프레시 토큰** — 15분 액세스, 7일 리프레시 (로테이션 + 재사용 탐지). issuer는 `https://portal.kittypaw.app/auth`, resource audience는 API/chat URL form입니다.
-- **속도 제한** — IP 기반 비인증 (5/분) + 사용자 기반 인증 (60/분), 일일 10K 상한
-- **서비스 디스커버리** — portal host의 `GET /discovery`로 auth, chat, Kakao, API, 스킬 레지스트리 URL 반환
-- **Stale-while-revalidate** — 업스트림 장애 시 만료된 캐시 데이터 제공
+- AirKorea, KASI, KMA 공공데이터 프록시와 캐시
+- `/v1/geo/resolve` 한국어 장소/주소 해석
+- upstream 보호를 위한 익명 IP rate limit
+- upstream 실패 시 stale cache 응답
 
 ## 빠른 시작
 
 ```bash
-# 사전 준비: Go 1.22+, PostgreSQL
-
-# 설정
 cp .env.example .env
-# .env 편집 — DATABASE_URL, JWT_PRIVATE_KEY_PEM_B64, OAuth 자격증명 설정
+# DATABASE_URL과 필요한 공공데이터 API 키를 설정합니다.
 
-# 데이터베이스
 createdb kittypaw_api
 migrate -path migrations -database "$DATABASE_URL" up
 
-# 실행
 make run
 ```
 
 ## API
 
-### 공개
-
-| 메서드 | 경로 | 설명 |
+| Method | Path | 설명 |
 |---|---|---|
 | `GET` | `/health` | 헬스 체크 |
-| `GET` | `/discovery` | portal host 전용. 서비스 URL (auth, chat relay, Kakao relay, API 베이스, 스킬 레지스트리) |
-
-### 인증
-
-| 메서드 | 경로 | 설명 |
-|---|---|---|
-| `GET` | `/auth/google` | Google OAuth 로그인 |
-| `GET` | `/auth/github` | GitHub OAuth 로그인 |
-| `POST` | `/auth/token/refresh` | 액세스 토큰 갱신 |
-| `GET` | `/auth/me` | 현재 사용자 정보 |
-| `GET` | `/auth/cli/{provider}` | CLI OAuth 로그인 (mode=http\|code) |
-| `POST` | `/auth/cli/exchange` | 일회용 코드로 토큰 교환 |
-
-### 데이터 프록시
-
-| 메서드 | 경로 | 설명 |
-|---|---|---|
 | `GET` | `/v1/air/airkorea/realtime/station` | 측정소별 실시간 대기질 |
 | `GET` | `/v1/air/airkorea/realtime/city` | 시도별 실시간 대기질 |
 | `GET` | `/v1/air/airkorea/forecast` | 대기질 예보 |
 | `GET` | `/v1/air/airkorea/forecast/weekly` | 주간 미세먼지 예보 |
 | `GET` | `/v1/air/airkorea/unhealthy` | 기준 초과 측정소 |
+| `GET` | `/v1/calendar/holidays` | 공휴일 정보 |
+| `GET` | `/v1/calendar/anniversaries` | 기념일 정보 |
+| `GET` | `/v1/calendar/solar-terms` | 24절기 정보 |
+| `GET` | `/v1/weather/kma/village-fcst` | 기상청 단기예보 |
+| `GET` | `/v1/weather/kma/ultra-srt-ncst` | 초단기 실황 |
+| `GET` | `/v1/weather/kma/ultra-srt-fcst` | 초단기 예보 |
+| `GET` | `/v1/almanac/lunar-date` | 양력에서 음력 변환 |
+| `GET` | `/v1/almanac/solar-date` | 음력에서 양력 변환 |
+| `GET` | `/v1/almanac/sun` | 일출/일몰 |
+| `GET` | `/v1/geo/resolve?q={query}` | 한국어 장소를 좌표로 변환 |
+
+`/auth/*`, `/discovery`, `/.well-known/jwks.json`은 portal 분리 이후 이
+앱에서 의도적으로 404를 반환합니다.
+
+기존 auth migration은 production DB cutover 계획 전까지 이 앱에도
+남겨둡니다. 런타임은 더 이상 identity route를 제공하지 않습니다.
 
 ## 설정
-
-모든 설정은 환경변수로 관리합니다:
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `PORT` | `8080` | 서버 포트 |
-| `BASE_URL` | `http://localhost:8080` | Portal/auth 공개 베이스 URL |
-| `DATABASE_URL` | *(필수)* | PostgreSQL 연결 문자열 |
-| `JWT_PRIVATE_KEY_PEM_B64` | *(필수)* | RS256 JWT 서명용 base64 PEM RSA private key |
-| `GOOGLE_CLIENT_ID` | | Google OAuth 클라이언트 ID |
-| `GOOGLE_CLIENT_SECRET` | | Google OAuth 클라이언트 시크릿 |
-| `GITHUB_CLIENT_ID` | | GitHub OAuth 클라이언트 ID |
-| `GITHUB_CLIENT_SECRET` | | GitHub OAuth 클라이언트 시크릿 |
-| `CORS_ORIGINS` | `BASE_URL` | 허용 오리진 (쉼표 구분) |
-| `AIRKOREA_API_KEY` | | 에어코리아 공공데이터 API 키 |
-| `KAKAO_RELAY_URL` | | 카카오톡 릴레이 서버 URL |
-| `CHAT_RELAY_URL` | | Chat 원격 릴레이 컨트롤 플레인 URL |
-| `API_BASE_URL` | `BASE_URL` | API resource 베이스 URL (/discovery용) |
-| `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | 스킬 패키지 레지스트리 |
-
-## 배포
-
-프로덕션 배포 가이드는 [DEPLOY.md](DEPLOY.md)를 참고하세요.
-
-```bash
-fab deploy     # 빌드, 업로드, 재시작
-fab status     # 서비스 상태
-fab logs       # 로그 확인
-fab rollback   # 이전 바이너리로 복원
-fab migrate    # DB 마이그레이션 실행
-```
-
-## 개발
-
-```bash
-make build     # 바이너리 빌드
-make test      # 전체 테스트 실행
-make lint      # golangci-lint 실행
-make fmt       # 코드 포맷 (gofmt + goimports)
-make run       # 빌드 후 실행 (.env 로드)
-```
-
-## 라이선스
-
-Elastic License 2.0. 자세한 내용은 [LICENSE](LICENSE)를 참고하세요.
+| `BASE_URL` | `http://localhost:8080` | CORS 기본값으로 쓰는 API origin |
+| `DATABASE_URL` | 필수 | PostgreSQL 연결 문자열 |
+| `CORS_ORIGINS` | `BASE_URL` | 허용 origin CSV |
+| `AIRKOREA_API_KEY` | | AirKorea 공공데이터 API 키 |
+| `HOLIDAY_API_KEY` | | KASI 공공데이터 API 키 |
+| `WEATHER_API_KEY` | | KMA 공공데이터 API 키 |
