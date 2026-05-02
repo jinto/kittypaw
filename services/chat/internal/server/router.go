@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-//go:embed manual/*
-var manualAssets embed.FS
+//go:embed manual/* web/*
+var staticAssets embed.FS
 
 type Config struct {
 	Version       string
@@ -38,6 +38,13 @@ func NewRouter(cfg Config) http.Handler {
 			"version": version,
 		})
 	})
+	r.Get("/", serveStaticFile("web/index.html"))
+	r.Get("/app", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
+	})
+	r.Get("/app/", serveStaticFile("web/app.html"))
+	r.Get("/auth/callback", serveStaticFile("web/auth-callback.html"))
+	r.Handle("/assets/*", http.StripPrefix("/assets/", staticDirHandler("web")))
 	r.Get("/manual", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/manual/", http.StatusMovedPermanently)
 	})
@@ -51,8 +58,30 @@ func NewRouter(cfg Config) http.Handler {
 	return r
 }
 
+func serveStaticFile(name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeFileFS(w, r, staticAssets, name)
+	}
+}
+
+func staticDirHandler(path string) http.Handler {
+	sub, err := fs.Sub(staticAssets, path)
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "assets unavailable", http.StatusInternalServerError)
+		})
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		http.FileServer(http.FS(sub)).ServeHTTP(w, r)
+	})
+}
+
 func manualHandler() http.Handler {
-	sub, err := fs.Sub(manualAssets, "manual")
+	sub, err := fs.Sub(staticAssets, "manual")
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "manual assets unavailable", http.StatusInternalServerError)

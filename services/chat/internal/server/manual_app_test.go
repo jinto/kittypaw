@@ -6,7 +6,7 @@ import (
 )
 
 func TestManualAppDoesNotExposeRawHTMLErrors(t *testing.T) {
-	raw, err := manualAssets.ReadFile("manual/app.js")
+	raw, err := staticAssets.ReadFile("manual/app.js")
 	if err != nil {
 		t.Fatalf("read manual app: %v", err)
 	}
@@ -20,7 +20,7 @@ func TestManualAppDoesNotExposeRawHTMLErrors(t *testing.T) {
 }
 
 func TestManualAppReplacesStaleSelectedRoute(t *testing.T) {
-	raw, err := manualAssets.ReadFile("manual/app.js")
+	raw, err := staticAssets.ReadFile("manual/app.js")
 	if err != nil {
 		t.Fatalf("read manual app: %v", err)
 	}
