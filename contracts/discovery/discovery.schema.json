@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kittypaw.app/contracts/discovery/discovery.schema.json",
+  "title": "Kitty Discovery Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_base_url"],
+  "properties": {
+    "api_base_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "auth_base_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "chat_relay_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "kakao_relay_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "skills_registry_url": {
+      "type": "string"
+    }
+  }
+}

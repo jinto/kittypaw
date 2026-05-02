@@ -1,0 +1,9 @@
+{
+  "iss": "https://api.kittypaw.app/auth",
+  "sub": "user_123",
+  "aud": ["https://api.kittypaw.app", "https://chat.kittypaw.app"],
+  "scope": ["chat:relay", "models:read"],
+  "v": 2,
+  "iat": 1777670400,
+  "exp": 1777671300
+}

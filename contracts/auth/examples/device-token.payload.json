@@ -1,0 +1,11 @@
+{
+  "iss": "https://api.kittypaw.app/auth",
+  "sub": "device:dev_123",
+  "aud": ["https://chat.kittypaw.app"],
+  "scope": ["daemon:connect"],
+  "v": 2,
+  "user_id": "user_123",
+  "device_id": "dev_123",
+  "iat": 1777670400,
+  "exp": 1777671300
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kittypaw.app/contracts/kakao-relay/frames.schema.json",
+  "title": "Kitty Kakao Relay Frames",
+  "oneOf": [
+    { "$ref": "#/$defs/incoming" },
+    { "$ref": "#/$defs/reply" }
+  ],
+  "$defs": {
+    "incoming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "user_id": { "type": "string" }
+      }
+    },
+    "reply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "image_url": { "type": "string", "format": "uri" },
+        "image_alt": { "type": "string" }
+      }
+    }
+  }
+}

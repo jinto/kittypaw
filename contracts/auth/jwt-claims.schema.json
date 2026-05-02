@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kittypaw.app/contracts/auth/jwt-claims.schema.json",
+  "title": "Kitty API JWT Claims",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["iss", "sub", "aud", "scope", "v", "iat", "exp"],
+  "properties": {
+    "iss": {
+      "type": "string",
+      "const": "https://api.kittypaw.app/auth"
+    },
+    "sub": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aud": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      ]
+    },
+    "scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["chat:relay", "models:read", "daemon:connect"]
+      },
+      "minItems": 1
+    },
+    "v": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "device_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "iat": {
+      "type": "integer"
+    },
+    "exp": {
+      "type": "integer"
+    }
+  }
+}

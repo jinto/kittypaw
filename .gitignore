@@ -1,0 +1,8 @@
+.DS_Store
+default.profraw
+*.profraw
+dist/
+tmp/
+.env
+.env.*
+!.env.example

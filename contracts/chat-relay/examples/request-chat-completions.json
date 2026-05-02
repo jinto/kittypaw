@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "req_123",
+  "operation": "openai.chat_completions",
+  "account_id": "alice",
+  "body": {
+    "model": "kittypaw",
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  }
+}

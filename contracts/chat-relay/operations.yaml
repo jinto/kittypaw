@@ -1,0 +1,10 @@
+protocol_version: "1"
+operations:
+  openai.models:
+    method: GET
+    path: /v1/models
+    required_client_scope: models:read
+  openai.chat_completions:
+    method: POST
+    path: /v1/chat/completions
+    required_client_scope: chat:relay

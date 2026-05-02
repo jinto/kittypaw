@@ -1,0 +1,15 @@
+routes:
+  list_routes:
+    method: GET
+    path: /v1/routes
+    required_scope_any:
+      - models:read
+      - chat:relay
+  account_models:
+    method: GET
+    path: /nodes/{device_id}/accounts/{account_id}/v1/models
+    required_scope: models:read
+  account_chat_completions:
+    method: POST
+    path: /nodes/{device_id}/accounts/{account_id}/v1/chat/completions
+    required_scope: chat:relay

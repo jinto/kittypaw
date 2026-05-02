@@ -1,0 +1,8 @@
+{
+  "type": "hello",
+  "device_id": "dev_123",
+  "local_accounts": ["alice"],
+  "daemon_version": "0.1.0",
+  "protocol_version": "1",
+  "capabilities": ["openai.models", "openai.chat_completions"]
+}

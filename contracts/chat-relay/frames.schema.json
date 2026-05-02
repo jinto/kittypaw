@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kittypaw.app/contracts/chat-relay/frames.schema.json",
+  "title": "Kitty Chat Relay Frames",
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response_headers" },
+    { "$ref": "#/$defs/response_chunk" },
+    { "$ref": "#/$defs/response_end" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "device_id", "local_accounts", "daemon_version", "protocol_version", "capabilities"],
+      "properties": {
+        "type": { "const": "hello" },
+        "device_id": { "type": "string", "minLength": 1 },
+        "local_accounts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "minItems": 1
+        },
+        "daemon_version": { "type": "string" },
+        "protocol_version": { "const": "1" },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["openai.models", "openai.chat_completions"]
+          }
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "operation", "account_id"],
+      "properties": {
+        "type": { "const": "request" },
+        "id": { "type": "string", "minLength": 1 },
+        "operation": {
+          "type": "string",
+          "enum": ["openai.models", "openai.chat_completions"]
+        },
+        "account_id": { "type": "string", "minLength": 1 },
+        "body": true
+      }
+    },
+    "response_headers": {
+      "type": "object",
+      "required": ["type", "id", "status"],
+      "properties": {
+        "type": { "const": "response_headers" },
+        "id": { "type": "string" },
+        "status": { "type": "integer" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "response_chunk": {
+      "type": "object",
+      "required": ["type", "id", "data"],
+      "properties": {
+        "type": { "const": "response_chunk" },
+        "id": { "type": "string" },
+        "data": { "type": "string" }
+      }
+    },
+    "response_end": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "response_end" },
+        "id": { "type": "string" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "error" },
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}
