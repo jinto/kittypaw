@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/jinto/kittypaw/client"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/server"
@@ -124,6 +126,43 @@ func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
 		if !children[want] {
 			t.Fatalf("server command missing %q child; got %#v", want, children)
 		}
+	}
+}
+
+func TestRootCommandPlacesRunUnderSkill(t *testing.T) {
+	root := newRootCmd()
+
+	var topRun *cobra.Command
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "run" {
+			topRun = cmd
+			break
+		}
+	}
+	if topRun == nil {
+		t.Fatal("root command should keep hidden legacy run alias")
+	}
+	if !topRun.Hidden {
+		t.Fatal("root run command must be hidden; use kittypaw skill run instead")
+	}
+
+	skillCmd, _, err := root.Find([]string{"skill"})
+	if err != nil || skillCmd == nil || skillCmd.Name() != "skill" {
+		t.Fatalf("root Find(skill) = %v, %v; want skill command", skillCmd, err)
+	}
+	children := map[string]*cobra.Command{}
+	for _, cmd := range skillCmd.Commands() {
+		children[cmd.Name()] = cmd
+	}
+	runCmd := children["run"]
+	if runCmd == nil {
+		t.Fatalf("skill command missing run child; got %#v", children)
+	}
+	if runCmd.Hidden {
+		t.Fatal("skill run command must be visible")
+	}
+	if runCmd.Short != "Run a skill by name" {
+		t.Fatalf("skill run short = %q", runCmd.Short)
 	}
 }
 

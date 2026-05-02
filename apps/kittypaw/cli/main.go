@@ -123,7 +123,7 @@ func newRootCmd() *cobra.Command {
 		newChatCmd(),
 		newStatusCmd(),
 		newSkillCmd(),
-		newRunCmd(),
+		newRunCmd(true),
 		newConfigCmd(),
 		newAgentCmd(),
 		newLogCmd(),
@@ -756,6 +756,7 @@ func newSkillCmd() *cobra.Command {
 		newSkillEnableCmd(),
 		newSkillDisableCmd(),
 		newSkillExplainCmd(),
+		newSkillRunCmd(),
 		newSkillConfigCmd(),
 		newSkillSuggestCmd(),
 	)
@@ -1331,12 +1332,17 @@ func newSkillSuggestCmd() *cobra.Command {
 // run
 // ---------------------------------------------------------------------------
 
-func newRunCmd() *cobra.Command {
+func newSkillRunCmd() *cobra.Command {
+	return newRunCmd(false)
+}
+
+func newRunCmd(hidden bool) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run <name>",
-		Short: "Run a skill by name",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runSkill,
+		Use:    "run <name>",
+		Short:  "Run a skill by name",
+		Args:   cobra.ExactArgs(1),
+		RunE:   runSkill,
+		Hidden: hidden,
 	}
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without executing")
 	return cmd
