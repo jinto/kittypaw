@@ -108,6 +108,21 @@ type pairResponse struct {
 	ExpiresIn          int    `json:"expires_in"`
 }
 
+// logStoreErr emits a slog Error WITHOUT the raw error message —
+// pgx errors can include offending parameter values (user-supplied
+// name, capabilities, etc.) which would land verbatim in JSON-
+// formatted prod logs (systemd journal). Only the Go error type
+// is emitted; the original error message itself is dropped.
+//
+// Plan 23 PR-D follow-up (Round 2 review MED 0.75). A systemic
+// slog ReplaceAttr handler that scrubs every "err" attr across the
+// codebase is tracked as Plan 19 follow-up; this is the cheap fix
+// for the user-controlled-data path that PR-D introduced.
+func logStoreErr(msg string, err error, attrs ...any) {
+	attrs = append(attrs, "err_type", fmt.Sprintf("%T", err))
+	slog.Error(msg, attrs...)
+}
+
 // HandlePair issues a fresh device JWT + refresh token after the
 // authenticated user pairs a daemon. The handler uses sequential
 // explicit revoke (Plan 23 결정 2) — if any post-Create step fails,
@@ -159,7 +174,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		ctx := r.Context()
 		dev, err := h.DeviceStore.Create(ctx, user.ID, req.Name, req.Capabilities)
 		if err != nil {
-			slog.Error("device create failed", "user_id", user.ID, "err", err)
+			logStoreErr("device create failed", err, "user_id", user.ID)
 			http.Error(w, "failed to pair device", http.StatusInternalServerError)
 			return
 		}
@@ -169,7 +184,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		accessToken, err := SignDeviceJWT(user.ID, dev.ID, h.JWTPrivateKey, h.JWTKID, DeviceAccessTokenTTL)
 		if err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
-			slog.Error("device JWT sign failed", "user_id", user.ID, "device_id", dev.ID, "err", err)
+			logStoreErr("device JWT sign failed", err, "user_id", user.ID, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
@@ -177,14 +192,14 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		rawRefresh, err := GenerateRefreshToken()
 		if err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
-			slog.Error("refresh token generate failed", "user_id", user.ID, "device_id", dev.ID, "err", err)
+			logStoreErr("refresh token generate failed", err, "user_id", user.ID, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 		hash := HashRefreshToken(rawRefresh)
 		if err := h.RefreshTokenStore.CreateForDevice(ctx, user.ID, dev.ID, hash, time.Now().Add(DeviceRefreshTokenTTL)); err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
-			slog.Error("refresh token store failed", "user_id", user.ID, "device_id", dev.ID, "err", err)
+			logStoreErr("refresh token store failed", err, "user_id", user.ID, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
@@ -247,7 +262,7 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 		// Revoke every active device refresh on the same device.
 		if rt.RevokedAt != nil {
 			if rerr := h.RefreshTokenStore.RevokeAllForDevice(ctx, *rt.DeviceID); rerr != nil {
-				slog.Error("RevokeAllForDevice failed during reuse-detect", "device_id", *rt.DeviceID, "err", rerr)
+				logStoreErr("RevokeAllForDevice failed during reuse-detect", rerr, "device_id", *rt.DeviceID)
 			}
 			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 			return
@@ -273,13 +288,13 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 		// crypto/rand failure can't leave the rotation half-done.
 		accessToken, err := SignDeviceJWT(rt.UserID, dev.ID, h.JWTPrivateKey, h.JWTKID, DeviceAccessTokenTTL)
 		if err != nil {
-			slog.Error("SignDeviceJWT failed", "device_id", dev.ID, "err", err)
+			logStoreErr("SignDeviceJWT failed", err, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 		rawRefresh, err := GenerateRefreshToken()
 		if err != nil {
-			slog.Error("GenerateRefreshToken failed", "device_id", dev.ID, "err", err)
+			logStoreErr("GenerateRefreshToken failed", err, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
@@ -297,7 +312,7 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 				http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 				return
 			}
-			slog.Error("RotateForDevice failed", "device_id", dev.ID, "err", err)
+			logStoreErr("RotateForDevice failed", err, "device_id", dev.ID)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
@@ -326,7 +341,7 @@ func (h *OAuthHandler) HandleDevicesList() http.HandlerFunc {
 		}
 		list, err := h.DeviceStore.ListActiveForUser(r.Context(), user.ID)
 		if err != nil {
-			slog.Error("ListActiveForUser failed", "user_id", user.ID, "err", err)
+			logStoreErr("ListActiveForUser failed", err, "user_id", user.ID)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -374,12 +389,12 @@ func (h *OAuthHandler) HandleDeviceDelete() http.HandlerFunc {
 		// Refresh revoke first — if it fails, device stays alive (no
 		// half-deleted state with orphan refresh).
 		if err := h.RefreshTokenStore.RevokeAllForDevice(ctx, deviceID); err != nil {
-			slog.Error("RevokeAllForDevice failed", "device_id", deviceID, "err", err)
+			logStoreErr("RevokeAllForDevice failed", err, "device_id", deviceID)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if err := h.DeviceStore.Revoke(ctx, deviceID); err != nil {
-			slog.Error("DeviceStore.Revoke failed", "device_id", deviceID, "err", err)
+			logStoreErr("DeviceStore.Revoke failed", err, "device_id", deviceID)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
