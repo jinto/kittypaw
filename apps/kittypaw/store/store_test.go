@@ -29,8 +29,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 21 {
-		t.Fatalf("expected 21 migrations, got %d", count)
+	if count != 22 {
+		t.Fatalf("expected 22 migrations, got %d", count)
 	}
 }
 
@@ -126,37 +126,33 @@ func TestLLMCache_InsertLookupDelete(t *testing.T) {
 	}
 }
 
-func TestAgentStateRoundTrip(t *testing.T) {
+func TestConversationStateRoundTrip(t *testing.T) {
 	st := openTestStore(t)
 
-	// LoadState for a non-existent agent returns nil, nil.
-	got, err := st.LoadState("ghost")
+	// LoadConversationState for an empty conversation returns nil, nil.
+	got, err := st.LoadConversationState()
 	if err != nil {
-		t.Fatalf("load ghost: %v", err)
+		t.Fatalf("load empty conversation: %v", err)
 	}
 	if got != nil {
-		t.Fatal("expected nil for non-existent agent")
+		t.Fatal("expected nil for empty conversation")
 	}
 
 	// Save and reload.
 	state := &core.AgentState{
-		AgentID:      "agent-1",
 		SystemPrompt: "You are helpful.",
 		Turns: []core.ConversationTurn{
-			{Role: core.RoleUser, Content: "hi", Timestamp: "2026-04-13 10:00:00"},
+			{Role: core.RoleUser, Content: "hi", Channel: "telegram", ChannelUserID: "tg-1", ChatID: "chat-1", MessageID: "msg-1", Timestamp: "2026-04-13 10:00:00"},
 			{Role: core.RoleAssistant, Content: "hello", Code: "console.log(1)", Result: "1", Timestamp: "2026-04-13 10:00:01"},
 		},
 	}
-	if err := st.SaveState(state); err != nil {
-		t.Fatalf("save state: %v", err)
+	if err := st.SaveConversationState(state); err != nil {
+		t.Fatalf("save conversation state: %v", err)
 	}
 
-	loaded, err := st.LoadState("agent-1")
+	loaded, err := st.LoadConversationState()
 	if err != nil {
-		t.Fatalf("load state: %v", err)
-	}
-	if loaded.AgentID != state.AgentID {
-		t.Errorf("agent_id: got %q, want %q", loaded.AgentID, state.AgentID)
+		t.Fatalf("load conversation state: %v", err)
 	}
 	if loaded.SystemPrompt != state.SystemPrompt {
 		t.Errorf("system_prompt: got %q, want %q", loaded.SystemPrompt, state.SystemPrompt)
@@ -168,35 +164,61 @@ func TestAgentStateRoundTrip(t *testing.T) {
 	if turn.Role != core.RoleAssistant || turn.Content != "hello" || turn.Code != "console.log(1)" || turn.Result != "1" {
 		t.Errorf("turn[1] mismatch: %+v", turn)
 	}
+	if loaded.Turns[0].Channel != "telegram" || loaded.Turns[0].ChannelUserID != "tg-1" || loaded.Turns[0].ChatID != "chat-1" || loaded.Turns[0].MessageID != "msg-1" {
+		t.Errorf("turn metadata mismatch: %+v", loaded.Turns[0])
+	}
 }
 
-func TestAddTurnAndList(t *testing.T) {
+func TestConversationSchemaUsesV2Turns(t *testing.T) {
 	st := openTestStore(t)
 
-	// AddTurn implicitly creates the agent.
-	err := st.AddTurn("bot-a", &core.ConversationTurn{
+	for _, table := range []string{"v2_conversation_turns", "conversation_state"} {
+		var count int
+		if err := st.db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
+		).Scan(&count); err != nil {
+			t.Fatalf("query table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("table %s count = %d, want 1", table, count)
+		}
+	}
+	for _, table := range []string{"agents", "conversations", "user_identities"} {
+		var count int
+		if err := st.db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
+		).Scan(&count); err != nil {
+			t.Fatalf("query legacy table %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("legacy table %s count = %d, want 0", table, count)
+		}
+	}
+}
+
+func TestAddConversationTurnAndSummary(t *testing.T) {
+	st := openTestStore(t)
+
+	err := st.AddConversationTurn(&core.ConversationTurn{
 		Role: core.RoleUser, Content: "ping", Timestamp: "2026-04-13 11:00:00",
 	})
 	if err != nil {
 		t.Fatalf("add turn: %v", err)
 	}
 
-	agents, err := st.ListAgents()
+	summary, err := st.ConversationSummary()
 	if err != nil {
-		t.Fatalf("list agents: %v", err)
+		t.Fatalf("conversation summary: %v", err)
 	}
-	if len(agents) != 1 || agents[0].AgentID != "bot-a" {
-		t.Fatalf("expected [bot-a], got %+v", agents)
-	}
-	if agents[0].TurnCount != 1 {
-		t.Errorf("turn count: got %d, want 1", agents[0].TurnCount)
+	if summary.TurnCount != 1 {
+		t.Errorf("turn count: got %d, want 1", summary.TurnCount)
 	}
 
 	// Add another user turn and a non-user turn.
-	st.AddTurn("bot-a", &core.ConversationTurn{
+	st.AddConversationTurn(&core.ConversationTurn{
 		Role: core.RoleUser, Content: "pong", Timestamp: "2026-04-13 11:00:01",
 	})
-	st.AddTurn("bot-a", &core.ConversationTurn{
+	st.AddConversationTurn(&core.ConversationTurn{
 		Role: core.RoleAssistant, Content: "ack", Timestamp: "2026-04-13 11:00:02",
 	})
 
@@ -206,6 +228,51 @@ func TestAddTurnAndList(t *testing.T) {
 	}
 	if count != 2 {
 		t.Errorf("user message count: got %d, want 2", count)
+	}
+}
+
+func TestCompactConversationPreservesRawTurns(t *testing.T) {
+	st := openTestStore(t)
+
+	for i := 0; i < 6; i++ {
+		if err := st.AddConversationTurn(&core.ConversationTurn{
+			Role:      core.RoleUser,
+			Content:   fmt.Sprintf("msg-%d", i),
+			Channel:   "telegram",
+			Timestamp: fmt.Sprintf("%d", i+1),
+		}); err != nil {
+			t.Fatalf("add turn %d: %v", i, err)
+		}
+	}
+
+	compacted, err := st.CompactConversation(2)
+	if err != nil {
+		t.Fatalf("compact conversation: %v", err)
+	}
+	if compacted != 4 {
+		t.Fatalf("compacted = %d, want 4", compacted)
+	}
+
+	raw, err := st.ListConversationTurns(10)
+	if err != nil {
+		t.Fatalf("list raw turns: %v", err)
+	}
+	if len(raw) != 6 {
+		t.Fatalf("raw turns = %d, want 6", len(raw))
+	}
+
+	state, err := st.LoadConversationState()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if len(state.Turns) != 3 {
+		t.Fatalf("state turns = %d, want summary + 2 recent", len(state.Turns))
+	}
+	if !strings.Contains(state.Turns[0].Content, "오래된 대화 4개") {
+		t.Fatalf("summary turn missing compacted count: %+v", state.Turns[0])
+	}
+	if state.Turns[1].Content != "msg-4" || state.Turns[2].Content != "msg-5" {
+		t.Fatalf("recent turns after summary = %+v", state.Turns)
 	}
 }
 
@@ -605,78 +672,31 @@ func TestMemoryContextLines(t *testing.T) {
 	})
 }
 
-func TestIdentityLinking(t *testing.T) {
-	st := openTestStore(t)
-
-	// Resolve missing returns false.
-	_, found, err := st.ResolveUser("telegram", "tg-123")
-	if err != nil {
-		t.Fatalf("resolve missing: %v", err)
-	}
-	if found {
-		t.Fatal("expected not found for unlinked identity")
-	}
-
-	// Link and resolve.
-	if err := st.LinkIdentity("user-1", "telegram", "tg-123"); err != nil {
-		t.Fatalf("link: %v", err)
-	}
-	if err := st.LinkIdentity("user-1", "slack", "sl-456"); err != nil {
-		t.Fatalf("link slack: %v", err)
-	}
-	gid, found, err := st.ResolveUser("telegram", "tg-123")
-	if err != nil || !found {
-		t.Fatalf("resolve: found=%v err=%v", found, err)
-	}
-	if gid != "user-1" {
-		t.Errorf("global id: got %q, want %q", gid, "user-1")
-	}
-
-	// List identities.
-	ids, err := st.ListIdentities("user-1")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(ids) != 2 {
-		t.Fatalf("identity count: got %d, want 2", len(ids))
-	}
-
-	// Unlink then resolve returns false.
-	if err := st.UnlinkIdentity("user-1", "telegram"); err != nil {
-		t.Fatalf("unlink: %v", err)
-	}
-	_, found, _ = st.ResolveUser("telegram", "tg-123")
-	if found {
-		t.Fatal("expected not found after unlink")
-	}
-}
-
 func TestCheckpoints(t *testing.T) {
 	st := openTestStore(t)
-	agent := "cp-agent"
 
 	// Add 3 turns.
 	for i := 0; i < 3; i++ {
-		st.AddTurn(agent, &core.ConversationTurn{
+		st.AddConversationTurn(&core.ConversationTurn{
 			Role: core.RoleUser, Content: "msg", Timestamp: "2026-04-13 10:00:00",
 		})
 	}
 
 	// Create checkpoint after 3 turns.
-	cpID, err := st.CreateCheckpoint(agent, "before-experiment")
+	cpID, err := st.CreateCheckpoint("before-experiment")
 	if err != nil {
 		t.Fatalf("create checkpoint: %v", err)
 	}
 
 	// Add 2 more turns.
 	for i := 0; i < 2; i++ {
-		st.AddTurn(agent, &core.ConversationTurn{
+		st.AddConversationTurn(&core.ConversationTurn{
 			Role: core.RoleAssistant, Content: "extra", Timestamp: "2026-04-13 10:00:01",
 		})
 	}
 
 	// Verify 5 turns before rollback.
-	state, _ := st.LoadState(agent)
+	state, _ := st.LoadConversationState()
 	if len(state.Turns) != 5 {
 		t.Fatalf("turns before rollback: got %d, want 5", len(state.Turns))
 	}
@@ -691,7 +711,7 @@ func TestCheckpoints(t *testing.T) {
 	}
 
 	// Verify only 3 turns remain.
-	state, _ = st.LoadState(agent)
+	state, _ = st.LoadConversationState()
 	if len(state.Turns) != 3 {
 		t.Errorf("turns after rollback: got %d, want 3", len(state.Turns))
 	}
@@ -1743,12 +1763,6 @@ func TestQueryPermissionLogFiltersNonPermission(t *testing.T) {
 func TestRecentUserMessagesAll_HonoursWindow(t *testing.T) {
 	st := openTestStore(t)
 
-	if _, err := st.db.Exec(
-		`INSERT INTO agents (agent_id) VALUES (?)`, "test-agent",
-	); err != nil {
-		t.Fatalf("insert agent: %v", err)
-	}
-
 	now := time.Now().Unix()
 	rows := []struct {
 		role    string
@@ -1762,11 +1776,11 @@ func TestRecentUserMessagesAll_HonoursWindow(t *testing.T) {
 	}
 	for _, r := range rows {
 		if _, err := st.db.Exec(
-			`INSERT INTO conversations (agent_id, role, content, timestamp)
-			 VALUES (?, ?, ?, ?)`,
-			"test-agent", r.role, r.content, fmt.Sprintf("%d", r.ts),
+			`INSERT INTO v2_conversation_turns (role, content, timestamp)
+			 VALUES (?, ?, ?)`,
+			r.role, r.content, fmt.Sprintf("%d", r.ts),
 		); err != nil {
-			t.Fatalf("insert conversation: %v", err)
+			t.Fatalf("insert conversation turn: %v", err)
 		}
 	}
 

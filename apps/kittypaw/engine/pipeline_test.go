@@ -255,17 +255,18 @@ func TestRecordPipelineTurn_AppendsBothTurns(t *testing.T) {
 		t.Fatalf("recordPipelineTurn: %v", err)
 	}
 
-	// agentID derivation mirrors recordPipelineTurn's fallback path
-	// (no ResolveUser hit on a fresh store) — channel-name + session id.
-	state, err := st.LoadState("web-test-session")
+	state, err := st.LoadConversationState()
 	if err != nil {
-		t.Fatalf("LoadState: %v", err)
+		t.Fatalf("LoadConversationState: %v", err)
 	}
 	if len(state.Turns) != 2 {
 		t.Fatalf("expected 2 turns (user + assistant), got %d", len(state.Turns))
 	}
 	if state.Turns[0].Role != core.RoleUser || state.Turns[0].Content != "환율 알려줘" {
 		t.Errorf("turn 0 not user query: %+v", state.Turns[0])
+	}
+	if state.Turns[0].Channel != "web" || state.Turns[0].ChannelUserID != "test-session" || state.Turns[0].ChatID != "test-chat" {
+		t.Errorf("turn 0 metadata mismatch: %+v", state.Turns[0])
 	}
 	if state.Turns[1].Role != core.RoleAssistant || state.Turns[1].Content != "1 USD = 1477.04 KRW" {
 		t.Errorf("turn 1 not branch response: %+v", state.Turns[1])
@@ -304,7 +305,7 @@ func TestRecordPipelineTurn_StripsAckBeforeStoring(t *testing.T) {
 	if err := sess.recordPipelineTurn(event, "네", "✅ '환율 조회' 스킬을 설치했어요.\n\n📈 환율\n1 USD = 1477.04 KRW"); err != nil {
 		t.Fatal(err)
 	}
-	state, _ := st.LoadState("web-test-session")
+	state, _ := st.LoadConversationState()
 	if len(state.Turns) != 2 {
 		t.Fatalf("expected 2 turns, got %d", len(state.Turns))
 	}
@@ -1900,7 +1901,7 @@ func TestRecordPipelineTurn_NextLoadSeesPriorTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state, _ := st.LoadState("web-test-session")
+	state, _ := st.LoadConversationState()
 	if len(state.Turns) != 4 {
 		t.Fatalf("expected 4 turns (2 user + 2 assistant), got %d", len(state.Turns))
 	}

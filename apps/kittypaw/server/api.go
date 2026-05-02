@@ -126,20 +126,74 @@ func (s *Server) handleExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/agents
+// GET /api/v1/chat/history
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleAgents(w http.ResponseWriter, _ *http.Request) {
-	agents, err := s.store.ListAgents()
+func (s *Server) handleChatHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	turns, err := s.store.ListConversationTurns(limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if agents == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"agents": []any{}})
+	summary, err := s.store.ConversationSummary()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+	turnsOut := any(turns)
+	if turns == nil {
+		turnsOut = []any{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"summary": summary,
+		"turns":   turnsOut,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/chat/forget
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleChatForget(w http.ResponseWriter, _ *http.Request) {
+	deleted, err := s.store.ForgetConversation()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":       true,
+		"turns_deleted": deleted,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/chat/compact
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleChatCompact(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		KeepRecent int `json:"keep_recent"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if !decodeBody(w, r, &body) {
+			return
+		}
+	}
+	compacted, err := s.store.CompactConversation(body.KeepRecent)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":         true,
+		"turns_compacted": compacted,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -465,17 +519,11 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/v1/agents/{id}/checkpoints
+// GET /api/v1/chat/checkpoints
 // ---------------------------------------------------------------------------
 
-func (s *Server) handleCheckpointsList(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "id")
-	if agentID == "" {
-		writeError(w, http.StatusBadRequest, "agent id is required")
-		return
-	}
-
-	cps, err := s.store.ListCheckpoints(agentID)
+func (s *Server) handleCheckpointsList(w http.ResponseWriter, _ *http.Request) {
+	cps, err := s.store.ListCheckpoints()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -488,16 +536,10 @@ func (s *Server) handleCheckpointsList(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/agents/{id}/checkpoints
+// POST /api/v1/chat/checkpoints
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleCheckpointsCreate(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "id")
-	if agentID == "" {
-		writeError(w, http.StatusBadRequest, "agent id is required")
-		return
-	}
-
 	var body struct {
 		Label string `json:"label"`
 	}
@@ -509,7 +551,7 @@ func (s *Server) handleCheckpointsCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cpID, err := s.store.CreateCheckpoint(agentID, body.Label)
+	cpID, err := s.store.CreateCheckpoint(body.Label)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -541,71 +583,6 @@ func (s *Server) handleCheckpointRollback(w http.ResponseWriter, r *http.Request
 		"success":       true,
 		"turns_deleted": deleted,
 	})
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/v1/users/link
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleUsersLink(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		GlobalUserID  string `json:"global_user_id"`
-		Channel       string `json:"channel"`
-		ChannelUserID string `json:"channel_user_id"`
-	}
-	if !decodeBody(w, r, &body) {
-		return
-	}
-	if body.GlobalUserID == "" || body.Channel == "" || body.ChannelUserID == "" {
-		writeError(w, http.StatusBadRequest, "global_user_id, channel, and channel_user_id are required")
-		return
-	}
-	if err := s.store.LinkIdentity(body.GlobalUserID, body.Channel, body.ChannelUserID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true})
-}
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/users/{id}/identities
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleUsersIdentities(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
-	if userID == "" {
-		writeError(w, http.StatusBadRequest, "user id is required")
-		return
-	}
-
-	ids, err := s.store.ListIdentities(userID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if ids == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"identities": []any{}})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"identities": ids})
-}
-
-// ---------------------------------------------------------------------------
-// DELETE /api/v1/users/{id}/identities/{channel}
-// ---------------------------------------------------------------------------
-
-func (s *Server) handleUsersUnlink(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "id")
-	channel := chi.URLParam(r, "channel")
-	if userID == "" || channel == "" {
-		writeError(w, http.StatusBadRequest, "user id and channel are required")
-		return
-	}
-	if err := s.store.UnlinkIdentity(userID, channel); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 // ---------------------------------------------------------------------------

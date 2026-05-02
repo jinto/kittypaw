@@ -48,20 +48,24 @@ const (
 	PhaseFinish   LoopPhase = "finish"
 )
 
-// AgentState holds the mutable runtime state for one agent.
+// AgentState holds the mutable runtime state for the account conversation.
 type AgentState struct {
-	AgentID      string             `json:"agent_id"`
+	AgentID      string             `json:"conversation_id,omitempty"`
 	SystemPrompt string             `json:"system_prompt"`
 	Turns        []ConversationTurn `json:"turns"`
 }
 
 // ConversationTurn is a single message in a conversation.
 type ConversationTurn struct {
-	Role      Role   `json:"role"`
-	Content   string `json:"content"`
-	Code      string `json:"code,omitempty"`
-	Result    string `json:"result,omitempty"`
-	Timestamp string `json:"timestamp"`
+	Role          Role   `json:"role"`
+	Content       string `json:"content"`
+	Code          string `json:"code,omitempty"`
+	Result        string `json:"result,omitempty"`
+	Channel       string `json:"channel,omitempty"`
+	ChannelUserID string `json:"channel_user_id,omitempty"`
+	ChatID        string `json:"chat_id,omitempty"`
+	MessageID     string `json:"message_id,omitempty"`
+	Timestamp     string `json:"timestamp"`
 }
 
 // Event is an inbound message from any channel.
@@ -76,10 +80,8 @@ type Event struct {
 
 // ChatPayload is the common structure inside Event.Payload.
 //
-// SessionID is the conversation continuity key — groups a single
-// speaker's consecutive messages into one session. Most channels
-// currently set this to the user ID (same speaker = same session);
-// WebSocket uses the per-socket session token.
+// SessionID is transport/runtime metadata. It is not a database conversation
+// key; the local account owns one account-wide conversation timeline.
 type ChatPayload struct {
 	ChatID      string `json:"chat_id"`
 	Text        string `json:"text"`

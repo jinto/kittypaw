@@ -43,12 +43,32 @@ type WorkspaceFTSRow struct {
 // DTO structs
 // ---------------------------------------------------------------------------
 
-// AgentSummary is a lightweight listing of an agent with its turn count.
-type AgentSummary struct {
-	AgentID   string
-	TurnCount int
-	CreatedAt string
-	UpdatedAt string
+// ConversationSummary describes the account-wide conversation timeline.
+type ConversationSummary struct {
+	TurnCount int    `json:"turn_count"`
+	FirstAt   string `json:"first_at"`
+	LastAt    string `json:"last_at"`
+}
+
+// ConversationTurnRecord is a persisted conversation turn with its row ID.
+type ConversationTurnRecord struct {
+	ID            int64     `json:"id"`
+	Role          core.Role `json:"role"`
+	Content       string    `json:"content"`
+	Code          string    `json:"code,omitempty"`
+	Result        string    `json:"result,omitempty"`
+	Channel       string    `json:"channel,omitempty"`
+	ChannelUserID string    `json:"channel_user_id,omitempty"`
+	ChatID        string    `json:"chat_id,omitempty"`
+	MessageID     string    `json:"message_id,omitempty"`
+	Timestamp     string    `json:"timestamp"`
+}
+
+type conversationCompaction struct {
+	StartTurnID int64
+	EndTurnID   int64
+	Summary     string
+	CreatedAt   string
 }
 
 // ExecutionRecord captures one skill execution for history/analysis.
@@ -81,20 +101,12 @@ type KeyValue struct {
 	Value string
 }
 
-// UserIdentity links a global user to a specific channel identity.
-type UserIdentity struct {
-	Channel       string
-	ChannelUserID string
-	CreatedAt     string
-}
-
 // Checkpoint is a named snapshot of conversation progress.
 type Checkpoint struct {
-	ID        int64
-	AgentID   string
-	Label     string
-	ConvRowID int64
-	CreatedAt string
+	ID        int64  `json:"id"`
+	Label     string `json:"label"`
+	TurnID    int64  `json:"turn_id"`
+	CreatedAt string `json:"created_at"`
 }
 
 // FilePermissionRule controls file access for a workspace.
@@ -280,11 +292,20 @@ func (s *Store) migrate() error {
 }
 
 // ---------------------------------------------------------------------------
-// Agent State
+// Conversation State
 // ---------------------------------------------------------------------------
 
-// SaveState upserts the agent row and replaces all conversation turns.
-func (s *Store) SaveState(state *core.AgentState) error {
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+// SaveConversationState upserts account-level runtime metadata. When the conversation is
+// empty, provided turns seed the account-wide timeline; existing turns are not
+// replaced, because AddConversationTurn owns durable history writes.
+func (s *Store) SaveConversationState(state *core.AgentState) error {
+	if state == nil {
+		return nil
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -297,172 +318,367 @@ func (s *Store) SaveState(state *core.AgentState) error {
 	}
 
 	_, err = tx.Exec(`
-		INSERT INTO agents (agent_id, system_prompt, state_json, updated_at)
-		VALUES (?, ?, ?, datetime('now'))
-		ON CONFLICT(agent_id) DO UPDATE SET
+		INSERT INTO conversation_state (id, system_prompt, state_json, updated_at)
+		VALUES (1, ?, ?, datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET
 			system_prompt = excluded.system_prompt,
 			state_json    = excluded.state_json,
 			updated_at    = datetime('now')`,
-		state.AgentID, state.SystemPrompt, string(stateJSON))
+		state.SystemPrompt, string(stateJSON))
 	if err != nil {
 		return err
 	}
 
-	// Replace turns: delete existing, insert fresh.
-	if _, err := tx.Exec("DELETE FROM conversations WHERE agent_id = ?", state.AgentID); err != nil {
+	var existing int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM v2_conversation_turns").Scan(&existing); err != nil {
 		return err
 	}
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO conversations (agent_id, role, content, code, result, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, t := range state.Turns {
-		if _, err := stmt.Exec(
-			state.AgentID,
-			string(t.Role),
-			t.Content,
-			nullString(t.Code),
-			nullString(t.Result),
-			t.Timestamp,
-		); err != nil {
-			return err
+	if existing == 0 {
+		for i := range state.Turns {
+			if err := insertConversationTurn(tx, &state.Turns[i]); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
 }
 
-// LoadState retrieves agent metadata and the most recent conversation turns.
-func (s *Store) LoadState(agentID string) (*core.AgentState, error) {
+// LoadConversationState retrieves account metadata and the most recent
+// conversation turns.
+func (s *Store) LoadConversationState() (*core.AgentState, error) {
 	var sysPrompt string
+	stateExists := true
 	err := s.db.QueryRow(
-		"SELECT system_prompt FROM agents WHERE agent_id = ?", agentID,
+		"SELECT system_prompt FROM conversation_state WHERE id = 1",
 	).Scan(&sysPrompt)
 	if err == sql.ErrNoRows {
+		stateExists = false
+	} else if err != nil {
+		return nil, err
+	}
+
+	turns, err := s.loadConversationStateTurns(core.MaxHistoryTurns)
+	if err != nil {
+		return nil, err
+	}
+	if !stateExists && len(turns) == 0 {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := s.db.Query(`
-		SELECT role, content, code, result, timestamp
-		FROM conversations
-		WHERE agent_id = ?
-		ORDER BY id DESC
-		LIMIT ?`, agentID, core.MaxHistoryTurns)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var turns []core.ConversationTurn
-	for rows.Next() {
-		var t core.ConversationTurn
-		var code, result sql.NullString
-		if err := rows.Scan(&t.Role, &t.Content, &code, &result, &t.Timestamp); err != nil {
-			return nil, err
-		}
-		t.Code = code.String
-		t.Result = result.String
-		turns = append(turns, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Reverse to chronological order (query was DESC).
-	for i, j := 0, len(turns)-1; i < j; i, j = i+1, j-1 {
-		turns[i], turns[j] = turns[j], turns[i]
-	}
-
 	return &core.AgentState{
-		AgentID:      agentID,
+		AgentID:      "account",
 		SystemPrompt: sysPrompt,
 		Turns:        turns,
 	}, nil
 }
 
-// AddTurn appends a single turn to an agent's conversation.
-// The agent row is upserted if it does not yet exist.
-func (s *Store) AddTurn(agentID string, turn *core.ConversationTurn) error {
-	// Ensure agent exists.
+// AddConversationTurn appends one turn to the account-wide conversation.
+func (s *Store) AddConversationTurn(turn *core.ConversationTurn) error {
+	if turn == nil {
+		return nil
+	}
 	if _, err := s.db.Exec(`
-		INSERT INTO agents (agent_id) VALUES (?)
-		ON CONFLICT(agent_id) DO UPDATE SET updated_at = datetime('now')`,
-		agentID,
-	); err != nil {
+		INSERT INTO conversation_state (id, updated_at)
+		VALUES (1, datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')`); err != nil {
 		return err
 	}
-
-	_, err := s.db.Exec(`
-		INSERT INTO conversations (agent_id, role, content, code, result, timestamp)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		agentID,
-		string(turn.Role),
-		turn.Content,
-		nullString(turn.Code),
-		nullString(turn.Result),
-		turn.Timestamp,
-	)
-	return err
+	return insertConversationTurn(s.db, turn)
 }
 
-// ResetConversations clears conversation history.
-// If agentID is empty, all agents are reset. Otherwise only the specified agent.
-func (s *Store) ResetConversations(agentID string) (int64, error) {
-	var res sql.Result
-	var err error
-	if agentID == "" {
-		res, err = s.db.Exec("DELETE FROM conversations")
-		if err != nil {
-			return 0, err
-		}
-		_, _ = s.db.Exec("DELETE FROM agent_checkpoints")
-	} else {
-		res, err = s.db.Exec("DELETE FROM conversations WHERE agent_id = ?", agentID)
-		if err != nil {
-			return 0, err
-		}
-		_, _ = s.db.Exec("DELETE FROM agent_checkpoints WHERE agent_id = ?", agentID)
+// ForgetConversation clears all account conversation turns and checkpoints.
+func (s *Store) ForgetConversation() (int64, error) {
+	res, err := s.db.Exec("DELETE FROM v2_conversation_turns")
+	if err != nil {
+		return 0, err
 	}
+	_, _ = s.db.Exec("DELETE FROM conversation_checkpoints")
+	_, _ = s.db.Exec("DELETE FROM conversation_compactions")
 	return res.RowsAffected()
 }
 
-// ListAgents returns all agents with their turn counts.
-func (s *Store) ListAgents() ([]AgentSummary, error) {
+// ConversationSummary returns aggregate information for the account timeline.
+func (s *Store) ConversationSummary() (ConversationSummary, error) {
+	var out ConversationSummary
+	err := s.db.QueryRow(`
+		SELECT COUNT(*), COALESCE(MIN(timestamp), ''), COALESCE(MAX(timestamp), '')
+		FROM v2_conversation_turns`).Scan(&out.TurnCount, &out.FirstAt, &out.LastAt)
+	return out, err
+}
+
+// ListConversationTurns returns recent account-wide turns in chronological
+// order. A non-positive limit uses a conservative default.
+func (s *Store) ListConversationTurns(limit int) ([]ConversationTurnRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
 	rows, err := s.db.Query(`
-		SELECT a.agent_id, COUNT(c.id), a.created_at, a.updated_at
-		FROM agents a
-		LEFT JOIN conversations c ON c.agent_id = a.agent_id
-		GROUP BY a.agent_id
-		ORDER BY a.updated_at DESC`)
+		SELECT id, role, content, code, result, channel, channel_user_id, chat_id, message_id, timestamp
+		FROM v2_conversation_turns
+		ORDER BY id DESC
+		LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []AgentSummary
+	var out []ConversationTurnRecord
 	for rows.Next() {
-		var a AgentSummary
-		if err := rows.Scan(&a.AgentID, &a.TurnCount, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		rec, err := scanConversationTurnRecord(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, a)
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// CompactConversation records a summary of older turns for prompt context while
+// preserving every raw turn in v2_conversation_turns.
+func (s *Store) CompactConversation(keepRecent int) (int, error) {
+	if keepRecent <= 0 {
+		keepRecent = 40
+	}
+	records, err := s.listAllConversationTurns()
+	if err != nil {
+		return 0, err
+	}
+	if len(records) <= keepRecent {
+		return 0, nil
+	}
+
+	old := records[:len(records)-keepRecent]
+	endTurnID := old[len(old)-1].ID
+	latest, ok, err := s.latestConversationCompaction()
+	if err != nil {
+		return 0, err
+	}
+	if ok && latest.EndTurnID >= endTurnID {
+		return 0, nil
+	}
+
+	summary := summarizeCompactedTurns(old)
+	if _, err := s.db.Exec(`
+		INSERT INTO conversation_compactions (start_turn_id, end_turn_id, summary)
+		VALUES (?, ?, ?)`,
+		old[0].ID, endTurnID, summary,
+	); err != nil {
+		return 0, err
+	}
+	return len(old), nil
+}
+
+func insertConversationTurn(exec sqlExecer, turn *core.ConversationTurn) error {
+	_, err := exec.Exec(`
+		INSERT INTO v2_conversation_turns
+			(role, content, code, result, channel, channel_user_id, chat_id, message_id, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(turn.Role),
+		turn.Content,
+		nullString(turn.Code),
+		nullString(turn.Result),
+		turn.Channel,
+		turn.ChannelUserID,
+		turn.ChatID,
+		turn.MessageID,
+		turn.Timestamp,
+	)
+	return err
+}
+
+func (s *Store) loadConversationStateTurns(limit int) ([]core.ConversationTurn, error) {
+	compaction, ok, err := s.latestConversationCompaction()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		records, err := s.ListConversationTurns(limit)
+		if err != nil {
+			return nil, err
+		}
+		return conversationRecordsToTurns(records), nil
+	}
+
+	records, err := s.listConversationTurnsAfter(compaction.EndTurnID, limit)
+	if err != nil {
+		return nil, err
+	}
+	turns := []core.ConversationTurn{{
+		Role:      core.RoleAssistant,
+		Content:   compaction.Summary,
+		Timestamp: compaction.CreatedAt,
+	}}
+	return append(turns, conversationRecordsToTurns(records)...), nil
+}
+
+func (s *Store) listConversationTurnsAfter(turnID int64, limit int) ([]ConversationTurnRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT id, role, content, code, result, channel, channel_user_id, chat_id, message_id, timestamp
+		FROM v2_conversation_turns
+		WHERE id > ?
+		ORDER BY id DESC
+		LIMIT ?`, turnID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []ConversationTurnRecord
+	for rows.Next() {
+		rec, err := scanConversationTurnRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+		records[i], records[j] = records[j], records[i]
+	}
+	return records, nil
+}
+
+func (s *Store) latestConversationCompaction() (conversationCompaction, bool, error) {
+	var out conversationCompaction
+	err := s.db.QueryRow(`
+		SELECT start_turn_id, end_turn_id, summary, created_at
+		FROM conversation_compactions
+		ORDER BY id DESC
+		LIMIT 1`).Scan(&out.StartTurnID, &out.EndTurnID, &out.Summary, &out.CreatedAt)
+	if err == sql.ErrNoRows {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, err
+	}
+	return out, true, nil
+}
+
+func conversationRecordsToTurns(records []ConversationTurnRecord) []core.ConversationTurn {
+	turns := make([]core.ConversationTurn, 0, len(records))
+	for i := range records {
+		turns = append(turns, records[i].Turn())
+	}
+	return turns
+}
+
+func (s *Store) listAllConversationTurns() ([]ConversationTurnRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, role, content, code, result, channel, channel_user_id, chat_id, message_id, timestamp
+		FROM v2_conversation_turns
+		ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ConversationTurnRecord
+	for rows.Next() {
+		rec, err := scanConversationTurnRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
 	}
 	return out, rows.Err()
 }
 
-// CountUserMessagesTotal returns the total number of user-role messages across
-// all agents.
+type conversationTurnScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanConversationTurnRecord(scanner conversationTurnScanner) (ConversationTurnRecord, error) {
+	var rec ConversationTurnRecord
+	var role string
+	var code, result sql.NullString
+	if err := scanner.Scan(
+		&rec.ID,
+		&role,
+		&rec.Content,
+		&code,
+		&result,
+		&rec.Channel,
+		&rec.ChannelUserID,
+		&rec.ChatID,
+		&rec.MessageID,
+		&rec.Timestamp,
+	); err != nil {
+		return rec, err
+	}
+	rec.Role = core.Role(role)
+	rec.Code = code.String
+	rec.Result = result.String
+	return rec, nil
+}
+
+func (r ConversationTurnRecord) Turn() core.ConversationTurn {
+	return core.ConversationTurn{
+		Role:          r.Role,
+		Content:       r.Content,
+		Code:          r.Code,
+		Result:        r.Result,
+		Channel:       r.Channel,
+		ChannelUserID: r.ChannelUserID,
+		ChatID:        r.ChatID,
+		MessageID:     r.MessageID,
+		Timestamp:     r.Timestamp,
+	}
+}
+
+func summarizeCompactedTurns(records []ConversationTurnRecord) string {
+	var userCount, assistantCount, codeCount, successCount, failureCount int
+	channels := map[string]bool{}
+	for i := range records {
+		switch records[i].Role {
+		case core.RoleUser:
+			userCount++
+		case core.RoleAssistant:
+			assistantCount++
+			if records[i].Code != "" {
+				codeCount++
+			}
+			result := strings.ToLower(records[i].Result)
+			if strings.Contains(result, "success") || strings.Contains(result, "output:") {
+				successCount++
+			} else if strings.Contains(result, "error") || strings.Contains(result, "fail") {
+				failureCount++
+			}
+		}
+		if records[i].Channel != "" {
+			channels[records[i].Channel] = true
+		}
+	}
+	channelNames := make([]string, 0, len(channels))
+	for ch := range channels {
+		channelNames = append(channelNames, ch)
+	}
+	sort.Strings(channelNames)
+	channelText := "unknown"
+	if len(channelNames) > 0 {
+		channelText = strings.Join(channelNames, ", ")
+	}
+	return fmt.Sprintf(
+		"[이전 대화 요약] 오래된 대화 %d개를 압축했습니다. 사용자 메시지 %d개, 어시스턴트 메시지 %d개, 코드 실행 %d번, 성공 %d번, 실패 %d번, 채널: %s.",
+		len(records), userCount, assistantCount, codeCount, successCount, failureCount, channelText,
+	)
+}
+
+// CountUserMessagesTotal returns the total number of user-role messages in the
+// account conversation.
 func (s *Store) CountUserMessagesTotal() (int, error) {
 	var n int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM conversations WHERE role = 'user'",
+		"SELECT COUNT(*) FROM v2_conversation_turns WHERE role = 'user'",
 	).Scan(&n)
 	return n, err
 }
@@ -470,7 +686,7 @@ func (s *Store) CountUserMessagesTotal() (int, error) {
 // RecentUserMessagesAll returns user messages from the last `hours` hours,
 // truncated so the combined length does not exceed maxChars.
 //
-// conversations.timestamp is written by core.NowTimestamp() as a unix epoch
+// v2_conversation_turns.timestamp is written by core.NowTimestamp() as a unix epoch
 // string ("1777394416"), not a SQL datetime. Comparing it against
 // datetime('now', ...) (which yields "2026-04-29 01:30:00") would do a
 // lexicographic compare where any "1*" < any "2*" — silently dropping
@@ -478,7 +694,7 @@ func (s *Store) CountUserMessagesTotal() (int, error) {
 // emits the matching epoch-seconds form.
 func (s *Store) RecentUserMessagesAll(hours int, maxChars int) ([]string, error) {
 	rows, err := s.db.Query(`
-		SELECT content FROM conversations
+		SELECT content FROM v2_conversation_turns
 		WHERE role = 'user'
 		  AND CAST(timestamp AS INTEGER) >= strftime('%s', 'now', ?)
 		ORDER BY timestamp DESC`,
@@ -862,86 +1078,22 @@ func (s *Store) DeleteUserContextPrefix(prefix string) (int, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-Channel Identity
-// ---------------------------------------------------------------------------
-
-// LinkIdentity associates a channel-specific user ID with a global user ID.
-func (s *Store) LinkIdentity(globalUserID, channel, channelUserID string) error {
-	_, err := s.db.Exec(`
-		INSERT INTO user_identities (global_user_id, channel, channel_user_id)
-		VALUES (?, ?, ?)
-		ON CONFLICT(channel, channel_user_id) DO UPDATE SET
-			global_user_id = excluded.global_user_id`,
-		globalUserID, channel, channelUserID)
-	return err
-}
-
-// ResolveUser looks up the global user ID for a given channel identity.
-func (s *Store) ResolveUser(channel, channelUserID string) (string, bool, error) {
-	var gid string
-	err := s.db.QueryRow(
-		"SELECT global_user_id FROM user_identities WHERE channel = ? AND channel_user_id = ?",
-		channel, channelUserID,
-	).Scan(&gid)
-	if err == sql.ErrNoRows {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return gid, true, nil
-}
-
-// UnlinkIdentity removes a channel binding for a global user.
-func (s *Store) UnlinkIdentity(globalUserID, channel string) error {
-	_, err := s.db.Exec(
-		"DELETE FROM user_identities WHERE global_user_id = ? AND channel = ?",
-		globalUserID, channel)
-	return err
-}
-
-// ListIdentities returns all channel identities for a global user.
-func (s *Store) ListIdentities(globalUserID string) ([]UserIdentity, error) {
-	rows, err := s.db.Query(`
-		SELECT channel, channel_user_id, created_at
-		FROM user_identities
-		WHERE global_user_id = ?
-		ORDER BY created_at`, globalUserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []UserIdentity
-	for rows.Next() {
-		var u UserIdentity
-		if err := rows.Scan(&u.Channel, &u.ChannelUserID, &u.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	return out, rows.Err()
-}
-
-// ---------------------------------------------------------------------------
 // Checkpoints
 // ---------------------------------------------------------------------------
 
-// CreateCheckpoint saves a checkpoint at the current latest conversation row
-// for an agent. Returns the new checkpoint ID.
-func (s *Store) CreateCheckpoint(agentID, label string) (int64, error) {
+// CreateCheckpoint saves a checkpoint at the current latest conversation turn.
+func (s *Store) CreateCheckpoint(label string) (int64, error) {
 	var maxID int64
 	err := s.db.QueryRow(
-		"SELECT COALESCE(MAX(id), 0) FROM conversations WHERE agent_id = ?",
-		agentID,
+		"SELECT COALESCE(MAX(id), 0) FROM v2_conversation_turns",
 	).Scan(&maxID)
 	if err != nil {
 		return 0, err
 	}
 
 	res, err := s.db.Exec(`
-		INSERT INTO agent_checkpoints (agent_id, label, conv_row_id)
-		VALUES (?, ?, ?)`, agentID, label, maxID)
+		INSERT INTO conversation_checkpoints (label, turn_id)
+		VALUES (?, ?)`, label, maxID)
 	if err != nil {
 		return 0, err
 	}
@@ -951,19 +1103,18 @@ func (s *Store) CreateCheckpoint(agentID, label string) (int64, error) {
 // RollbackToCheckpoint deletes all conversation rows after the checkpoint's
 // saved row ID. Returns the number of deleted rows.
 func (s *Store) RollbackToCheckpoint(checkpointID int64) (int, error) {
-	var agentID string
-	var convRowID int64
+	var turnID int64
 	err := s.db.QueryRow(
-		"SELECT agent_id, conv_row_id FROM agent_checkpoints WHERE id = ?",
+		"SELECT turn_id FROM conversation_checkpoints WHERE id = ?",
 		checkpointID,
-	).Scan(&agentID, &convRowID)
+	).Scan(&turnID)
 	if err != nil {
 		return 0, err
 	}
 
 	res, err := s.db.Exec(
-		"DELETE FROM conversations WHERE agent_id = ? AND id > ?",
-		agentID, convRowID)
+		"DELETE FROM v2_conversation_turns WHERE id > ?",
+		turnID)
 	if err != nil {
 		return 0, err
 	}
@@ -971,13 +1122,12 @@ func (s *Store) RollbackToCheckpoint(checkpointID int64) (int, error) {
 	return int(n), err
 }
 
-// ListCheckpoints returns all checkpoints for an agent.
-func (s *Store) ListCheckpoints(agentID string) ([]Checkpoint, error) {
+// ListCheckpoints returns all account conversation checkpoints.
+func (s *Store) ListCheckpoints() ([]Checkpoint, error) {
 	rows, err := s.db.Query(`
-		SELECT id, agent_id, label, conv_row_id, created_at
-		FROM agent_checkpoints
-		WHERE agent_id = ?
-		ORDER BY id DESC`, agentID)
+		SELECT id, label, turn_id, created_at
+		FROM conversation_checkpoints
+		ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -986,7 +1136,7 @@ func (s *Store) ListCheckpoints(agentID string) ([]Checkpoint, error) {
 	var out []Checkpoint
 	for rows.Next() {
 		var c Checkpoint
-		if err := rows.Scan(&c.ID, &c.AgentID, &c.Label, &c.ConvRowID, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Label, &c.TurnID, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

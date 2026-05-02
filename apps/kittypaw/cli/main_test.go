@@ -207,6 +207,35 @@ func TestRootCommandDoesNotExposeReflection(t *testing.T) {
 	}
 }
 
+func TestPersonaCommandDoesNotExposeEvolution(t *testing.T) {
+	root := newRootCmd()
+
+	personaCmd, _, err := root.Find([]string{"persona"})
+	if err != nil || personaCmd == nil || personaCmd.Name() != "persona" {
+		t.Fatalf("root Find(persona) = %v, %v; want persona command", personaCmd, err)
+	}
+	for _, cmd := range personaCmd.Commands() {
+		if cmd.Name() == "evolution" {
+			t.Fatal("persona command must not expose evolution approval internals")
+		}
+	}
+}
+
+func TestPersonaCommandRejectsRemovedEvolution(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"persona", "evolution"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("kittypaw persona evolution must fail after evolution approval is removed")
+	}
+	if !strings.Contains(err.Error(), `unknown command "evolution" for "kittypaw persona"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRootCommandPlacesStatsUnderSkill(t *testing.T) {
 	root := newRootCmd()
 
@@ -254,29 +283,26 @@ func TestSkillCommandRejectsRemovedSuggest(t *testing.T) {
 	}
 }
 
-func TestRootCommandPlacesResetUnderAgent(t *testing.T) {
+func TestRootCommandRemovesAgentAndAddsChatHistoryControls(t *testing.T) {
 	root := newRootCmd()
 
-	for _, cmd := range root.Commands() {
-		if cmd.Name() == "reset" {
-			t.Fatal("root command must not expose reset; use kittypaw agent reset instead")
-		}
+	if cmd, _, err := root.Find([]string{"agent"}); err == nil && cmd != nil && cmd.Name() == "agent" {
+		t.Fatal("root command must not expose agent management")
 	}
 
-	agentCmd, _, err := root.Find([]string{"agent"})
-	if err != nil || agentCmd == nil || agentCmd.Name() != "agent" {
-		t.Fatalf("root Find(agent) = %v, %v; want agent command", agentCmd, err)
+	chatCmd, _, err := root.Find([]string{"chat"})
+	if err != nil || chatCmd == nil || chatCmd.Name() != "chat" {
+		t.Fatalf("root Find(chat) = %v, %v; want chat command", chatCmd, err)
 	}
+
 	children := map[string]*cobra.Command{}
-	for _, cmd := range agentCmd.Commands() {
+	for _, cmd := range chatCmd.Commands() {
 		children[cmd.Name()] = cmd
 	}
-	resetCmd := children["reset"]
-	if resetCmd == nil {
-		t.Fatalf("agent command missing reset child; got %#v", children)
-	}
-	if resetCmd.Short != "Reset conversation history" {
-		t.Fatalf("agent reset short = %q", resetCmd.Short)
+	for _, name := range []string{"history", "forget", "compact"} {
+		if children[name] == nil {
+			t.Fatalf("chat command missing %q child; got %#v", name, children)
+		}
 	}
 }
 
@@ -331,8 +357,9 @@ func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
 		{"skill", "stats"},
 		{"skill", "log"},
 		{"config", "check"},
-		{"agent"},
-		{"agent", "reset"},
+		{"chat", "history"},
+		{"chat", "forget"},
+		{"chat", "compact"},
 		{"persona"},
 		{"memory"},
 		{"channels"},

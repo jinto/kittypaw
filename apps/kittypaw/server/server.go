@@ -394,11 +394,6 @@ func (s *Server) setupRoutes() chi.Router {
 		r.Get("/status", s.handleStatus)
 		r.Get("/executions", s.handleExecutions)
 
-		// Agents
-		r.Get("/agents", s.handleAgents)
-		r.Get("/agents/{id}/checkpoints", s.handleCheckpointsList)
-		r.Post("/agents/{id}/checkpoints", s.handleCheckpointsCreate)
-
 		// Skills
 		r.Get("/skills", s.handleSkills)
 		r.Post("/skills/run", s.handleSkillsRun)
@@ -414,6 +409,11 @@ func (s *Server) setupRoutes() chi.Router {
 
 		// Chat
 		r.Post("/chat", s.handleChat)
+		r.Get("/chat/history", s.handleChatHistory)
+		r.Post("/chat/forget", s.handleChatForget)
+		r.Post("/chat/compact", s.handleChatCompact)
+		r.Get("/chat/checkpoints", s.handleCheckpointsList)
+		r.Post("/chat/checkpoints", s.handleCheckpointsCreate)
 
 		// Config
 		r.Get("/config/check", s.handleConfigCheck)
@@ -447,16 +447,6 @@ func (s *Server) setupRoutes() chi.Router {
 
 		// Memory
 		r.Get("/memory/search", s.handleMemorySearch)
-
-		// Users / identity
-		r.Post("/users/link", s.handleUsersLink)
-		r.Get("/users/{id}/identities", s.handleUsersIdentities)
-		r.Delete("/users/{id}/identities/{channel}", s.handleUsersUnlink)
-
-		// Persona evolution
-		r.Get("/persona/evolution", s.handleEvolutionList)
-		r.Post("/persona/evolution/{id}/approve", s.handleEvolutionApprove)
-		r.Post("/persona/evolution/{id}/reject", s.handleEvolutionReject)
 
 		// Profiles
 		r.Get("/profiles", s.handleProfileList)

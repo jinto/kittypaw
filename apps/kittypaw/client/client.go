@@ -70,9 +70,26 @@ func (c *Client) Executions(skill string, limit int) (map[string]any, error) {
 	return c.get(path)
 }
 
-// Agents returns configured agents.
-func (c *Client) Agents() (map[string]any, error) {
-	return c.get("/api/v1/agents")
+// ChatHistory returns recent account-wide conversation turns.
+func (c *Client) ChatHistory(limit int) (map[string]any, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	return c.get(fmt.Sprintf("/api/v1/chat/history?limit=%d", limit))
+}
+
+// ChatForget clears account-wide conversation history.
+func (c *Client) ChatForget() (map[string]any, error) {
+	return c.post("/api/v1/chat/forget", nil)
+}
+
+// ChatCompact compacts older account-wide conversation turns.
+func (c *Client) ChatCompact(keepRecent int) (map[string]any, error) {
+	body := map[string]int{}
+	if keepRecent > 0 {
+		body["keep_recent"] = keepRecent
+	}
+	return c.post("/api/v1/chat/compact", body)
 }
 
 // Skills returns all skills.
@@ -119,15 +136,6 @@ func (c *Client) MemorySearch(query string, limit int) (map[string]any, error) {
 	return c.get(fmt.Sprintf("/api/v1/memory/search?q=%s&limit=%d", url.QueryEscape(query), limit))
 }
 
-// LinkIdentity links a channel user to a global identity.
-func (c *Client) LinkIdentity(globalUserID, channel, channelUserID string) (map[string]any, error) {
-	return c.post("/api/v1/users/link", map[string]string{
-		"global_user_id":  globalUserID,
-		"channel":         channel,
-		"channel_user_id": channelUserID,
-	})
-}
-
 // Reload triggers a config reload on the server.
 func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
@@ -159,21 +167,6 @@ func (c *Client) EnableSkill(name string) (map[string]any, error) {
 // ExplainSkill asks the LLM to explain a skill.
 func (c *Client) ExplainSkill(name string) (map[string]any, error) {
 	return c.post("/api/v1/skills/"+url.PathEscape(name)+"/explain", nil)
-}
-
-// EvolutionList returns pending persona evolutions.
-func (c *Client) EvolutionList() (map[string]any, error) {
-	return c.get("/api/v1/persona/evolution")
-}
-
-// EvolutionApprove approves a persona evolution.
-func (c *Client) EvolutionApprove(id string) (map[string]any, error) {
-	return c.post("/api/v1/persona/evolution/"+url.PathEscape(id)+"/approve", nil)
-}
-
-// EvolutionReject rejects a persona evolution.
-func (c *Client) EvolutionReject(id string) (map[string]any, error) {
-	return c.post("/api/v1/persona/evolution/"+url.PathEscape(id)+"/reject", nil)
 }
 
 // ChannelsList returns active channels.

@@ -1,8 +1,7 @@
-CREATE TABLE agent_checkpoints (
+CREATE TABLE IF NOT EXISTS conversation_checkpoints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id TEXT NOT NULL,
     label TEXT NOT NULL DEFAULT '',
-    conv_row_id INTEGER NOT NULL,
+    turn_id INTEGER NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_checkpoints_agent ON agent_checkpoints(agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_checkpoints_turn ON conversation_checkpoints(turn_id);

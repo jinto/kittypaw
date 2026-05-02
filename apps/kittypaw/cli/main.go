@@ -127,7 +127,6 @@ func newRootCmd() *cobra.Command {
 		newChatCmd(),
 		newSkillCmd(),
 		newConfigCmd(),
-		newAgentCmd(),
 		newPersonaCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
@@ -568,7 +567,12 @@ func newChatCmd() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runChat,
 	}
-	addAccountFlag(cmd)
+	addPersistentAccountFlag(cmd)
+	cmd.AddCommand(
+		newChatHistoryCmd(),
+		newChatForgetCmd(),
+		newChatCompactCmd(),
+	)
 	return cmd
 }
 
@@ -650,6 +654,174 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 
 	return runInteractiveChatTUI(ctx, conn, cs, header, warning, historyFile)
+}
+
+func newChatHistoryCmd() *cobra.Command {
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "history",
+		Short: "Show account conversation history",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runChatHistory(limit)
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 50, "number of turns to show")
+	return cmd
+}
+
+func runChatHistory(limit int) error {
+	if flagRemote != "" {
+		cl, err := connectServerForCLIAccount()
+		if err != nil {
+			return err
+		}
+		res, err := cl.ChatHistory(limit)
+		if err != nil {
+			return fmt.Errorf("chat history: %w", err)
+		}
+		return printConversationMapRows(jsonSlice(res, "turns"))
+	}
+
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close() //nolint:errcheck
+
+	turns, err := st.ListConversationTurns(limit)
+	if err != nil {
+		return fmt.Errorf("chat history: %w", err)
+	}
+	return printConversationRecords(turns)
+}
+
+func newChatForgetCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "forget",
+		Short: "Forget account conversation history",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runChatForget(yes)
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation")
+	return cmd
+}
+
+func runChatForget(yes bool) error {
+	if !yes {
+		if !isTTY() {
+			return errors.New("refusing to forget conversation history without --yes in non-interactive mode")
+		}
+		scanner := bufio.NewScanner(os.Stdin)
+		if !promptYesNo(scanner, "Forget all account conversation history?", false) {
+			fmt.Println("Canceled.")
+			return nil
+		}
+	}
+
+	if flagRemote != "" {
+		cl, err := connectServerForCLIAccount()
+		if err != nil {
+			return err
+		}
+		res, err := cl.ChatForget()
+		if err != nil {
+			return fmt.Errorf("chat forget: %w", err)
+		}
+		fmt.Printf("Forgot %d conversation turns.\n", jsonInt(res, "turns_deleted"))
+		return nil
+	}
+
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close() //nolint:errcheck
+	deleted, err := st.ForgetConversation()
+	if err != nil {
+		return fmt.Errorf("chat forget: %w", err)
+	}
+	fmt.Printf("Forgot %d conversation turns.\n", deleted)
+	return nil
+}
+
+func newChatCompactCmd() *cobra.Command {
+	var keepRecent int
+	cmd := &cobra.Command{
+		Use:   "compact",
+		Short: "Compact older account conversation history",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runChatCompact(keepRecent)
+		},
+	}
+	cmd.Flags().IntVar(&keepRecent, "keep-recent", 40, "recent turns to keep verbatim")
+	return cmd
+}
+
+func runChatCompact(keepRecent int) error {
+	if flagRemote != "" {
+		cl, err := connectServerForCLIAccount()
+		if err != nil {
+			return err
+		}
+		res, err := cl.ChatCompact(keepRecent)
+		if err != nil {
+			return fmt.Errorf("chat compact: %w", err)
+		}
+		fmt.Printf("Compacted %d older conversation turns.\n", jsonInt(res, "turns_compacted"))
+		return nil
+	}
+
+	st, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer st.Close() //nolint:errcheck
+	compacted, err := st.CompactConversation(keepRecent)
+	if err != nil {
+		return fmt.Errorf("chat compact: %w", err)
+	}
+	fmt.Printf("Compacted %d older conversation turns.\n", compacted)
+	return nil
+}
+
+func printConversationRecords(turns []store.ConversationTurnRecord) error {
+	if len(turns) == 0 {
+		fmt.Println("No conversation turns found.")
+		return nil
+	}
+	fmt.Printf("%s %s %s %s %s\n", padW("ID", 6), padW("ROLE", 10), padW("CHANNEL", 12), padW("TIME", 16), "CONTENT")
+	fmt.Println(strings.Repeat("-", 88))
+	for _, t := range turns {
+		fmt.Printf("%s %s %s %s %s\n",
+			padW(fmt.Sprintf("%d", t.ID), 6),
+			padW(string(t.Role), 10),
+			padW(truncW(t.Channel, 12), 12),
+			padW(truncW(t.Timestamp, 16), 16),
+			truncW(t.Content, 80),
+		)
+	}
+	return nil
+}
+
+func printConversationMapRows(turns []map[string]any) error {
+	if len(turns) == 0 {
+		fmt.Println("No conversation turns found.")
+		return nil
+	}
+	fmt.Printf("%s %s %s %s %s\n", padW("ID", 6), padW("ROLE", 10), padW("CHANNEL", 12), padW("TIME", 16), "CONTENT")
+	fmt.Println(strings.Repeat("-", 88))
+	for _, t := range turns {
+		fmt.Printf("%s %s %s %s %s\n",
+			padW(fmt.Sprintf("%d", jsonInt(t, "id")), 6),
+			padW(jsonStr(t, "role"), 10),
+			padW(truncW(jsonStr(t, "channel"), 12), 12),
+			padW(truncW(jsonStr(t, "timestamp"), 16), 16),
+			truncW(jsonStr(t, "content"), 80),
+		)
+	}
+	return nil
 }
 
 func formatChatHeader(cliVersion, serverVersion, model, accountID string, channels []string) string {
@@ -1436,53 +1608,6 @@ func runConfigCheck(cmd *cobra.Command, _ []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// agent
-// ---------------------------------------------------------------------------
-
-func newAgentCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Agent management",
-	}
-	addPersistentAccountFlag(cmd)
-	cmd.AddCommand(newAgentListCmd(), newAgentResetCmd())
-	return cmd
-}
-
-func newAgentListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List configured agents",
-		RunE:  runAgentList,
-	}
-}
-
-func runAgentList(_ *cobra.Command, _ []string) error {
-	cl, err := connectServerForCLIAccount()
-	if err != nil {
-		return err
-	}
-
-	res, err := cl.Agents()
-	if err != nil {
-		return fmt.Errorf("list agents: %w", err)
-	}
-
-	agents := jsonSlice(res, "agents")
-	if len(agents) == 0 {
-		fmt.Println("No agents found.")
-		return nil
-	}
-
-	fmt.Printf("%s %s %s\n", padW("AGENT ID", 30), padW("TURNS", 6), "UPDATED")
-	fmt.Println(strings.Repeat("-", 60))
-	for _, a := range agents {
-		fmt.Printf("%s %s %s\n", padW(jsonStr(a, "agent_id"), 30), padW(fmt.Sprintf("%d", jsonInt(a, "turn_count")), 6), jsonStr(a, "updated_at"))
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
 // skill log
 // ---------------------------------------------------------------------------
 
@@ -1523,45 +1648,6 @@ func runLog(_ *cobra.Command, _ []string) error {
 		}
 		duration := strconv.FormatInt(jsonInt(r, "duration_ms"), 10) + "ms"
 		fmt.Printf("%s %s %s %s %s\n", padW(fmt.Sprintf("%d", jsonInt(r, "id")), 5), padW(truncW(jsonStr(r, "skill_name"), 20), 20), padW(jsonStr(r, "started_at"), 20), padW(status, 7), duration)
-	}
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// agent reset
-// ---------------------------------------------------------------------------
-
-func newAgentResetCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "reset [agent-id]",
-		Short: "Reset conversation history",
-		Long:  "Clear conversation history for all agents, or a specific agent if specified.",
-		RunE:  runReset,
-	}
-	return cmd
-}
-
-func runReset(_ *cobra.Command, args []string) error {
-	st, err := openStore()
-	if err != nil {
-		return err
-	}
-	defer st.Close() //nolint:errcheck
-
-	agentID := ""
-	if len(args) > 0 {
-		agentID = args[0]
-	}
-
-	deleted, err := st.ResetConversations(agentID)
-	if err != nil {
-		return fmt.Errorf("reset: %w", err)
-	}
-
-	if agentID != "" {
-		fmt.Printf("Reset %d turns for agent %q.\n", deleted, agentID)
-	} else {
-		fmt.Printf("Reset %d turns (all agents).\n", deleted)
 	}
 	return nil
 }
@@ -1700,90 +1786,16 @@ func newPersonaCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "persona",
 		Short: "Manage persona presets",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
+			return cmd.Help()
+		},
 	}
 	addPersistentAccountFlag(cmd)
-	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd(), newPersonaEvolutionCmd())
+	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd())
 	return cmd
-}
-
-func newPersonaEvolutionCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "evolution",
-		Short: "Manage persona evolution proposals",
-	}
-	cmd.AddCommand(
-		newEvolutionListCmd(),
-		newEvolutionApproveCmd(),
-		newEvolutionRejectCmd(),
-	)
-	return cmd
-}
-
-func newEvolutionListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List pending evolutions",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			res, err := cl.EvolutionList()
-			if err != nil {
-				return err
-			}
-			evos := jsonSlice(res, "evolutions")
-			if len(evos) == 0 {
-				fmt.Println("No pending evolutions.")
-				return nil
-			}
-			fmt.Printf("%s %s\n", padW("ID", 30), "REASON")
-			fmt.Println(strings.Repeat("-", 60))
-			for _, e := range evos {
-				reason := truncW(jsonStr(e, "Value"), 40)
-				fmt.Printf("%s %s\n", padW(jsonStr(e, "Key"), 30), reason)
-			}
-			return nil
-		},
-	}
-}
-
-func newEvolutionApproveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "approve <id>",
-		Short: "Approve an evolution",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.EvolutionApprove(args[0]); err != nil {
-				return err
-			}
-			fmt.Println("Evolution approved.")
-			return nil
-		},
-	}
-}
-
-func newEvolutionRejectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reject <id>",
-		Short: "Reject an evolution",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServerForCLIAccount()
-			if err != nil {
-				return err
-			}
-			if _, err := cl.EvolutionReject(args[0]); err != nil {
-				return err
-			}
-			fmt.Println("Evolution rejected.")
-			return nil
-		},
-	}
 }
 
 func newPersonaListCmd() *cobra.Command {

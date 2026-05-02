@@ -343,18 +343,17 @@ func TestAppendSuggestionForBranchResponse_NotFirstTurnSkips(t *testing.T) {
 	s := newSuggestionBranchTestSession(t)
 	_ = s.Store.SetUserContext("suggest_candidate:abc123", "환율 조회|3|0 8 * * *", "reflection-test")
 
-	// Pre-existing assistant turn for this agent_id ⇒ not first turn.
-	channelName := core.EventWebChat.ChannelName()
-	agentID := channelName + "-session-existing"
+	// Pre-existing assistant turn in the account conversation means this is
+	// not the first turn, even if the channel session differs.
 	state := &core.AgentState{
-		AgentID:      agentID,
+		AgentID:      conversationKey(s),
 		SystemPrompt: SystemPrompt,
 		Turns: []core.ConversationTurn{
 			{Role: core.RoleUser, Content: "이전"},
 			{Role: core.RoleAssistant, Content: "응답"},
 		},
 	}
-	if err := s.Store.SaveState(state); err != nil {
+	if err := s.Store.SaveConversationState(state); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
 

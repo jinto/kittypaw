@@ -47,8 +47,8 @@ func TestLegacyMigration_PreservesDBRows(t *testing.T) {
 			{Role: core.RoleAssistant, Content: "pre-migration reply", Timestamp: "2"},
 		},
 	}
-	if err := stLegacy.SaveState(seed); err != nil {
-		t.Fatalf("seed SaveState: %v", err)
+	if err := stLegacy.SaveConversationState(seed); err != nil {
+		t.Fatalf("seed SaveConversationState: %v", err)
 	}
 	if err := stLegacy.Close(); err != nil {
 		t.Fatalf("close legacy db: %v", err)
@@ -76,9 +76,9 @@ func TestLegacyMigration_PreservesDBRows(t *testing.T) {
 	}
 	defer func() { _ = stNew.Close() }()
 
-	got, err := stNew.LoadState("legacy-agent")
+	got, err := stNew.LoadConversationState()
 	if err != nil {
-		t.Fatalf("LoadState post-migration: %v", err)
+		t.Fatalf("LoadConversationState post-migration: %v", err)
 	}
 	if got == nil {
 		t.Fatal("LoadState returned nil — the seeded agent row was lost in migration")

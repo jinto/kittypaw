@@ -5,12 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jinto/kittypaw/core"
-	"github.com/jinto/kittypaw/store"
 )
 
 // EvolutionProposal is the LLM's suggestion for SOUL.md changes.
@@ -113,63 +110,5 @@ JSON으로 응답하세요 (마크다운 펜스 없이):
 	_ = s.Store.SetUserContext(pendingKey, string(data), "evolution")
 
 	slog.Info("evolution: proposal stored for review", "profile", profileID)
-	return nil
-}
-
-// ApproveEvolution applies a pending persona evolution by overwriting SOUL.md.
-func ApproveEvolution(baseDir string, st *store.Store, profileID string) error {
-	if err := core.ValidateProfileID(profileID); err != nil {
-		return err
-	}
-	pendingKey := fmt.Sprintf("evolution:pending:%s", profileID)
-	raw, exists, err := st.GetUserContext(pendingKey)
-	if err != nil || !exists {
-		return fmt.Errorf("no pending evolution for profile %q", profileID)
-	}
-
-	var proposal EvolutionProposal
-	if err := json.Unmarshal([]byte(raw), &proposal); err != nil {
-		return fmt.Errorf("parse proposal: %w", err)
-	}
-
-	// Write new SOUL.md.
-	dir, err := core.ResolveBaseDir(baseDir)
-	if err != nil {
-		return err
-	}
-	soulDir := filepath.Join(dir, "profiles", profileID)
-	if err := os.MkdirAll(soulDir, 0o755); err != nil {
-		return err
-	}
-	soulPath := filepath.Join(soulDir, "SOUL.md")
-	if err := os.WriteFile(soulPath, []byte(proposal.NewSOUL), 0o644); err != nil {
-		return fmt.Errorf("write SOUL.md: %w", err)
-	}
-
-	// Remove pending marker.
-	_, _ = st.DeleteUserContext(pendingKey)
-	slog.Info("evolution: applied", "profile", profileID)
-	return nil
-}
-
-// RejectEvolution stores a rejection and removes the pending proposal.
-func RejectEvolution(st *store.Store, profileID string) error {
-	if err := core.ValidateProfileID(profileID); err != nil {
-		return err
-	}
-	pendingKey := fmt.Sprintf("evolution:pending:%s", profileID)
-	raw, exists, err := st.GetUserContext(pendingKey)
-	if err != nil || !exists {
-		return fmt.Errorf("no pending evolution for profile %q", profileID)
-	}
-
-	// Store rejection hash for future reference.
-	hash := IntentHash(raw)
-	rejKey := fmt.Sprintf("evolution:rejected:%s", hash)
-	_ = st.SetUserContext(rejKey, profileID, "evolution")
-
-	// Remove pending.
-	_, _ = st.DeleteUserContext(pendingKey)
-	slog.Info("evolution: rejected", "profile", profileID)
 	return nil
 }

@@ -290,9 +290,9 @@ const App = {
         <h1>\u{1F43E} KittyPaw Dashboard</h1>
         <p class="hint">Auto-refreshes every 30s</p>
         <div class="stats-grid" id="stats"></div>
-        <h2>Agents</h2>
-        <table><thead><tr><th>Agent ID</th><th>Turns</th><th>Created</th><th>Last Active</th></tr></thead>
-        <tbody id="agents"></tbody></table>
+        <h2>Conversation</h2>
+        <table><thead><tr><th>Time</th><th>Role</th><th>Channel</th><th>Content</th></tr></thead>
+        <tbody id="conversation"></tbody></table>
         <h2 class="mt-20">Recent Executions</h2>
         <table><thead><tr><th>Time</th><th>Skill</th><th>Status</th><th>Duration</th><th>Summary</th></tr></thead>
         <tbody id="exec"></tbody></table>
@@ -313,17 +313,18 @@ const App = {
           statCard(s.total_tokens || 0, 'Tokens');
       }
 
-      const agentsData = await api('/api/v1/agents');
-      const agents = agentsData.agents || [];
-      const agentsEl = document.getElementById('agents');
-      if (agentsEl) {
-        agentsEl.innerHTML = agents.length
-          ? agents.map(a =>
-            `<tr><td>${esc(a.AgentID || a.agent_id)}</td><td>${esc(String(a.TurnCount || a.turn_count || 0))}</td>` +
-            `<td>${esc(((a.CreatedAt || a.created_at) || '').slice(0,19))}</td>` +
-            `<td>${esc(((a.UpdatedAt || a.updated_at) || '').slice(0,19))}</td></tr>`
+      const historyData = await api('/api/v1/chat/history?limit=10');
+      const turns = historyData.turns || [];
+      const conversationEl = document.getElementById('conversation');
+      if (conversationEl) {
+        conversationEl.innerHTML = turns.length
+          ? turns.map(t =>
+            `<tr><td>${esc(((t.Timestamp || t.timestamp) || '').slice(0,19))}</td>` +
+            `<td>${esc(t.Role || t.role || '')}</td>` +
+            `<td>${esc(t.Channel || t.channel || '')}</td>` +
+            `<td>${esc(t.Content || t.content || '')}</td></tr>`
           ).join('')
-          : '<tr><td colspan="4">No agents yet</td></tr>';
+          : '<tr><td colspan="4">No conversation yet</td></tr>';
       }
 
       const execData = await api('/api/v1/executions');

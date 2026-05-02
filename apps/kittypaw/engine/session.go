@@ -437,18 +437,16 @@ func pickActiveSuggestion(st *store.Store) (label, hash string) {
 
 // appendSuggestionForBranchResponse adds a literal suggestion suffix to
 // a deterministic branch (RunInstalledSkillBranch / InstallConsentBranch
-// / etc) response when this is the agent's first turn AND there is an
+// / etc) response when this is the account conversation's first turn AND there is an
 // active reflection candidate outside the silence window. Branch paths
 // don't run an LLM after the skill executes, so the
 // system-prompt-augmentation path used by the agent loop has no effect
 // here — we have to compose the proposal text ourselves.
 //
-// First-turn detection probes the store: zero prior assistant turns for
-// this agent_id ⇒ first turn. Branch dispatch hasn't yet recorded the
-// just-arrived user turn (recordPipelineTurn runs after this), so the
-// transcript will show role=assistant only if a previous session
-// reached this agent_id, which is exactly the "not first turn" case we
-// want to skip.
+// First-turn detection probes the account-wide store: zero prior assistant
+// turns means first turn. Branch dispatch hasn't yet recorded the just-arrived
+// user turn (recordPipelineTurn runs after this), so the transcript will show
+// role=assistant only if a previous channel already reached this account.
 //
 // Best-effort: any store error or missing candidate returns response
 // unchanged. surfaced_at is recorded on success so the same candidate
@@ -457,17 +455,11 @@ func appendSuggestionForBranchResponse(s *Session, event core.Event, response st
 	if s == nil || s.Store == nil {
 		return response
 	}
-	channelName := event.Type.ChannelName()
-	channelUserID := sessionIDFromEvent(&event)
-	agentID := channelName + "-" + channelUserID
-	if globalID, ok, err := s.Store.ResolveUser(channelName, channelUserID); err == nil && ok {
-		agentID = "user-" + globalID
-	}
-	state, err := s.Store.LoadState(agentID)
+	state, err := s.Store.LoadConversationState()
 	if err != nil {
 		return response
 	}
-	// state == nil ⇒ never seen this agent_id ⇒ definitely first turn.
+	// state == nil ⇒ never seen this account conversation ⇒ definitely first turn.
 	// state != nil but no assistant role yet ⇒ also first turn (the
 	// just-arrived user turn isn't yet recorded; recordPipelineTurn
 	// runs after this).
@@ -525,61 +517,65 @@ func stripBranchControlMarker(response string) string {
 }
 
 // recordPipelineTurn persists the user query + branch response onto the
-// agent's conversation history so subsequent turns (whether dispatched
+// account conversation history so subsequent turns (whether dispatched
 // by another branch or by the legacy LLM) see the cross-turn context.
 // Mirrors the user-turn / assistant-turn pair that runAgentLoop emits
 // at lines 215-246; the duplication is small and the alternative —
 // extracting a shared helper — would entangle the legacy loop with the
 // branch path more than is worth the saved lines.
 func (s *Session) recordPipelineTurn(event core.Event, eventText, response string) error {
-	channelName := event.Type.ChannelName()
-	channelUserID := sessionIDFromEvent(&event)
-	agentID := channelName + "-" + channelUserID
-	if globalID, ok, err := s.Store.ResolveUser(channelName, channelUserID); err == nil && ok {
-		agentID = "user-" + globalID
-	}
-	state, err := s.Store.LoadState(agentID)
+	convKey := conversationKey(s)
+	meta := conversationTurnSource(&event)
+	state, err := s.Store.LoadConversationState()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
 	if state == nil {
-		// First-ever turn for this agent — runAgentLoop creates the row
+		// First-ever turn for this account — runAgentLoop creates the row
 		// lazily on the same path. Mirror that here so a branch dispatch
-		// is allowed to be the agent's very first interaction.
+		// is allowed to be the account's very first interaction.
 		state = &core.AgentState{
-			AgentID:      agentID,
+			AgentID:      convKey,
 			SystemPrompt: SystemPrompt,
 		}
-		if err := s.Store.SaveState(state); err != nil {
+		if err := s.Store.SaveConversationState(state); err != nil {
 			return fmt.Errorf("save initial state: %w", err)
 		}
 	}
 	now := core.NowTimestamp()
 	userTurn := core.ConversationTurn{
-		Role:      core.RoleUser,
-		Content:   eventText,
-		Timestamp: now,
+		Role:          core.RoleUser,
+		Content:       eventText,
+		Channel:       meta.Channel,
+		ChannelUserID: meta.ChannelUserID,
+		ChatID:        meta.ChatID,
+		MessageID:     meta.MessageID,
+		Timestamp:     now,
 	}
 	state.Turns = append(state.Turns, userTurn)
-	if err := s.Store.AddTurn(agentID, &userTurn); err != nil {
+	if err := s.Store.AddConversationTurn(&userTurn); err != nil {
 		return fmt.Errorf("add user turn: %w", err)
 	}
 	assistantTurn := core.ConversationTurn{
-		Role:      core.RoleAssistant,
-		Content:   stripBranchControlMarker(response),
-		Timestamp: now,
+		Role:          core.RoleAssistant,
+		Content:       stripBranchControlMarker(response),
+		Channel:       meta.Channel,
+		ChannelUserID: meta.ChannelUserID,
+		ChatID:        meta.ChatID,
+		Timestamp:     now,
 	}
 	state.Turns = append(state.Turns, assistantTurn)
-	if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
+	if err := s.Store.AddConversationTurn(&assistantTurn); err != nil {
 		return fmt.Errorf("add assistant turn: %w", err)
 	}
-	return s.Store.SaveState(state)
+	return s.Store.SaveConversationState(state)
 }
 
 func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventText string, opts *RunOptions) (string, error) {
 	loopStart := time.Now()
 	channelName := event.Type.ChannelName()
-	channelUserID := sessionIDFromEvent(&event)
+	convKey := conversationKey(s)
+	meta := conversationTurnSource(&event)
 
 	// Extract callbacks from options.
 	var onPermission PermissionCallback
@@ -587,40 +583,26 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		onPermission = opts.OnPermission
 	}
 
-	// Resolve cross-channel identity
-	agentID := func() string {
-		globalID, ok, err := s.Store.ResolveUser(channelName, channelUserID)
-		if err == nil && ok {
-			slog.Info("resolved cross-channel identity",
-				"channel", channelName,
-				"channel_user_id", channelUserID,
-				"global_user_id", globalID,
-			)
-			return "user-" + globalID
-		}
-		return channelName + "-" + channelUserID
-	}()
-
-	// Store agentID and event in context for downstream handlers.
-	ctx = ContextWithAgentID(ctx, agentID)
+	// Store the account conversation key and event in context for downstream handlers.
+	ctx = ContextWithAgentID(ctx, convKey)
 	ctx = ContextWithEvent(ctx, &event)
 
-	// Load or create agent state
-	state, err := s.Store.LoadState(agentID)
+	// Load or create account conversation state.
+	state, err := s.Store.LoadConversationState()
 	if err != nil {
 		return "", fmt.Errorf("load state: %w", err)
 	}
 	if state == nil {
 		state = &core.AgentState{
-			AgentID:      agentID,
+			AgentID:      convKey,
 			SystemPrompt: SystemPrompt,
 		}
-		if err := s.Store.SaveState(state); err != nil {
+		if err := s.Store.SaveConversationState(state); err != nil {
 			return "", fmt.Errorf("save initial state: %w", err)
 		}
 	}
 
-	slog.Info("agent state ready", "phase", core.PhaseInit, "agent_id", agentID)
+	slog.Info("conversation state ready", "phase", core.PhaseInit, "conversation", convKey)
 
 	// Parse @mention routing
 	var mentionOverride string
@@ -636,12 +618,16 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 
 	// Add user turn
 	userTurn := core.ConversationTurn{
-		Role:      core.RoleUser,
-		Content:   eventText,
-		Timestamp: core.NowTimestamp(),
+		Role:          core.RoleUser,
+		Content:       eventText,
+		Channel:       meta.Channel,
+		ChannelUserID: meta.ChannelUserID,
+		ChatID:        meta.ChatID,
+		MessageID:     meta.MessageID,
+		Timestamp:     core.NowTimestamp(),
 	}
 	state.Turns = append(state.Turns, userTurn)
-	if err := s.Store.AddTurn(agentID, &userTurn); err != nil {
+	if err := s.Store.AddConversationTurn(&userTurn); err != nil {
 		return "", fmt.Errorf("add turn: %w", err)
 	}
 
@@ -661,13 +647,16 @@ func (s *Session) runAgentLoop(ctx context.Context, event core.Event, rawEventTe
 		slog.Warn("orchestration error, falling through", "error", orchErr)
 	} else if handled {
 		assistantTurn := core.ConversationTurn{
-			Role:      core.RoleAssistant,
-			Content:   response,
-			Timestamp: core.NowTimestamp(),
+			Role:          core.RoleAssistant,
+			Content:       response,
+			Channel:       meta.Channel,
+			ChannelUserID: meta.ChannelUserID,
+			ChatID:        meta.ChatID,
+			Timestamp:     core.NowTimestamp(),
 		}
 		state.Turns = append(state.Turns, assistantTurn)
-		_ = s.Store.AddTurn(agentID, &assistantTurn)
-		_ = s.Store.SaveState(state)
+		_ = s.Store.AddConversationTurn(&assistantTurn)
+		_ = s.Store.SaveConversationState(state)
 		return response, nil
 	}
 
@@ -720,7 +709,7 @@ observeLoop:
 			compaction := s.compactionForAttempt(attempt)
 
 			// Resolve and load profile.
-			profileName := ResolveProfileName(s.Config, channelName, agentID, mentionOverride, s.Store)
+			profileName := ResolveProfileName(s.Config, channelName, convKey, mentionOverride, s.Store)
 			profile := loadProfileForPrompt(profileName, s.Config, s.BaseDir)
 
 			// Build prompt (observations are volatile — replaced each observe round)
@@ -806,14 +795,14 @@ observeLoop:
 					lastError = err.Error()
 					continue
 				}
-				slog.Error("LLM call failed after retries", "agent_id", agentID, "retries", maxRetries, "raw_error", err.Error())
+				slog.Error("LLM call failed after retries", "conversation", convKey, "retries", maxRetries, "raw_error", err.Error())
 				return "", fmt.Errorf("지금 답변을 만들지 못했어요. 잠시 후 다시 한 번 말씀해 주시겠어요?")
 			}
 
 			code := normalizeGeneratedCode(resp.Content)
 			slog.Info("code generated",
 				"phase", core.PhaseGenerate,
-				"agent_id", agentID,
+				"conversation", convKey,
 				"attempt", attempt,
 				"code_len", len(code),
 				"code_preview", truncate(code, 500),
@@ -821,9 +810,9 @@ observeLoop:
 
 			// Build sandbox context
 			jsContext := map[string]any{
-				"event":      json.RawMessage(event.Payload),
-				"event_type": string(event.Type),
-				"agent_id":   agentID,
+				"event":           json.RawMessage(event.Payload),
+				"event_type":      string(event.Type),
+				"conversation_id": convKey,
 			}
 
 			// Execute in sandbox with skill resolver
@@ -852,15 +841,18 @@ observeLoop:
 					output = "(max observation rounds reached)"
 				}
 				assistantTurn := core.ConversationTurn{
-					Role:      core.RoleAssistant,
-					Content:   output,
-					Code:      code,
-					Timestamp: core.NowTimestamp(),
+					Role:          core.RoleAssistant,
+					Content:       output,
+					Code:          code,
+					Channel:       meta.Channel,
+					ChannelUserID: meta.ChannelUserID,
+					ChatID:        meta.ChatID,
+					Timestamp:     core.NowTimestamp(),
 				}
 				state.Turns = append(state.Turns, assistantTurn)
-				_ = s.Store.AddTurn(agentID, &assistantTurn)
-				_ = s.Store.SaveState(state)
-				s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
+				_ = s.Store.AddConversationTurn(&assistantTurn)
+				_ = s.Store.SaveConversationState(state)
+				s.recordExecution(eventText, output, resp, loopStart, attempt, true)
 				return output, nil
 			}
 
@@ -872,7 +864,7 @@ observeLoop:
 
 				slog.Info("execution success",
 					"phase", core.PhaseFinish,
-					"agent_id", agentID,
+					"conversation", convKey,
 					"output_len", len(output),
 					"output_preview", truncate(output, 300),
 					"skill_calls", len(execResult.SkillCalls),
@@ -880,22 +872,25 @@ observeLoop:
 
 				// Save assistant turn
 				assistantTurn := core.ConversationTurn{
-					Role:      core.RoleAssistant,
-					Content:   output,
-					Code:      code,
-					Result:    FormatExecResult(execResult),
-					Timestamp: core.NowTimestamp(),
+					Role:          core.RoleAssistant,
+					Content:       output,
+					Code:          code,
+					Result:        FormatExecResult(execResult),
+					Channel:       meta.Channel,
+					ChannelUserID: meta.ChannelUserID,
+					ChatID:        meta.ChatID,
+					Timestamp:     core.NowTimestamp(),
 				}
 				state.Turns = append(state.Turns, assistantTurn)
-				if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
-					slog.Warn("failed to save assistant turn", "agent_id", agentID, "error", err)
+				if err := s.Store.AddConversationTurn(&assistantTurn); err != nil {
+					slog.Warn("failed to save assistant turn", "conversation", convKey, "error", err)
 				}
-				if err := s.Store.SaveState(state); err != nil {
-					slog.Warn("failed to save agent state", "agent_id", agentID, "error", err)
+				if err := s.Store.SaveConversationState(state); err != nil {
+					slog.Warn("failed to save conversation state", "conversation", convKey, "error", err)
 				}
 
 				// Record execution metrics.
-				s.recordExecution(agentID, eventText, output, resp, loopStart, attempt, true)
+				s.recordExecution(eventText, output, resp, loopStart, attempt, true)
 
 				// Cache invalidation — successful legacy-LLM turn
 				// consumed (or rejected) the cached raw skill output.
@@ -923,7 +918,7 @@ observeLoop:
 			}
 			slog.Warn("execution failed",
 				"phase", core.PhaseRetry,
-				"agent_id", agentID,
+				"conversation", convKey,
 				"attempt", attempt,
 				"error", errMsg,
 			)
@@ -940,24 +935,27 @@ observeLoop:
 	}
 	slog.Info("retries exhausted",
 		"phase", core.PhaseFinish,
-		"agent_id", agentID,
+		"conversation", convKey,
 		"raw_error", errMsg,
 	)
 
 	assistantTurn := core.ConversationTurn{
-		Role:      core.RoleAssistant,
-		Content:   fmt.Sprintf("Error after %d retries: %s", maxRetries, errMsg),
-		Timestamp: core.NowTimestamp(),
+		Role:          core.RoleAssistant,
+		Content:       fmt.Sprintf("Error after %d retries: %s", maxRetries, errMsg),
+		Channel:       meta.Channel,
+		ChannelUserID: meta.ChannelUserID,
+		ChatID:        meta.ChatID,
+		Timestamp:     core.NowTimestamp(),
 	}
 	state.Turns = append(state.Turns, assistantTurn)
-	if err := s.Store.AddTurn(agentID, &assistantTurn); err != nil {
-		slog.Warn("failed to save error turn", "agent_id", agentID, "error", err)
+	if err := s.Store.AddConversationTurn(&assistantTurn); err != nil {
+		slog.Warn("failed to save error turn", "conversation", convKey, "error", err)
 	}
-	if err := s.Store.SaveState(state); err != nil {
-		slog.Warn("failed to save agent state after failure", "agent_id", agentID, "error", err)
+	if err := s.Store.SaveConversationState(state); err != nil {
+		slog.Warn("failed to save conversation state after failure", "conversation", convKey, "error", err)
 	}
 
-	s.recordExecution(agentID, eventText, errMsg, nil, loopStart, maxRetries, false)
+	s.recordExecution(eventText, errMsg, nil, loopStart, maxRetries, false)
 
 	// User-facing fallback: the raw error (SyntaxError, undefined ident,
 	// etc.) is internal noise that doesn't help the user act. Log captures
@@ -966,7 +964,7 @@ observeLoop:
 	return "", fmt.Errorf("지금 답변을 만들지 못했어요. 잠시 후 다시 한 번 말씀해 주시겠어요?")
 }
 
-func (s *Session) recordExecution(agentID, input, output string, resp *llm.Response, start time.Time, retries int, success bool) {
+func (s *Session) recordExecution(input, output string, resp *llm.Response, start time.Time, retries int, success bool) {
 	summary := output
 	if len(summary) > 200 {
 		summary = summary[:200]
@@ -978,7 +976,7 @@ func (s *Session) recordExecution(agentID, input, output string, resp *llm.Respo
 		}
 	}
 	if err := s.Store.RecordExecution(&store.ExecutionRecord{
-		SkillID:       agentID,
+		SkillID:       "chat",
 		SkillName:     "chat",
 		StartedAt:     start.UTC().Format("2006-01-02T15:04:05Z"),
 		FinishedAt:    time.Now().UTC().Format("2006-01-02T15:04:05Z"),
@@ -989,7 +987,7 @@ func (s *Session) recordExecution(agentID, input, output string, resp *llm.Respo
 		RetryCount:    retries,
 		UsageJSON:     usageJSON,
 	}); err != nil {
-		slog.Warn("failed to record execution", "agent_id", agentID, "error", err)
+		slog.Warn("failed to record execution", "skill_id", "chat", "error", err)
 	}
 }
 
@@ -1085,13 +1083,36 @@ func loadProfileForPrompt(profileName string, config *core.Config, baseDir strin
 	return p
 }
 
-func sessionIDFromEvent(event *core.Event) string {
+type conversationTurnMetadata struct {
+	Channel       string
+	ChannelUserID string
+	ChatID        string
+	MessageID     string
+}
+
+func conversationKey(s *Session) string {
+	if s != nil && s.AccountID != "" {
+		return s.AccountID
+	}
+	return "account"
+}
+
+func conversationTurnSource(event *core.Event) conversationTurnMetadata {
+	meta := conversationTurnMetadata{Channel: event.Type.ChannelName()}
 	payload, err := event.ParsePayload()
 	if err != nil {
-		return "unknown"
+		meta.ChannelUserID = "unknown"
+		return meta
 	}
+	meta.ChatID = payload.ChatID
+	meta.MessageID = payload.ReplyToMessageID
 	if payload.SessionID != "" {
-		return payload.SessionID
+		meta.ChannelUserID = payload.SessionID
+	} else {
+		meta.ChannelUserID = payload.ChatID
 	}
-	return payload.ChatID
+	if meta.ChannelUserID == "" {
+		meta.ChannelUserID = "unknown"
+	}
+	return meta
 }
