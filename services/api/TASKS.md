@@ -323,7 +323,7 @@
 
 - [ ] kickoff 시 ina:plan trigger
 
-## Plan 14: C′ — L1.F cross-cutting 축소판 ← 현재
+## Plan 14: C′ — L1.F cross-cutting 축소판 (deferred)
 
 > Spec: `.claude/plans/test-coverage-completion.md` Plan C′ 섹션
 > kickoff: B0 머지 직후 별도 `ina:plan` 호출.
@@ -413,6 +413,47 @@
 - [ ] **handler 내부 `log.Printf` → slog 일괄 마이그레이션** — `internal/auth/{refresh,google,github,cli}.go`, `internal/proxy/*.go` 등 ~16곳. structured fields + level 분류.
 - [ ] **slog secret redaction** — custom `slog.Handler`로 `password`/`token`/`secret` 키 자동 마스킹. Lane B HIGH/0.90.
 - [ ] **shutdown race edge** — `signal.NotifyContext` cancel이 goroutine 시작 전 도착 시 select가 ctx.Done()으로 빠짐. 현재 코드 정상 작동하지만 명시적 ordering 보강 가치. Lane B Medium/0.70.
+
+## Plan 20: RS256/JWKS + device credential — PR-A (keys + JWKS infra) ← 현재
+
+> Spec: `~/.claude/plans/silly-wiggling-balloon.md` (전체 4 PR — A/B/C/D — 중 첫 PR)
+> Goal: RSA key 인프라 + JWKS endpoint 노출. 회귀 0 (발급은 여전히 HS256). 채팅팀 verifier 통합 테스트 unblock.
+> 후속: PR-A 머지 후 별도 ina:plan kickoff — PR-B (RS256 cutover) → PR-C (devices DB) → PR-D (endpoints).
+> Cross-team: 채팅팀 + daemon팀 spec 합의 완료. 회신 보낸 message 박제는 plan §결정된 spec 참고.
+
+- [x] **T1: `internal/auth/keystore.go` — RSA load + JWK Set + RFC 7638 thumbprint + JWKSProvider**
+      RED: `keystore_test.go` 단위 4건 — (a) RFC 7638 §3.1 example key의 thumbprint 알려진 값 매칭, (b) JWK modulus N의 leading-zero 패딩 검증 (modulus byte 길이 = `(BitLen+7)/8`), (c) 잘못된 PEM bytes → error, (d) `JWKSProvider.Lookup(kid)` known kid → public key, unknown kid → error.
+      GREEN: `LoadPrivateKeyPEM([]byte) (*rsa.PrivateKey, string, error)` (key + kid), `BuildJWKSet(*rsa.PublicKey, kid string) JWKSet` (n/e/kty/alg/use/kid 박제), `Thumbprint(JWK) string` (RFC 7638 canonical JSON SHA-256 base64url), `JWKSProvider` interface + `singleKeyProvider` 구현. stdlib only (crypto/rsa, encoding/base64, encoding/json, math/big, crypto/sha256).
+
+- [x] **T2: `internal/auth/jwks.go` — HandleJWKS handler**
+      RED: `jwks_test.go` 단위 2건 — (a) GET 응답 200 + Content-Type=application/json + body가 `{"keys":[{...}]}` shape, (b) `Cache-Control: public, max-age=600` header 박제.
+      GREEN: `HandleJWKS(provider JWKSProvider) http.HandlerFunc` — provider에서 keys 추출 → JSON encode + Cache-Control set.
+
+- [x] **T3: `internal/config/config.go` — `JWT_PRIVATE_KEY_PEM_B64` env + fail-fast**
+      RED: `config_test.go` 단위 4건 — (a) 정상 base64 PEM → key load 성공 + kid 비어있지 않음, (b) base64 디코딩 실패 → error, (c) PEM parse 실패 → error, (d) RSA 비트 < 2048 → error. `JWT_SECRET`은 일단 기존 검증 유지 (PR-B에서 제거).
+      GREEN: Config struct에 `JWTPrivateKey *rsa.PrivateKey`, `JWTKID string` 필드 추가. `Load()`가 env 디코딩 → `keystore.LoadPrivateKeyPEM` 호출 → 비트 검증 → fail-fast error 반환. `LoadForTest()`는 fixture key 박제 (메모리만).
+
+- [x] **T4: `cmd/server/main.go` — JWKS 라우트 등록 + integration**
+      구현됨: `cfg.JWTPrivateKey + cfg.JWTKID` 으로 `auth.NewSingleKeyProvider` 생성 → `r.Get("/.well-known/jwks.json", auth.HandleJWKS(provider))` `/health` 옆 등록. `LoadForTest()`에 sync.Once 캐시된 RSA fixture key 박제 (~50ms × 1회). `testRouter(t)`가 fixture 자동 wire. 회귀 0 — 모든 기존 main_test.go 케이스 PASS.
+
+- [x] **T5: `internal/auth/testfixture/jwt.go` — IssueDeviceJWT helper (정적 fixture 미포함)**
+      변경 사유: 정적 `.jwt` 파일 commit 비포함. RSA private key commit 시 gitleaks 운영 부채 + 정적 JWKS와 동적 키 매칭 보증 어려움. helper-only 패턴으로 단순화 — chat 측이 helper(또는 동등 코드)로 자기 verifier 테스트 fixture 동적 생성.
+      구현됨: `DeviceClaims` struct + `IssueDeviceJWT(*rsa.PrivateKey, kid, DeviceClaims) (string, error)` (RS256 + kid header). 단위 테스트 `TestIssueDeviceJWT_RoundTrip` — alg=RS256, kid set, sub=`device:<id>`, user_id, aud, scope, v=2 wire에서 회복 검증. PASS.
+
+- [x] **T6: docs/spec 갱신 (gitleaks allowlist는 정적 fixture 미포함으로 불필요)**
+      구현됨: `docs/specs/kittychat-credential-foundation.md` D5 섹션 갱신 — "HS256 첫 slice → RS256 다음 slice" 박제를 "Plan 20 PR-A에서 RS256+JWKS 직진" 으로 교체. RFC 7638 thumbprint 박제, JWKS endpoint URL, Cache-Control max-age=600, key rotation contract (old key overlap 30분, 양측 알림), kittychat fail-mode (stale cache + backoff), Verify invariants (downgrade + cross-aud + leeway), JWKSProvider interface, 사용자 0명 cutover 배경 모두 박제.
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` (T1~T5 단위 14건 + 통합 3건) PASS / `make test-integration -p 1` 회귀 0 / fixture key의 thumbprint = T1 expected 매칭.
+
+**완료 신호**: 채팅팀이 `https://api.kittypaw.app/.well-known/jwks.json` fetch + fixture private key로 동적 mock JWT 생성하여 verifier 통합 테스트 시작 가능.
+
+**Operational Checklist** (이 PR 머지 후):
+- [ ] secret manager에 prod RSA private key 등록 (test fixture key는 prod 사용 절대 금지)
+- [ ] systemd EnvironmentFile에 `JWT_PRIVATE_KEY_PEM_B64` 추가
+- [ ] `fab deploy` (build + upload + restart + smoke)
+- [ ] `curl https://api.kittypaw.app/.well-known/jwks.json` 200 + JSON 응답 검증
+- [ ] 채팅팀에 PR-A 머지 신호 (verifier 통합 테스트 unblock)
+- [ ] PR-B (RS256 cutover) ina:plan kickoff
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 

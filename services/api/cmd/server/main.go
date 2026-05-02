@@ -238,11 +238,22 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		discovery["chat_relay_url"] = cfg.ChatRelayURL
 	}
 
+	// JWKS provider — the same single-key store backs both /.well-known/
+	// jwks.json publication and (in PR-B) RS256 token verification. nil
+	// only in tests that don't exercise auth (we still wire it because
+	// the JWKS endpoint is anonymous and runs ahead of authMW). Plan 20
+	// PR-A keeps HS256 issuance — JWKS is published but not yet
+	// consumed by issueTokenPair.
+	jwksProvider := auth.NewSingleKeyProvider(&cfg.JWTPrivateKey.PublicKey, cfg.JWTKID)
+
 	// Routes.
 	r.Get("/health", handleHealth)
+	r.Get("/.well-known/jwks.json", auth.HandleJWKS(jwksProvider))
 	r.Get("/discovery", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(discovery)
+		if err := json.NewEncoder(w).Encode(discovery); err != nil {
+			slog.Error("encode discovery", "err", err)
+		}
 	})
 
 	// CLI OAuth for kittypaw login (HTTP callback + code-paste modes).

@@ -1,14 +1,26 @@
 package main
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 	"github.com/kittypaw-app/kittyapi/internal/config"
 )
+
+// testJWTKey returns the fixture RSA key wired by config.LoadForTest.
+// Reusing the cached key avoids re-running 2048-bit generation per
+// test (~50ms each) and keeps thumbprint stable so JWKS endpoint
+// assertions can pin the kid.
+func testJWTKey(t *testing.T) (*rsa.PrivateKey, string) {
+	t.Helper()
+	cfg := config.LoadForTest()
+	return cfg.JWTPrivateKey, cfg.JWTKID
+}
 
 func testRouter(t *testing.T) http.Handler {
 	t.Helper()
@@ -124,6 +136,54 @@ func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	}
 	if got := body["auth_base_url"]; got != "http://localhost:8080/auth" {
 		t.Fatalf("expected auth_base_url=http://localhost:8080/auth (no double slash), got %q", got)
+	}
+}
+
+// TestJWKSEndpoint_Anonymous200 pins the /.well-known/jwks.json contract:
+// status 200, Content-Type application/json, body decodes into a JWK Set
+// with at least one key whose kid matches the router's configured key.
+// Anonymous — must succeed without an Authorization header (kittychat
+// fetches it before holding any token).
+func TestJWKSEndpoint_Anonymous200(t *testing.T) {
+	r := testRouter(t)
+	_, wantKID := testJWTKey(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+
+	var got auth.JWKSet
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(got.Keys) != 1 {
+		t.Fatalf("keys len = %d, want 1", len(got.Keys))
+	}
+	if got.Keys[0].Kid != wantKID {
+		t.Fatalf("kid = %q, want %q", got.Keys[0].Kid, wantKID)
+	}
+}
+
+// TestJWKSEndpoint_CacheControl pins the rotation contract: max-age=600
+// (10min) — kittychat caches at the same TTL, and the old key 30min
+// overlap calculation depends on this value.
+func TestJWKSEndpoint_CacheControl(t *testing.T) {
+	r := testRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	const want = "public, max-age=600"
+	if got := w.Header().Get("Cache-Control"); got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
 	}
 }
 
