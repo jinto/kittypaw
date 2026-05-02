@@ -2,6 +2,7 @@ package testfixture
 
 import (
 	"context"
+	"crypto/rsa"
 	"fmt"
 	"testing"
 	"time"
@@ -12,12 +13,19 @@ import (
 
 const defaultTTL = 15 * time.Minute
 
-func IssueTestJWT(t *testing.T, secret, userID string, ttl time.Duration) string {
+// IssueTestJWT signs a user JWT in production wire format (RS256, kid
+// header, v=2, default API client aud/scope). The caller injects key+kid
+// to keep this package config-free — testfixture must not import config
+// (cycle: config → auth → testfixture would loop). Tests fetch the
+// process-cached fixture key via config.LoadForTest() and pass it here.
+//
+// Plan 21 PR-B: HS256 secret signature dropped — RS256 + JWKS path only.
+func IssueTestJWT(t *testing.T, key *rsa.PrivateKey, kid, userID string, ttl time.Duration) string {
 	t.Helper()
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
-	token, err := auth.SignForAudiences(userID, auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, secret, ttl)
+	token, err := auth.SignForAudiences(userID, auth.DefaultAPIClientAudiences, auth.DefaultAPIClientScopes, key, kid, ttl)
 	if err != nil {
 		t.Fatalf("testfixture.IssueTestJWT: %v", err)
 	}

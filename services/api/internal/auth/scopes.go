@@ -23,7 +23,7 @@ const (
 	// Future host split (auth.kittypaw.app) requires dual-accept migration.
 	Issuer = "https://api.kittypaw.app/auth"
 
-	ClaimsVersion = 1
+	ClaimsVersion = 2
 )
 
 // DefaultAPIClientScopes is the scope set granted to OAuth-issued

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
@@ -90,6 +91,7 @@ func (m *mockRefreshTokenStore) RevokeAllForUser(_ context.Context, _ string) er
 func setupGoogleTest(t *testing.T, googleServer *httptest.Server) (*auth.OAuthHandler, auth.GoogleConfig) {
 	t.Helper()
 
+	appCfg := config.LoadForTest()
 	states := auth.NewStateStore()
 	t.Cleanup(states.Close)
 
@@ -97,7 +99,8 @@ func setupGoogleTest(t *testing.T, googleServer *httptest.Server) (*auth.OAuthHa
 		UserStore:         newMockUserStore(),
 		RefreshTokenStore: &mockRefreshTokenStore{},
 		StateStore:        states,
-		JWTSecret:         testSecret,
+		JWTPrivateKey:     appCfg.JWTPrivateKey,
+		JWTKID:            appCfg.JWTKID,
 		HTTPClient:        googleServer.Client(),
 	}
 
@@ -189,14 +192,29 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 		t.Fatalf("expected Bearer, got %q", resp.TokenType)
 	}
 
-	// Plan 17 wire-format guard (issueTokenPair single choke point).
-	// Decode the access_token payload directly and pin sub/iss/aud/scope/v=1.
-	// If anyone reverts cli.go:27 SignForAudiences -> Sign, this assertion
-	// fires with the message below — distinguishing the regression from a
-	// generic OAuth path failure.
+	// Plan 17 / Plan 21 PR-B wire-format guard (issueTokenPair single choke
+	// point). Decode the access_token header AND payload directly and pin
+	// alg=RS256, kid present, sub/iss/aud/scope, v=2.
+	// If anyone reverts cli.go:27 SignForAudiences -> Sign or downgrades
+	// alg/v, this assertion fires with the message below — distinguishing
+	// the regression from a generic OAuth path failure.
 	parts := strings.Split(resp.AccessToken, ".")
 	if len(parts) != 3 {
 		t.Fatalf("wire-format regression in issueTokenPair: expected 3 JWT segments, got %d", len(parts))
+	}
+	hdrSeg, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("wire-format regression in issueTokenPair: decode header: %v", err)
+	}
+	var hdr map[string]any
+	if err := json.Unmarshal(hdrSeg, &hdr); err != nil {
+		t.Fatalf("wire-format regression in issueTokenPair: unmarshal header: %v", err)
+	}
+	if hdr["alg"] != "RS256" {
+		t.Fatalf("wire-format regression: alg=%v", hdr["alg"])
+	}
+	if hdr["kid"] == "" || hdr["kid"] == nil {
+		t.Fatal("wire-format regression: missing kid header")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
@@ -212,8 +230,8 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 	if got, _ := raw["iss"].(string); got != "https://api.kittypaw.app/auth" {
 		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "https://api.kittypaw.app/auth"`, raw["iss"])
 	}
-	if v, _ := raw["v"].(float64); v != 1 {
-		t.Fatalf("wire-format regression in issueTokenPair: v = %v, want 1", raw["v"])
+	if v, _ := raw["v"].(float64); v != 2 {
+		t.Fatalf("wire-format regression in issueTokenPair: v = %v, want 2", raw["v"])
 	}
 	if _, ok := raw["uid"]; ok {
 		t.Fatalf(`wire-format regression in issueTokenPair: legacy "uid" key must not appear, got: %v`, raw)

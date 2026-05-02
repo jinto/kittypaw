@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"time"
 
@@ -21,10 +22,21 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// SignForAudiences issues a JWT with explicit audiences and scopes.
-// Pins claims version to 1 (Plan 17 spec D4 — additive only).
-// docs/specs/kittychat-credential-foundation.md
-func SignForAudiences(userID string, audiences []string, scopes []string, secret string, ttl time.Duration) (string, error) {
+// SignForAudiences issues an RS256 JWT with explicit audiences and scopes.
+// header carries kid (RFC 7515 §4.1.4) so verifiers can resolve the
+// signing key via JWKS lookup.
+//
+// Plan 21 PR-B: HS256 secret-based signing replaced with RS256 key +
+// kid pair. ClaimsVersion = 2 (Plan 20 cutover, BC 부담 0 — 사용자 0명).
+//
+// docs/specs/kittychat-credential-foundation.md D5.
+func SignForAudiences(userID string, audiences []string, scopes []string, key *rsa.PrivateKey, kid string, ttl time.Duration) (string, error) {
+	if key == nil {
+		return "", fmt.Errorf("private key is nil")
+	}
+	if kid == "" {
+		return "", fmt.Errorf("kid is empty")
+	}
 	now := time.Now()
 	claims := Claims{
 		UserID: userID,
@@ -37,22 +49,45 @@ func SignForAudiences(userID string, audiences []string, scopes []string, secret
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(secret))
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = kid
+	return token.SignedString(key)
 }
 
 // Verify parses and validates a JWT issued by SignForAudiences.
-// Strict on iss (exact match) + aud (must contain AudienceAPI) — Plan 13 H1.
-func Verify(tokenString, secret string) (*Claims, error) {
+//
+// Strict invariants (Plan 21 PR-B):
+//   - alg=RS256 only — `WithValidMethods([RS256])` blocks alg=HS256
+//     downgrade attacks even when the token is "valid" by golang-jwt's
+//     default permissive verification
+//   - iss exact match (docs/specs D8 path-form issuer)
+//   - aud strict — caller passes the expected audience. user middleware
+//     pins AudienceAPI; future device middleware will pin AudienceChat.
+//     This is the cross-audience leak guard.
+//   - leeway 60s — clock skew tolerance agreed with kittychat
+//   - kid resolved via JWKSProvider.Lookup — unknown kid → reject
+func Verify(tokenString string, jwks JWKSProvider, audience string) (*Claims, error) {
+	if jwks == nil {
+		return nil, fmt.Errorf("jwks provider is nil")
+	}
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		// Defense-in-depth: reject anything that isn't RS256 before
+		// even attempting the lookup. WithValidMethods below also
+		// catches this; we double-check here so an unsupported alg
+		// can't reach the JWKS provider.
+		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(secret), nil
+		kid, ok := token.Header["kid"].(string)
+		if !ok || kid == "" {
+			return nil, fmt.Errorf("missing kid header")
+		}
+		return jwks.Lookup(kid)
 	},
 		jwt.WithIssuer(Issuer),
-		jwt.WithAudience(AudienceAPI),
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithAudience(audience),
+		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithLeeway(60*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("parse token: %w", err)

@@ -4,6 +4,7 @@ package auth_test
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/kittypaw-app/kittyapi/internal/auth"
 	"github.com/kittypaw-app/kittyapi/internal/auth/testfixture"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
@@ -30,12 +32,12 @@ import (
 //   - testfixture (Plan 11) seeds the user; users table is the only DB
 //     dependency (no places / alias_overrides involvement).
 
-const meTestSecret = "test-secret-key-for-jwt-me-integration"
-
 type authSetup struct {
 	pool   *pgxpool.Pool
 	store  model.UserStore
 	server *httptest.Server
+	jwtKey *rsa.PrivateKey
+	jwtKID string
 }
 
 func setupAuthIntegration(t *testing.T) *authSetup {
@@ -48,6 +50,9 @@ func setupAuthIntegration(t *testing.T) *authSetup {
 		t.Fatalf("DATABASE_URL must point at a test DB (must contain \"_test\"); got %q", dsn)
 	}
 
+	cfg := config.LoadForTest()
+	provider := auth.NewSingleKeyProvider(&cfg.JWTPrivateKey.PublicKey, cfg.JWTKID)
+
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -55,7 +60,7 @@ func setupAuthIntegration(t *testing.T) *authSetup {
 	}
 
 	store := model.NewUserStore(pool)
-	mw := auth.Middleware(meTestSecret, store)
+	mw := auth.Middleware(provider, auth.AudienceAPI, store)
 	server := httptest.NewServer(mw(http.HandlerFunc(auth.HandleMe)))
 
 	t.Cleanup(func() {
@@ -67,7 +72,7 @@ func setupAuthIntegration(t *testing.T) *authSetup {
 		pool.Close()
 	})
 
-	return &authSetup{pool: pool, store: store, server: server}
+	return &authSetup{pool: pool, store: store, server: server, jwtKey: cfg.JWTPrivateKey, jwtKID: cfg.JWTKID}
 }
 
 func meRequest(t *testing.T, server *httptest.Server, bearer string) (*http.Response, []byte) {
@@ -103,7 +108,7 @@ func TestMe_Integration_ValidJWT(t *testing.T) {
 	s := setupAuthIntegration(t)
 
 	user := testfixture.SeedTestUser(t, s.store)
-	token := testfixture.IssueTestJWT(t, meTestSecret, user.ID, 15*time.Minute)
+	token := testfixture.IssueTestJWT(t, s.jwtKey, s.jwtKID, user.ID, 15*time.Minute)
 
 	resp, body := meRequest(t, s.server, token)
 	if resp.StatusCode != http.StatusOK {
@@ -129,9 +134,10 @@ func TestMe_Integration_ExpiredJWT(t *testing.T) {
 	s := setupAuthIntegration(t)
 
 	user := testfixture.SeedTestUser(t, s.store)
-	// Negative TTL — the token expires immediately, so Verify rejects with
-	// "token is expired" and the middleware returns 401.
-	token := testfixture.IssueTestJWT(t, meTestSecret, user.ID, -1*time.Second)
+	// TTL well past leeway — the token is too old, so Verify rejects with
+	// "token is expired" and the middleware returns 401. Must exceed the
+	// 60s leeway window or this case silently passes verification.
+	token := testfixture.IssueTestJWT(t, s.jwtKey, s.jwtKID, user.ID, -2*time.Minute)
 
 	resp, _ := meRequest(t, s.server, token)
 	if resp.StatusCode != http.StatusUnauthorized {

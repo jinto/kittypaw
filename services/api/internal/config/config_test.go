@@ -34,7 +34,6 @@ func loadWithEnv(t *testing.T, envs map[string]string) (*config.Config, error) {
 	t.Helper()
 	base := map[string]string{
 		"DATABASE_URL": "postgres://localhost/x",
-		"JWT_SECRET":   "test-only-dummy-not-a-real-secret", //gitleaks:allow
 	}
 	for k, v := range envs {
 		base[k] = v

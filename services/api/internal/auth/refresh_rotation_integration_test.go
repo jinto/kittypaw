@@ -18,6 +18,7 @@ import (
 
 	"github.com/kittypaw-app/kittyapi/internal/auth"
 	"github.com/kittypaw-app/kittyapi/internal/auth/testfixture"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
@@ -28,8 +29,6 @@ import (
 //   1. needs both UserStore + RefreshTokenStore (the store seam exercised
 //      by HandleTokenRefresh).
 //   2. server wraps OAuthHandler.HandleTokenRefresh, not HandleMe.
-
-const refreshTestSecret = "test-secret-key-for-refresh-rotation-integration"
 
 type refreshSetup struct {
 	pool         *pgxpool.Pool
@@ -48,6 +47,8 @@ func setupRefreshIntegration(t *testing.T) *refreshSetup {
 		t.Fatalf("DATABASE_URL must point at a test DB (must contain \"_test\"); got %q", dsn)
 	}
 
+	cfg := config.LoadForTest()
+
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -61,7 +62,8 @@ func setupRefreshIntegration(t *testing.T) *refreshSetup {
 		UserStore:         users,
 		RefreshTokenStore: refreshStore,
 		StateStore:        auth.NewStateStore(),
-		JWTSecret:         refreshTestSecret,
+		JWTPrivateKey:     cfg.JWTPrivateKey,
+		JWTKID:            cfg.JWTKID,
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
 	}
 	server := httptest.NewServer(h.HandleTokenRefresh())

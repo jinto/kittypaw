@@ -21,8 +21,7 @@ const MinJWTKeyBits = 2048
 type Config struct {
 	Port               string
 	DatabaseURL        string
-	JWTSecret          string
-	JWTPrivateKey      *rsa.PrivateKey // RS256 signing key (PR-A; replaces JWTSecret in PR-B)
+	JWTPrivateKey      *rsa.PrivateKey // RS256 signing key (Plan 21 PR-B cutover; replaces HS256 secret)
 	JWTKID             string          // RFC 7638 thumbprint of JWTPrivateKey's public half
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -43,7 +42,6 @@ func Load() (*Config, error) {
 	c := &Config{
 		Port:               env("PORT", "8080"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		JWTSecret:          os.Getenv("JWT_SECRET"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
@@ -60,7 +58,6 @@ func Load() (*Config, error) {
 
 	required := map[string]string{
 		"DATABASE_URL": c.DatabaseURL,
-		"JWT_SECRET":   c.JWTSecret,
 	}
 	for name, val := range required {
 		if val == "" {
@@ -68,13 +65,10 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if len(c.JWTSecret) < 32 {
-		return nil, fmt.Errorf("JWT_SECRET must be at least 32 characters")
-	}
-
-	// PR-A: load RSA signing key. Required from this PR onwards — fails
-	// fast at startup so an undecodable env can't survive into request
-	// time. JWT_SECRET stays alongside until PR-B's RS256 cutover.
+	// Plan 21 PR-B: RS256 cutover complete — HS256 JWT_SECRET removed.
+	// Token signing/verification flows entirely through JWT_PRIVATE_KEY_PEM_B64
+	// (PR-A) + the JWKS endpoint. The RSA key is required at startup so an
+	// undecodable env can't survive into request time.
 	//
 	// Encoding contract: standard base64 (RFC 4648 §4 — `+/` alphabet
 	// with padding). NOT URL-safe (`-_`). Mismatch at deploy time

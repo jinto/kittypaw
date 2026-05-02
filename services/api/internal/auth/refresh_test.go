@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 	"github.com/kittypaw-app/kittyapi/internal/model"
 )
 
@@ -62,6 +63,7 @@ func (s *refreshTestRefreshStore) RevokeAllForUser(_ context.Context, _ string) 
 
 func setupRefreshTest(t *testing.T) (*auth.OAuthHandler, *refreshTestRefreshStore) {
 	t.Helper()
+	cfg := config.LoadForTest()
 	rtStore := newRefreshTestRefreshStore()
 	userStore := newMockUserStore()
 
@@ -72,7 +74,8 @@ func setupRefreshTest(t *testing.T) (*auth.OAuthHandler, *refreshTestRefreshStor
 		UserStore:         userStore,
 		RefreshTokenStore: rtStore,
 		StateStore:        auth.NewStateStore(),
-		JWTSecret:         testSecret,
+		JWTPrivateKey:     cfg.JWTPrivateKey,
+		JWTKID:            cfg.JWTKID,
 	}
 	t.Cleanup(h.StateStore.Close)
 	return h, rtStore

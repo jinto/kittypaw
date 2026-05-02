@@ -167,8 +167,15 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		MaxAge:           300,
 	}))
 
+	// JWKS provider — the same single-key store backs /.well-known/
+	// jwks.json publication AND user JWT verification (Plan 21 PR-B).
+	// Built before middleware wiring so authMW can consume it.
+	jwksProvider := auth.NewSingleKeyProvider(&cfg.JWTPrivateKey.PublicKey, cfg.JWTKID)
+
 	// Auth middleware — sets *User in context (nil for anonymous).
-	authMW := auth.Middleware(cfg.JWTSecret, userStore)
+	// audience pinned to AudienceAPI — user JWTs only. cross-audience
+	// leak guard (device JWT with aud=chat) lives in auth.Verify.
+	authMW := auth.Middleware(jwksProvider, auth.AudienceAPI, userStore)
 	r.Use(authMW)
 
 	// Rate limiting — after auth MW so it knows if user is authenticated.
@@ -181,7 +188,8 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		UserStore:         userStore,
 		RefreshTokenStore: refreshStore,
 		StateStore:        states,
-		JWTSecret:         cfg.JWTSecret,
+		JWTPrivateKey:     cfg.JWTPrivateKey,
+		JWTKID:            cfg.JWTKID,
 		HTTPClient:        &http.Client{Timeout: 10 * time.Second},
 	}
 
@@ -237,14 +245,6 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	if cfg.ChatRelayURL != "" {
 		discovery["chat_relay_url"] = cfg.ChatRelayURL
 	}
-
-	// JWKS provider — the same single-key store backs both /.well-known/
-	// jwks.json publication and (in PR-B) RS256 token verification. nil
-	// only in tests that don't exercise auth (we still wire it because
-	// the JWKS endpoint is anonymous and runs ahead of authMW). Plan 20
-	// PR-A keeps HS256 issuance — JWKS is published but not yet
-	// consumed by issueTokenPair.
-	jwksProvider := auth.NewSingleKeyProvider(&cfg.JWTPrivateKey.PublicKey, cfg.JWTKID)
 
 	// Routes.
 	r.Get("/health", handleHealth)

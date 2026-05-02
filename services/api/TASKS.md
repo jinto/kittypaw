@@ -414,7 +414,7 @@
 - [ ] **slog secret redaction** — custom `slog.Handler`로 `password`/`token`/`secret` 키 자동 마스킹. Lane B HIGH/0.90.
 - [ ] **shutdown race edge** — `signal.NotifyContext` cancel이 goroutine 시작 전 도착 시 select가 ctx.Done()으로 빠짐. 현재 코드 정상 작동하지만 명시적 ordering 보강 가치. Lane B Medium/0.70.
 
-## Plan 20: RS256/JWKS + device credential — PR-A (keys + JWKS infra) ← 현재
+## Plan 20: RS256/JWKS + device credential — PR-A (keys + JWKS infra) ✅ (`c75c238`)
 
 > Spec: `~/.claude/plans/silly-wiggling-balloon.md` (전체 4 PR — A/B/C/D — 중 첫 PR)
 > Goal: RSA key 인프라 + JWKS endpoint 노출. 회귀 0 (발급은 여전히 HS256). 채팅팀 verifier 통합 테스트 unblock.
@@ -454,6 +454,69 @@
 - [ ] `curl https://api.kittypaw.app/.well-known/jwks.json` 200 + JSON 응답 검증
 - [ ] 채팅팀에 PR-A 머지 신호 (verifier 통합 테스트 unblock)
 - [ ] PR-B (RS256 cutover) ina:plan kickoff
+
+## Plan 21: RS256/JWKS + device credential — PR-B (RS256 cutover) ✅
+
+> Spec: `~/.claude/plans/silly-wiggling-balloon.md` PR-B
+> Goal: user JWT 발급/검증 HS256 → RS256 cutover. ClaimsVersion v=2 bump. JWKSProvider 와이어링. 사용자 0명 윈도우 활용 (BC 부담 0).
+> 직전 머지: PR-A `c75c238` (JWKS 인프라).
+> 후속: PR-C (devices DB) → PR-D (endpoints) — 본 PR 머지 후 별도 ina:plan.
+
+**검증 결과** (Plan agent ITERATE 4 high concerns 박제 반영):
+- fixture helper 시그니처: `IssueTestJWT(t, key, kid, userID, ttl)` — testfixture가 config import 회피 (cycle)
+- `Verify(token, jwks, audience)` — caller가 audience 지정
+- JWT_SECRET dead path 동시 제거 체크리스트 (silly-wiggling-balloon.md PR-B step 14 참고)
+- wire-format guard에 header 검증 추가 (alg=RS256, kid 존재)
+
+- [x] **T1: `SignForAudiences` RS256 + `ClaimsVersion=2` (단위)**
+      RED: `internal/auth/jwt_test.go`의 `TestSignForAudiences_RoundTrip`을 RSA fixture로 갱신 — `cfg := config.LoadForTest(); SignForAudiences(userID, auds, scopes, cfg.JWTPrivateKey, cfg.JWTKID, ttl)`. 결과 token decode → header `alg=="RS256"`, `kid==cfg.JWTKID`, payload `v==2` 검증. 컴파일 실패 + assertion fail 확인.
+      GREEN: `internal/auth/scopes.go` `ClaimsVersion = 2`. `internal/auth/jwt.go` `SignForAudiences(userID string, audiences, scopes []string, key *rsa.PrivateKey, kid string, ttl time.Duration)` — `jwt.SigningMethodRS256` + `token.Header["kid"] = kid` + `token.SignedString(key)`.
+
+- [x] **T2: `Verify` JWKSProvider + leeway + downgrade guard (단위)**
+      RED: `jwt_test.go`에 4건 신규 — (a) `TestVerify_RejectsHS256_Downgrade` (alg=HS256 위조 토큰 → 401), (b) `TestVerify_LeewayBoundary_30sPass`, (c) `TestVerify_LeewayBoundary_90sFail`, (d) `TestVerify_RejectsUnknownKID`. 기존 `TestSignVerifyRoundtrip`/`TestVerifyExpired`/`TestVerifyWrongSecret`/`TestVerifyMalformed` RSA로 갱신. `TestVerifyWrongSecret` → `TestVerify_RejectsForeignKey` (다른 키로 서명 → JWKS lookup 미스).
+      GREEN: `Verify(tokenString string, jwks JWKSProvider, audience string) (*Claims, error)`. KeyFunc에서 `kid := token.Header["kid"].(string)` → `jwks.Lookup(kid)`. `jwt.WithLeeway(60*time.Second)` + `jwt.WithIssuer(Issuer)` + `jwt.WithAudience(audience)` + `jwt.WithValidMethods([]string{"RS256"})`.
+
+- [x] **T3: `IssueTestJWT` helper RS256 + cycle 회피 (단위)**
+      RED: `internal/auth/testfixture/fixture_test.go`의 3건 시그니처 변경 — `IssueTestJWT(t, cfg.JWTPrivateKey, cfg.JWTKID, "user-abc", 0)`. `auth.Verify(token, provider, auth.AudienceAPI)`. 시그니처 mismatch.
+      GREEN: `internal/auth/testfixture/fixture.go` `IssueTestJWT(t *testing.T, key *rsa.PrivateKey, kid, userID string, ttl time.Duration) string` — 내부에서 `auth.SignForAudiences(...)` 호출. testfixture가 `config` import 안 함. `doc.go` 코멘트 RS256/key-injection으로 갱신.
+
+- [x] **T4: middleware JWKS provider + audience strict + cross-aud guard (단위)**
+      RED: `internal/auth/middleware_test.go` 4 호출 시그니처 변경 (`auth.Middleware(jwks, auth.AudienceAPI, userStore)`). 신규 테스트 `TestMiddleware_RejectsCrossAudienceLeak` — device JWT (aud=AudienceChat, scope=daemon:connect)를 user middleware에 던짐 → 401 기대. `testfixture.IssueDeviceJWT` 사용 (PR-A 박제).
+      GREEN: `internal/auth/middleware.go` `Middleware(jwks JWKSProvider, audience string, users model.UserStore)`. 호출 `auth.Verify(parts[1], jwks, audience)`. `internal/auth/handler.go` `OAuthHandler.JWTSecret` 제거 + `JWTPrivateKey *rsa.PrivateKey, JWTKID string` 추가. `internal/auth/cli.go:27` `SignForAudiences(user.ID, ..., h.JWTPrivateKey, h.JWTKID, AccessTokenTTL)`.
+
+- [x] **T5: handler 레벨 테스트 cascade + wire-format guard (단위)**
+      RED: 4 파일 시그니처 cascade — `google_test.go:100`, `github_test.go:22`, `refresh_test.go:75`의 `JWTSecret: testSecret` → `JWTPrivateKey: cfg.JWTPrivateKey, JWTKID: cfg.JWTKID`. wire-format guard 강화 — `google_test.go:215` `v != 1` → `v != 2`. `L197` 직후 header 검증 5줄 추가:
+      ```go
+      hdrSeg, _ := base64.RawURLEncoding.DecodeString(parts[0])
+      var hdr map[string]any
+      _ = json.Unmarshal(hdrSeg, &hdr)
+      if hdr["alg"] != "RS256" { t.Fatalf("wire-format regression: alg=%v", hdr["alg"]) }
+      if hdr["kid"] == "" { t.Fatal("wire-format regression: missing kid") }
+      ```
+      GREEN: 위 cascade가 자체로 GREEN. production 변경 없음 (T1~T4에서 완료).
+
+- [x] **T6: integration 테스트 cascade (build tag integration)**
+      RED: `me_integration_test.go` (3 호출) + `refresh_rotation_integration_test.go` 시그니처 cascade — `auth.Middleware(jwksProvider, auth.AudienceAPI, store)` + `IssueTestJWT(t, key, kid, ...)` + `JWTPrivateKey/JWTKID` 두 필드.
+      GREEN: 시그니처 변경. 통합 테스트 회귀 0 (`make test-integration -p 1`).
+
+- [x] **T7: cmd/server/main 와이어링 + JWT_SECRET dead path 일괄 제거**
+      RED: `cmd/server/main_test.go`의 `cfg.JWTSecret = "test-secret"` 5줄 제거 → 컴파일/lint fail (unused field).
+      GREEN:
+      - `cmd/server/main.go`: `auth.Middleware(jwksProvider, auth.AudienceAPI, userStore)` + oauthHandler에 `JWTPrivateKey: cfg.JWTPrivateKey, JWTKID: cfg.JWTKID`
+      - `internal/config/config.go`: `JWTSecret string` 필드 + Load의 required map + len ≥ 32 check 제거
+      - `internal/config/config_test.go`: `loadWithEnv` base map에서 `JWT_SECRET` 제거
+      - `cmd/server/main_test.go`: `cfg.JWTSecret = "test-secret"` 5줄 제거
+      - 각 _test.go의 `testSecret` 상수 (5+곳) 정리 — RSA fixture로 의미 변경 또는 제거
+      - `.env.example`: `JWT_SECRET` 제거 (PR-A에서 박제된 신규 `JWT_PRIVATE_KEY_PEM_B64`만 유지)
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` (T1~T5 단위 + T6 integration) PASS / `make test-integration -p 1` 회귀 0.
+
+**완료 신호**: 기존 user 흐름 동일 (Google/GitHub/CLI/Refresh OAuth flow), 단지 발급 토큰이 RS256/v=2로 변경. middleware가 JWKSProvider로 검증. cross-audience leak 차단. downgrade attack 방어.
+
+**Operational Checklist** (PR-B 머지 후):
+- [ ] `fab deploy` — RS256 발급 prod 활성. `JWT_SECRET` env 운영 서버에서 제거 가능 (선택).
+- [ ] `make smoke` 회귀 0 + Google OAuth 직접 1회 (사용자 0명이라 회귀 risk 거의 없음).
+- [ ] 채팅팀에 user JWT가 RS256/v=2로 발급 시작 알림 (kittychat이 user JWT 검증 안 하므로 무영향이지만 contract 변경).
 
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 

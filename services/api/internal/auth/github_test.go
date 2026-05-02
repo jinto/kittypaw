@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/kittypaw-app/kittyapi/internal/auth"
+	"github.com/kittypaw-app/kittyapi/internal/config"
 )
 
 func setupGitHubTest(t *testing.T, ghServer *httptest.Server) (*auth.OAuthHandler, auth.GitHubConfig) {
 	t.Helper()
 
+	appCfg := config.LoadForTest()
 	states := auth.NewStateStore()
 	t.Cleanup(states.Close)
 
@@ -19,7 +21,8 @@ func setupGitHubTest(t *testing.T, ghServer *httptest.Server) (*auth.OAuthHandle
 		UserStore:         newMockUserStore(),
 		RefreshTokenStore: &mockRefreshTokenStore{},
 		StateStore:        states,
-		JWTSecret:         testSecret,
+		JWTPrivateKey:     appCfg.JWTPrivateKey,
+		JWTKID:            appCfg.JWTKID,
 		HTTPClient:        ghServer.Client(),
 		GitHubTokenURL:    ghServer.URL + "/login/oauth/access_token",
 		GitHubUserURL:     ghServer.URL + "/user",

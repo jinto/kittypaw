@@ -25,7 +25,6 @@ func testJWTKey(t *testing.T) (*rsa.PrivateKey, string) {
 func testRouter(t *testing.T) http.Handler {
 	t.Helper()
 	cfg := config.LoadForTest()
-	cfg.JWTSecret = "test-secret"
 	r, cleanup := NewRouter(cfg, nil, nil, nil)
 	t.Cleanup(cleanup)
 	return r
@@ -59,7 +58,6 @@ func TestHealthEndpoint(t *testing.T) {
 // must NOT appear. The kittypaw daemon now reads kakao_relay_url only.
 func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
-	cfg.JWTSecret = "test-secret"
 	cfg.KakaoRelayURL = "https://kakao.kittypaw.app"
 	r, cleanup := NewRouter(cfg, nil, nil, nil)
 	t.Cleanup(cleanup)
@@ -90,7 +88,6 @@ func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 // 2026-04-30-remote-relay-control-plane-design.md).
 func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
-	cfg.JWTSecret = "test-secret"
 	cfg.ChatRelayURL = "https://chat.kittypaw.app"
 	r, cleanup := NewRouter(cfg, nil, nil, nil)
 	t.Cleanup(cleanup)
@@ -118,7 +115,6 @@ func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 // derive logic must surface here.
 func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	cfg := config.LoadForTest()
-	cfg.JWTSecret = "test-secret"
 	cfg.BaseURL = "http://localhost:8080/" // trailing slash — TrimRight defends
 	r, cleanup := NewRouter(cfg, nil, nil, nil)
 	t.Cleanup(cleanup)
@@ -194,7 +190,6 @@ func TestJWKSEndpoint_CacheControl(t *testing.T) {
 // leak detection itself is out of scope for a unit test.
 func TestNewRouter_CleanupReleasesStores(t *testing.T) {
 	cfg := config.LoadForTest()
-	cfg.JWTSecret = "test-secret"
 	r, cleanup := NewRouter(cfg, nil, nil, nil)
 	if r == nil {
 		t.Fatal("expected non-nil router")

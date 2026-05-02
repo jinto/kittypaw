@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -32,7 +33,8 @@ type OAuthHandler struct {
 	UserStore         model.UserStore
 	RefreshTokenStore model.RefreshTokenStore
 	StateStore        *StateStore
-	JWTSecret         string
+	JWTPrivateKey     *rsa.PrivateKey // Plan 21 PR-B: HS256 secret → RS256 key
+	JWTKID            string          // RFC 7638 thumbprint, embedded in JWT header
 	HTTPClient        *http.Client
 
 	// Overridable for testing.
