@@ -1,0 +1,92 @@
+name: Release Kittypaw
+
+on:
+  push:
+    tags:
+      - "kittypaw/v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/kittypaw
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kittypaw/go.mod
+
+      - name: Build archives
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#kittypaw/v}"
+          DIST="$GITHUB_WORKSPACE/dist"
+          mkdir -p "$DIST"
+
+          build_unix() {
+            os="$1"
+            arch="$2"
+            outdir="$(mktemp -d)"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -ldflags "-s -w -X main.version=${VERSION}" -o "$outdir/kittypaw" ./cli
+            tar -C "$outdir" -czf "$DIST/kittypaw_${os}_${arch}.tar.gz" kittypaw
+            rm -rf "$outdir"
+          }
+
+          build_windows() {
+            arch="$1"
+            outdir="$(mktemp -d)"
+            GOOS=windows GOARCH="$arch" CGO_ENABLED=0 \
+              go build -ldflags "-s -w -X main.version=${VERSION}" -o "$outdir/kittypaw.exe" ./cli
+            (cd "$outdir" && zip -q "$DIST/kittypaw_windows_${arch}.zip" kittypaw.exe)
+            rm -rf "$outdir"
+          }
+
+          build_unix linux amd64
+          build_unix linux arm64
+          build_unix darwin amd64
+          build_unix darwin arm64
+          build_windows amd64
+          build_windows arm64
+
+          cp install.sh "$DIST/install.sh"
+          (cd "$DIST" && sha256sum kittypaw_* install.sh > checksums.txt)
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#kittypaw/v}"
+          DIST="$GITHUB_WORKSPACE/dist"
+          NOTES="$RUNNER_TEMP/kittypaw-release-notes.md"
+          cat > "$NOTES" <<EOF
+          ## Install
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/install.sh | sh
+          \`\`\`
+
+          Set \`VERSION=${VERSION}\` to install this version explicitly.
+          EOF
+
+          if gh release view "$TAG_NAME" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" "$DIST"/* --clobber --repo "$REPO"
+          else
+            gh release create "$TAG_NAME" "$DIST"/* \
+              --repo "$REPO" \
+              --title "Kittypaw v${VERSION}" \
+              --notes-file "$NOTES"
+          fi

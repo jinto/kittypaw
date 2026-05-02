@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="kittypaw-app/kittypaw"
+REPO="kittypaw-app/kitty"
 BINARY="kittypaw"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
@@ -62,12 +62,18 @@ esac
 # ----- resolve version -----
 
 if [ -z "$VERSION" ]; then
-  VERSION="$(curl -fsSL --proto '=https' --tlsv1.2 \
-    "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')"
+  TAG="$(curl -fsSL --proto '=https' --tlsv1.2 \
+    "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+    | grep '"tag_name": "kittypaw/v' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/')"
+else
+  case "$VERSION" in
+    kittypaw/v*) TAG="$VERSION" ;;
+    v*) TAG="kittypaw/${VERSION}" ;;
+    *) TAG="kittypaw/v${VERSION}" ;;
+  esac
 fi
 
-VERSION="${VERSION#v}"
+VERSION="${TAG#kittypaw/v}"
 
 if [ -z "$VERSION" ]; then
   echo "Failed to determine latest version" >&2; exit 1
@@ -78,7 +84,8 @@ echo "Installing ${BINARY} v${VERSION} (${OS}/${ARCH})..."
 # ----- download & verify -----
 
 TARBALL="${BINARY}_${OS}_${ARCH}.tar.gz"
-BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
+ENC_TAG="$(printf '%s' "$TAG" | sed 's#/#%2F#g')"
+BASE_URL="https://github.com/${REPO}/releases/download/${ENC_TAG}"
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
