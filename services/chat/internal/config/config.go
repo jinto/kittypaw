@@ -10,6 +10,7 @@ type Config struct {
 	APIToken       string
 	DeviceToken    string
 	JWTSecret      string
+	JWKSURL        string
 	UserID         string
 	DeviceID       string
 	LocalAccountID string
@@ -22,18 +23,20 @@ func Load() (Config, error) {
 		APIToken:       os.Getenv("KITTYCHAT_API_TOKEN"),
 		DeviceToken:    os.Getenv("KITTYCHAT_DEVICE_TOKEN"),
 		JWTSecret:      env("KITTYCHAT_JWT_SECRET", os.Getenv("JWT_SECRET")),
+		JWKSURL:        os.Getenv("KITTYCHAT_JWKS_URL"),
 		UserID:         os.Getenv("KITTYCHAT_USER_ID"),
 		DeviceID:       os.Getenv("KITTYCHAT_DEVICE_ID"),
 		LocalAccountID: os.Getenv("KITTYCHAT_LOCAL_ACCOUNT_ID"),
 		Version:        env("KITTYCHAT_VERSION", "dev"),
 	}
 
+	hasJWTVerifier := cfg.JWTSecret != "" || cfg.JWKSURL != ""
 	required := map[string]string{}
-	if cfg.JWTSecret == "" {
+	if !hasJWTVerifier {
 		required["KITTYCHAT_API_TOKEN"] = cfg.APIToken
 		required["KITTYCHAT_DEVICE_TOKEN"] = cfg.DeviceToken
 	}
-	if cfg.JWTSecret == "" || cfg.APIToken != "" || cfg.DeviceToken != "" {
+	if !hasJWTVerifier || cfg.APIToken != "" || cfg.DeviceToken != "" {
 		required["KITTYCHAT_USER_ID"] = cfg.UserID
 		required["KITTYCHAT_DEVICE_ID"] = cfg.DeviceID
 		required["KITTYCHAT_LOCAL_ACCOUNT_ID"] = cfg.LocalAccountID

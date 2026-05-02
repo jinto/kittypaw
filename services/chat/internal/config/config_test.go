@@ -9,6 +9,7 @@ func TestLoadRequiresStaticMVPSecrets(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
@@ -24,6 +25,7 @@ func TestLoadUsesEnvAndDefaults(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -50,6 +52,7 @@ func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -70,6 +73,7 @@ func TestLoadUsesJWTSecretInsteadOfStaticAPIToken(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -88,6 +92,7 @@ func TestLoadAllowsJWTOnlyCredentials(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
@@ -101,11 +106,31 @@ func TestLoadAllowsJWTOnlyCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsJWKSOnlyCredentials(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "https://api.kittypaw.app/.well-known/jwks.json")
+	t.Setenv("KITTYCHAT_USER_ID", "")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.JWKSURL != "https://api.kittypaw.app/.well-known/jwks.json" {
+		t.Fatalf("JWKSURL = %q", cfg.JWKSURL)
+	}
+}
+
 func TestLoadRequiresStaticPrincipalWhenStaticTokenConfigured(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
@@ -120,6 +145,7 @@ func TestLoadRejectsShortJWTSecret(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "short")
 	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
 	t.Setenv("KITTYCHAT_USER_ID", "user_1")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")

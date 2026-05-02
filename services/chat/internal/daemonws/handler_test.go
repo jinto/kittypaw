@@ -220,6 +220,54 @@ func TestDaemonWebSocketRegistersOnlyHelloAdvertisedAccounts(t *testing.T) {
 	}
 }
 
+func TestDaemonWebSocketAllowsJWTScopedHelloAccounts(t *testing.T) {
+	fb := &captureBroker{registered: make(chan broker.DevicePrincipal, 1)}
+	r := chi.NewRouter()
+	r.Mount("/daemon", NewHandler(StaticTokenAuthenticator{
+		Token: "dev_secret",
+		Principal: broker.DevicePrincipal{
+			UserID:   "user_1",
+			DeviceID: "dev_1",
+		},
+	}, fb).Routes())
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/daemon/connect"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer dev_secret"}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice", "bob"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+
+	select {
+	case got := <-fb.registered:
+		if got.UserID != "user_1" || got.DeviceID != "dev_1" {
+			t.Fatalf("registered identity = %+v", got)
+		}
+		if len(got.LocalAccountIDs) != 2 || got.LocalAccountIDs[0] != "alice" || got.LocalAccountIDs[1] != "bob" {
+			t.Fatalf("registered accounts = %+v, want [alice bob]", got.LocalAccountIDs)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for broker registration")
+	}
+}
+
 func TestDaemonWebSocketRejectsUnexpectedPostHelloFrame(t *testing.T) {
 	fb := &captureBroker{
 		registered: make(chan broker.DevicePrincipal, 1),

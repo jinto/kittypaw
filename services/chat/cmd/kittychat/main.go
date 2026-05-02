@@ -49,8 +49,8 @@ func newRouter(cfg config.Config) (http.Handler, error) {
 
 func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, error) {
 	verifier := identity.NewMemoryCredentialVerifier()
-	if cfg.APIToken == "" && cfg.JWTSecret == "" {
-		return nil, fmt.Errorf("api token or jwt secret is required")
+	if cfg.APIToken == "" && cfg.JWTSecret == "" && cfg.JWKSURL == "" {
+		return nil, fmt.Errorf("api token, jwt secret, or jwks url is required")
 	}
 	hasStaticSeed := false
 	if cfg.APIToken != "" {
@@ -81,9 +81,10 @@ func newCredentialVerifier(cfg config.Config) (identity.CredentialVerifier, erro
 		}
 		hasStaticSeed = true
 	}
-	if cfg.JWTSecret != "" {
+	if cfg.JWTSecret != "" || cfg.JWKSURL != "" {
 		jwtVerifier, err := identity.NewJWTCredentialVerifier(identity.JWTVerifierConfig{
-			Secret: cfg.JWTSecret,
+			Secret:  cfg.JWTSecret,
+			JWKSURL: cfg.JWKSURL,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("jwt verifier: %w", err)

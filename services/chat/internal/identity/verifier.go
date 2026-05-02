@@ -16,6 +16,7 @@ const (
 	IssuerKittyAPI    = "https://api.kittypaw.app/auth"
 
 	CredentialVersion1 = 1
+	CredentialVersion2 = 2
 )
 
 type Scope string
@@ -158,6 +159,14 @@ func (v *MemoryCredentialVerifier) AddDevice(token string, claims DeviceClaims) 
 	if err := validateDeviceClaims(claims); err != nil {
 		return err
 	}
+	if len(claims.LocalAccountIDs) == 0 {
+		return fmt.Errorf("at least one local account is required")
+	}
+	for _, accountID := range claims.LocalAccountIDs {
+		if accountID == "" {
+			return fmt.Errorf("local account id is required")
+		}
+	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.devices[token] = cloneDeviceClaims(claims)
@@ -225,14 +234,6 @@ func validateDeviceClaims(claims DeviceClaims) error {
 	if claims.Subject != "device:"+claims.DeviceID {
 		return fmt.Errorf("device subject must match device_id")
 	}
-	if len(claims.LocalAccountIDs) == 0 {
-		return fmt.Errorf("at least one local account is required")
-	}
-	for _, accountID := range claims.LocalAccountIDs {
-		if accountID == "" {
-			return fmt.Errorf("local account id is required")
-		}
-	}
 	return nil
 }
 
@@ -243,8 +244,8 @@ func validateCommonClaims(subject string, audiences []string, version int, scope
 	if !hasAudience(audiences, AudienceKittyChat) {
 		return fmt.Errorf("audience must include %q", AudienceKittyChat)
 	}
-	if version != CredentialVersion1 {
-		return fmt.Errorf("credential version must be %d", CredentialVersion1)
+	if version != CredentialVersion1 && version != CredentialVersion2 {
+		return fmt.Errorf("unsupported credential version %d", version)
 	}
 	if len(scopes) == 0 {
 		return fmt.Errorf("at least one scope is required")

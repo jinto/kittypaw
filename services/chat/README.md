@@ -33,9 +33,10 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `KITTYCHAT_JWT_SECRET` | unset | HS256 secret shared with kittyapi for API-issued access tokens. Falls back to `JWT_SECRET` when unset |
-| `KITTYCHAT_API_TOKEN` | required when JWT secret is unset | Static MVP bearer token fallback for web chat and OpenAI-compatible client requests |
-| `KITTYCHAT_DEVICE_TOKEN` | required when JWT secret is unset | Static MVP bearer token fallback for daemon WebSocket connections |
+| `KITTYCHAT_JWKS_URL` | unset | kittyapi JWKS endpoint for RS256 API-issued access tokens and daemon device credentials |
+| `KITTYCHAT_JWT_SECRET` | unset | Legacy HS256 shared-secret fallback. Falls back to `JWT_SECRET` when unset |
+| `KITTYCHAT_API_TOKEN` | required when no JWT verifier is configured | Static MVP bearer token fallback for web chat and OpenAI-compatible client requests |
+| `KITTYCHAT_DEVICE_TOKEN` | required when no JWT verifier is configured | Static MVP bearer token fallback for daemon WebSocket connections |
 | `KITTYCHAT_USER_ID` | required for static token fallback | MVP cloud user id |
 | `KITTYCHAT_DEVICE_ID` | required for static token fallback | MVP device id |
 | `KITTYCHAT_LOCAL_ACCOUNT_ID` | required for static token fallback | Local KittyPaw account id routed through this device |
@@ -61,7 +62,7 @@ make smoke-local
 Example local run:
 
 ```bash
-KITTYCHAT_JWT_SECRET=test_jwt_secret_with_at_least_32_bytes \
+KITTYCHAT_API_TOKEN=api_secret \
 KITTYCHAT_DEVICE_TOKEN=dev_secret \
 KITTYCHAT_USER_ID=user_1 \
 KITTYCHAT_DEVICE_ID=dev_1 \
@@ -69,15 +70,16 @@ KITTYCHAT_LOCAL_ACCOUNT_ID=alice \
 make run
 ```
 
-API client tokens are expected to use the kittyapi wire format:
+API client tokens submitted directly to KittyChat are expected to use the
+kittyapi wire format and include the KittyChat audience:
 
 ```json
 {
   "iss": "https://api.kittypaw.app/auth",
   "sub": "user_<id>",
-  "aud": ["https://api.kittypaw.app", "https://chat.kittypaw.app"],
+  "aud": ["https://chat.kittypaw.app"],
   "scope": ["chat:relay", "models:read"],
-  "v": 1
+  "v": 2
 }
 ```
 
@@ -95,12 +97,14 @@ Daemon device credentials are also accepted as kittyapi JWTs:
   "sub": "device:dev_1",
   "aud": ["https://chat.kittypaw.app"],
   "scope": ["daemon:connect"],
-  "v": 1,
-  "user_id": "user_<id>",
-  "device_id": "dev_1",
-  "local_accounts": ["alice", "bob"]
+  "v": 2,
+  "user_id": "user_<id>"
 }
 ```
+
+Device JWTs are RS256 signed, select keys with the JWT `kid` header, and are
+verified against `KITTYCHAT_JWKS_URL`. KittyChat caches JWKS keys for 10 minutes
+and refetches once when a token presents an unknown `kid`.
 
 Static API/device tokens can still be configured as a fallback while the daemon
 credential issuance flow is being rolled out.
@@ -110,8 +114,10 @@ credential issuance flow is being rolled out.
 Daemon WebSocket connections are scoped by verified identity, not by local
 account names alone. `hello.local_accounts` is the set of local account ids that
 the current daemon process is actively serving on that connection. The relay
-checks that every advertised account is within the daemon credential's
-`local_accounts` claim, then registers only the advertised active accounts.
+registers only the advertised active accounts. Static fallback device
+credentials can still carry a configured account allow-list; RS256 device JWTs do
+not carry account claims, so accounts are scoped by the verified `user_id` and
+`device_id`.
 
 Effective routing key:
 

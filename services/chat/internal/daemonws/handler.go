@@ -141,13 +141,15 @@ func principalForHello(hello protocol.Frame, principal broker.DevicePrincipal) (
 	if hello.DeviceID != principal.DeviceID {
 		return broker.DevicePrincipal{}, fmt.Errorf("hello device_id does not match credential")
 	}
-	allowed := make(map[string]struct{}, len(principal.LocalAccountIDs))
-	for _, accountID := range principal.LocalAccountIDs {
-		allowed[accountID] = struct{}{}
-	}
-	for _, accountID := range hello.LocalAccounts {
-		if _, ok := allowed[accountID]; !ok {
-			return broker.DevicePrincipal{}, fmt.Errorf("hello local account does not match credential")
+	if len(principal.LocalAccountIDs) > 0 {
+		allowed := make(map[string]struct{}, len(principal.LocalAccountIDs))
+		for _, accountID := range principal.LocalAccountIDs {
+			allowed[accountID] = struct{}{}
+		}
+		for _, accountID := range hello.LocalAccounts {
+			if _, ok := allowed[accountID]; !ok {
+				return broker.DevicePrincipal{}, fmt.Errorf("hello local account does not match credential")
+			}
 		}
 	}
 	return broker.DevicePrincipal{

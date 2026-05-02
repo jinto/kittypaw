@@ -2,6 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,6 +119,33 @@ func TestNewCredentialVerifierUsesJWTForDeviceCredentials(t *testing.T) {
 	}
 }
 
+func TestNewCredentialVerifierUsesJWKSForDeviceCredentials(t *testing.T) {
+	key := newTestRSAKey(t)
+	kid := "test-key-1"
+	jwks := newTestJWKSet(t, kid, &key.PublicKey)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		JWKSURL: srv.URL,
+	}
+	verifier, err := newCredentialVerifier(cfg)
+	if err != nil {
+		t.Fatalf("newCredentialVerifier() error = %v", err)
+	}
+
+	claims, err := verifier.VerifyDevice(context.Background(), signTestRS256DeviceJWT(t, key, kid, "user_1", "dev_1"))
+	if err != nil {
+		t.Fatalf("VerifyDevice() error = %v", err)
+	}
+	if claims.UserID != "user_1" || claims.DeviceID != "dev_1" {
+		t.Fatalf("device identity = %+v", claims)
+	}
+}
+
 func TestNewServerAcceptsJWTDeviceCredentialOnDaemonConnect(t *testing.T) {
 	cfg := config.Config{
 		JWTSecret: "test-jwt-secret-with-at-least-32-bytes",
@@ -133,6 +165,49 @@ func TestNewServerAcceptsJWTDeviceCredentialOnDaemonConnect(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("dial daemon websocket with JWT device credential: %v", err)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
+
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:            protocol.FrameHello,
+		DeviceID:        "dev_1",
+		LocalAccounts:   []string{"alice"},
+		DaemonVersion:   "test",
+		ProtocolVersion: protocol.ProtocolVersion1,
+		Capabilities:    []protocol.Operation{protocol.OperationOpenAIModels},
+	}); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+}
+
+func TestNewServerAcceptsJWKSDeviceCredentialOnDaemonConnect(t *testing.T) {
+	key := newTestRSAKey(t)
+	kid := "test-key-1"
+	jwks := newTestJWKSet(t, kid, &key.PublicKey)
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	defer jwksServer.Close()
+
+	cfg := config.Config{
+		JWKSURL: jwksServer.URL,
+		Version: "test",
+	}
+	router, err := newRouter(cfg)
+	if err != nil {
+		t.Fatalf("newRouter() error = %v", err)
+	}
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, wsURL(srv.URL), &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + signTestRS256DeviceJWT(t, key, kid, "user_1", "dev_1")}},
+	})
+	if err != nil {
+		t.Fatalf("dial daemon websocket with JWKS device credential: %v", err)
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "test done") }()
 
@@ -259,4 +334,52 @@ func responseStatus(resp *http.Response) int {
 		return 0
 	}
 	return resp.StatusCode
+}
+
+func newTestRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	return key
+}
+
+func newTestJWKSet(t *testing.T, kid string, key *rsa.PublicKey) []byte {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"keys": []map[string]string{{
+			"kty": "RSA",
+			"use": "sig",
+			"alg": "RS256",
+			"kid": kid,
+			"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal JWKS: %v", err)
+	}
+	return body
+}
+
+func signTestRS256DeviceJWT(t *testing.T, key *rsa.PrivateKey, kid, userID, deviceID string) string {
+	t.Helper()
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss":     identity.IssuerKittyAPI,
+		"sub":     "device:" + deviceID,
+		"aud":     []string{identity.AudienceKittyChat},
+		"scope":   []string{"daemon:connect"},
+		"v":       identity.CredentialVersion2,
+		"user_id": userID,
+		"iat":     now.Unix(),
+		"exp":     now.Add(time.Hour).Unix(),
+	})
+	token.Header["kid"] = kid
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign RS256 device jwt: %v", err)
+	}
+	return signed
 }
