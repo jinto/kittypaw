@@ -27,9 +27,10 @@ type cliCodeEntry struct {
 // Used by the code-paste mode: the browser shows a code, the user
 // types it into the CLI, and the CLI exchanges it for tokens.
 type CLICodeStore struct {
-	mu      sync.Mutex
-	entries map[string]cliCodeEntry
-	stop    chan struct{}
+	mu        sync.Mutex
+	entries   map[string]cliCodeEntry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewCLICodeStore() *CLICodeStore {
@@ -41,8 +42,9 @@ func NewCLICodeStore() *CLICodeStore {
 	return s
 }
 
+// Close stops the sweep goroutine. Idempotent (sync.Once).
 func (s *CLICodeStore) Close() {
-	close(s.stop)
+	s.closeOnce.Do(func() { close(s.stop) })
 }
 
 // Create stores a token pair and returns a displayable code like "ABCD-1234".

@@ -10,14 +10,17 @@ import (
 	"github.com/kittypaw-app/kittyapi/internal/config"
 )
 
-func testRouter() http.Handler {
+func testRouter(t *testing.T) http.Handler {
+	t.Helper()
 	cfg := config.LoadForTest()
 	cfg.JWTSecret = "test-secret"
-	return NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+	return r
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
@@ -46,7 +49,8 @@ func TestDiscoveryReturnsKakaoRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.JWTSecret = "test-secret"
 	cfg.KakaoRelayURL = "https://kakao.kittypaw.app"
-	r := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
 	w := httptest.NewRecorder()
@@ -76,7 +80,8 @@ func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.JWTSecret = "test-secret"
 	cfg.ChatRelayURL = "https://chat.kittypaw.app"
-	r := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
 	w := httptest.NewRecorder()
@@ -103,7 +108,8 @@ func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.JWTSecret = "test-secret"
 	cfg.BaseURL = "http://localhost:8080/" // trailing slash — TrimRight defends
-	r := NewRouter(cfg, nil, nil, nil)
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
 
 	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
 	w := httptest.NewRecorder()
@@ -121,8 +127,28 @@ func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	}
 }
 
+// TestNewRouter_CleanupReleasesStores pins the (router, cleanup) contract
+// added in Plan 19. cleanup must be non-nil and idempotent — each underlying
+// store guards close(stop) with sync.Once so a panic-recovery path or a
+// duplicated cleanup hook can't trip "close of closed channel". Goroutine
+// leak detection itself is out of scope for a unit test.
+func TestNewRouter_CleanupReleasesStores(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.JWTSecret = "test-secret"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	if r == nil {
+		t.Fatal("expected non-nil router")
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup")
+	}
+	// Two calls must be safe — Phase 2 sync.Once contract on each store.
+	cleanup()
+	cleanup()
+}
+
 func TestNotFound(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -137,7 +163,7 @@ func TestNotFound(t *testing.T) {
 // TestAlmanacRouteWiredWithRateLimit confirms the new /v1/almanac/... route
 // is registered and inherits the global rate limiter (anon = 5/min).
 func TestAlmanacRouteWiredWithRateLimit(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
 	const peer = "192.0.2.43:1234"
@@ -173,7 +199,7 @@ func TestAlmanacRouteWiredWithRateLimit(t *testing.T) {
 // key per request. The fix: trust only X-Real-IP (which nginx canonically
 // overrides) and otherwise fall back to the actual TCP peer (r.RemoteAddr).
 func TestRouter_TrueClientIPHeaderDoesNotBypassRateLimit(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
 	const peer = "192.0.2.71:1234"
@@ -209,7 +235,7 @@ func TestRouter_TrueClientIPHeaderDoesNotBypassRateLimit(t *testing.T) {
 // real peer to any client-supplied X-Forwarded-For, leaving the attacker
 // value at index 0 — which chi.RealIP took as the canonical IP.
 func TestRouter_XForwardedForHeaderDoesNotBypassRateLimit(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
 	const peer = "192.0.2.72:1234"
@@ -241,7 +267,7 @@ func TestRouter_XForwardedForHeaderDoesNotBypassRateLimit(t *testing.T) {
 // traffic behind nginx would share the loopback IP key and trip the limit
 // after 5 total requests across the entire user base.
 func TestRouter_XRealIPHeaderTrustedForRateLimit(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	const url = "/v1/almanac/lunar-date?solYear=2026&solMonth=05&solDay=01"
 	const nginxPeer = "127.0.0.1:8443"
@@ -285,7 +311,7 @@ func TestRouter_XRealIPHeaderTrustedForRateLimit(t *testing.T) {
 // The handler will return 502 (no upstream/key) for the first calls — what
 // we care about is that the 6th request short-circuits with 429.
 func TestWeatherRouteWiredWithRateLimit(t *testing.T) {
-	r := testRouter()
+	r := testRouter(t)
 
 	const url = "/v1/weather/kma/village-fcst?lat=37.5665&lon=126.978"
 	const peer = "192.0.2.42:1234"

@@ -16,9 +16,10 @@ func (e *entry) expired() bool {
 }
 
 type Cache struct {
-	mu      sync.RWMutex
-	entries map[string]*entry
-	stop    chan struct{}
+	mu        sync.RWMutex
+	entries   map[string]*entry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 func New() *Cache {
@@ -30,8 +31,11 @@ func New() *Cache {
 	return c
 }
 
+// Close stops the sweep goroutine. Idempotent — safe to call multiple
+// times so panic-recovery paths or duplicated cleanup hooks don't trip
+// "close of closed channel".
 func (c *Cache) Close() {
-	close(c.stop)
+	c.closeOnce.Do(func() { close(c.stop) })
 }
 
 func (c *Cache) Set(key string, data []byte, ttl time.Duration) {

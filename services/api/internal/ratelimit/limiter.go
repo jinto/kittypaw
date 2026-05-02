@@ -11,11 +11,12 @@ type window struct {
 }
 
 type Limiter struct {
-	mu      sync.Mutex
-	windows map[string]*window
-	daily   map[string]*window
-	stop    chan struct{}
-	nowFunc func() time.Time // for testing
+	mu        sync.Mutex
+	windows   map[string]*window
+	daily     map[string]*window
+	stop      chan struct{}
+	closeOnce sync.Once
+	nowFunc   func() time.Time // for testing
 }
 
 func New() *Limiter {
@@ -33,8 +34,9 @@ func NewWithClock(nowFunc func() time.Time) *Limiter {
 	return l
 }
 
+// Close stops the sweep goroutine. Idempotent (sync.Once).
 func (l *Limiter) Close() {
-	close(l.stop)
+	l.closeOnce.Do(func() { close(l.stop) })
 }
 
 func (l *Limiter) now() time.Time {

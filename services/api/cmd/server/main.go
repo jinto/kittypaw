@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,16 +25,71 @@ import (
 	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
 )
 
+// shutdownGrace is the time given to in-flight requests after SIGTERM/SIGINT
+// before the server is force-closed. Long enough for slow upstream calls
+// (e.g. KMA village-fcst with 15s client timeout) to finish, short enough
+// that systemd does not escalate to SIGKILL (default TimeoutStopSec=90s).
+const shutdownGrace = 30 * time.Second
+
 func main() {
+	initLogging()
+
+	if err := run(); err != nil {
+		slog.Error("server exited", "err", err)
+		os.Exit(1)
+	}
+}
+
+// initLogging wires slog as the default logger. JSON handler to stderr so
+// systemd journal captures structured fields. Level from LOG_LEVEL env
+// (debug|info|warn|error), defaults to info. Unknown values fall back
+// to info AFTER an explicit warn — silent fallback masks operator typos
+// like LOG_LEVEL=verbose or LOG_LEVEL=WARN (case-sensitive lookup).
+func initLogging() {
+	raw := strings.ToLower(os.Getenv("LOG_LEVEL"))
+	level := slog.LevelInfo
+	known := true
+	switch raw {
+	case "", "info":
+		// default
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		known = false
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	if !known {
+		slog.Warn("unknown LOG_LEVEL — falling back to info", "value", raw)
+	}
+}
+
+// run wires the config, DB, router, and HTTP server, blocking until either
+// the listener errors or a SIGINT/SIGTERM arrives. On signal, it drains
+// in-flight requests for shutdownGrace before returning.
+func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
-	ctx := context.Background()
+	// signal.NotifyContext cancels ctx on the first SIGINT or SIGTERM.
+	// A second signal restores default behavior (process termination) —
+	// this gives operators an escape hatch when graceful drain hangs.
+	ctx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// Defers below run in reverse order on return: cleanup() first
+	// (closes sweep goroutines) → pool.Close() (DB pool) → stopSignals()
+	// (release signal handler). Independent resources, but the order
+	// keeps signal listening live until the last possible moment so
+	// a second SIGTERM during drain still triggers immediate exit.
+	defer stopSignals()
+
 	pool, err := model.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		return fmt.Errorf("db: %w", err)
 	}
 	defer pool.Close()
 
@@ -37,15 +97,60 @@ func main() {
 	refreshStore := model.NewRefreshTokenStore(pool)
 	placeStore := model.NewPlaceStore(pool)
 
-	r := NewRouter(cfg, userStore, refreshStore, placeStore)
+	router, cleanup := NewRouter(cfg, userStore, refreshStore, placeStore)
+	defer cleanup()
 
-	log.Printf("listening on :%s", cfg.Port)
-	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
-		log.Fatalf("server: %v", err)
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: router,
+		// ReadHeaderTimeout caps the slowloris attack window — clients
+		// must finish sending headers within 10s. Body read timeouts
+		// are per-handler (MaxBytesReader). WriteTimeout caps slow
+		// readers stalling response goroutines (15s is the longest
+		// per-handler upstream timeout, 30s gives one full retry).
+		// IdleTimeout reaps keep-alive zombies before nginx upstream
+		// connection cap is hit.
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		slog.Info("listening", "addr", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+		}
+		close(serveErr)
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("listen: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		slog.Info("shutdown signal received, draining", "grace", shutdownGrace)
+	}
+
+	// Detach from the canceled root ctx so Shutdown gets its own deadline;
+	// the server otherwise refuses to wait once the parent is done.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	return nil
 }
 
-func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, placeStore model.PlaceStore) *chi.Mux {
+// NewRouter builds the HTTP router and returns it alongside a cleanup
+// function that releases the four internal sweep goroutines (cache,
+// state store, CLI code store, rate limiter). Callers MUST invoke
+// cleanup when the server stops — main() defers it; tests use
+// t.Cleanup. Without this hook the goroutines leak past process
+// shutdown intent.
+func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model.RefreshTokenStore, placeStore model.PlaceStore) (*chi.Mux, func()) {
 	r := chi.NewRouter()
 
 	// chi.middleware.RealIP intentionally omitted — it trusts attacker-
@@ -192,7 +297,13 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Get("/resolve", places.Resolve())
 	})
 
-	return r
+	cleanup := func() {
+		dataCache.Close()
+		states.Close()
+		cliCodes.Close()
+		limiter.Close()
+	}
+	return r, cleanup
 }
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {

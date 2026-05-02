@@ -391,6 +391,29 @@
 - [ ] **마이크로 follow-up**: IPv6 형태 r.RemoteAddr fallback 보강 (`net.ParseIP` + bracket strip) — 운영 영향 극미하나 깔끔함
 - [ ] **테스트 인프라 flake**: `make test-integration` 이 패키지 병렬 실행 (`go test -p`)으로 인해 model 패키지 마이그레이션과 proxy/places_integration_test 가 race. `setupGeoIntegration` 이 마이그레이션을 적용하지 않고 model 테스트가 적용한 결과에 의존. 임시 회피: `-p 1` 또는 model 먼저 실행. 본질 fix: `setupGeoIntegration` 자체 마이그레이션 적용 또는 packages 간 dependency 명시.
 
+## Plan 19: 코드 리뷰 — Phase 2 graceful shutdown + slog ✅
+
+> Spec: `~/.claude/plans/silly-wiggling-balloon.md` Phase 2.
+> Goal: SIGINT/SIGTERM 시 inflight 요청 drain + 4 store sweep goroutine 정리. slog 도입 (init/shutdown 한정).
+
+- [x] **P2-4**: `main()` → `run() error` 분리. `signal.NotifyContext(ctx, SIGINT, SIGTERM)` + `srv.Shutdown(grace=30s)` + `defer cleanup()`. `http.Server` 도입 — `ReadHeaderTimeout=10s` (slowloris), `WriteTimeout=30s` (slow reader), `IdleTimeout=120s` (keep-alive 좀비). `NewRouter` signature `(*chi.Mux, func())` — cleanup이 cache + state + cli_code + limiter 4개 store Close 호출. 4 store에 `sync.Once` 적용 (멱등성, 두 번 호출 시 panic 방지).
+- [x] **P2-5(시작)**: `initLogging()` — JSON handler to stderr, `LOG_LEVEL` env (debug/info/warn/error). unknown 값은 `slog.Warn` + info fallback (silent 방지). main lifecycle만 slog (listening / shutdown signal / exited). 기존 handler 내부 `log.Printf`는 점진 follow-up.
+- [x] 리뷰 적용 (5건): WriteTimeout/IdleTimeout, LOG_LEVEL 검증, 변수명 `stop`→`stopSignals`, defer 순서 주석, sync.Once. 임계 미달 또는 plan 외 3건 (slog secret filter, log.Printf 혼재, shutdown race edge) → 별도 follow-up.
+
+**검증**: `make build` ✓ / `make lint` 0 issues / `make test` + `test-integration -p 1` 전 패키지 PASS.
+
+**테스트**: `TestNewRouter_CleanupReleasesStores` 신규 — cleanup 두 번 호출 시 panic 없음 (sync.Once 회귀 가드). `testRouter` 시그니처 `(t *testing.T) http.Handler`로 변경, 모든 호출자에 `t.Cleanup` cascade.
+
+**Operational Checklist**:
+- [ ] **`fab deploy`** — 새 timeout 설정 반영. systemd unit에 `LOG_LEVEL` 환경변수 추가 (옵션, 기본 info).
+- [ ] **`make smoke`** — 26/26 회귀 0 확인.
+- [ ] **수동 SIGTERM 검증**: `systemctl reload kittyapi` 또는 `kill -TERM <pid>` 후 journal에서 "shutdown signal received" + "server exited" 로그 확인.
+
+**Follow-up (별도 PR)**:
+- [ ] **handler 내부 `log.Printf` → slog 일괄 마이그레이션** — `internal/auth/{refresh,google,github,cli}.go`, `internal/proxy/*.go` 등 ~16곳. structured fields + level 분류.
+- [ ] **slog secret redaction** — custom `slog.Handler`로 `password`/`token`/`secret` 키 자동 마스킹. Lane B HIGH/0.90.
+- [ ] **shutdown race edge** — `signal.NotifyContext` cancel이 goroutine 시작 전 도착 시 select가 ctx.Done()으로 빠짐. 현재 코드 정상 작동하지만 명시적 ordering 보강 가치. Lane B Medium/0.70.
+
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 

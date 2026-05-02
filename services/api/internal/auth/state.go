@@ -21,9 +21,10 @@ type stateEntry struct {
 }
 
 type StateStore struct {
-	mu      sync.Mutex
-	entries map[string]stateEntry
-	stop    chan struct{}
+	mu        sync.Mutex
+	entries   map[string]stateEntry
+	stop      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewStateStore() *StateStore {
@@ -35,8 +36,9 @@ func NewStateStore() *StateStore {
 	return s
 }
 
+// Close stops the sweep goroutine. Idempotent (sync.Once).
 func (s *StateStore) Close() {
-	close(s.stop)
+	s.closeOnce.Do(func() { close(s.stop) })
 }
 
 func (s *StateStore) Create(codeVerifier string) (string, error) {
