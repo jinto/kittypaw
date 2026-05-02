@@ -108,6 +108,18 @@ type pairResponse struct {
 	ExpiresIn          int    `json:"expires_in"`
 }
 
+// writeJSONError emits an error response in the {"error": "..."}
+// envelope used elsewhere in the API. Replaces http.Error which
+// would have served text/plain — daemons and the chat-team verifier
+// expect JSON for every API response. Plan 23 PR-D follow-up
+// (Round 3 review LOW 0.80). Scope: device handlers only;
+// cross-codebase JSON-envelope cleanup is tracked separately.
+func writeJSONError(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
 // logStoreErr emits a slog Error WITHOUT the raw error message —
 // pgx errors can include offending parameter values (user-supplied
 // name, capabilities, etc.) which would land verbatim in JSON-
@@ -135,7 +147,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := UserFromContext(r.Context())
 		if user == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 
@@ -145,7 +157,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		// Daemons may add new pair-request fields ahead of server bumps.
 		var req pairRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+			writeJSONError(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
 		// `name` is optional per spec (silly-wiggling-balloon.md L222).
@@ -153,7 +165,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		// future PATCH endpoint. Length-capped to prevent storage
 		// amplification (review HIGH 0.85 follow-up).
 		if len(req.Name) > maxDeviceNameBytes {
-			http.Error(w, "name too long", http.StatusBadRequest)
+			writeJSONError(w, "name too long", http.StatusBadRequest)
 			return
 		}
 		// Cap capabilities by JSON-encoded size — body cap is
@@ -162,11 +174,11 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		if req.Capabilities != nil {
 			capsCheck, err := json.Marshal(req.Capabilities)
 			if err != nil {
-				http.Error(w, "invalid capabilities", http.StatusBadRequest)
+				writeJSONError(w, "invalid capabilities", http.StatusBadRequest)
 				return
 			}
 			if len(capsCheck) > maxDeviceCapabilitiesBytes {
-				http.Error(w, "capabilities too large", http.StatusBadRequest)
+				writeJSONError(w, "capabilities too large", http.StatusBadRequest)
 				return
 			}
 		}
@@ -175,7 +187,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		dev, err := h.DeviceStore.Create(ctx, user.ID, req.Name, req.Capabilities)
 		if err != nil {
 			logStoreErr("device create failed", err, "user_id", user.ID)
-			http.Error(w, "failed to pair device", http.StatusInternalServerError)
+			writeJSONError(w, "failed to pair device", http.StatusInternalServerError)
 			return
 		}
 
@@ -185,7 +197,7 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		if err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
 			logStoreErr("device JWT sign failed", err, "user_id", user.ID, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 
@@ -193,14 +205,14 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		if err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
 			logStoreErr("refresh token generate failed", err, "user_id", user.ID, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 		hash := HashRefreshToken(rawRefresh)
 		if err := h.RefreshTokenStore.CreateForDevice(ctx, user.ID, dev.ID, hash, time.Now().Add(DeviceRefreshTokenTTL)); err != nil {
 			_ = h.DeviceStore.Revoke(ctx, dev.ID)
 			logStoreErr("refresh token store failed", err, "user_id", user.ID, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 
@@ -241,7 +253,7 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			RefreshToken string `json:"refresh_token"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
-			http.Error(w, "refresh_token required", http.StatusBadRequest)
+			writeJSONError(w, "refresh_token required", http.StatusBadRequest)
 			return
 		}
 
@@ -250,12 +262,12 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 		rt, err := h.RefreshTokenStore.FindByHash(ctx, hash)
 		if err != nil {
 			// Unknown hash → silent 401 (don't disclose existence).
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 		// Device-only endpoint guard.
 		if rt.DeviceID == nil {
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 		// Reuse detection — already-revoked refresh signals a leaked token.
@@ -264,11 +276,11 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			if rerr := h.RefreshTokenStore.RevokeAllForDevice(ctx, *rt.DeviceID); rerr != nil {
 				logStoreErr("RevokeAllForDevice failed during reuse-detect", rerr, "device_id", *rt.DeviceID)
 			}
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 		if rt.ExpiresAt.Before(time.Now()) {
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 
@@ -276,11 +288,11 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 		// no point burning a new refresh row if the device is gone.
 		dev, err := h.DeviceStore.FindByID(ctx, *rt.DeviceID)
 		if err != nil {
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 		if dev.RevokedAt != nil {
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 			return
 		}
 
@@ -289,13 +301,13 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 		accessToken, err := SignDeviceJWT(rt.UserID, dev.ID, h.JWTPrivateKey, h.JWTKID, DeviceAccessTokenTTL)
 		if err != nil {
 			logStoreErr("SignDeviceJWT failed", err, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 		rawRefresh, err := GenerateRefreshToken()
 		if err != nil {
 			logStoreErr("GenerateRefreshToken failed", err, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 		newHash := HashRefreshToken(rawRefresh)
@@ -309,11 +321,11 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			// Race-loser: another request rotated this row first.
 			// Silent 401 (don't disclose which path failed).
 			if errors.Is(err, model.ErrRotationAborted) {
-				http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+				writeJSONError(w, "invalid refresh token", http.StatusUnauthorized)
 				return
 			}
 			logStoreErr("RotateForDevice failed", err, "device_id", dev.ID)
-			http.Error(w, "failed to issue token", http.StatusInternalServerError)
+			writeJSONError(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}
 
@@ -336,13 +348,13 @@ func (h *OAuthHandler) HandleDevicesList() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := UserFromContext(r.Context())
 		if user == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		list, err := h.DeviceStore.ListActiveForUser(r.Context(), user.ID)
 		if err != nil {
 			logStoreErr("ListActiveForUser failed", err, "user_id", user.ID)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if list == nil {
@@ -364,12 +376,12 @@ func (h *OAuthHandler) HandleDeviceDelete() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := UserFromContext(r.Context())
 		if user == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeJSONError(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		deviceID := chi.URLParam(r, "id")
 		if deviceID == "" {
-			http.Error(w, "device not found", http.StatusNotFound)
+			writeJSONError(w, "device not found", http.StatusNotFound)
 			return
 		}
 
@@ -378,11 +390,11 @@ func (h *OAuthHandler) HandleDeviceDelete() http.HandlerFunc {
 		if err != nil {
 			// ErrNotFound, invalid UUID (pgx 22P02), or any other lookup
 			// error — collapse to 404 for non-disclosure consistency.
-			http.Error(w, "device not found", http.StatusNotFound)
+			writeJSONError(w, "device not found", http.StatusNotFound)
 			return
 		}
 		if dev.UserID != user.ID || dev.RevokedAt != nil {
-			http.Error(w, "device not found", http.StatusNotFound)
+			writeJSONError(w, "device not found", http.StatusNotFound)
 			return
 		}
 
@@ -390,12 +402,12 @@ func (h *OAuthHandler) HandleDeviceDelete() http.HandlerFunc {
 		// half-deleted state with orphan refresh).
 		if err := h.RefreshTokenStore.RevokeAllForDevice(ctx, deviceID); err != nil {
 			logStoreErr("RevokeAllForDevice failed", err, "device_id", deviceID)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if err := h.DeviceStore.Revoke(ctx, deviceID); err != nil {
 			logStoreErr("DeviceStore.Revoke failed", err, "device_id", deviceID)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeJSONError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 
