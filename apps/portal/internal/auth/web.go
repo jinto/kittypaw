@@ -119,7 +119,7 @@ func (h *OAuthHandler) HandleWebGoogleLogin(cfg WebLoginConfig) http.HandlerFunc
 			"code_challenge_method": {pkceMethodS256},
 			"access_type":           {"offline"},
 		}
-		http.Redirect(w, r, "https://accounts.google.com/o/oauth2/v2/auth?"+params.Encode(), http.StatusFound)
+		http.Redirect(w, r, h.googleAuthURL()+"?"+params.Encode(), http.StatusFound)
 	}
 }
 

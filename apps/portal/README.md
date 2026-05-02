@@ -45,6 +45,9 @@ portal.kittypaw.app
 | `JWT_PRIVATE_KEY_PEM_B64` | required | Base64 PEM RSA private key for RS256 JWT signing |
 | `GOOGLE_CLIENT_ID` | | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | | Google OAuth client secret |
+| `GOOGLE_AUTH_URL` | Google authorization URL | Override only for local E2E/fake OAuth |
+| `GOOGLE_TOKEN_URL` | Google token URL | Override only for local E2E/fake OAuth |
+| `GOOGLE_USERINFO_URL` | Google userinfo URL | Override only for local E2E/fake OAuth |
 | `GITHUB_CLIENT_ID` | | GitHub OAuth client ID |
 | `GITHUB_CLIENT_SECRET` | | GitHub OAuth client secret |
 | `CORS_ORIGINS` | `BASE_URL` | Comma-separated allowed origins |

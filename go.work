@@ -5,4 +5,5 @@ use (
 	./apps/kittyapi
 	./apps/kittypaw
 	./apps/portal
+	./testkit/e2e
 )

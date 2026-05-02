@@ -229,6 +229,24 @@ func TestGoogleLoginRedirect(t *testing.T) {
 	}
 }
 
+func TestGoogleLoginRedirectUsesConfiguredAuthURL(t *testing.T) {
+	h, cfg := setupGoogleTest(t, httptest.NewServer(http.NotFoundHandler()))
+	h.GoogleAuthURL = "http://oauth.local/google/auth"
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/google", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleGoogleLogin(cfg).ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "http://oauth.local/google/auth?") {
+		t.Fatalf("redirect URL = %q, want configured auth URL", loc)
+	}
+}
+
 func TestGoogleCallbackSuccess(t *testing.T) {
 	// Mock Google token + userinfo endpoints.
 	mux := http.NewServeMux()

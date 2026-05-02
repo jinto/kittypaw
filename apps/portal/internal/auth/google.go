@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	defaultGoogleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
 	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
 	defaultGoogleUserInfoURL = "https://www.googleapis.com/oauth2/v2/userinfo"
 )
@@ -25,6 +26,13 @@ type googleUserInfo struct {
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
+}
+
+func (h *OAuthHandler) googleAuthURL() string {
+	if h.GoogleAuthURL != "" {
+		return h.GoogleAuthURL
+	}
+	return defaultGoogleAuthURL
 }
 
 func (h *OAuthHandler) googleTokenURL() string {
@@ -66,7 +74,7 @@ func (h *OAuthHandler) HandleGoogleLogin(cfg GoogleConfig) http.HandlerFunc {
 			"access_type":           {"offline"},
 		}
 
-		http.Redirect(w, r, "https://accounts.google.com/o/oauth2/v2/auth?"+params.Encode(), http.StatusFound)
+		http.Redirect(w, r, h.googleAuthURL()+"?"+params.Encode(), http.StatusFound)
 	}
 }
 

@@ -148,6 +148,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		JWTPrivateKey:     cfg.JWTPrivateKey,
 		JWTKID:            cfg.JWTKID,
 		HTTPClient:        &http.Client{Timeout: 10 * time.Second},
+		GoogleAuthURL:     cfg.GoogleAuthURL,
+		GoogleTokenURL:    cfg.GoogleTokenURL,
+		GoogleUserInfoURL: cfg.GoogleUserInfoURL,
 	}
 
 	cliCodes := auth.NewCLICodeStore()

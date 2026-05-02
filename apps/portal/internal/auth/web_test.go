@@ -160,6 +160,30 @@ func TestWebGoogleLogin_Happy(t *testing.T) {
 	}
 }
 
+func TestWebGoogleLogin_UsesConfiguredAuthURL(t *testing.T) {
+	h, webCfg, _ := setupWebTest(t)
+	h.GoogleAuthURL = "http://oauth.local/google/auth"
+	challenge := auth.ChallengeS256(testVerifier)
+
+	q := url.Values{
+		"redirect_uri":          {testChatRedirectURI},
+		"state":                 {testChatState},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/web/google?"+q.Encode(), nil)
+	w := httptest.NewRecorder()
+	h.HandleWebGoogleLogin(webCfg).ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, "http://oauth.local/google/auth?") {
+		t.Fatalf("redirect URL = %q, want configured auth URL", loc)
+	}
+}
+
 // TestWebExchange_Happy: the round-trip from Create → Consume.
 // Verifier matches the stored S256 challenge → token issued.
 //

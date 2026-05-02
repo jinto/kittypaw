@@ -40,6 +40,7 @@ type OAuthHandler struct {
 	HTTPClient        *http.Client
 
 	// Overridable for testing.
+	GoogleAuthURL     string
 	GoogleTokenURL    string
 	GoogleUserInfoURL string
 	GitHubTokenURL    string

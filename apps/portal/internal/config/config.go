@@ -25,6 +25,9 @@ type Config struct {
 	JWTKID             string          // RFC 7638 thumbprint of JWTPrivateKey's public half
 	GoogleClientID     string
 	GoogleClientSecret string
+	GoogleAuthURL      string
+	GoogleTokenURL     string
+	GoogleUserInfoURL  string
 	GitHubClientID     string
 	GitHubClientSecret string
 	BaseURL            string
@@ -47,6 +50,9 @@ func Load() (*Config, error) {
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleAuthURL:      os.Getenv("GOOGLE_AUTH_URL"),
+		GoogleTokenURL:     os.Getenv("GOOGLE_TOKEN_URL"),
+		GoogleUserInfoURL:  os.Getenv("GOOGLE_USERINFO_URL"),
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		BaseURL:            env("BASE_URL", "http://localhost:8080"),
