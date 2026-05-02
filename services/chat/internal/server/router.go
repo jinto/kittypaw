@@ -60,9 +60,7 @@ func manualHandler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if r.URL.Path == "" || r.URL.Path == "index.html" {
-			w.Header().Set("Cache-Control", "no-store")
-		}
+		w.Header().Set("Cache-Control", "no-store")
 		http.FileServer(http.FS(sub)).ServeHTTP(w, r)
 	})
 }
