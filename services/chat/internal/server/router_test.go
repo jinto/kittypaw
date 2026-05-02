@@ -49,6 +49,9 @@ func TestRouterServesHostedChatEntry(t *testing.T) {
 	if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("cache-control = %q, want no-store", cc)
 	}
+	if csp := rr.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") {
+		t.Fatalf("content-security-policy = %q, want default-src self", csp)
+	}
 	if body := rr.Body.String(); !strings.Contains(body, `id="chat-entry"`) {
 		t.Fatalf("hosted entry marker missing from body:\n%s", body)
 	}
@@ -123,6 +126,21 @@ func TestRouterServesHostedChatAssets(t *testing.T) {
 	}
 	if body := rr.Body.String(); !strings.Contains(body, "parseTokenParams") {
 		t.Fatalf("hosted shared helper missing from body:\n%s", body)
+	}
+}
+
+func TestRouterDoesNotExposeHostedHTMLAsAsset(t *testing.T) {
+	router := NewRouter(Config{
+		Version:       "dev",
+		OpenAIHandler: openai.NewHandler(nilAuth{}, nilBroker{}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/index.html", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
 	}
 }
 

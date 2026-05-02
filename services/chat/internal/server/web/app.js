@@ -76,6 +76,7 @@
     if (!resp.ok) {
       if (resp.status === 401) {
         web.clearAuth(window.localStorage);
+        window.location.replace("/");
       }
       throw new Error(web.formatHTTPError(resp, body, text));
     }
