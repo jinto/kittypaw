@@ -36,10 +36,8 @@ section "go tests"
 run go test ./apps/kittyapi/... -count=1
 run go test ./apps/portal/... -count=1
 run go test ./apps/chat/... -count=1
+run go test ./apps/kakao/... -count=1
 run go test ./apps/kittypaw/... -count=1
-
-section "rust tests"
-run cargo test --manifest-path "$ROOT/apps/kakao/Cargo.toml"
 
 section "chat in-process e2e"
 run make -C "$ROOT/apps/chat" smoke-local

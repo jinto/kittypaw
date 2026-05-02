@@ -38,8 +38,8 @@
 ## Build & Test
 
 ```bash
-cargo build --release
-cargo test
+make build
+make test
 ```
 
 ## Deploy

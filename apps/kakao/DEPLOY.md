@@ -13,8 +13,8 @@
 ### 사전 준비
 
 ```bash
-# cross-compile 도구 (로컬 macOS)
-cargo install cross
+# Go toolchain (로컬 macOS)
+go version
 
 # fabric (로컬)
 pip install fabric
@@ -28,8 +28,26 @@ fab setup
 
 # 서버에 SSH 접속 후 .env 편집
 ssh <your-host>
-vi /home/ubuntu/kittykakao/.env
+vi <REMOTE_DIR>/.env
 ```
+
+### Fabric 없이 설치할 수 있나?
+
+가능하다. 이 앱은 단일 Go 바이너리와 세 개의 설정 파일만 필요하다.
+Fabric은 필수 런타임 의존성이 아니라 다음 작업을 묶어주는 편의 래퍼다.
+
+1. 로컬에서 `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build`로 바이너리 생성
+2. 서버에 `{{REMOTE_DIR}}` 생성
+3. `deploy/kittykakao.service`, `deploy/kittykakao.nginx`, `deploy/env.example` 업로드
+4. `{{DOMAIN}}`, `{{REMOTE_DIR}}`, `{{SERVICE_USER}}`, `{{SERVICE_GROUP}}` 치환
+5. systemd/nginx 위치로 복사, `systemctl daemon-reload`, `systemctl enable`, `nginx -t`, reload
+6. 바이너리 업로드, 실행 권한 부여, 서비스 restart, `/health` smoke
+
+수동 설치도 같은 명령을 `ssh`/`scp`로 실행하면 된다. 다만 최초 설치에서는
+root 권한 복사, nginx 검증, systemd enable/restart, 이전 바이너리 백업 순서를
+빼먹기 쉽기 때문에 현재 `fab setup`/`fab deploy`를 유지한다. 배포 자동화를 더
+가볍게 만들고 싶다면 Fabric을 제거하기보다 같은 절차를 `deploy/install.sh`와
+`deploy/deploy.sh`로 옮기면 된다.
 
 ### 배포
 

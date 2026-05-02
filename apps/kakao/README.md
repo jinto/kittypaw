@@ -33,14 +33,14 @@ KakaoTalk User ──► Kakao OpenBuilder ──► KittyKakao ──► WebSoc
 
 ```bash
 # Build
-cargo build --release
+make build
 
 # Configure
 cp deploy/env.example .env
 # Edit .env — at minimum, set WEBHOOK_SECRET
 
 # Run
-WEBHOOK_SECRET=your-secret ./target/release/kittykakao
+WEBHOOK_SECRET=your-secret ./kittykakao
 ```
 
 ## Configuration
@@ -55,7 +55,8 @@ All configuration is via environment variables:
 | `CHANNEL_URL` | *(empty)* | KakaoTalk channel URL returned on registration |
 | `DAILY_LIMIT` | `10000` | Max messages per day |
 | `MONTHLY_LIMIT` | `100000` | Max messages per month |
-| `RUST_LOG` | `info` | Log level filter |
+| `LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `RUST_LOG` | *(legacy)* | Legacy log level fallback accepted for existing `.env` files |
 
 ## API
 
@@ -100,10 +101,10 @@ Pre-built deployment configs are in the `deploy/` directory:
 ## Development
 
 ```bash
-cargo build           # Debug build
-cargo test            # Run tests
-cargo clippy          # Lint
-RUST_LOG=debug cargo run  # Run with debug logging
+make build            # Build binary
+make test             # Run tests
+make lint             # Lint
+LOG_LEVEL=debug make run  # Run with debug logging
 ```
 
 ## License

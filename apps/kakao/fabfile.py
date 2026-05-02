@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from shutil import which
 
 from fabric import task
 
@@ -16,9 +15,9 @@ SERVICE_USER = os.environ.get("DEPLOY_USER", "jinto")
 SERVICE_GROUP = os.environ.get("DEPLOY_GROUP", SERVICE_USER)
 SERVICE = "kittykakao"
 BINARY = "kittykakao"
-TARGET = "x86_64-unknown-linux-gnu"
 
 LOCAL_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = LOCAL_ROOT.parent.parent
 
 
 def _conn():
@@ -27,58 +26,40 @@ def _conn():
 
 
 def _local_build():
-    """Build a Linux x86_64 binary for deployment."""
-    print(f"Building {BINARY} for {TARGET} ...")
-    if which("cross"):
-        result = subprocess.run(
-            ["cross", "build", "--release", "--target", TARGET],
-            cwd=LOCAL_ROOT,
-        )
-        if result.returncode == 0:
-            return LOCAL_ROOT / "target" / TARGET / "release" / BINARY
-        print("cross build failed; retrying in a local Linux Docker builder ...")
-    else:
-        print("cross not found; using a local Linux Docker builder ...")
-
-    repo_root = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
+    """Cross-compile for Linux x86_64 (static binary, no CGO)."""
+    version, commit = _build_metadata()
+    print(f"Building {BINARY} for linux/amd64 ({version} {commit}) ...")
+    env = {**os.environ, "GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "0"}
+    result = subprocess.run(
+        [
+            "go",
+            "build",
+            "-ldflags",
+            f"-s -w -X main.version={version} -X main.commit={commit}",
+            "-o",
+            f"{BINARY}-linux",
+            "./cmd/kittykakao",
+        ],
         cwd=LOCAL_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    target_dir = LOCAL_ROOT / "target" / "docker-linux-amd64"
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    docker_image = os.environ.get("KAKAO_DOCKER_IMAGE", "rust:1.91-bookworm")
-    docker_cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "--platform",
-        "linux/amd64",
-        "--user",
-        f"{os.getuid()}:{os.getgid()}",
-        "-v",
-        f"{repo_root}:/repo",
-        "-v",
-        f"{target_dir}:/target",
-        "-w",
-        "/repo/apps/kakao",
-        "-e",
-        "CARGO_HOME=/target/cargo-home",
-        "-e",
-        "CARGO_TARGET_DIR=/target/build",
-        docker_image,
-        "cargo",
-        "build",
-        "--release",
-    ]
-    result = subprocess.run(docker_cmd, cwd=LOCAL_ROOT)
+        env=env,
+    )
     if result.returncode != 0:
-        print("Build failed. Install/fix cross or ensure Docker is running locally.")
+        print("Build failed.")
         sys.exit(1)
-    return target_dir / "build" / "release" / BINARY
+    return LOCAL_ROOT / f"{BINARY}-linux"
+
+
+def _git(*args, default="unknown"):
+    try:
+        return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True).strip()
+    except Exception:
+        return default
+
+
+def _build_metadata():
+    version = os.environ.get("VERSION") or _git("describe", "--tags", "--always", default="dev")
+    commit = os.environ.get("COMMIT") or _git("rev-parse", "--short=12", "HEAD")
+    return version, commit
 
 
 @task

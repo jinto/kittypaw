@@ -31,14 +31,14 @@
 
 ```bash
 # 빌드
-cargo build --release
+make build
 
 # 설정
 cp deploy/env.example .env
 # .env 편집 — 최소한 WEBHOOK_SECRET 설정 필요
 
 # 실행
-WEBHOOK_SECRET=your-secret ./target/release/kittykakao
+WEBHOOK_SECRET=your-secret ./kittykakao
 ```
 
 ## 설정
@@ -53,7 +53,8 @@ WEBHOOK_SECRET=your-secret ./target/release/kittykakao
 | `CHANNEL_URL` | *(없음)* | 등록 시 반환되는 카카오톡 채널 URL |
 | `DAILY_LIMIT` | `10000` | 일일 최대 메시지 수 |
 | `MONTHLY_LIMIT` | `100000` | 월간 최대 메시지 수 |
-| `RUST_LOG` | `info` | 로그 레벨 |
+| `LOG_LEVEL` | `info` | 로그 레벨 (`debug`, `info`, `warn`, `error`) |
+| `RUST_LOG` | *(legacy)* | 기존 `.env` 호환용 레거시 로그 레벨 fallback |
 
 ## API
 
@@ -98,10 +99,10 @@ WEBHOOK_SECRET=your-secret ./target/release/kittykakao
 ## 개발
 
 ```bash
-cargo build           # 디버그 빌드
-cargo test            # 테스트 실행
-cargo clippy          # 린트
-RUST_LOG=debug cargo run  # 디버그 로깅으로 실행
+make build            # 바이너리 빌드
+make test             # 테스트 실행
+make lint             # 린트
+LOG_LEVEL=debug make run  # 디버그 로깅으로 실행
 ```
 
 ## 라이선스
