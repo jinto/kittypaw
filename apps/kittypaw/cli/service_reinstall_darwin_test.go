@@ -31,7 +31,7 @@ exit 0
 	cmd.SetArgs([]string{"--bind-port", strconv.Itoa(port)})
 
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("service install command returned error: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
+		t.Fatalf("server install command returned error: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), errOut.String())
 	}
 
 	log := readFileIfExists(t, fx.logPath)
@@ -59,7 +59,7 @@ exit 0
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatalf("service install command unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
+		t.Fatalf("server install command unexpectedly succeeded\nstdout:\n%s\nstderr:\n%s", out.String(), errOut.String())
 	}
 	if !strings.Contains(err.Error(), "port 127.0.0.1:") {
 		t.Fatalf("error = %v, want port conflict", err)

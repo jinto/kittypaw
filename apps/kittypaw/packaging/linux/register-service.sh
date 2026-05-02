@@ -1,5 +1,5 @@
 #!/bin/sh
-# Register the KittyPaw daemon as a per-user systemd service.
+# Register the KittyPaw server as a per-user systemd service.
 #
 # Installs the unit into ~/.config/systemd/user/ so no root is required for
 # the common path. Resource ceilings (MemoryMax, CPUQuota, TasksMax) rely on
@@ -53,7 +53,7 @@ port_in_use() {
 if port_in_use "$KITTYPAW_BIND_PORT"; then
   echo "error: 127.0.0.1:${KITTYPAW_BIND_PORT} is already in use." >&2
   echo "" >&2
-  echo "  Another process — likely another OS user's kittypaw daemon — is" >&2
+  echo "  Another process — likely another OS user's kittypaw server — is" >&2
   echo "  bound to this port. Pick a free port and retry:" >&2
   echo "" >&2
   echo "    KITTYPAW_BIND_PORT=3001 sh $(basename "$0")" >&2
@@ -104,7 +104,7 @@ if [ "$DELEGATE" != "yes" ]; then
   echo "      Then re-login or run: systemctl --user daemon-reexec"
 fi
 
-# Linger keeps the user manager alive across logouts so the daemon starts at
+# Linger keeps the user manager alive across logouts so the server starts at
 # boot and survives SSH disconnect. Requires root.
 if ! loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
   echo ""

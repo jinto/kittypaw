@@ -68,7 +68,7 @@ func serviceInstall(stdout, stderr io.Writer, f *serviceFlags) error {
 	}
 
 	linuxPostInstallDiagnostics(stdout)
-	_, _ = fmt.Fprintf(stdout, "\ndone. tail the log with:  %s service logs -f\n", os.Args[0])
+	_, _ = fmt.Fprintf(stdout, "\ndone. tail the log with:  %s server logs -f\n", os.Args[0])
 	return nil
 }
 

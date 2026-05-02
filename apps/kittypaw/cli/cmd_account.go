@@ -67,7 +67,7 @@ api-key, and model. Secrets (token, api-key) are read with terminal echo
 disabled. CI / scripted callers passing any flag/env keep the original
 non-interactive path.
 
-If a daemon is already running, the account is hot-activated: channels spawn
+If a server is already running, the account is hot-activated: channels spawn
 and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
 the activation RPC and only stage files on disk.`,
 		Args: cobra.ExactArgs(1),
@@ -82,7 +82,7 @@ the activation RPC and only stage files on disk.`,
 	cmd.Flags().StringVar(&f.llmProvider, "llm-provider", "", "LLM provider (anthropic|openai|local)")
 	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")
-	cmd.Flags().BoolVar(&f.noActivate, "no-activate", false, "Stage files only; skip hot-activation against a running daemon")
+	cmd.Flags().BoolVar(&f.noActivate, "no-activate", false, "Stage files only; skip hot-activation against a running server")
 	cmd.Flags().BoolVar(&f.passwordStdin, "password-stdin", false, "Read local Web UI password from stdin")
 	return cmd
 }
@@ -224,15 +224,15 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	_, _ = fmt.Fprintf(stdout, "account %q created at %s\n", tt.ID, tt.BaseDir)
 
 	if f.noActivate {
-		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw serve' or re-run without the flag to activate.")
+		_, _ = fmt.Fprintln(stdout, "Skipped activation (--no-activate). Restart 'kittypaw server start' or re-run without the flag to activate.")
 		return nil
 	}
 	if err := activateAccountOnDaemon(tt.ID, stdout, stderr); err != nil {
 		// Don't fail the whole command — files are already on disk; the user
-		// can recover with a daemon restart. Surface the error clearly so
+		// can recover with a server restart. Surface the error clearly so
 		// they know hot-activate didn't take.
 		_, _ = fmt.Fprintf(stderr, "warning: hot-activation failed: %v\n", err)
-		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw serve' to activate, or re-run `kittypaw account add` after starting the daemon.")
+		_, _ = fmt.Fprintln(stdout, "Restart 'kittypaw server start' to activate, or re-run `kittypaw account add` after starting the server.")
 	}
 	return nil
 }
@@ -243,7 +243,7 @@ func newAccountRemoveCmd() *cobra.Command {
 		Short: "Decommission an account (safe, reversible via .trash/)",
 		Long: `Decommission an account safely:
 
-  1. If a daemon is running, deactivate the account (stops channels, drains
+  1. If a server is running, deactivate the account (stops channels, drains
      sessions) via admin RPC — no restart required.
   2. If the removed account is personal and a family account exists, delete
      the matching [share.<name>] stanza from family/config.toml so stale
@@ -254,8 +254,8 @@ func newAccountRemoveCmd() *cobra.Command {
      must revoke it via @BotFather /revoke.
 
 The command aborts BEFORE touching the family config or the account
-directory if the daemon returns an error, so a failed step 1 leaves the
-account fully runnable. Re-running after the daemon reports healthy
+directory if the server returns an error, so a failed step 1 leaves the
+account fully runnable. Re-running after the server reports healthy
 completes the decommission.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -289,7 +289,7 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 	removedIsShared := selfCfg != nil && selfCfg.IsSharedAccount()
 
 	if err := deactivateAccountOnDaemon(name, stdout, stderr); err != nil {
-		return fmt.Errorf("deactivate on daemon: %w", err)
+		return fmt.Errorf("deactivate on server: %w", err)
 	}
 
 	if !removedIsShared {
@@ -312,8 +312,8 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 }
 
 // deactivateAccountOnDaemon calls POST /api/v1/admin/accounts/{id}/delete when
-// a daemon is running. Absence of a daemon is not an error (AC-RM2 offline
-// path); 404 from the daemon means the account isn't currently active, which
+// a server is running. Absence of a server is not an error (AC-RM2 offline
+// path); 404 from the server means the account isn't currently active, which
 // is also fine (already decommissioned or never booted with it).
 func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
@@ -321,11 +321,11 @@ func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
 		// Missing config.toml (pre-onboarding) is treated as offline — the
 		// filesystem part of decommission still matters even if the user
 		// never booted the daemon with this account.
-		_, _ = fmt.Fprintf(stdout, "Daemon config unavailable (%v); skipping hot-deactivation.\n", err)
+		_, _ = fmt.Fprintf(stdout, "Server config unavailable (%v); skipping hot-deactivation.\n", err)
 		return nil
 	}
 	if !conn.IsRunning() {
-		_, _ = fmt.Fprintln(stdout, "Daemon is not running; skipping hot-deactivation.")
+		_, _ = fmt.Fprintln(stdout, "Server is not running; skipping hot-deactivation.")
 		return nil
 	}
 
@@ -335,12 +335,12 @@ func deactivateAccountOnDaemon(name string, stdout, stderr io.Writer) error {
 		// CLI doesn't mutate family config or the filesystem while a real
 		// drain error is pending — AC-RM5.
 		if strings.Contains(err.Error(), "404") {
-			_, _ = fmt.Fprintf(stderr, "info: daemon reports account %q not active (already decommissioned?); continuing.\n", name)
+			_, _ = fmt.Fprintf(stderr, "info: server reports account %q not active (already decommissioned?); continuing.\n", name)
 			return nil
 		}
 		return err
 	}
-	_, _ = fmt.Fprintf(stdout, "account %q deactivated on daemon\n", name)
+	_, _ = fmt.Fprintf(stdout, "account %q deactivated on server\n", name)
 	return nil
 }
 
@@ -400,16 +400,16 @@ func moveAccountToTrash(cfgDir, accountsDir, name string) (string, error) {
 }
 
 // activateAccountOnDaemon calls POST /api/v1/admin/accounts if a daemon is
-// already running locally. Absence of a daemon is not an error — the user
+// already running locally. Absence of a server is not an error — the user
 // may be provisioning offline before first boot — so we fall back to a
 // restart hint printed by the caller.
 func activateAccountOnDaemon(accountID string, stdout, stderr io.Writer) error {
 	conn, err := client.NewDaemonConn("")
 	if err != nil {
-		return fmt.Errorf("read daemon config: %w", err)
+		return fmt.Errorf("read server config: %w", err)
 	}
 	if !conn.IsRunning() {
-		_, _ = fmt.Fprintln(stdout, "Daemon is not running; start 'kittypaw serve' to activate this account.")
+		_, _ = fmt.Fprintln(stdout, "Server is not running; start 'kittypaw server start' to activate this account.")
 		return nil
 	}
 

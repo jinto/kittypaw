@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -37,9 +36,9 @@ var version = "dev"
 
 // flags
 var (
-	flagRemote  string // --remote: connect to daemon instead of running locally
+	flagRemote  string // --remote: connect to a server instead of local discovery
 	flagAccount string // --account: local account for account-scoped CLI operations
-	flagBind    string // serve --bind
+	flagBind    string // server start --bind
 	flagDryRun  bool   // run --dry-run
 	flagSkill   string // log --skill
 	flagLimit   int    // log --limit
@@ -85,8 +84,8 @@ func renderSetupBox(w io.Writer, cfgPath string) {
 		truncW(cfgPath, setupBoxInner),
 		"",
 		"다음 단계",
-		"  kittypaw serve    # 메시지 수신 서비스 실행",
-		"  kittypaw chat     # 터미널에서 바로 대화",
+		"  kittypaw server start    # 메시지 수신 서버 실행",
+		"  kittypaw chat            # 터미널에서 바로 대화",
 		"",
 	}
 	border := strings.Repeat("─", setupBoxInner+2)
@@ -116,11 +115,10 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	cmd.PersistentFlags().StringVar(&flagRemote, "remote", "", "connect to remote daemon instead of local")
+	cmd.PersistentFlags().StringVar(&flagRemote, "remote", "", "connect to remote server instead of local discovery")
 
 	cmd.AddCommand(
-		newServeCmd(),
-		newStopCmd(),
+		newServerCmd(),
 		newSetupCmd(),
 		newChatCmd(),
 		newStatusCmd(),
@@ -129,7 +127,6 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(),
 		newAgentCmd(),
 		newLogCmd(),
-		newDaemonCmd(),
 		newPersonaCmd(),
 		newReflectionCmd(),
 		newMemoryCmd(),
@@ -140,20 +137,39 @@ func newRootCmd() *cobra.Command {
 		newChatRelayCmd(),
 		newAccountCmd(),
 		newFamilyCmd(),
-		newServiceCmd(),
 	)
 
 	return cmd
 }
 
 // ---------------------------------------------------------------------------
-// serve
+// server
 // ---------------------------------------------------------------------------
 
-func newServeCmd() *cobra.Command {
+func newServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Start the HTTP server",
+		Use:   "server",
+		Short: "Manage the local KittyPaw server",
+		Long: `Manage the local KittyPaw server.
+
+Use "server start" to run it in the current terminal. Use "server install"
+to register it with the OS as a per-user background service.`,
+	}
+	cmd.AddCommand(
+		newServerStartCmd(),
+		newServerStopCmd(),
+		newServiceInstallCmd(),
+		newServiceUninstallCmd(),
+		newServiceStatusCmd(),
+		newServiceLogsCmd(),
+	)
+	return cmd
+}
+
+func newServerStartCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the local server in this terminal",
 		RunE:  runServe,
 	}
 	cmd.Flags().StringVar(&flagBind, "bind", ":3000", "address to bind")
@@ -177,7 +193,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Write PID file so `kittypaw stop` can find us.
+	// Write PID file so `kittypaw server stop` can find us.
 	writePidFile()
 	defer removePidFile()
 
@@ -573,8 +589,8 @@ func runChat(cmd *cobra.Command, args []string) error {
 		accountID = conn.AccountID
 	}
 
-	// Auto-start daemon if needed; it stays resident across chat
-	// sessions. Users free resources via `kittypaw stop`.
+	// Auto-start the local server if needed; it stays resident across chat
+	// sessions. Users free resources via `kittypaw server stop`.
 	if _, err := conn.Connect(); err != nil {
 		return err
 	}
@@ -656,7 +672,7 @@ func formatChatHeader(cliVersion, serverVersion, model, accountID string, channe
 
 func versionMismatchWarning(cliVersion, serverVersion string) string {
 	if serverVersion != "" && cliVersion != serverVersion {
-		return fmt.Sprintf("CLI/server versions differ (cli %s, server %s). Restart: kittypaw stop && kittypaw serve", cliVersion, serverVersion)
+		return fmt.Sprintf("CLI/server versions differ (cli %s, server %s). Restart: kittypaw server stop && kittypaw server start", cliVersion, serverVersion)
 	}
 	return ""
 }
@@ -1037,7 +1053,7 @@ func newSkillUninstallCmd() *cobra.Command {
 				}
 			}
 
-			// Fall back to skill deletion via daemon.
+			// Fall back to skill deletion via server.
 			cl, err := connectDaemon()
 			if err != nil {
 				return err
@@ -1069,7 +1085,7 @@ func newSkillInfoCmd() *cobra.Command {
 				}
 			}
 
-			// Fall back to skill via daemon.
+			// Fall back to skill via server.
 			cl, err := connectDaemon()
 			if err != nil {
 				return err
@@ -1583,153 +1599,6 @@ func runLog(_ *cobra.Command, _ []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// daemon
-// ---------------------------------------------------------------------------
-
-func newDaemonCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "daemon",
-		Short: "Manage daemon process",
-	}
-	cmd.AddCommand(
-		newDaemonStartCmd(),
-		newDaemonStopCmd(),
-		newDaemonStatusCmd(),
-	)
-	return cmd
-}
-
-func newDaemonStartCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "start",
-		Short: "Start daemon in background",
-		RunE:  runDaemonStart,
-	}
-}
-
-func runDaemonStart(_ *cobra.Command, _ []string) error {
-	pidPath, err := daemonPidPath()
-	if err != nil {
-		return err
-	}
-
-	// Check if already running. Verify start-time so a stale PID
-	// recycled by an unrelated process does not produce a false
-	// "already running" error.
-	if pid, recordedStart, ok := client.ReadPidFile(pidPath); ok {
-		if processRunning(pid) && client.VerifyDaemonStartTime(pid, recordedStart) {
-			return fmt.Errorf("daemon already running (pid %d)", pid)
-		}
-	}
-
-	// Re-exec ourselves with "serve" in the background.
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("find executable: %w", err)
-	}
-
-	proc := exec.Command(exe, "serve")
-	proc.Env = append(os.Environ(), "KITTYPAW_DAEMON=1")
-	proc.Stdout = nil
-	proc.Stderr = nil
-	setSysProcAttr(proc)
-
-	if err := proc.Start(); err != nil {
-		return fmt.Errorf("start daemon: %w", err)
-	}
-
-	if err := client.WritePidFile(pidPath, proc.Process.Pid); err != nil {
-		return fmt.Errorf("write pid file: %w", err)
-	}
-
-	fmt.Printf("Daemon started (pid %d).\n", proc.Process.Pid)
-	return nil
-}
-
-func newDaemonStopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "stop",
-		Short: "Stop the daemon",
-		RunE:  runDaemonStop,
-	}
-}
-
-func runDaemonStop(_ *cobra.Command, _ []string) error {
-	pidPath, err := daemonPidPath()
-	if err != nil {
-		return err
-	}
-
-	pid, recordedStart, ok := client.ReadPidFile(pidPath)
-	if !ok {
-		fmt.Println("No daemon pid file found.")
-		return nil
-	}
-
-	// Phase 13.4 PID hardening: refuse to signal a recycled PID.
-	if !client.VerifyDaemonStartTime(pid, recordedStart) {
-		fmt.Printf("PID %d does not match the recorded daemon (PID was reused). Cleaning up stale pid file.\n", pid)
-		os.Remove(pidPath)
-		return nil
-	}
-
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("find process: %w", err)
-	}
-
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		fmt.Printf("Could not signal process %d: %v\n", pid, err)
-	} else {
-		if !waitForProcessExit(pid, stopWaitTimeout) {
-			return fmt.Errorf("daemon did not stop within %s (pid %d)", stopWaitTimeout, pid)
-		}
-		fmt.Printf("Daemon stopped (pid %d).\n", pid)
-	}
-
-	removePidFileIfMatches(pidPath, pid)
-	return nil
-}
-
-func newDaemonStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "status",
-		Short: "Show daemon status",
-		RunE:  runDaemonStatus,
-	}
-}
-
-func runDaemonStatus(_ *cobra.Command, _ []string) error {
-	pidPath, err := daemonPidPath()
-	if err != nil {
-		return err
-	}
-
-	pid, recordedStart, ok := client.ReadPidFile(pidPath)
-	if !ok {
-		fmt.Println("Daemon is not running (no pid file).")
-		return nil
-	}
-
-	if !processRunning(pid) {
-		fmt.Printf("Daemon is not running (stale pid %d).\n", pid)
-		os.Remove(pidPath)
-		return nil
-	}
-	if !client.VerifyDaemonStartTime(pid, recordedStart) {
-		fmt.Printf("Daemon is not running (pid %d was reused by an unrelated process).\n", pid)
-		os.Remove(pidPath)
-		return nil
-	}
-	fmt.Printf("Daemon is running (pid %d).\n", pid)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// stop
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // reset
 // ---------------------------------------------------------------------------
 
@@ -1775,7 +1644,7 @@ func runReset(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func newStopCmd() *cobra.Command {
+func newServerStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the running server",
@@ -1810,7 +1679,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 	// live process's. If it doesn't, the PID was reused by an
 	// unrelated process and we must NOT signal it.
 	if !client.VerifyDaemonStartTime(pid, recordedStart) {
-		fmt.Printf("PID %d does not match the recorded daemon (PID was reused). Cleaning up stale pid file.\n", pid)
+		fmt.Printf("PID %d does not match the recorded server (PID was reused). Cleaning up stale pid file.\n", pid)
 		os.Remove(pidPath)
 		return nil
 	}
@@ -1858,31 +1727,27 @@ func printPortInUseMessage(addr string) {
 		fmt.Printf("\n  ⚠ %s 포트가 이미 사용 중입니다.\n", addr)
 		fmt.Println("    이미 실행 중인 KittyPaw가 있을 수 있습니다.")
 		fmt.Println()
-		fmt.Println("    kittypaw stop     # 기존 서버 종료")
-		fmt.Println("    kittypaw serve    # 다시 시작")
+		fmt.Println("    kittypaw server stop     # 기존 서버 종료")
+		fmt.Println("    kittypaw server start    # 다시 시작")
 		fmt.Println()
 	case strings.HasPrefix(lang, "ja"):
 		fmt.Printf("\n  ⚠ ポート %s は既に使用中です。\n", addr)
 		fmt.Println("    KittyPawが既に実行中の可能性があります。")
 		fmt.Println()
-		fmt.Println("    kittypaw stop     # サーバーを停止")
-		fmt.Println("    kittypaw serve    # 再起動")
+		fmt.Println("    kittypaw server stop     # サーバーを停止")
+		fmt.Println("    kittypaw server start    # 再起動")
 		fmt.Println()
 	default:
 		fmt.Printf("\n  ⚠ Port %s is already in use.\n", addr)
 		fmt.Println("    Another KittyPaw instance may be running.")
 		fmt.Println()
-		fmt.Println("    kittypaw stop     # stop the existing server")
-		fmt.Println("    kittypaw serve    # restart")
+		fmt.Println("    kittypaw server stop     # stop the existing server")
+		fmt.Println("    kittypaw server start    # restart")
 		fmt.Println()
 	}
 }
 
 func writePidFile() {
-	// When launched via `daemon start`, the parent manages the PID file.
-	if os.Getenv("KITTYPAW_DAEMON") != "" {
-		return
-	}
 	pidPath, err := daemonPidPath()
 	if err != nil {
 		return
@@ -1891,9 +1756,6 @@ func writePidFile() {
 }
 
 func removePidFile() {
-	if os.Getenv("KITTYPAW_DAEMON") != "" {
-		return
-	}
 	pidPath, err := daemonPidPath()
 	if err != nil {
 		return

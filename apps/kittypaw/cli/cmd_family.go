@@ -62,7 +62,7 @@ per member under ~/.kittypaw/accounts/. A shared "family" coordinator account is
 created at the end (skip with --no-family).
 
 This is the bulk equivalent of running "kittypaw account add" N times. It reuses
-the same staging→rename atomic provisioning and, if a daemon is already running,
+the same staging→rename atomic provisioning and, if a server is already running,
 hot-activates each account without a restart.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -251,7 +251,7 @@ func promptUntilValid(reader *bufio.Reader, stdout, stderr io.Writer,
 
 // provisionMember turns one prompted member into an on-disk account.
 // Activation failures are treated as warnings (disk state is good; the
-// admin can restart the daemon later) rather than full failures.
+// admin can restart the server later) rather than full failures.
 func provisionMember(accountsDir, name, token, chatID string, stdout, stderr io.Writer) memberEntry {
 	if !core.ValidateTelegramToken(token) {
 		return memberEntry{

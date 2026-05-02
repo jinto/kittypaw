@@ -28,7 +28,7 @@ func TestInstallScriptRestartsLoadedMacOSService(t *testing.T) {
 	}
 }
 
-func TestInstallScriptRestartsRunningStandaloneDaemon(t *testing.T) {
+func TestInstallScriptDoesNotUseLegacyStandaloneDaemonFallback(t *testing.T) {
 	env := installScriptFixture(t, "Darwin", "arm64")
 	env.setFake("FAKE_KITTYPAW_DAEMON_RUNNING", "1")
 
@@ -41,14 +41,8 @@ func TestInstallScriptRestartsRunningStandaloneDaemon(t *testing.T) {
 	if strings.Contains(log, "launchctl kickstart") {
 		t.Fatalf("standalone daemon path should not restart launchd service\nlog:\n%s", log)
 	}
-	if !strings.Contains(log, "kittypaw daemon status") {
-		t.Fatalf("standalone daemon status was not checked\nlog:\n%s", log)
-	}
-	if !strings.Contains(log, "kittypaw daemon stop") {
-		t.Fatalf("running standalone daemon was not stopped\nlog:\n%s", log)
-	}
-	if !strings.Contains(log, "kittypaw daemon start") {
-		t.Fatalf("running standalone daemon was not started\nlog:\n%s", log)
+	if strings.Contains(log, "kittypaw daemon") {
+		t.Fatalf("installer should not call legacy daemon commands\nlog:\n%s", log)
 	}
 }
 
@@ -151,14 +145,6 @@ exit 0
 cat > kittypaw <<'SCRIPT'
 #!/bin/sh
 printf 'kittypaw %s\n' "$*" >> "$FAKE_LOG"
-if [ "$1" = "daemon" ] && [ "$2" = "status" ]; then
-  if [ "$FAKE_KITTYPAW_DAEMON_RUNNING" = "1" ]; then
-    printf 'Daemon is running (pid 123).\n'
-    exit 0
-  fi
-  printf 'Daemon is not running (no pid file).\n'
-  exit 0
-fi
 exit 0
 SCRIPT
 chmod +x kittypaw

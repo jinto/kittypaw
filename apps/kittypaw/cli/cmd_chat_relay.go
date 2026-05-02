@@ -28,7 +28,7 @@ func newChatRelayCmd() *cobra.Command {
 
 	pairCmd := &cobra.Command{
 		Use:   "pair",
-		Short: "Pair this daemon with the hosted chat relay",
+		Short: "Pair this server with the hosted chat relay",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChatRelayPair(flags)
 		},

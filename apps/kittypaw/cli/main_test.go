@@ -81,7 +81,7 @@ func TestIsTransportDropErr_RejectsServerSide(t *testing.T) {
 
 func TestIsTransportDropErr_NegativeCases(t *testing.T) {
 	cases := []string{
-		"daemon failed to start",
+		"server failed to start",
 		"chat protocol invalid",
 		"unauthorized: 401",
 		"timeout exceeded",
@@ -98,6 +98,32 @@ func TestIsTransportDropErr_NegativeCases(t *testing.T) {
 func TestIsTransportDropErr_NilSafe(t *testing.T) {
 	if isTransportDropErr(nil) {
 		t.Fatal("nil error must not classify as transport drop")
+	}
+}
+
+func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
+	root := newRootCmd()
+	topLevel := map[string]bool{}
+	for _, cmd := range root.Commands() {
+		topLevel[cmd.Name()] = true
+	}
+	for _, hidden := range []string{"serve", "stop", "service", "daemon"} {
+		if topLevel[hidden] {
+			t.Fatalf("root command must not expose legacy %q command", hidden)
+		}
+	}
+	serverCmd, _, err := root.Find([]string{"server"})
+	if err != nil || serverCmd == nil || serverCmd.Name() != "server" {
+		t.Fatalf("root Find(server) = %v, %v; want server command", serverCmd, err)
+	}
+	children := map[string]bool{}
+	for _, cmd := range serverCmd.Commands() {
+		children[cmd.Name()] = true
+	}
+	for _, want := range []string{"start", "stop", "install", "uninstall", "status", "logs"} {
+		if !children[want] {
+			t.Fatalf("server command missing %q child; got %#v", want, children)
+		}
 	}
 }
 
@@ -290,7 +316,7 @@ func TestBootstrapRejectsMissingConfiguredDefaultAccount(t *testing.T) {
 
 func TestResolveServeBindUsesServerTomlUnlessFlagChanged(t *testing.T) {
 	flagBind = ":3000"
-	cmd := newServeCmd()
+	cmd := newServerStartCmd()
 	got := resolveServeBind(cmd, core.TopLevelServerConfig{Bind: "127.0.0.1:4567"}, nil)
 	if got != "127.0.0.1:4567" {
 		t.Fatalf("resolveServeBind = %q, want server.toml bind", got)
@@ -307,7 +333,7 @@ func TestResolveServeBindUsesServerTomlUnlessFlagChanged(t *testing.T) {
 
 func TestResolveServeBindFallsBackToSelectedAccount(t *testing.T) {
 	flagBind = ":3000"
-	cmd := newServeCmd()
+	cmd := newServerStartCmd()
 	cfg := core.DefaultConfig()
 	cfg.Server.Bind = "127.0.0.1:4567"
 	deps := []*server.AccountDeps{

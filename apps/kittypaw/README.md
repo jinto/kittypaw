@@ -4,7 +4,7 @@ Experimental Go framework for local AI agents. Single binary, goja JS sandbox, 5
 
 ## Status
 
-- ✅ **Working** — CLI + daemon, registry install, sandbox + permission, 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
+- ✅ **Working** — CLI + local server, registry install, sandbox + permission, 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
 - 🚧 **Partial** — Reflection candidate surface (verified), `skill create` syntax (5/5 measured), Web search source quality
 - 🔬 **Experimental** — Family account, MoA, live workspace indexing
 - ❌ **Not / retired** — Windows GUI signing, "learns the more you use it" auto-adaptation, self-healing (retired)
@@ -20,14 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.
 ```bash
 kittypaw setup --account alice            # interactive setup (account login, LLM, channels); auto-enters chat on TTY
 kittypaw skill install weather-briefing   # install a skill from registry
-kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts daemon)
+kittypaw chat "오늘 날씨 알려줘"            # one-shot chat (auto-starts local server)
 ```
 
-Inspect what you get: a local daemon, one installed skill, an LLM-backed chat. Skill runtime behaviour depends on its package, the configured APIs, and the LLM provider.
+Inspect what you get: a local server, one installed skill, an LLM-backed chat. Skill runtime behaviour depends on its package, the configured APIs, and the LLM provider.
 
 ```bash
 kittypaw chat          # interactive REPL mode
-kittypaw serve         # start as HTTP/WebSocket server
+kittypaw server start  # start as HTTP/WebSocket server
 ```
 
 ## Accounts
@@ -91,11 +91,11 @@ git push origin v0.1.0
 ## Stop / Uninstall
 
 ```bash
-kittypaw stop                   # stop the running server
+kittypaw server stop            # stop the running server
 ```
 
 ```bash
-kittypaw stop
+kittypaw server stop
 rm /usr/local/bin/kittypaw      # remove binary
 rm -rf ~/.kittypaw              # remove config and data
 ```
