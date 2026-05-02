@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from shutil import which
 
 from fabric import task
 
@@ -26,16 +27,58 @@ def _conn():
 
 
 def _local_build():
-    """Cross-compile for Linux x86_64 using `cross`."""
+    """Build a Linux x86_64 binary for deployment."""
     print(f"Building {BINARY} for {TARGET} ...")
-    result = subprocess.run(
-        ["cross", "build", "--release", "--target", TARGET],
+    if which("cross"):
+        result = subprocess.run(
+            ["cross", "build", "--release", "--target", TARGET],
+            cwd=LOCAL_ROOT,
+        )
+        if result.returncode == 0:
+            return LOCAL_ROOT / "target" / TARGET / "release" / BINARY
+        print("cross build failed; retrying in a local Linux Docker builder ...")
+    else:
+        print("cross not found; using a local Linux Docker builder ...")
+
+    repo_root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
         cwd=LOCAL_ROOT,
-    )
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    target_dir = LOCAL_ROOT / "target" / "docker-linux-amd64"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    docker_image = os.environ.get("KAKAO_DOCKER_IMAGE", "rust:1.91-bookworm")
+    docker_cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        "linux/amd64",
+        "--user",
+        f"{os.getuid()}:{os.getgid()}",
+        "-v",
+        f"{repo_root}:/repo",
+        "-v",
+        f"{target_dir}:/target",
+        "-w",
+        "/repo/apps/kakao",
+        "-e",
+        "CARGO_HOME=/target/cargo-home",
+        "-e",
+        "CARGO_TARGET_DIR=/target/build",
+        docker_image,
+        "cargo",
+        "build",
+        "--release",
+    ]
+    result = subprocess.run(docker_cmd, cwd=LOCAL_ROOT)
     if result.returncode != 0:
-        print("Build failed. Install cross: cargo install cross")
+        print("Build failed. Install/fix cross or ensure Docker is running locally.")
         sys.exit(1)
-    return LOCAL_ROOT / "target" / TARGET / "release" / BINARY
+    return target_dir / "build" / "release" / BINARY
 
 
 @task
@@ -80,12 +123,12 @@ def deploy(ctx):
 
     c = _conn()
 
-    # Backup current binary
+    # Backup current binary, then upload to a fresh inode. SFTP can fail when
+    # writing directly over the executable that systemd is still running.
     c.run(f"cp {REMOTE_DIR}/{BINARY} {REMOTE_DIR}/{BINARY}.prev 2>/dev/null || true")
-
-    # Upload new binary
-    c.put(str(binary_path), f"{REMOTE_DIR}/{BINARY}")
-    c.run(f"chmod +x {REMOTE_DIR}/{BINARY}")
+    c.put(str(binary_path), f"{REMOTE_DIR}/{BINARY}.new")
+    c.run(f"chmod +x {REMOTE_DIR}/{BINARY}.new")
+    c.run(f"mv {REMOTE_DIR}/{BINARY}.new {REMOTE_DIR}/{BINARY}")
 
     # Restart
     c.sudo(f"systemctl restart {SERVICE}")
