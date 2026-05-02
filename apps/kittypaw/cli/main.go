@@ -2298,7 +2298,7 @@ func newReflectionCmd() *cobra.Command {
 		newReflectionRejectCmd(),
 		newReflectionClearCmd(),
 		newReflectionRunCmd(),
-		newReflectionWeeklyReportCmd(),
+		newReflectionReportCmd(),
 	)
 	return cmd
 }
@@ -2406,10 +2406,10 @@ func newReflectionRunCmd() *cobra.Command {
 	}
 }
 
-func newReflectionWeeklyReportCmd() *cobra.Command {
+func newReflectionReportCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "weekly-report",
-		Short: "Show weekly reflection report",
+		Use:   "report",
+		Short: "Show reflection report",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cl, err := connectServerForCLIAccount()
 			if err != nil {

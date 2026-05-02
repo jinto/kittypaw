@@ -187,6 +187,29 @@ func TestRootCommandPlacesLogUnderSkill(t *testing.T) {
 	}
 }
 
+func TestReflectionCommandUsesReportName(t *testing.T) {
+	root := newRootCmd()
+
+	reflectionCmd, _, err := root.Find([]string{"reflection"})
+	if err != nil || reflectionCmd == nil || reflectionCmd.Name() != "reflection" {
+		t.Fatalf("root Find(reflection) = %v, %v; want reflection command", reflectionCmd, err)
+	}
+	children := map[string]*cobra.Command{}
+	for _, cmd := range reflectionCmd.Commands() {
+		children[cmd.Name()] = cmd
+	}
+	if _, ok := children["weekly-report"]; ok {
+		t.Fatal("reflection command must not expose weekly-report; use report instead")
+	}
+	reportCmd := children["report"]
+	if reportCmd == nil {
+		t.Fatalf("reflection command missing report child; got %#v", children)
+	}
+	if reportCmd.Short != "Show reflection report" {
+		t.Fatalf("reflection report short = %q", reportCmd.Short)
+	}
+}
+
 func TestRunSkillDryRunUsesSelectedAccount(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
