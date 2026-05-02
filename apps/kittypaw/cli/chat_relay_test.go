@@ -1,6 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
@@ -17,7 +23,11 @@ func TestChatRelayConnectorConfigsRequiresCompleteAccountSecrets(t *testing.T) {
 	if err := mgr.SaveChatRelayDeviceID(apiURL, "dev_123"); err != nil {
 		t.Fatal(err)
 	}
-	if err := mgr.SaveChatDaemonCredential(apiURL, "device-token-1"); err != nil {
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, core.ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  chatRelayTestAccessToken("device-token-1"),
+		RefreshToken: "refresh-token-1",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,7 +49,7 @@ func TestChatRelayConnectorConfigsRequiresCompleteAccountSecrets(t *testing.T) {
 	if cfg.DeviceID != "dev_123" {
 		t.Fatalf("DeviceID = %q", cfg.DeviceID)
 	}
-	if cfg.Credential != "device-token-1" {
+	if cfg.Credential != chatRelayTestAccessToken("device-token-1") {
 		t.Fatalf("Credential = %q", cfg.Credential)
 	}
 	if len(cfg.LocalAccounts) != 1 || cfg.LocalAccounts[0] != "alice" {
@@ -63,7 +73,11 @@ func TestChatRelayConnectorConfigsAdvertisesDefaultCapabilitiesWhenDispatchIsRea
 	if err := mgr.SaveChatRelayDeviceID(apiURL, "dev_123"); err != nil {
 		t.Fatal(err)
 	}
-	if err := mgr.SaveChatDaemonCredential(apiURL, "device-token-1"); err != nil {
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, core.ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  chatRelayTestAccessToken("device-token-1"),
+		RefreshToken: "refresh-token-1",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -98,7 +112,11 @@ func TestChatRelayConnectorConfigsGroupsAccountsForSameDeviceCredential(t *testi
 		if err := mgr.SaveChatRelayDeviceID(core.DefaultAPIServerURL, "dev_123"); err != nil {
 			t.Fatal(err)
 		}
-		if err := mgr.SaveChatDaemonCredential(core.DefaultAPIServerURL, "device-token-1"); err != nil {
+		if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+			DeviceID:     "dev_123",
+			AccessToken:  chatRelayTestAccessToken("device-token-1"),
+			RefreshToken: "refresh-token-1",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -134,7 +152,11 @@ func TestChatRelayConnectorConfigsSeparatesSameDeviceWithDifferentCredential(t *
 		if err := setup.mgr.SaveChatRelayDeviceID(core.DefaultAPIServerURL, "dev_123"); err != nil {
 			t.Fatal(err)
 		}
-		if err := setup.mgr.SaveChatDaemonCredential(core.DefaultAPIServerURL, setup.credential); err != nil {
+		if err := setup.mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+			DeviceID:     "dev_123",
+			AccessToken:  chatRelayTestAccessToken(setup.credential),
+			RefreshToken: "refresh-" + setup.credential,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -147,6 +169,135 @@ func TestChatRelayConnectorConfigsSeparatesSameDeviceWithDifferentCredential(t *
 	if len(got) != 2 {
 		t.Fatalf("connector configs = %d, want two credentials kept separate", len(got))
 	}
+}
+
+func TestChatRelayConnectorRuntimeRefreshRotatesGroupedAccounts(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/devices/refresh" {
+			http.NotFound(w, r)
+			return
+		}
+		calls++
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode refresh body: %v", err)
+		}
+		if body["refresh_token"] != "refresh-1" {
+			t.Fatalf("refresh token = %q, want refresh-1", body["refresh_token"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_access_token":"access-2","device_refresh_token":"refresh-2","expires_in":900}`)
+	}))
+	defer ts.Close()
+
+	aliceSecrets := testSecretsStore(t)
+	aliceMgr := core.NewAPITokenManager("", aliceSecrets)
+	bobSecrets := testSecretsStore(t)
+	bobMgr := core.NewAPITokenManager("", bobSecrets)
+	for _, mgr := range []*core.APITokenManager{aliceMgr, bobMgr} {
+		if err := mgr.SaveAuthBaseURL(core.DefaultAPIServerURL, ts.URL); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.SaveChatRelayURL(core.DefaultAPIServerURL, "https://chat.kittypaw.app"); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+			DeviceID:     "dev_123",
+			AccessToken:  chatRelayTestAccessToken("access-1"),
+			RefreshToken: "refresh-1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := chatRelayConnectorRuntimeConfigs([]*server.AccountDeps{
+		{Account: &core.Account{ID: "alice"}, Secrets: aliceSecrets, APITokenMgr: aliceMgr},
+		{Account: &core.Account{ID: "bob"}, Secrets: bobSecrets, APITokenMgr: bobMgr},
+	}, "0.1.5", false)
+	if len(got) != 1 {
+		t.Fatalf("runtime configs = %d, want one grouped connector", len(got))
+	}
+	refreshed, err := got[0].RefreshCredential(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshCredential: %v", err)
+	}
+	if refreshed != "access-2" {
+		t.Fatalf("refreshed credential = %q, want access-2", refreshed)
+	}
+	if calls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", calls)
+	}
+	for name, mgr := range map[string]*core.APITokenManager{"alice": aliceMgr, "bob": bobMgr} {
+		tokens, ok := mgr.LoadChatRelayDeviceTokens(core.DefaultAPIServerURL)
+		if !ok || tokens.AccessToken != "access-2" || tokens.RefreshToken != "refresh-2" || tokens.DeviceID != "dev_123" {
+			t.Fatalf("%s tokens = (%#v, %v), want rotated tokens", name, tokens, ok)
+		}
+	}
+}
+
+func TestChatRelayConnectorRuntimeConfigsRefreshExpiredCredentialOnceForGroup(t *testing.T) {
+	var calls int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/devices/refresh" {
+			http.NotFound(w, r)
+			return
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"device_access_token":%q,"device_refresh_token":"refresh-2","expires_in":900}`, chatRelayTestAccessToken("access-2"))
+	}))
+	defer ts.Close()
+
+	aliceSecrets := testSecretsStore(t)
+	aliceMgr := core.NewAPITokenManager("", aliceSecrets)
+	bobSecrets := testSecretsStore(t)
+	bobMgr := core.NewAPITokenManager("", bobSecrets)
+	for _, mgr := range []*core.APITokenManager{aliceMgr, bobMgr} {
+		if err := mgr.SaveAuthBaseURL(core.DefaultAPIServerURL, ts.URL); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.SaveChatRelayURL(core.DefaultAPIServerURL, "https://chat.kittypaw.app"); err != nil {
+			t.Fatal(err)
+		}
+		if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+			DeviceID:     "dev_123",
+			AccessToken:  chatRelayTestAccessTokenWithExp("access-1", 1),
+			RefreshToken: "refresh-1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := chatRelayConnectorRuntimeConfigs([]*server.AccountDeps{
+		{Account: &core.Account{ID: "alice"}, Secrets: aliceSecrets, APITokenMgr: aliceMgr},
+		{Account: &core.Account{ID: "bob"}, Secrets: bobSecrets, APITokenMgr: bobMgr},
+	}, "0.1.5", false)
+	if len(got) != 1 {
+		t.Fatalf("runtime configs = %d, want one grouped connector", len(got))
+	}
+	if got[0].Config.Credential != chatRelayTestAccessToken("access-2") {
+		t.Fatalf("credential was not refreshed before connect")
+	}
+	if calls != 1 {
+		t.Fatalf("refresh calls = %d, want one group-level refresh", calls)
+	}
+	for name, mgr := range map[string]*core.APITokenManager{"alice": aliceMgr, "bob": bobMgr} {
+		tokens, ok := mgr.LoadChatRelayDeviceTokens(core.DefaultAPIServerURL)
+		if !ok || tokens.AccessToken != chatRelayTestAccessToken("access-2") || tokens.RefreshToken != "refresh-2" {
+			t.Fatalf("%s tokens = (%#v, %v), want group-rotated tokens", name, tokens, ok)
+		}
+	}
+}
+
+func chatRelayTestAccessToken(subject string) string {
+	return chatRelayTestAccessTokenWithExp(subject, 4102444800)
+}
+
+func chatRelayTestAccessTokenWithExp(subject string, exp int64) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":%q,"exp":%d}`, subject, exp)))
+	return header + "." + payload + ".sig"
 }
 
 func TestChatRelayConnectorConfigsSkipsPartialSecrets(t *testing.T) {

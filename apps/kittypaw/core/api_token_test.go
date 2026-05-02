@@ -264,35 +264,6 @@ func TestAPITokenManager_SaveChatRelayURL_EmptyDeletes(t *testing.T) {
 	}
 }
 
-func TestAPITokenManager_SaveAndLoadChatDaemonCredential(t *testing.T) {
-	secrets := &SecretsStore{
-		path: t.TempDir() + "/secrets.json",
-		data: make(map[string]map[string]string),
-	}
-	mgr := NewAPITokenManager("", secrets)
-	apiURL := "https://portal.kittypaw.app"
-	ns := NamespaceForURL(apiURL)
-
-	if err := mgr.SaveChatDaemonCredential(apiURL, "device-token-1"); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := mgr.LoadChatDaemonCredential(apiURL)
-	if !ok || got != "device-token-1" {
-		t.Fatalf("LoadChatDaemonCredential = (%q, %v), want device token", got, ok)
-	}
-	if stored, ok := secrets.Get(ns, "chat_daemon_credential"); !ok || stored != "device-token-1" {
-		t.Fatalf("stored credential = (%q, %v), want chat_daemon_credential", stored, ok)
-	}
-
-	if err := mgr.SaveChatDaemonCredential(apiURL, ""); err != nil {
-		t.Fatal(err)
-	}
-	got, ok = mgr.LoadChatDaemonCredential(apiURL)
-	if ok || got != "" {
-		t.Fatalf("after empty save, LoadChatDaemonCredential = (%q, %v), want empty false", got, ok)
-	}
-}
-
 func TestAPITokenManager_SaveAndLoadChatRelayDeviceID(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",
@@ -319,6 +290,206 @@ func TestAPITokenManager_SaveAndLoadChatRelayDeviceID(t *testing.T) {
 	got, ok = mgr.LoadChatRelayDeviceID(apiURL)
 	if ok || got != "" {
 		t.Fatalf("after empty save, LoadChatRelayDeviceID = (%q, %v), want empty false", got, ok)
+	}
+}
+
+func TestAPITokenManager_SaveAuthBaseURL_EmptyDeletes(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	ns := NamespaceForURL(apiURL)
+
+	if err := mgr.SaveAuthBaseURL(apiURL, "https://api.kittypaw.app/auth"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadAuthBaseURL(apiURL)
+	if !ok || got != "https://api.kittypaw.app/auth" {
+		t.Fatalf("LoadAuthBaseURL = (%q, %v), want auth base URL", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "auth_base_url"); !ok || stored != "https://api.kittypaw.app/auth" {
+		t.Fatalf("stored auth base URL = (%q, %v), want auth_base_url", stored, ok)
+	}
+
+	if err := mgr.SaveAuthBaseURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadAuthBaseURL(apiURL)
+	if ok || got != "" {
+		t.Fatalf("after empty save, LoadAuthBaseURL = (%q, %v), want empty false", got, ok)
+	}
+}
+
+func TestAPITokenManager_SaveLoadAndClearChatRelayDeviceTokens(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+
+	tokens := ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  "access-1",
+		RefreshToken: "refresh-1",
+	}
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, tokens); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadChatRelayDeviceTokens(apiURL)
+	if !ok {
+		t.Fatal("LoadChatRelayDeviceTokens ok = false, want true")
+	}
+	if got != tokens {
+		t.Fatalf("LoadChatRelayDeviceTokens = %#v, want %#v", got, tokens)
+	}
+
+	if err := mgr.ClearChatRelayDeviceTokens(apiURL); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadChatRelayDeviceTokens(apiURL)
+	if ok || got != (ChatRelayDeviceTokens{}) {
+		t.Fatalf("after clear = (%#v, %v), want empty false", got, ok)
+	}
+}
+
+func TestAPITokenManager_PairChatRelayDeviceStoresResponse(t *testing.T) {
+	var gotAuth string
+	var gotPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode pair body: %v", err)
+		}
+		if body["name"] != "m3-enuma" {
+			t.Fatalf("pair body name = %#v", body["name"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_id":"dev_123","device_access_token":"access-1","device_refresh_token":"refresh-1","expires_in":900}`)
+	}))
+	defer ts.Close()
+
+	secrets := &SecretsStore{path: t.TempDir() + "/secrets.json", data: make(map[string]map[string]string)}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	got, err := mgr.PairChatRelayDevice(ts.URL, apiURL, "user-access", ChatRelayDevicePairRequest{Name: "m3-enuma"})
+	if err != nil {
+		t.Fatalf("PairChatRelayDevice: %v", err)
+	}
+	if gotPath != "/devices/pair" {
+		t.Fatalf("path = %q, want /devices/pair", gotPath)
+	}
+	if gotAuth != "Bearer user-access" {
+		t.Fatalf("Authorization = %q, want Bearer user-access", gotAuth)
+	}
+	want := ChatRelayDeviceTokens{DeviceID: "dev_123", AccessToken: "access-1", RefreshToken: "refresh-1"}
+	if got != want {
+		t.Fatalf("tokens = %#v, want %#v", got, want)
+	}
+	stored, ok := mgr.LoadChatRelayDeviceTokens(apiURL)
+	if !ok || stored != want {
+		t.Fatalf("stored tokens = (%#v, %v), want %#v true", stored, ok, want)
+	}
+}
+
+func TestAPITokenManager_RefreshChatRelayDeviceTokenRotatesStoredTokens(t *testing.T) {
+	var gotPath string
+	var gotRefresh string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode refresh body: %v", err)
+		}
+		gotRefresh = body["refresh_token"]
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_access_token":"access-2","device_refresh_token":"refresh-2","expires_in":900}`)
+	}))
+	defer ts.Close()
+
+	secrets := &SecretsStore{path: t.TempDir() + "/secrets.json", data: make(map[string]map[string]string)}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  "access-1",
+		RefreshToken: "refresh-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgr.RefreshChatRelayDeviceToken(ts.URL, apiURL)
+	if err != nil {
+		t.Fatalf("RefreshChatRelayDeviceToken: %v", err)
+	}
+	if gotPath != "/devices/refresh" {
+		t.Fatalf("path = %q, want /devices/refresh", gotPath)
+	}
+	if gotRefresh != "refresh-1" {
+		t.Fatalf("refresh_token = %q, want refresh-1", gotRefresh)
+	}
+	want := ChatRelayDeviceTokens{DeviceID: "dev_123", AccessToken: "access-2", RefreshToken: "refresh-2"}
+	if got != want {
+		t.Fatalf("tokens = %#v, want %#v", got, want)
+	}
+	stored, ok := mgr.LoadChatRelayDeviceTokens(apiURL)
+	if !ok || stored != want {
+		t.Fatalf("stored tokens = (%#v, %v), want %#v true", stored, ok, want)
+	}
+}
+
+func TestAPITokenManager_EnsureChatRelayDeviceAccessTokenRefreshesExpiredAccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/devices/refresh" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"device_access_token":%q,"device_refresh_token":"refresh-2","expires_in":900}`, makeJWT(time.Now().Add(10*time.Minute).Unix()))
+	}))
+	defer ts.Close()
+
+	secrets := &SecretsStore{path: t.TempDir() + "/secrets.json", data: make(map[string]map[string]string)}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  makeJWT(time.Now().Add(-1 * time.Minute).Unix()),
+		RefreshToken: "refresh-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgr.EnsureChatRelayDeviceAccessToken(ts.URL, apiURL)
+	if err != nil {
+		t.Fatalf("EnsureChatRelayDeviceAccessToken: %v", err)
+	}
+	if got.DeviceID != "dev_123" || got.RefreshToken != "refresh-2" {
+		t.Fatalf("tokens = %#v, want retained device id and rotated refresh", got)
+	}
+}
+
+func TestAPITokenManager_ChatRelayDeviceAccessTokenExpired(t *testing.T) {
+	secrets := &SecretsStore{path: t.TempDir() + "/secrets.json", data: make(map[string]map[string]string)}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	if _, ok := mgr.ChatRelayDeviceAccessTokenExpired(apiURL); ok {
+		t.Fatal("status ok = true without stored tokens")
+	}
+	if err := mgr.SaveChatRelayDeviceTokens(apiURL, ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  makeJWT(time.Now().Add(-1 * time.Minute).Unix()),
+		RefreshToken: "refresh-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expired, ok := mgr.ChatRelayDeviceAccessTokenExpired(apiURL)
+	if !ok || !expired {
+		t.Fatalf("expired status = (%v, %v), want true true", expired, ok)
 	}
 }
 

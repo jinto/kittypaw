@@ -196,6 +196,77 @@ func TestRunRetriesUntilRelayAccepts(t *testing.T) {
 	}
 }
 
+func TestRunRefreshesCredentialAfterUnauthorizedDial(t *testing.T) {
+	var attempts atomic.Int32
+	var refreshes atomic.Int32
+	helloCh := make(chan HelloFrame, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/daemon/connect" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer access-2" {
+			http.Error(w, "expired", http.StatusUnauthorized)
+			return
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Logf("accept: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Logf("read hello: %v", err)
+			return
+		}
+		var hello HelloFrame
+		if err := json.Unmarshal(data, &hello); err != nil {
+			t.Logf("decode hello: %v", err)
+			return
+		}
+		helloCh <- hello
+	}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	connector := &Connector{
+		Config: ConnectorConfig{
+			RelayURL:      ts.URL,
+			Credential:    "access-1",
+			DeviceID:      "dev_1",
+			LocalAccounts: []string{"alice"},
+			DaemonVersion: "0.1.5",
+		},
+		RefreshCredential: func(context.Context) (string, error) {
+			refreshes.Add(1)
+			return "access-2", nil
+		},
+	}
+	go connector.Run(ctx, RunOptions{
+		RetryInitialDelay: time.Hour,
+		RetryMaxDelay:     time.Hour,
+	})
+
+	select {
+	case hello := <-helloCh:
+		if hello.DeviceID != "dev_1" {
+			t.Fatalf("hello device id = %q", hello.DeviceID)
+		}
+		if got := refreshes.Load(); got != 1 {
+			t.Fatalf("refreshes = %d, want 1", got)
+		}
+		if got := attempts.Load(); got != 2 {
+			t.Fatalf("attempts = %d, want initial 401 plus refreshed retry", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for refreshed hello")
+	}
+}
+
 func TestRunRejectsRequestForUnadvertisedCapability(t *testing.T) {
 	errCh := make(chan error, 1)
 	errorFrameCh := make(chan ErrorFrame, 1)
