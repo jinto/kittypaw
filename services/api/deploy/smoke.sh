@@ -262,6 +262,33 @@ check_status "/auth/devices/refresh" "400" "auth/devices/refresh (no body, no au
 check_status "/auth/devices" "401" "auth/devices GET (no auth)"
 check_status "/auth/devices/00000000-0000-0000-0000-000000000000" "401" "auth/devices/{id} DELETE (no auth)" "DELETE"
 
+# Plan 25 — web OAuth flow (PKCE + code exchange).
+# /auth/web/google: no-params → 400 (handler reachable, validation path).
+# /auth/web/exchange: no-body → 400; with Origin header → 403 (BFF boundary
+# enforced server-side, independent of cors.AllowedOrigins config).
+check_origin_rejected() {
+    local path="$1"
+    local desc="$2"
+    local raw
+    raw=$(curl -sS -X POST -H "Origin: https://example.com" -w $'\n%{http_code}' "${BASE}${path}" 2>/dev/null || printf '\n000')
+    _split_body_code "$raw"
+    if [[ "$CODE" == "403" ]]; then
+        printf "${G}✓${N} %s [403, Origin blocked]\n" "$desc"
+        PASS=$((PASS + 1))
+    else
+        printf "${R}✗${N} %s [expected 403, got %s]\n" "$desc" "$CODE"
+        FAIL=$((FAIL + 1))
+        FAIL_LIST+=("$desc")
+    fi
+    sleep "$THROTTLE"
+}
+
+echo
+echo "--- Auth (web OAuth flow, Plan 25) ---"
+check_status "/auth/web/google" "400" "auth/web/google (no params)"
+check_status "/auth/web/exchange" "400" "auth/web/exchange POST (no body)" "POST"
+check_origin_rejected "/auth/web/exchange" "auth/web/exchange (browser Origin blocked)"
+
 TOTAL=$((PASS + FAIL))
 echo
 echo "=== Summary ==="
