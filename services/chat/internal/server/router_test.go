@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kittypaw-app/kittychat/internal/broker"
@@ -26,6 +27,45 @@ func TestRouterHealth(t *testing.T) {
 	}
 	if rr.Body.String() != `{"status":"healthy","version":"dev"}`+"\n" {
 		t.Fatalf("body = %q", rr.Body.String())
+	}
+}
+
+func TestRouterServesManualChatUI(t *testing.T) {
+	router := NewRouter(Config{
+		Version:       "dev",
+		OpenAIHandler: openai.NewHandler(nilAuth{}, nilBroker{}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/manual/", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("content-type = %q, want html", ct)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, `id="manual-chat-app"`) {
+		t.Fatalf("manual ui marker missing from body:\n%s", body)
+	}
+}
+
+func TestRouterServesManualChatAssets(t *testing.T) {
+	router := NewRouter(Config{
+		Version:       "dev",
+		OpenAIHandler: openai.NewHandler(nilAuth{}, nilBroker{}),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/manual/app.js", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Fatalf("content-type = %q, want javascript", ct)
 	}
 }
 

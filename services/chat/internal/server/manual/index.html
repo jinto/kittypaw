@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KittyChat Manual</title>
+  <link rel="stylesheet" href="/manual/style.css">
+</head>
+<body>
+  <main id="manual-chat-app" class="shell">
+    <section class="panel connection-panel" aria-label="Connection">
+      <div class="brand">
+        <div>
+          <h1>KittyChat Manual</h1>
+          <p id="statusText" class="status-text">Idle</p>
+        </div>
+        <button id="loadRoutesButton" class="icon-button" type="button" title="Load routes" aria-label="Load routes">
+          <span aria-hidden="true">&#8635;</span>
+        </button>
+      </div>
+
+      <label class="field field-token">
+        <span>API token</span>
+        <input id="apiTokenInput" type="password" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>Device</span>
+          <select id="deviceSelect"></select>
+        </label>
+        <label class="field">
+          <span>Account</span>
+          <select id="accountSelect"></select>
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <select id="modelSelect"></select>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="loadModelsButton" type="button">Models</button>
+        <button id="clearButton" type="button" class="secondary">Clear</button>
+      </div>
+    </section>
+
+    <section class="chat-surface" aria-label="Chat">
+      <div id="messages" class="messages"></div>
+      <form id="composer" class="composer">
+        <textarea id="messageInput" rows="3" placeholder="Message"></textarea>
+        <button id="sendButton" type="submit">Send</button>
+      </form>
+    </section>
+  </main>
+  <script src="/manual/app.js"></script>
+</body>
+</html>
