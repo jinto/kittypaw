@@ -19,8 +19,9 @@ type chatRelayFlags struct {
 func newChatRelayCmd() *cobra.Command {
 	flags := &chatRelayFlags{}
 	cmd := &cobra.Command{
-		Use:   "chat-relay",
-		Short: "Manage hosted chat relay device credentials",
+		Use:    "chat-relay",
+		Short:  "Internal hosted chat relay diagnostics",
+		Hidden: true,
 	}
 	cmd.PersistentFlags().StringVar(&flags.account, "account", "", "use this local account")
 	cmd.PersistentFlags().StringVar(&flags.apiURL, "api-url", "", "API server URL (default "+core.DefaultAPIServerURL+")")
@@ -42,15 +43,7 @@ func newChatRelayCmd() *cobra.Command {
 		},
 	}
 
-	disconnectCmd := &cobra.Command{
-		Use:   "disconnect",
-		Short: "Remove local chat relay device credentials",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatRelayDisconnect(flags)
-		},
-	}
-
-	cmd.AddCommand(pairCmd, statusCmd, disconnectCmd)
+	cmd.AddCommand(pairCmd, statusCmd)
 	return cmd
 }
 
@@ -75,15 +68,10 @@ func runChatRelayPair(flags *chatRelayFlags) error {
 			name = host
 		}
 	}
-	tokens, err := mgr.PairChatRelayDevice(mgr.ResolveAuthBaseURL(apiURL), apiURL, accessToken, core.ChatRelayDevicePairRequest{Name: name})
-	if err != nil {
+	if _, err := mgr.PairChatRelayDevice(mgr.ResolveAuthBaseURL(apiURL), apiURL, accessToken, core.ChatRelayDevicePairRequest{Name: name}); err != nil {
 		return err
 	}
-	fmt.Printf("paired chat relay device for account %s\n", accountID)
-	fmt.Printf("device_id: %s\n", tokens.DeviceID)
-	if relayURL, ok := mgr.LoadChatRelayURL(apiURL); ok && relayURL != "" {
-		fmt.Printf("chat_relay_url: %s\n", relayURL)
-	}
+	fmt.Printf("Hosted chat ready for account %s\n", accountID)
 	return nil
 }
 
@@ -92,41 +80,21 @@ func runChatRelayStatus(flags *chatRelayFlags) error {
 	if err != nil {
 		return err
 	}
-	authBaseURL := mgr.ResolveAuthBaseURL(apiURL)
 	relayURL, relayOK := mgr.LoadChatRelayURL(apiURL)
-	tokens, tokenOK := mgr.LoadChatRelayDeviceTokens(apiURL)
+	_, tokenOK := mgr.LoadChatRelayDeviceTokens(apiURL)
 
 	fmt.Printf("account: %s\n", accountID)
-	fmt.Printf("api_url: %s\n", apiURL)
-	fmt.Printf("auth_base_url: %s\n", authBaseURL)
-	if relayOK && relayURL != "" {
-		fmt.Printf("chat_relay_url: %s\n", relayURL)
-	} else {
-		fmt.Println("chat_relay_url: not configured")
-	}
 	if tokenOK {
-		fmt.Printf("device_id: %s\n", tokens.DeviceID)
 		if expired, ok := mgr.ChatRelayDeviceAccessTokenExpired(apiURL); ok && expired {
-			fmt.Println("access_token: stored (refresh needed)")
+			fmt.Println("hosted_chat: ready (refresh pending)")
 		} else {
-			fmt.Println("access_token: stored")
+			fmt.Println("hosted_chat: ready")
 		}
-		fmt.Println("refresh_token: stored")
+	} else if relayOK && relayURL != "" {
+		fmt.Println("hosted_chat: login needed")
 	} else {
-		fmt.Println("device: not paired")
+		fmt.Println("hosted_chat: unavailable")
 	}
-	return nil
-}
-
-func runChatRelayDisconnect(flags *chatRelayFlags) error {
-	accountID, mgr, apiURL, err := chatRelayAccountManager(flags)
-	if err != nil {
-		return err
-	}
-	if err := mgr.ClearChatRelayDeviceTokens(apiURL); err != nil {
-		return err
-	}
-	fmt.Printf("removed local chat relay device tokens for account %s\n", accountID)
 	return nil
 }
 

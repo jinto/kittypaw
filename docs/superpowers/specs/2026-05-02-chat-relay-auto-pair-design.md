@@ -22,10 +22,8 @@ The pairing request uses the stored `auth_base_url` and a host-derived device na
 
 ## Error Handling
 
-Pairing is best-effort. Failure does not fail login or setup because the API endpoint may not be deployed yet, and local Telegram/Kakao/CLI workflows must remain usable. Failures are reported as a short warning with the manual fallback command:
-
-`kittypaw chat-relay pair`
+Pairing is best-effort. Failure does not fail login or setup because the API endpoint may not be deployed yet, and local Telegram/Kakao/CLI workflows must remain usable. Failures are reported as a short warning. Users should not need to know about chat relay device IDs or manual pairing commands; the next `kittypaw login` or `kittypaw setup` retries automatic pairing.
 
 ## Out Of Scope
 
-This does not add API-side device revocation, OS keyring storage, or automatic pairing from `kittypaw serve`.
+This does not add user-facing device revocation, user-facing disconnect, OS keyring storage, or automatic pairing from `kittypaw serve`. Stale device cleanup belongs to the API/chat services as an automatic lifecycle policy.

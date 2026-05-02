@@ -107,18 +107,17 @@ func maybePairChatRelayDevice(apiURL string, mgr *core.APITokenManager, accessTo
 	if host, err := os.Hostname(); err == nil && strings.TrimSpace(host) != "" {
 		name = strings.TrimSpace(host)
 	}
-	tokens, err := mgr.PairChatRelayDevice(
+	if _, err := mgr.PairChatRelayDevice(
 		mgr.ResolveAuthBaseURL(apiURL),
 		apiURL,
 		accessToken,
 		core.ChatRelayDevicePairRequest{Name: name},
-	)
-	if err != nil {
-		_, _ = fmt.Fprintf(out, "chat relay pairing skipped: %v\n", err)
-		_, _ = fmt.Fprintf(out, "Run `kittypaw chat-relay pair` after the API supports device pairing.\n")
+	); err != nil {
+		_, _ = fmt.Fprintf(out, "Hosted chat setup skipped: %v\n", err)
+		_, _ = fmt.Fprintln(out, "Hosted chat will be configured automatically the next time you log in.")
 		return false
 	}
-	_, _ = fmt.Fprintf(out, "Chat relay paired (device %s)\n", tokens.DeviceID)
+	_, _ = fmt.Fprintln(out, "Hosted chat ready.")
 	return true
 }
 

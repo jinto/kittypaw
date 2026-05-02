@@ -44,7 +44,7 @@
 - [x] Attach the refresh callback to the connector started by `kittypaw serve`.
 - [x] Run `go test ./cli -run TestChatRelayConnectorConfigs -count=1`.
 
-## Task 4: CLI Commands
+## Task 4: Internal CLI Diagnostics
 
 **Files:**
 - Create `cli/cmd_chat_relay.go`
@@ -52,10 +52,10 @@
 - Modify `cli/chat_relay_test.go`
 - Modify `cli/main.go`
 
-- [x] Add `kittypaw chat-relay pair`, `status`, and `disconnect`.
+- [x] Add hidden `kittypaw chat-relay pair` and `status` diagnostics.
 - [x] `pair` uses the user access token and stores device tokens.
-- [x] `status` prints relay URL, auth base URL, device ID, access token validity, and refresh token presence.
-- [x] `disconnect` clears local chat relay device tokens.
+- [x] `status` prints only coarse hosted chat readiness and does not expose device IDs or token state.
+- [x] Do not expose `disconnect`; stale device cleanup is an automatic API/chat service lifecycle concern.
 - [x] Run `go test ./cli -run 'TestChatRelay' -count=1`.
 
 ## Final Verification

@@ -248,7 +248,7 @@ func (m *APITokenManager) PairChatRelayDevice(authBaseURL, apiURL, userAccessTok
 func (m *APITokenManager) RefreshChatRelayDeviceToken(authBaseURL, apiURL string) (ChatRelayDeviceTokens, error) {
 	current, ok := m.LoadChatRelayDeviceTokens(apiURL)
 	if !ok {
-		return ChatRelayDeviceTokens{}, fmt.Errorf("no chat relay device tokens; run `kittypaw chat-relay pair`")
+		return ChatRelayDeviceTokens{}, fmt.Errorf("hosted chat is not configured; run `kittypaw login`")
 	}
 	payload, _ := json.Marshal(map[string]string{"refresh_token": current.RefreshToken})
 	resp, err := m.client.Post(
@@ -282,7 +282,7 @@ func (m *APITokenManager) RefreshChatRelayDeviceToken(authBaseURL, apiURL string
 func (m *APITokenManager) EnsureChatRelayDeviceAccessToken(authBaseURL, apiURL string) (ChatRelayDeviceTokens, error) {
 	tokens, ok := m.LoadChatRelayDeviceTokens(apiURL)
 	if !ok {
-		return ChatRelayDeviceTokens{}, fmt.Errorf("no chat relay device tokens; run `kittypaw chat-relay pair`")
+		return ChatRelayDeviceTokens{}, fmt.Errorf("hosted chat is not configured; run `kittypaw login`")
 	}
 	if !isJWTExpired(tokens.AccessToken) {
 		return tokens, nil
