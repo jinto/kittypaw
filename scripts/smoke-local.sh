@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOCACHE="${GOCACHE:-/private/tmp/kitty-go-build}"
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/kitty-pycache}"
+
+section() {
+    printf '\n==> %s\n' "$1"
+}
+
+run() {
+    printf '+ %s\n' "$*"
+    "$@"
+}
+
+section "contracts"
+run make -C "$ROOT" contracts-check
+
+section "deploy script syntax"
+run bash -n "$ROOT/apps/kittyapi/deploy/smoke.sh"
+run bash -n "$ROOT/apps/portal/deploy/smoke.sh"
+run bash -n "$ROOT/apps/portal/deploy/e2e_devices.sh"
+run bash -n "$ROOT/apps/portal/deploy/check-token-shape.sh"
+run bash -n "$ROOT/apps/chat/deploy/smoke.sh"
+
+section "deploy python syntax"
+run python3 -m py_compile "$ROOT/apps/kittyapi/fabfile.py" "$ROOT/apps/portal/fabfile.py"
+
+section "go tests"
+run go test ./apps/kittyapi/... -count=1
+run go test ./apps/portal/... -count=1
+run go test ./apps/chat/... -count=1
+run go test ./apps/kittypaw/... -count=1
+
+section "rust tests"
+run cargo test --manifest-path "$ROOT/apps/kakao/Cargo.toml"
+
+section "chat in-process e2e"
+run make -C "$ROOT/apps/chat" smoke-local
+
+section "done"

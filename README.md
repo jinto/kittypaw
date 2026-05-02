@@ -52,3 +52,12 @@ the latest `kittypaw/v*` release, not the repository-wide latest release.
 
 The historical repositories have been imported with path-level history. New
 deployable product work should live under `apps/<name>`.
+
+## Local Smoke
+
+```bash
+make smoke-local
+```
+
+Runs contracts, deploy-script syntax checks, Go/Rust package tests, and the
+Chat in-process e2e smoke without touching production hosts.
