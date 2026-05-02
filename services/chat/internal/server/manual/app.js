@@ -24,6 +24,8 @@ const els = {
   clear: document.getElementById("clearButton"),
 };
 
+let tokenLoadTimer = 0;
+
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
@@ -57,6 +59,14 @@ function setStatus(text, error = false) {
 function authHeaders() {
   const token = state.token.trim();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function requireToken() {
+  if (state.token.trim()) {
+    return true;
+  }
+  setStatus("API token required", true);
+  return false;
 }
 
 async function requestJSON(path, options = {}) {
@@ -148,6 +158,9 @@ function renderModels(models = []) {
 }
 
 async function loadRoutes() {
+  if (!requireToken()) {
+    return;
+  }
   setBusy(true);
   try {
     setStatus("Loading routes");
@@ -170,6 +183,9 @@ async function loadRoutes() {
 }
 
 async function loadModels() {
+  if (!requireToken()) {
+    return;
+  }
   setBusy(true);
   try {
     setStatus("Loading models");
@@ -186,6 +202,9 @@ async function loadModels() {
 
 async function sendMessage(event) {
   event.preventDefault();
+  if (!requireToken()) {
+    return;
+  }
   const text = els.input.value.trim();
   if (!text) {
     return;
@@ -244,14 +263,38 @@ function syncFromInputs() {
   saveState();
 }
 
+function syncTokenFromInput() {
+  state.token = els.token.value;
+  saveState();
+  clearTimeout(tokenLoadTimer);
+  if (!state.token.trim()) {
+    state.routes = [];
+    renderRoutes();
+    setStatus("API token required", true);
+    return;
+  }
+  setStatus("Token ready");
+  tokenLoadTimer = setTimeout(() => {
+    loadRoutes();
+  }, 250);
+}
+
 function init() {
   loadState();
   els.token.value = state.token;
   renderRoutes();
   renderModels([]);
   renderMessages();
+  if (!state.token.trim()) {
+    setStatus("API token required", true);
+  } else {
+    setStatus("Token ready");
+    tokenLoadTimer = setTimeout(() => {
+      loadRoutes();
+    }, 0);
+  }
 
-  els.token.addEventListener("input", syncFromInputs);
+  els.token.addEventListener("input", syncTokenFromInput);
   els.device.addEventListener("change", () => {
     state.deviceID = els.device.value;
     renderAccounts();

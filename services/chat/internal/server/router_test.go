@@ -49,6 +49,9 @@ func TestRouterServesManualChatUI(t *testing.T) {
 	if body := rr.Body.String(); !strings.Contains(body, `id="manual-chat-app"`) {
 		t.Fatalf("manual ui marker missing from body:\n%s", body)
 	}
+	if body := rr.Body.String(); !strings.Contains(body, `placeholder="Paste KITTYCHAT_API_TOKEN"`) {
+		t.Fatalf("token placeholder missing from body:\n%s", body)
+	}
 }
 
 func TestRouterServesManualChatAssets(t *testing.T) {
