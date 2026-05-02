@@ -109,7 +109,7 @@ func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
 	for _, cmd := range root.Commands() {
 		topLevel[cmd.Name()] = true
 	}
-	for _, hidden := range []string{"serve", "stop", "service", "daemon"} {
+	for _, hidden := range []string{"serve", "stop", "service", "daemon", "reload"} {
 		if topLevel[hidden] {
 			t.Fatalf("root command must not expose legacy %q command", hidden)
 		}
@@ -122,7 +122,7 @@ func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
 	for _, cmd := range serverCmd.Commands() {
 		children[cmd.Name()] = true
 	}
-	for _, want := range []string{"start", "stop", "install", "uninstall", "status", "logs"} {
+	for _, want := range []string{"start", "stop", "reload", "install", "uninstall", "status", "logs"} {
 		if !children[want] {
 			t.Fatalf("server command missing %q child; got %#v", want, children)
 		}

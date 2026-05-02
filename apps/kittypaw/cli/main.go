@@ -133,7 +133,6 @@ func newRootCmd() *cobra.Command {
 		newReflectionCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
-		newReloadCmd(),
 		newResetCmd(),
 		newLoginCmd(),
 		newChatRelayCmd(),
@@ -168,6 +167,7 @@ to register it with the OS as a per-user background service.`,
 	cmd.AddCommand(
 		newServerStartCmd(),
 		newServerStopCmd(),
+		newServerReloadCmd(),
 	)
 	addServerServiceCommands(cmd)
 	return cmd
@@ -2261,10 +2261,10 @@ func newChannelsListCmd() *cobra.Command {
 }
 
 // ---------------------------------------------------------------------------
-// reload
+// server reload
 // ---------------------------------------------------------------------------
 
-func newReloadCmd() *cobra.Command {
+func newServerReloadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "reload",
 		Short: "Reload server configuration",
