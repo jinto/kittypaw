@@ -177,9 +177,6 @@ function renderSelect(select, values, selected) {
 
 function renderRoutes() {
   const deviceIDs = [...new Set(state.routes.map((r) => r.device_id).filter(Boolean))];
-  if (state.deviceID && !deviceIDs.includes(state.deviceID)) {
-    deviceIDs.unshift(state.deviceID);
-  }
   renderSelect(els.device, deviceIDs, state.deviceID);
   renderAccounts();
 }
@@ -191,6 +188,23 @@ function renderAccounts() {
     state.accountID = accounts[0];
   }
   renderSelect(els.account, accounts, state.accountID);
+}
+
+function selectFirstAvailableRoute() {
+  if (state.routes.length === 0) {
+    state.deviceID = "";
+    state.accountID = "";
+    return;
+  }
+  let route = state.routes.find((r) => r.device_id === state.deviceID);
+  if (!route) {
+    route = state.routes[0];
+    state.deviceID = route.device_id || "";
+  }
+  const accounts = route && Array.isArray(route.local_accounts) ? route.local_accounts : [];
+  if (!accounts.includes(state.accountID)) {
+    state.accountID = accounts[0] || "";
+  }
 }
 
 function renderModels(models = []) {
@@ -210,12 +224,7 @@ async function loadRoutes() {
     setStatus("Loading routes");
     const body = await requestJSON("/v1/routes");
     state.routes = Array.isArray(body.data) ? body.data : [];
-    if (state.routes.length > 0) {
-      const first = state.routes[0];
-      state.deviceID = state.deviceID || first.device_id || "";
-      const accounts = Array.isArray(first.local_accounts) ? first.local_accounts : [];
-      state.accountID = state.accountID || accounts[0] || "";
-    }
+    selectFirstAvailableRoute();
     renderRoutes();
     saveState();
     setStatus(state.routes.length ? "Routes loaded" : "No routes");
