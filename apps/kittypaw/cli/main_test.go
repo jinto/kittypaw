@@ -166,6 +166,42 @@ func TestRootCommandPlacesRunUnderSkill(t *testing.T) {
 	}
 }
 
+func TestRunSkillDryRunUsesSelectedAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "bob", "config.toml"))
+
+	oldDryRun := flagDryRun
+	oldAccount := flagAccount
+	oldRemote := flagRemote
+	t.Cleanup(func() {
+		flagDryRun = oldDryRun
+		flagAccount = oldAccount
+		flagRemote = oldRemote
+	})
+	flagDryRun = true
+	flagAccount = "bob"
+	flagRemote = ""
+
+	skill := &core.Skill{
+		Name:        "account-skill",
+		Version:     1,
+		Description: "bob-only skill",
+		Enabled:     true,
+		Format:      core.SkillFormatNative,
+		Trigger:     core.SkillTrigger{Type: "manual"},
+	}
+	if err := core.SaveSkillTo(filepath.Join(root, "accounts", "bob"), skill, "Agent.respond('bob')"); err != nil {
+		t.Fatalf("SaveSkillTo: %v", err)
+	}
+
+	if err := runSkill(nil, []string{"account-skill"}); err != nil {
+		t.Fatalf("runSkill dry-run with selected account: %v", err)
+	}
+}
+
 func TestResolveCLIAccountExplicit(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)

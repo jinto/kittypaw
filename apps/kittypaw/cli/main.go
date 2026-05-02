@@ -798,7 +798,7 @@ func newSkillListCmd() *cobra.Command {
 
 			var skills []map[string]any
 			if filterType == "" || filterType == "skill" {
-				if cl, err := connectServer(); err == nil {
+				if cl, err := connectServerForCLIAccount(); err == nil {
 					if res, err := cl.Skills(); err == nil {
 						skills = jsonSlice(res, "skills")
 					}
@@ -1020,7 +1020,7 @@ func newSkillInstallCmd() *cobra.Command {
 }
 
 func installViaServer(source, mdMode string) error {
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -1052,7 +1052,7 @@ func newSkillUninstallCmd() *cobra.Command {
 			}
 
 			// Fall back to skill deletion via server.
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1084,7 +1084,7 @@ func newSkillInfoCmd() *cobra.Command {
 			}
 
 			// Fall back to skill via server.
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1173,7 +1173,7 @@ func newSkillEnableCmd() *cobra.Command {
 		Short: "Enable a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1192,7 +1192,7 @@ func newSkillDisableCmd() *cobra.Command {
 		Short: "Disable a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1211,7 +1211,7 @@ func newSkillExplainCmd() *cobra.Command {
 		Short: "Explain what a skill does",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1269,7 +1269,7 @@ func newSkillSuggestCmd() *cobra.Command {
 		Short: "Manage skill suggestions",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			// Default action: list suggestions.
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1297,7 +1297,7 @@ func newSkillSuggestCmd() *cobra.Command {
 			Short: "Accept a suggestion",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectServer()
+				cl, err := connectServerForCLIAccount()
 				if err != nil {
 					return err
 				}
@@ -1313,7 +1313,7 @@ func newSkillSuggestCmd() *cobra.Command {
 			Short: "Dismiss a suggestion",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(_ *cobra.Command, args []string) error {
-				cl, err := connectServer()
+				cl, err := connectServerForCLIAccount()
 				if err != nil {
 					return err
 				}
@@ -1353,7 +1353,11 @@ func runSkill(_ *cobra.Command, args []string) error {
 
 	if flagDryRun {
 		// Dry run stays local; no server needed.
-		skill, code, err := core.LoadSkill(name)
+		base, err := defaultAccountBase()
+		if err != nil {
+			return err
+		}
+		skill, code, err := core.LoadSkillFrom(base, name)
 		if err != nil {
 			return fmt.Errorf("load skill: %w", err)
 		}
@@ -1368,7 +1372,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -1390,7 +1394,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 func runTeach(_ *cobra.Command, args []string) error {
 	description := strings.Join(args, " ")
 
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -2406,7 +2410,25 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 // connectServer returns a Client connected through client.DaemonConn.
 // Uses --remote flag if set, otherwise auto-discovers/starts the local server.
 func connectServer() (*client.Client, error) {
-	conn, err := client.NewDaemonConn(flagRemote)
+	return connectServerForAccount("")
+}
+
+// connectServerForCLIAccount connects account-scoped CLI commands to the
+// selected local account. Remote connections do not use local account names.
+func connectServerForCLIAccount() (*client.Client, error) {
+	accountID := ""
+	if flagRemote == "" {
+		var err error
+		accountID, err = resolveCLIAccount(flagAccount)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return connectServerForAccount(accountID)
+}
+
+func connectServerForAccount(accountID string) (*client.Client, error) {
+	conn, err := client.NewDaemonConnForAccount(flagRemote, accountID)
 	if err != nil {
 		return nil, err
 	}
