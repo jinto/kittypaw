@@ -49,6 +49,9 @@ func (m *APITokenManager) SaveTokens(apiURL, accessToken, refreshToken string) e
 	if err := m.secrets.Set(ns, "api_url", apiURL); err != nil {
 		return fmt.Errorf("save api_url: %w", err)
 	}
+	if err := m.secrets.Set("kittypaw-api", "api_url", apiURL); err != nil {
+		return fmt.Errorf("save default api_url: %w", err)
+	}
 	return nil
 }
 
