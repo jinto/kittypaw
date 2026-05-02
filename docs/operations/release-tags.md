@@ -20,7 +20,9 @@ The script should list releases and select the newest tag that starts with
 Kittypaw releases are built by `.github/workflows/release-kittypaw.yml`. The
 workflow intentionally builds archives directly with `go build` instead of
 GoReleaser because prefixed monorepo tags such as `kittypaw/v0.4.0` require
-GoReleaser Pro's monorepo support.
+GoReleaser Pro's monorepo support. The workflow signs and notarizes the macOS
+archives after upload, then regenerates `checksums.txt` so the installer checks
+the signed artifacts.
 
 ## GitHub Actions
 
