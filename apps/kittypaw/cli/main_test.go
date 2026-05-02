@@ -158,6 +158,35 @@ func TestRootCommandPlacesRunUnderSkill(t *testing.T) {
 	}
 }
 
+func TestRootCommandPlacesLogUnderSkill(t *testing.T) {
+	root := newRootCmd()
+
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "log" {
+			t.Fatal("root command must not expose log; use kittypaw skill log instead")
+		}
+	}
+
+	skillCmd, _, err := root.Find([]string{"skill"})
+	if err != nil || skillCmd == nil || skillCmd.Name() != "skill" {
+		t.Fatalf("root Find(skill) = %v, %v; want skill command", skillCmd, err)
+	}
+	children := map[string]*cobra.Command{}
+	for _, cmd := range skillCmd.Commands() {
+		children[cmd.Name()] = cmd
+	}
+	logCmd := children["log"]
+	if logCmd == nil {
+		t.Fatalf("skill command missing log child; got %#v", children)
+	}
+	if logCmd.Hidden {
+		t.Fatal("skill log command must be visible")
+	}
+	if logCmd.Short != "Show skill execution log" {
+		t.Fatalf("skill log short = %q", logCmd.Short)
+	}
+}
+
 func TestRunSkillDryRunUsesSelectedAccount(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
@@ -207,9 +236,9 @@ func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
 		{"chat"},
 		{"status"},
 		{"skill"},
+		{"skill", "log"},
 		{"config", "check"},
 		{"agent"},
-		{"log"},
 		{"persona"},
 		{"reflection"},
 		{"memory"},
