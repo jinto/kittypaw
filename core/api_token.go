@@ -106,9 +106,11 @@ func (m *APITokenManager) saveOrDelete(ns, key, value string) error {
 const (
 	chatRelayURLKey         = "chat_relay_url"
 	chatRelayDeviceIDKey    = "chat_relay_device_id"
-	chatDaemonCredentialKey = "chat_daemon_credential"
+	chatRelayAccessTokenKey = "chat_relay_access_token"
+	chatRelayRefreshKey     = "chat_relay_refresh_token"
 	kakaoRelayURLKey        = "kakao_relay_url"
 	kakaoRelayWSURLKey      = "kakao_relay_ws_url"
+	authBaseURLKey          = "auth_base_url"
 )
 
 // SaveChatRelayURL stores the chat relay server base URL from GET /discovery.
@@ -133,16 +135,186 @@ func (m *APITokenManager) LoadChatRelayDeviceID(apiURL string) (string, bool) {
 	return m.secrets.Get(NamespaceForURL(apiURL), chatRelayDeviceIDKey)
 }
 
-// SaveChatDaemonCredential stores the API-issued daemon/device credential
-// used for outbound WSS connections to the chat relay.
-// Empty value deletes the key so revoked credentials don't survive rotation.
-func (m *APITokenManager) SaveChatDaemonCredential(apiURL, credential string) error {
-	return m.saveOrDelete(NamespaceForURL(apiURL), chatDaemonCredentialKey, credential)
+// ChatRelayDeviceTokens are the API-issued credentials the local daemon uses
+// to connect outbound to the hosted chat relay. The daemon treats AccessToken
+// as an opaque Bearer token; kittychat validates the RS256 JWT.
+type ChatRelayDeviceTokens struct {
+	DeviceID     string
+	AccessToken  string
+	RefreshToken string
 }
 
-// LoadChatDaemonCredential returns the stored daemon/device credential.
-func (m *APITokenManager) LoadChatDaemonCredential(apiURL string) (string, bool) {
-	return m.secrets.Get(NamespaceForURL(apiURL), chatDaemonCredentialKey)
+// ChatRelayDevicePairRequest is sent to POST {auth_base_url}/devices/pair.
+type ChatRelayDevicePairRequest struct {
+	Name         string   `json:"name,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// SaveChatRelayDeviceTokens stores the API-issued device id and rotating
+// access/refresh tokens used by the chat relay connector.
+func (m *APITokenManager) SaveChatRelayDeviceTokens(apiURL string, tokens ChatRelayDeviceTokens) error {
+	if err := m.SaveChatRelayDeviceID(apiURL, tokens.DeviceID); err != nil {
+		return err
+	}
+	ns := NamespaceForURL(apiURL)
+	if err := m.saveOrDelete(ns, chatRelayAccessTokenKey, tokens.AccessToken); err != nil {
+		return err
+	}
+	return m.saveOrDelete(ns, chatRelayRefreshKey, tokens.RefreshToken)
+}
+
+// LoadChatRelayDeviceTokens returns a complete stored device credential set.
+func (m *APITokenManager) LoadChatRelayDeviceTokens(apiURL string) (ChatRelayDeviceTokens, bool) {
+	deviceID, okDevice := m.LoadChatRelayDeviceID(apiURL)
+	ns := NamespaceForURL(apiURL)
+	access, okAccess := m.secrets.Get(ns, chatRelayAccessTokenKey)
+	refresh, okRefresh := m.secrets.Get(ns, chatRelayRefreshKey)
+	if !okDevice || !okAccess || !okRefresh || deviceID == "" || access == "" || refresh == "" {
+		return ChatRelayDeviceTokens{}, false
+	}
+	return ChatRelayDeviceTokens{DeviceID: deviceID, AccessToken: access, RefreshToken: refresh}, true
+}
+
+// ClearChatRelayDeviceTokens removes locally stored chat relay device tokens.
+func (m *APITokenManager) ClearChatRelayDeviceTokens(apiURL string) error {
+	ns := NamespaceForURL(apiURL)
+	for _, key := range []string{chatRelayDeviceIDKey, chatRelayAccessTokenKey, chatRelayRefreshKey} {
+		if err := m.secrets.Delete(ns, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SaveAuthBaseURL stores the auth service base URL from GET /discovery.
+// Empty value deletes the key so stale topology does not persist.
+func (m *APITokenManager) SaveAuthBaseURL(apiURL, authBaseURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), authBaseURLKey, strings.TrimRight(authBaseURL, "/"))
+}
+
+// LoadAuthBaseURL returns the stored auth base URL.
+func (m *APITokenManager) LoadAuthBaseURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), authBaseURLKey)
+}
+
+// ResolveAuthBaseURL returns the stored auth_base_url or the default
+// <api_url>/auth topology used by collapsed local/dev deployments.
+func (m *APITokenManager) ResolveAuthBaseURL(apiURL string) string {
+	if got, ok := m.LoadAuthBaseURL(apiURL); ok && got != "" {
+		return strings.TrimRight(got, "/")
+	}
+	return strings.TrimRight(apiURL, "/") + "/auth"
+}
+
+// PairChatRelayDevice calls POST {auth_base_url}/devices/pair with the user's
+// access token and stores the returned device credential set.
+func (m *APITokenManager) PairChatRelayDevice(authBaseURL, apiURL, userAccessToken string, body ChatRelayDevicePairRequest) (ChatRelayDeviceTokens, error) {
+	payload, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(authBaseURL, "/")+"/devices/pair", strings.NewReader(string(payload)))
+	if err != nil {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("build pair request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if userAccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+userAccessToken)
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("pair request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return ChatRelayDeviceTokens{}, fmt.Errorf("pair failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	tokens, err := decodeChatRelayDeviceTokenResponse(resp.Body)
+	if err != nil {
+		return ChatRelayDeviceTokens{}, err
+	}
+	if tokens.DeviceID == "" {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("device token response missing device id")
+	}
+	if err := m.SaveChatRelayDeviceTokens(apiURL, tokens); err != nil {
+		return ChatRelayDeviceTokens{}, err
+	}
+	return tokens, nil
+}
+
+// RefreshChatRelayDeviceToken rotates the stored chat relay access/refresh
+// token pair by calling POST {auth_base_url}/devices/refresh.
+func (m *APITokenManager) RefreshChatRelayDeviceToken(authBaseURL, apiURL string) (ChatRelayDeviceTokens, error) {
+	current, ok := m.LoadChatRelayDeviceTokens(apiURL)
+	if !ok {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("no chat relay device tokens; run `kittypaw chat-relay pair`")
+	}
+	payload, _ := json.Marshal(map[string]string{"refresh_token": current.RefreshToken})
+	resp, err := m.client.Post(
+		strings.TrimRight(authBaseURL, "/")+"/devices/refresh",
+		"application/json",
+		strings.NewReader(string(payload)),
+	)
+	if err != nil {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("device refresh request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return ChatRelayDeviceTokens{}, fmt.Errorf("device refresh failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	rotated, err := decodeChatRelayDeviceTokenResponse(resp.Body)
+	if err != nil {
+		return ChatRelayDeviceTokens{}, err
+	}
+	if rotated.DeviceID == "" {
+		rotated.DeviceID = current.DeviceID
+	}
+	if err := m.SaveChatRelayDeviceTokens(apiURL, rotated); err != nil {
+		return ChatRelayDeviceTokens{}, err
+	}
+	return rotated, nil
+}
+
+// EnsureChatRelayDeviceAccessToken returns stored chat relay device tokens,
+// refreshing them first when the access JWT is expired or near expiry.
+func (m *APITokenManager) EnsureChatRelayDeviceAccessToken(authBaseURL, apiURL string) (ChatRelayDeviceTokens, error) {
+	tokens, ok := m.LoadChatRelayDeviceTokens(apiURL)
+	if !ok {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("no chat relay device tokens; run `kittypaw chat-relay pair`")
+	}
+	if !isJWTExpired(tokens.AccessToken) {
+		return tokens, nil
+	}
+	return m.RefreshChatRelayDeviceToken(authBaseURL, apiURL)
+}
+
+// ChatRelayDeviceAccessTokenExpired reports whether the stored chat relay
+// access JWT is expired or within the refresh grace window.
+func (m *APITokenManager) ChatRelayDeviceAccessTokenExpired(apiURL string) (bool, bool) {
+	tokens, ok := m.LoadChatRelayDeviceTokens(apiURL)
+	if !ok {
+		return false, false
+	}
+	return isJWTExpired(tokens.AccessToken), true
+}
+
+func decodeChatRelayDeviceTokenResponse(r io.Reader) (ChatRelayDeviceTokens, error) {
+	var result struct {
+		DeviceID           string `json:"device_id"`
+		DeviceAccessToken  string `json:"device_access_token"`
+		DeviceRefreshToken string `json:"device_refresh_token"`
+		ExpiresIn          int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(r).Decode(&result); err != nil {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("decode device token response: %w", err)
+	}
+	if result.DeviceAccessToken == "" || result.DeviceRefreshToken == "" {
+		return ChatRelayDeviceTokens{}, fmt.Errorf("device token response missing access or refresh token")
+	}
+	return ChatRelayDeviceTokens{
+		DeviceID:     result.DeviceID,
+		AccessToken:  result.DeviceAccessToken,
+		RefreshToken: result.DeviceRefreshToken,
+	}, nil
 }
 
 // SaveKakaoRelayBaseURL stores the KakaoTalk relay server base URL from GET /discovery.

@@ -1,0 +1,150 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/jinto/kittypaw/core"
+)
+
+func TestRunChatRelayPairStoresDeviceTokens(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	var gotAuth string
+	var gotName string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/discovery":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"api_base_url":%q,"auth_base_url":%q,"chat_relay_url":"https://chat.kittypaw.app"}`, "http://"+r.Host, "http://"+r.Host+"/auth")
+		case "/auth/devices/pair":
+			gotAuth = r.Header.Get("Authorization")
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode pair body: %v", err)
+			}
+			gotName, _ = body["name"].(string)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"device_id":"dev_123","device_access_token":"access-secret","device_refresh_token":"refresh-secret","expires_in":900}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	secrets, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+	userAccess := chatRelayTestAccessToken("user-access")
+	if err := mgr.SaveTokens(ts.URL, userAccess, "user-refresh"); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		err = runChatRelayPair(&chatRelayFlags{account: "alice", apiURL: ts.URL, name: "m3-enuma"})
+	})
+	if err != nil {
+		t.Fatalf("runChatRelayPair: %v", err)
+	}
+	if gotAuth != "Bearer "+userAccess {
+		t.Fatalf("Authorization = %q, want user access bearer", gotAuth)
+	}
+	if gotName != "m3-enuma" {
+		t.Fatalf("pair name = %q", gotName)
+	}
+	if !strings.Contains(out, "device_id: dev_123") {
+		t.Fatalf("stdout = %q, want device id", out)
+	}
+	secretsAfterPair, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, ok := core.NewAPITokenManager("", secretsAfterPair).LoadChatRelayDeviceTokens(ts.URL)
+	if !ok || tokens.DeviceID != "dev_123" || tokens.AccessToken != "access-secret" || tokens.RefreshToken != "refresh-secret" {
+		t.Fatalf("stored tokens = (%#v, %v), want pair response", tokens, ok)
+	}
+}
+
+func TestRunChatRelayStatusDoesNotPrintTokens(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	secrets, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+	if err := mgr.SaveAuthBaseURL(core.DefaultAPIServerURL, "https://api.kittypaw.app/auth"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayURL(core.DefaultAPIServerURL, "https://chat.kittypaw.app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  chatRelayTestAccessToken("access-secret"),
+		RefreshToken: "refresh-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runChatRelayStatus(&chatRelayFlags{account: "alice", apiURL: core.DefaultAPIServerURL})
+	})
+	if runErr != nil {
+		t.Fatalf("runChatRelayStatus: %v", runErr)
+	}
+	for _, want := range []string{"device_id: dev_123", "access_token: stored", "refresh_token: stored"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, missing %q", out, want)
+		}
+	}
+	if strings.Contains(out, "refresh-secret") || strings.Contains(out, "access-secret") {
+		t.Fatalf("status leaked token material: %q", out)
+	}
+}
+
+func TestRunChatRelayDisconnectClearsDeviceTokens(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	mustWriteTestConfig(t, filepath.Join(root, "accounts", "alice", "config.toml"))
+
+	secrets, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+	if err := mgr.SaveChatRelayDeviceTokens(core.DefaultAPIServerURL, core.ChatRelayDeviceTokens{
+		DeviceID:     "dev_123",
+		AccessToken:  chatRelayTestAccessToken("access-secret"),
+		RefreshToken: "refresh-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var runErr error
+	_ = captureStdout(t, func() {
+		runErr = runChatRelayDisconnect(&chatRelayFlags{account: "alice", apiURL: core.DefaultAPIServerURL})
+	})
+	if runErr != nil {
+		t.Fatalf("runChatRelayDisconnect: %v", runErr)
+	}
+	secretsAfterDisconnect, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := core.NewAPITokenManager("", secretsAfterDisconnect).LoadChatRelayDeviceTokens(core.DefaultAPIServerURL); ok || got != (core.ChatRelayDeviceTokens{}) {
+		t.Fatalf("tokens after disconnect = (%#v, %v), want cleared", got, ok)
+	}
+}

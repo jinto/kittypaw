@@ -16,6 +16,8 @@ import (
 
 const maxRelayFrameBytes = 1 << 20
 
+var ErrUnauthorized = errors.New("chat relay unauthorized")
+
 type ConnectorConfig struct {
 	RelayURL      string
 	Credential    string
@@ -26,8 +28,9 @@ type ConnectorConfig struct {
 }
 
 type Connector struct {
-	Config     ConnectorConfig
-	Dispatcher Dispatcher
+	Config            ConnectorConfig
+	Dispatcher        Dispatcher
+	RefreshCredential func(context.Context) (string, error)
 }
 
 type RunOptions struct {
@@ -104,6 +107,9 @@ func (c *Connector) DialAndSendHello(ctx context.Context) (*websocket.Conn, erro
 	})
 	if err != nil {
 		if resp != nil {
+			if resp.StatusCode == http.StatusUnauthorized {
+				return nil, fmt.Errorf("%w (%s): %v", ErrUnauthorized, resp.Status, err)
+			}
 			return nil, fmt.Errorf("chat relay dial failed (%s): %w", resp.Status, err)
 		}
 		return nil, fmt.Errorf("chat relay dial: %w", err)
@@ -151,8 +157,32 @@ func (c *Connector) Run(ctx context.Context, opts RunOptions) {
 			if readErr != nil && opts.Logf != nil {
 				opts.Logf("chat relay disconnected: %v", readErr)
 			}
-		} else if opts.Logf != nil {
-			opts.Logf("chat relay connect failed: %v", err)
+		} else {
+			if errors.Is(err, ErrUnauthorized) && c.RefreshCredential != nil {
+				nextCredential, refreshErr := c.RefreshCredential(ctx)
+				if ctx.Err() != nil {
+					return
+				}
+				if refreshErr == nil && strings.TrimSpace(nextCredential) != "" {
+					c.Config.Credential = nextCredential
+					delay = opts.RetryInitialDelay
+					if delay <= 0 {
+						delay = time.Second
+					}
+					if opts.Logf != nil {
+						opts.Logf("chat relay credential refreshed after unauthorized dial")
+					}
+					continue
+				}
+				if refreshErr != nil {
+					err = fmt.Errorf("%w; credential refresh failed: %w", err, refreshErr)
+				} else {
+					err = fmt.Errorf("%w; credential refresh returned empty token", err)
+				}
+			}
+			if opts.Logf != nil {
+				opts.Logf("chat relay connect failed: %v", err)
+			}
 		}
 
 		if !sleepContext(ctx, delay) {

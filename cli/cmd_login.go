@@ -72,6 +72,9 @@ func applyDiscovery(apiURL string, mgr *core.APITokenManager) string {
 	if err := mgr.SaveAPIBaseURL(apiURL, d.APIBaseURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save api_base_url: %v\n", err)
 	}
+	if err := mgr.SaveAuthBaseURL(apiURL, d.AuthBaseURL); err != nil {
+		fmt.Fprintf(os.Stderr, "discovery: save auth_base_url: %v\n", err)
+	}
 	if err := mgr.SaveChatRelayURL(apiURL, d.ChatRelayURL); err != nil {
 		fmt.Fprintf(os.Stderr, "discovery: save chat_relay_url: %v\n", err)
 	}
