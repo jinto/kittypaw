@@ -8,10 +8,11 @@
 
 ## Next
 
-- [ ] Decide whether existing repositories will be imported with history or as
+- [x] Decide whether existing repositories will be imported with history or as
   snapshots.
-- [ ] Add root-level contract verification commands.
-- [ ] Add `apps/kittypaw` release workflow plan for `kittypaw/v*` tags.
-- [ ] Add migration plan for current `kittypaw`, `kittyapi`, `kittychat`, and
+- [x] Import existing repositories with history.
+- [x] Add root-level contract verification commands.
+- [x] Add migration plan for current `kittypaw`, `kittyapi`, `kittychat`, and
   `kittykakao` repositories.
+- [ ] Add `apps/kittypaw` release workflow plan for `kittypaw/v*` tags.
 - [ ] Add initial CI path-filter strategy.
