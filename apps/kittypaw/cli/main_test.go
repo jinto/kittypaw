@@ -132,18 +132,10 @@ func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
 func TestRootCommandPlacesRunUnderSkill(t *testing.T) {
 	root := newRootCmd()
 
-	var topRun *cobra.Command
 	for _, cmd := range root.Commands() {
 		if cmd.Name() == "run" {
-			topRun = cmd
-			break
+			t.Fatal("root command must not expose legacy run alias")
 		}
-	}
-	if topRun == nil {
-		t.Fatal("root command should keep hidden legacy run alias")
-	}
-	if !topRun.Hidden {
-		t.Fatal("root run command must be hidden; use kittypaw skill run instead")
 	}
 
 	skillCmd, _, err := root.Find([]string{"skill"})
@@ -197,8 +189,40 @@ func TestRunSkillDryRunUsesSelectedAccount(t *testing.T) {
 		t.Fatalf("SaveSkillTo: %v", err)
 	}
 
-	if err := runSkill(nil, []string{"account-skill"}); err != nil {
-		t.Fatalf("runSkill dry-run with selected account: %v", err)
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runSkill(nil, []string{"account-skill"})
+	})
+	if runErr != nil {
+		t.Fatalf("runSkill dry-run with selected account: %v", runErr)
+	}
+	if !strings.Contains(out, "Account: bob\n") {
+		t.Fatalf("runSkill output %q missing selected account", out)
+	}
+}
+
+func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
+	root := newRootCmd()
+	for _, path := range [][]string{
+		{"chat"},
+		{"status"},
+		{"skill"},
+		{"config", "check"},
+		{"agent"},
+		{"log"},
+		{"persona"},
+		{"reflection"},
+		{"memory"},
+		{"channels"},
+		{"reset"},
+	} {
+		cmd, _, err := root.Find(path)
+		if err != nil || cmd == nil {
+			t.Fatalf("Find(%v) = %v, %v", path, cmd, err)
+		}
+		if cmd.Flag("account") == nil {
+			t.Fatalf("%q must expose --account", strings.Join(path, " "))
+		}
 	}
 }
 

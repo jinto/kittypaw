@@ -42,6 +42,8 @@ var (
 	flagDryRun  bool   // run --dry-run
 	flagSkill   string // log --skill
 	flagLimit   int    // log --limit
+
+	accountContextPrinted bool
 )
 
 func main() {
@@ -108,6 +110,8 @@ func printSetupBox(cfgPath string) {
 // ---------------------------------------------------------------------------
 
 func newRootCmd() *cobra.Command {
+	accountContextPrinted = false
+
 	cmd := &cobra.Command{
 		Use:          "kittypaw",
 		Short:        "KittyPaw — AI agent platform",
@@ -123,7 +127,6 @@ func newRootCmd() *cobra.Command {
 		newChatCmd(),
 		newStatusCmd(),
 		newSkillCmd(),
-		newRunCmd(true),
 		newConfigCmd(),
 		newAgentCmd(),
 		newLogCmd(),
@@ -140,6 +143,14 @@ func newRootCmd() *cobra.Command {
 	)
 
 	return cmd
+}
+
+func addAccountFlag(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&flagAccount, "account", "", "use this local account")
+}
+
+func addPersistentAccountFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&flagAccount, "account", "", "use this local account")
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +573,7 @@ func newChatCmd() *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runChat,
 	}
-	cmd.Flags().StringVar(&flagAccount, "account", "", "use this local account")
+	addAccountFlag(cmd)
 	return cmd
 }
 
@@ -572,7 +583,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	accountID := ""
 	if flagRemote == "" {
 		var err error
-		accountID, err = resolveCLIAccount(flagAccount)
+		accountID, err = resolveCLIAccountWithContext(flagAccount)
 		if err != nil {
 			return err
 		}
@@ -707,15 +718,17 @@ func isTransportDropErr(err error) bool {
 // ---------------------------------------------------------------------------
 
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show today's execution stats",
 		RunE:  runStatus,
 	}
+	addAccountFlag(cmd)
+	return cmd
 }
 
 func runStatus(_ *cobra.Command, _ []string) error {
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -744,7 +757,7 @@ func newSkillCmd() *cobra.Command {
 		Use:   "skill",
 		Short: "Manage skills",
 	}
-	cmd.PersistentFlags().StringVar(&flagAccount, "account", "", "use this local account")
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(
 		newSkillListCmd(),
 		newSkillSearchCmd(),
@@ -790,11 +803,10 @@ func newSkillListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all skills",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			accountID, err := resolveCLIAccount(flagAccount)
+			_, err := resolveCLIAccountWithContext(flagAccount)
 			if err != nil {
 				return err
 			}
-			printAccountContext(os.Stdout, accountID, cmd.CommandPath())
 
 			var skills []map[string]any
 			if filterType == "" || filterType == "skill" {
@@ -931,7 +943,7 @@ func newSkillInstallCmd() *cobra.Command {
 			}
 
 			// Otherwise treat as a registry package ID.
-			accountID, err := resolveCLIAccount(flagAccount)
+			accountID, err := resolveCLIAccountWithContext(flagAccount)
 			if err != nil {
 				return err
 			}
@@ -1333,16 +1345,11 @@ func newSkillSuggestCmd() *cobra.Command {
 // ---------------------------------------------------------------------------
 
 func newSkillRunCmd() *cobra.Command {
-	return newRunCmd(false)
-}
-
-func newRunCmd(hidden bool) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "run <name>",
-		Short:  "Run a skill by name",
-		Args:   cobra.ExactArgs(1),
-		RunE:   runSkill,
-		Hidden: hidden,
+		Use:   "run <name>",
+		Short: "Run a skill by name",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSkill,
 	}
 	cmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "show what would happen without executing")
 	return cmd
@@ -1353,7 +1360,7 @@ func runSkill(_ *cobra.Command, args []string) error {
 
 	if flagDryRun {
 		// Dry run stays local; no server needed.
-		base, err := defaultAccountBase()
+		base, err := defaultAccountBaseWithContext()
 		if err != nil {
 			return err
 		}
@@ -1471,7 +1478,7 @@ func newConfigCheckCmd() *cobra.Command {
 		Short: "Show config summary",
 		RunE:  runConfigCheck,
 	}
-	cmd.Flags().String("account", "", "account id")
+	addAccountFlag(cmd)
 	return cmd
 }
 
@@ -1482,7 +1489,7 @@ func runConfigCheck(cmd *cobra.Command, _ []string) error {
 			explicitAccount = value
 		}
 	}
-	accountID, err := resolveCLIAccount(explicitAccount)
+	accountID, err := resolveCLIAccountWithContext(explicitAccount)
 	if err != nil {
 		return err
 	}
@@ -1523,6 +1530,7 @@ func newAgentCmd() *cobra.Command {
 		Use:   "agent",
 		Short: "Agent management",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(newAgentListCmd())
 	return cmd
 }
@@ -1536,7 +1544,7 @@ func newAgentListCmd() *cobra.Command {
 }
 
 func runAgentList(_ *cobra.Command, _ []string) error {
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -1570,13 +1578,14 @@ func newLogCmd() *cobra.Command {
 		Short: "Show execution log",
 		RunE:  runLog,
 	}
+	addAccountFlag(cmd)
 	cmd.Flags().StringVar(&flagSkill, "skill", "", "filter by skill name")
 	cmd.Flags().IntVar(&flagLimit, "limit", 20, "number of entries to show")
 	return cmd
 }
 
 func runLog(_ *cobra.Command, _ []string) error {
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -1616,17 +1625,11 @@ func newResetCmd() *cobra.Command {
 		Long:  "Clear conversation history for all agents, or a specific agent if specified.",
 		RunE:  runReset,
 	}
-	cmd.Flags().StringVar(&flagAccount, "account", "", "use this local account")
+	addAccountFlag(cmd)
 	return cmd
 }
 
 func runReset(_ *cobra.Command, args []string) error {
-	accountID, err := resolveCLIAccount(flagAccount)
-	if err != nil {
-		return err
-	}
-	printAccountContext(os.Stdout, accountID, "kittypaw reset")
-
 	st, err := openStore()
 	if err != nil {
 		return err
@@ -1786,6 +1789,7 @@ func newPersonaCmd() *cobra.Command {
 		Use:   "persona",
 		Short: "Manage persona presets",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd(), newPersonaEvolutionCmd())
 	return cmd
 }
@@ -1808,7 +1812,7 @@ func newEvolutionListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List pending evolutions",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1838,7 +1842,7 @@ func newEvolutionApproveCmd() *cobra.Command {
 		Short: "Approve an evolution",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1857,7 +1861,7 @@ func newEvolutionRejectCmd() *cobra.Command {
 		Short: "Reject an evolution",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -1879,7 +1883,7 @@ func newPersonaListCmd() *cobra.Command {
 }
 
 func runPersonaList(_ *cobra.Command, _ []string) error {
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -1932,7 +1936,7 @@ func runPersonaApply(_ *cobra.Command, args []string) error {
 		profileID = args[1]
 	}
 
-	cl, err := connectServer()
+	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
 	}
@@ -2082,8 +2086,24 @@ func defaultAccountBase() (string, error) {
 	return accountBaseForID(accountID)
 }
 
+func defaultAccountBaseWithContext() (string, error) {
+	accountID, err := resolveCLIAccountWithContext(flagAccount)
+	if err != nil {
+		return "", err
+	}
+	return accountBaseForID(accountID)
+}
+
 func printAccountContext(w io.Writer, accountID, commandPath string) {
 	_, _ = fmt.Fprintf(w, "Account: %s\n", accountID)
+}
+
+func printAccountContextOnce(accountID string) {
+	if accountID == "" || accountContextPrinted {
+		return
+	}
+	printAccountContext(os.Stdout, accountID, "")
+	accountContextPrinted = true
 }
 
 func accountBaseForID(accountID string) (string, error) {
@@ -2104,7 +2124,7 @@ func accountBaseForID(accountID string) (string, error) {
 // and only finds packages at the legacy path, which has been wrong since
 // the multi-account migration.
 func localPackageManager() (*core.PackageManager, error) {
-	accountID, err := resolveCLIAccount(flagAccount)
+	accountID, err := resolveCLIAccountWithContext(flagAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -2142,6 +2162,7 @@ func newMemoryCmd() *cobra.Command {
 		Use:   "memory",
 		Short: "Memory operations",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(newMemorySearchCmd())
 	return cmd
 }
@@ -2153,7 +2174,7 @@ func newMemorySearchCmd() *cobra.Command {
 		Short: "Search execution memory",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2198,6 +2219,7 @@ func newChannelsCmd() *cobra.Command {
 		Use:   "channels",
 		Short: "Manage messaging channels",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(newChannelsListCmd())
 	return cmd
 }
@@ -2207,7 +2229,7 @@ func newChannelsListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List active channels",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2270,6 +2292,7 @@ func newReflectionCmd() *cobra.Command {
 		Use:   "reflection",
 		Short: "Manage reflection system",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(
 		newReflectionListCmd(),
 		newReflectionApproveCmd(),
@@ -2286,7 +2309,7 @@ func newReflectionListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List reflection candidates",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2316,7 +2339,7 @@ func newReflectionApproveCmd() *cobra.Command {
 		Short: "Approve a reflection candidate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2335,7 +2358,7 @@ func newReflectionRejectCmd() *cobra.Command {
 		Short: "Reject a reflection candidate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2353,7 +2376,7 @@ func newReflectionClearCmd() *cobra.Command {
 		Use:   "clear",
 		Short: "Clear all reflection candidates",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2371,7 +2394,7 @@ func newReflectionRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Trigger reflection cycle",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2389,7 +2412,7 @@ func newReflectionWeeklyReportCmd() *cobra.Command {
 		Use:   "weekly-report",
 		Short: "Show weekly reflection report",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cl, err := connectServer()
+			cl, err := connectServerForCLIAccount()
 			if err != nil {
 				return err
 			}
@@ -2419,7 +2442,7 @@ func connectServerForCLIAccount() (*client.Client, error) {
 	accountID := ""
 	if flagRemote == "" {
 		var err error
-		accountID, err = resolveCLIAccount(flagAccount)
+		accountID, err = resolveCLIAccountWithContext(flagAccount)
 		if err != nil {
 			return nil, err
 		}
@@ -2600,6 +2623,15 @@ func resolveCLIAccount(explicit string) (string, error) {
 	return "", fmt.Errorf("multiple accounts found (%s); pass --account, set KITTYPAW_ACCOUNT, or set default_account in server.toml", strings.Join(ids, ", "))
 }
 
+func resolveCLIAccountWithContext(explicit string) (string, error) {
+	accountID, err := resolveCLIAccount(explicit)
+	if err != nil {
+		return "", err
+	}
+	printAccountContextOnce(accountID)
+	return accountID, nil
+}
+
 func resolveNamedCLIAccount(cfgDir, id string) (string, error) {
 	if err := core.ValidateAccountID(id); err != nil {
 		return "", err
@@ -2626,7 +2658,7 @@ func resolveNamedCLIAccount(cfgDir, id string) (string, error) {
 
 // openStore opens the SQLite store for the resolved local account.
 func openStore() (*store.Store, error) {
-	accountID, err := resolveCLIAccount(flagAccount)
+	accountID, err := resolveCLIAccountWithContext(flagAccount)
 	if err != nil {
 		return nil, err
 	}
