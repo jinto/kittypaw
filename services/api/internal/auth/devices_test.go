@@ -326,6 +326,15 @@ func TestHandlePair_Happy(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
+	// RFC 6749 §5.1 — token responses MUST NOT be cached. Without this
+	// assertion, a regression that drops writeTokenResponse silently
+	// allows intermediate proxies to cache the refresh token.
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store (RFC 6749 §5.1)", got)
+	}
+	if got := w.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q, want no-cache", got)
+	}
 
 	var resp struct {
 		DeviceID           string `json:"device_id"`
@@ -492,6 +501,12 @@ func TestHandleDeviceRefresh_Happy_Rotation(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	// RFC 6749 §5.1 — refresh response also MUST NOT be cached.
+	// Pinned alongside pair to catch a regression that touches one
+	// handler but forgets the other.
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store (RFC 6749 §5.1)", got)
 	}
 	var resp struct {
 		DeviceID           string `json:"device_id"`
