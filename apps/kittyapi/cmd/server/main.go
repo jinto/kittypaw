@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -90,8 +92,8 @@ func run() error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("listening", "addr", listenAddr(cfg))
+		if err := serveHTTP(srv, cfg.UnixSocket); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}
 		close(serveErr)
@@ -113,6 +115,38 @@ func run() error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+func listenAddr(cfg *config.Config) string {
+	if cfg != nil && cfg.UnixSocket != "" {
+		return "unix:" + cfg.UnixSocket
+	}
+	if cfg == nil {
+		return ""
+	}
+	return ":" + cfg.Port
+}
+
+func serveHTTP(srv *http.Server, unixSocket string) error {
+	if unixSocket == "" {
+		return srv.ListenAndServe()
+	}
+	if err := os.MkdirAll(filepath.Dir(unixSocket), 0o755); err != nil {
+		return err
+	}
+	if err := os.Remove(unixSocket); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ln, err := net.Listen("unix", unixSocket)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(unixSocket)
+	if err := os.Chmod(unixSocket, 0o666); err != nil {
+		ln.Close()
+		return err
+	}
+	return srv.Serve(ln)
 }
 
 // NewRouter builds the data API router. Identity routes, discovery, and

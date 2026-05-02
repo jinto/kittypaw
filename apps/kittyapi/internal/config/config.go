@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Port           string
+	UnixSocket     string
 	DatabaseURL    string
 	BaseURL        string
 	AllowedOrigins []string
@@ -19,6 +20,7 @@ type Config struct {
 func Load() (*Config, error) {
 	c := &Config{
 		Port:           env("PORT", "8080"),
+		UnixSocket:     os.Getenv("UNIX_SOCKET"),
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		BaseURL:        env("BASE_URL", "http://localhost:8080"),
 		AirKoreaAPIKey: os.Getenv("AIRKOREA_API_KEY"),
@@ -42,6 +44,7 @@ func Load() (*Config, error) {
 func LoadForTest() *Config {
 	return &Config{
 		Port:           env("PORT", "8080"),
+		UnixSocket:     os.Getenv("UNIX_SOCKET"),
 		BaseURL:        env("BASE_URL", "http://localhost:8080"),
 		AllowedOrigins: []string{"http://localhost:8080"},
 	}

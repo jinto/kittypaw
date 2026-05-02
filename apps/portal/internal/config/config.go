@@ -20,6 +20,7 @@ const MinJWTKeyBits = 2048
 
 type Config struct {
 	Port               string
+	UnixSocket         string
 	DatabaseURL        string
 	JWTPrivateKey      *rsa.PrivateKey // RS256 signing key (Plan 21 PR-B cutover; replaces HS256 secret)
 	JWTKID             string          // RFC 7638 thumbprint of JWTPrivateKey's public half
@@ -47,6 +48,7 @@ type Config struct {
 func Load() (*Config, error) {
 	c := &Config{
 		Port:               env("PORT", "8080"),
+		UnixSocket:         os.Getenv("UNIX_SOCKET"),
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),

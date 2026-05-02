@@ -95,6 +95,27 @@ func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsUnixSocketBindAddr(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "api_secret")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
+	t.Setenv("KITTYCHAT_USER_ID", "user_1")
+	t.Setenv("KITTYCHAT_DEVICE_ID", "dev_1")
+	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "alice")
+	t.Setenv("PORT", "9090")
+	t.Setenv("KITTYCHAT_BIND_ADDR", "/tmp/kittychat.sock")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.BindAddr != "/tmp/kittychat.sock" {
+		t.Fatalf("BindAddr = %q, want unix socket path", cfg.BindAddr)
+	}
+}
+
 func TestLoadUsesJWTSecretInsteadOfStaticAPIToken(t *testing.T) {
 	t.Setenv("KITTYCHAT_API_TOKEN", "")
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "dev_secret")

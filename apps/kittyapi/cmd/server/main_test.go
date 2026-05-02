@@ -1,11 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kittypaw-app/kittyapi/internal/config"
 )
@@ -44,6 +50,45 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestServeHTTPListensOnUnixSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("/private/tmp", "kittyapi-socket-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, "kittyapi.sock")
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveHTTP(srv, socketPath)
+	}()
+	waitForSocket(t, socketPath)
+
+	client := &http.Client{Transport: unixSocketTransport(socketPath)}
+	resp, err := client.Get("http://unix/health")
+	if err != nil {
+		t.Fatalf("GET over unix socket: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+
+	if err := srv.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("serveHTTP returned %v", err)
+	}
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("socket should be removed after shutdown, stat err=%v", err)
+	}
+}
+
 func TestAPIDoesNotServePortalRoutes(t *testing.T) {
 	r := testRouter(t)
 
@@ -64,6 +109,26 @@ func TestAPIDoesNotServePortalRoutes(t *testing.T) {
 				t.Fatalf("status = %d, want 404", w.Code)
 			}
 		})
+	}
+}
+
+func waitForSocket(t *testing.T, socketPath string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(socketPath); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("socket %s was not created", socketPath)
+}
+
+func unixSocketTransport(socketPath string) http.RoundTripper {
+	return &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", socketPath)
+		},
 	}
 }
 

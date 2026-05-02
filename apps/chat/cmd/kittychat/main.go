@@ -3,7 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kittypaw-app/kittychat/internal/broker"
 	"github.com/kittypaw-app/kittychat/internal/config"
@@ -32,7 +36,8 @@ func main() {
 	}
 
 	log.Printf("listening on %s", cfg.BindAddr)
-	if err := http.ListenAndServe(cfg.BindAddr, router); err != nil {
+	srv := &http.Server{Addr: cfg.BindAddr, Handler: router}
+	if err := serveHTTP(srv, cfg.BindAddr); err != nil {
 		log.Fatalf("server: %v", err)
 	}
 }
@@ -130,4 +135,37 @@ func buildValue(configured, built string) string {
 		return built
 	}
 	return configured
+}
+
+func serveHTTP(srv *http.Server, bindAddr string) error {
+	socketPath, ok := unixSocketPath(bindAddr)
+	if !ok {
+		return srv.ListenAndServe()
+	}
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(socketPath)
+	if err := os.Chmod(socketPath, 0o666); err != nil {
+		ln.Close()
+		return err
+	}
+	return srv.Serve(ln)
+}
+
+func unixSocketPath(bindAddr string) (string, bool) {
+	if strings.HasPrefix(bindAddr, "unix:") {
+		return strings.TrimPrefix(bindAddr, "unix:"), true
+	}
+	if strings.HasPrefix(bindAddr, "/") {
+		return bindAddr, true
+	}
+	return "", false
 }

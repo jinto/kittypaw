@@ -1,5 +1,5 @@
 upstream kittyportal {
-  server 127.0.0.1:9714;
+  server unix:/home/jinto/kittyportal/kittyportal.sock;
 }
 
 server {

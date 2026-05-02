@@ -1,5 +1,5 @@
 upstream kittychat {
-  server 127.0.0.1:9713;
+  server unix:/home/jinto/kittychat/kittychat.sock;
 }
 
 server {

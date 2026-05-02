@@ -87,6 +87,22 @@ func TestConfig_LoadGoogleOAuthEndpointOverrides(t *testing.T) {
 	}
 }
 
+func TestConfig_LoadUnixSocket(t *testing.T) {
+	pemStr := generatePEM(t, 2048)
+	b64 := base64.StdEncoding.EncodeToString([]byte(pemStr))
+
+	cfg, err := loadWithEnv(t, map[string]string{
+		"JWT_PRIVATE_KEY_PEM_B64": b64,
+		"UNIX_SOCKET":             "/tmp/kittyportal.sock",
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UnixSocket != "/tmp/kittyportal.sock" {
+		t.Fatalf("UnixSocket = %q, want /tmp/kittyportal.sock", cfg.UnixSocket)
+	}
+}
+
 // TestConfig_LoadJWTKey_BadBase64 ensures we fail-fast at startup
 // rather than letting an undecodable env survive into request-time.
 func TestConfig_LoadJWTKey_BadBase64(t *testing.T) {

@@ -30,6 +30,19 @@ func TestLoadDoesNotRequirePortalAuthSecrets(t *testing.T) {
 	}
 }
 
+func TestLoadUsesUnixSocketEnv(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/x")
+	t.Setenv("UNIX_SOCKET", "/tmp/kittyapi.sock")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UnixSocket != "/tmp/kittyapi.sock" {
+		t.Fatalf("UnixSocket = %q, want /tmp/kittyapi.sock", cfg.UnixSocket)
+	}
+}
+
 func TestLoadCORSOriginsCSV(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://localhost/x")
 	t.Setenv("CORS_ORIGINS", " https://portal.kittypaw.app,https://chat.kittypaw.app ")
