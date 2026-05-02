@@ -73,6 +73,9 @@ func TestRouterServesManualChatAssets(t *testing.T) {
 	if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("cache-control = %q, want no-store", cc)
 	}
+	if body := rr.Body.String(); !strings.Contains(body, "formatHTTPError") {
+		t.Fatalf("manual app error formatter missing from body:\n%s", body)
+	}
 }
 
 type nilAuth struct{}

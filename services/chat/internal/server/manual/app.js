@@ -69,10 +69,55 @@ function requireToken() {
   return false;
 }
 
+function errorStatus(resp) {
+  const label = resp.statusText ? ` ${resp.statusText}` : "";
+  return `HTTP ${resp.status}${label}`;
+}
+
+function looksLikeHTML(text) {
+  return /^\s*(<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>])/i.test(text);
+}
+
+function compactErrorText(text) {
+  return text.replace(/\s+/g, " ").trim().slice(0, 220);
+}
+
+function errorMessageFromJSON(body) {
+  if (!body || typeof body !== "object") {
+    return "";
+  }
+  if (typeof body.error === "string") {
+    return body.error;
+  }
+  if (body.error && typeof body.error.message === "string") {
+    return body.error.message;
+  }
+  if (typeof body.message === "string") {
+    return body.message;
+  }
+  return "";
+}
+
+function formatHTTPError(resp, body, rawText) {
+  const status = errorStatus(resp);
+  const jsonMessage = compactErrorText(errorMessageFromJSON(body));
+  if (jsonMessage && !looksLikeHTML(jsonMessage)) {
+    return `${status}: ${jsonMessage}`;
+  }
+  const textMessage = compactErrorText(rawText || "");
+  if (textMessage && !looksLikeHTML(textMessage)) {
+    return `${status}: ${textMessage}`;
+  }
+  return status;
+}
+
+window.__kittychatManual = { formatHTTPError };
+
 async function requestJSON(path, options = {}) {
   const resp = await fetch(path, {
     ...options,
     headers: {
+      Accept: "application/json",
       ...authHeaders(),
       ...(options.headers || {}),
     },
@@ -83,12 +128,11 @@ async function requestJSON(path, options = {}) {
     try {
       body = JSON.parse(text);
     } catch {
-      body = { error: text };
+      body = null;
     }
   }
   if (!resp.ok) {
-    const msg = body && body.error ? body.error : `${resp.status} ${resp.statusText}`;
-    throw new Error(msg);
+    throw new Error(formatHTTPError(resp, body, text));
   }
   return body;
 }
