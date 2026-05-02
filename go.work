@@ -1,7 +1,7 @@
 go 1.26.2
 
 use (
+	./apps/chat
+	./apps/kittyapi
 	./apps/kittypaw
-	./services/api
-	./services/chat
 )
