@@ -28,6 +28,42 @@ func TestNewRegistryClient_RequiresHTTPS(t *testing.T) {
 	}
 }
 
+func TestNewRegistryClient_AllowsExplicitLoopbackHTTPRegistry(t *testing.T) {
+	t.Setenv("KITTYPAW_ALLOW_INSECURE_REGISTRY", "1")
+	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index.json" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`[{"id":"local","name":"Local","version":"1.0.0"}]`))
+	}))
+	defer ts.Close()
+
+	client, err := NewRegistryClient(ts.URL)
+	if err != nil {
+		t.Fatalf("NewRegistryClient(loopback http) error = %v", err)
+	}
+	entries, err := client.FetchIndex()
+	if err != nil {
+		t.Fatalf("FetchIndex() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != "local" {
+		t.Fatalf("entries = %+v, want local package", entries)
+	}
+}
+
+func TestNewRegistryClient_RejectsNonLoopbackHTTPRegistryEvenWhenEnabled(t *testing.T) {
+	t.Setenv("KITTYPAW_ALLOW_INSECURE_REGISTRY", "1")
+	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
+
+	_, err := NewRegistryClient("http://example.com/registry")
+	if err == nil {
+		t.Fatal("expected non-loopback HTTP registry to be rejected")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // DownloadPackage — SSRF
 // ---------------------------------------------------------------------------

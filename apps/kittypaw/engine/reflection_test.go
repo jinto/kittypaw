@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
+	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
 	"github.com/jinto/kittypaw/store"
 )
 
@@ -73,6 +76,39 @@ func TestBuildWeeklyReport_WithData(t *testing.T) {
 	report := BuildWeeklyReport(prefs)
 	if !containsAll(report, "날씨", "뉴스", "0.40", "0.30") {
 		t.Errorf("report should contain topics and ratios: %s", report)
+	}
+}
+
+func TestRunReflectionCycleReadsConversationTurnsAndStoresCandidates(t *testing.T) {
+	st := newReflectionStore(t)
+	for i := 0; i < 3; i++ {
+		if err := st.AddConversationTurn(&core.ConversationTurn{
+			Role:      core.RoleUser,
+			Content:   "환율 알려줘",
+			Timestamp: core.NowTimestamp(),
+		}); err != nil {
+			t.Fatalf("seed conversation turn: %v", err)
+		}
+	}
+	sess := &Session{
+		Store: st,
+		Provider: &mockProvider{responses: []*llm.Response{mockResp(`{
+			"intents": [{"label":"환율 조회","count":3,"cron":"0 8 * * *"}],
+			"topics": [{"topic":"환율","ratio":1.0}]
+		}`)}},
+	}
+	cfg := &core.ReflectionConfig{IntentThreshold: 3, TTLDays: 7, MaxInputChars: 4000}
+
+	if err := RunReflectionCycle(context.Background(), sess, cfg); err != nil {
+		t.Fatalf("RunReflectionCycle error: %v", err)
+	}
+
+	key := "suggest_candidate:" + IntentHash("환율 조회")
+	if got, ok, err := st.GetUserContext(key); err != nil || !ok || got != "환율 조회|3|0 8 * * *" {
+		t.Fatalf("%s = %q ok=%v err=%v", key, got, ok, err)
+	}
+	if got, ok, err := st.GetUserContext("topic_pref:환율"); err != nil || !ok || got != "1.00" {
+		t.Fatalf("topic_pref:환율 = %q ok=%v err=%v", got, ok, err)
 	}
 }
 

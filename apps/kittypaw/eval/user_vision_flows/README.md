@@ -6,6 +6,13 @@ canonical multi-turn flows the user actually walked through during the
 "진짜 비서답게" assistant-quality work, so a future change can be
 sanity-checked with one command.
 
+Deterministic regressions for the same product surface live in Go tests and
+run from the repository smoke tier first: skill install/run, installed-skill
+reuse, assistant mention routing, `/persona`, reflection over
+`conversation_turns`, persona evolution pending proposals, and Telegram/Kakao
+fixture conversion. This eval remains the slower behavior-quality check with an
+LLM judge.
+
 ## Why a separate path from `eval/secretary_smoke/`
 
 `secretary_smoke` is single-turn fixtures with an LLM judge — designed

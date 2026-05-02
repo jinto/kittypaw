@@ -151,25 +151,9 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 			continue
 		}
 
-		if msg.Text == "" {
+		event, ok := kakaoRelayEvent(k.accountID, msg)
+		if !ok {
 			continue
-		}
-
-		payload := core.ChatPayload{
-			ChatID:    msg.ID,
-			Text:      msg.Text,
-			SessionID: msg.UserID,
-		}
-		raw, err := json.Marshal(payload)
-		if err != nil {
-			slog.Error("kakao: marshal payload", "error", err)
-			continue
-		}
-
-		event := core.Event{
-			Type:      core.EventKakaoTalk,
-			AccountID: k.accountID,
-			Payload:   raw,
 		}
 
 		select {
@@ -178,6 +162,28 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 			return ctx.Err()
 		}
 	}
+}
+
+func kakaoRelayEvent(accountID string, msg kakaoRelayMessage) (core.Event, bool) {
+	if msg.Text == "" {
+		return core.Event{}, false
+	}
+	payload := core.ChatPayload{
+		ChatID:    msg.ID,
+		Text:      msg.Text,
+		SessionID: msg.UserID,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("kakao: marshal payload", "error", err)
+		return core.Event{}, false
+	}
+
+	return core.Event{
+		Type:      core.EventKakaoTalk,
+		AccountID: accountID,
+		Payload:   raw,
+	}, true
 }
 
 // SendResponse sends a reply frame through the WebSocket connection.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -59,7 +60,7 @@ func NewRegistryClient(baseURL string) (*RegistryClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid registry URL: %w", err)
 	}
-	if parsed.Scheme != "https" {
+	if parsed.Scheme != "https" && !allowInsecureLoopbackRegistry(parsed) {
 		return nil, fmt.Errorf("registry URL must use HTTPS: %s", baseURL)
 	}
 
@@ -81,6 +82,21 @@ func NewRegistryClient(baseURL string) (*RegistryClient, error) {
 		},
 		cacheDir: cacheDir,
 	}, nil
+}
+
+func allowInsecureLoopbackRegistry(parsed *url.URL) bool {
+	if parsed == nil || parsed.Scheme != "http" {
+		return false
+	}
+	if os.Getenv("KITTYPAW_ALLOW_INSECURE_REGISTRY") != "1" {
+		return false
+	}
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // IndexResult wraps the registry entries with cache metadata.

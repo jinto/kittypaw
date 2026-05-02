@@ -36,6 +36,11 @@ func tryHandleCommand(ctx context.Context, text string, s *Session) (string, boo
 			return handleTeach(ctx, strings.Join(parts[1:], " "), s), true
 		}
 		return "사용법: /teach <설명>", true
+	case "/persona":
+		if len(parts) > 1 {
+			return handlePersona(parts[1], s), true
+		}
+		return "사용법: /persona <profile-id>", true
 	default:
 		return "", false
 	}
@@ -47,7 +52,8 @@ func handleHelp() string {
 /status — 실행 통계 확인
 /skills — 스킬 목록
 /run <name> — 스킬 실행
-/teach <설명> — 새 스킬 학습`
+/teach <설명> — 새 스킬 학습
+/persona <profile-id> — 기본 대화상대 변경`
 }
 
 func handleStatus(s *Session) string {
@@ -116,4 +122,34 @@ func handleTeach(ctx context.Context, description string, s *Session) string {
 	}
 	fmt.Fprintf(&sb, "\n코드:\n%s", result.Code)
 	return sb.String()
+}
+
+func handlePersona(id string, s *Session) string {
+	if s == nil || s.Store == nil {
+		return "persona 변경을 위한 저장소가 준비되지 않았습니다."
+	}
+	if err := core.ValidateProfileID(id); err != nil {
+		return fmt.Sprintf("profile id가 올바르지 않습니다: %s", err)
+	}
+	meta, ok, err := s.Store.GetProfileMeta(id)
+	if err != nil {
+		return fmt.Sprintf("profile 조회 실패: %s", err)
+	}
+	if ok && !meta.Active {
+		return fmt.Sprintf("profile %q는 비활성화되어 있습니다.", id)
+	}
+	if !ok {
+		base, err := core.ResolveBaseDir(s.BaseDir)
+		if err != nil {
+			return fmt.Sprintf("profile 조회 실패: %s", err)
+		}
+		if _, err := core.LoadProfile(base, id); err != nil {
+			return fmt.Sprintf("profile %q를 찾지 못했습니다.", id)
+		}
+	}
+	key := fmt.Sprintf("active_profile:%s", conversationKey(s))
+	if err := s.Store.SetUserContext(key, id, "chat_command"); err != nil {
+		return fmt.Sprintf("persona 변경 실패: %s", err)
+	}
+	return fmt.Sprintf("기본 대화상대를 %q로 바꿨습니다.", id)
 }

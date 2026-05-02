@@ -256,34 +256,9 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 				continue
 			}
 
-			chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
-
-			fromName := ""
-			sessionID := chatIDStr
-			if msg.From != nil {
-				fromName = msg.From.displayName()
-				if msg.From.ID != 0 {
-					sessionID = strconv.FormatInt(msg.From.ID, 10)
-				}
-			}
-
-			payload := core.ChatPayload{
-				ChatID:           chatIDStr,
-				Text:             text,
-				FromName:         fromName,
-				SessionID:        sessionID,
-				ReplyToMessageID: strconv.FormatInt(msg.MessageID, 10),
-			}
-			raw, err := json.Marshal(payload)
-			if err != nil {
-				slog.Error("telegram: marshal payload", "error", err)
+			event, chatID, ok := telegramMessageEvent(t.accountID, msg, text)
+			if !ok {
 				continue
-			}
-
-			event := core.Event{
-				Type:      core.EventTelegram,
-				AccountID: t.accountID,
-				Payload:   raw,
 			}
 
 			select {
@@ -291,12 +266,47 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 				// Start typing as early as possible — before the agent loop
 				// even begins. SendResponse will cancel this when it's time
 				// to deliver the actual reply.
-				t.startTyping(ctx, msg.Chat.ID)
+				t.startTyping(ctx, chatID)
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 		}
 	}
+}
+
+func telegramMessageEvent(accountID string, msg *telegramMessage, text string) (core.Event, int64, bool) {
+	if msg == nil || text == "" {
+		return core.Event{}, 0, false
+	}
+	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
+
+	fromName := ""
+	sessionID := chatIDStr
+	if msg.From != nil {
+		fromName = msg.From.displayName()
+		if msg.From.ID != 0 {
+			sessionID = strconv.FormatInt(msg.From.ID, 10)
+		}
+	}
+
+	payload := core.ChatPayload{
+		ChatID:           chatIDStr,
+		Text:             text,
+		FromName:         fromName,
+		SessionID:        sessionID,
+		ReplyToMessageID: strconv.FormatInt(msg.MessageID, 10),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("telegram: marshal payload", "error", err)
+		return core.Event{}, 0, false
+	}
+
+	return core.Event{
+		Type:      core.EventTelegram,
+		AccountID: accountID,
+		Payload:   raw,
+	}, msg.Chat.ID, true
 }
 
 // startTyping spawns (or replaces) a typingLoop for chatID. Subsequent calls

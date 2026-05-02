@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/llm"
+	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/store"
 )
 
@@ -22,6 +25,23 @@ func openTestStore(t *testing.T) *store.Store {
 	t.Cleanup(func() { st.Close() })
 	return st
 }
+
+type promptCaptureProvider struct {
+	response string
+	messages []core.LlmMessage
+}
+
+func (p *promptCaptureProvider) Generate(_ context.Context, msgs []core.LlmMessage) (*llm.Response, error) {
+	p.messages = append([]core.LlmMessage(nil), msgs...)
+	return &llm.Response{Content: p.response, Usage: &llm.TokenUsage{Model: "mock"}}, nil
+}
+
+func (p *promptCaptureProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMessage, _ []llm.Tool) (*llm.Response, error) {
+	return p.Generate(ctx, msgs)
+}
+
+func (p *promptCaptureProvider) ContextWindow() int { return 128_000 }
+func (p *promptCaptureProvider) MaxTokens() int     { return 4096 }
 
 func TestResolveProfileName_MentionOverride(t *testing.T) {
 	cfg := core.DefaultConfig()
@@ -172,6 +192,96 @@ func TestProfileSwitch_OverriddenByMention(t *testing.T) {
 	got := ResolveProfileName(&cfg, "web", agentID, "mention-profile", st)
 	if got != "mention-profile" {
 		t.Errorf("got %q, want %q", got, "mention-profile")
+	}
+}
+
+func TestRunAtMentionRoutesPromptAndStoresStrippedConversationTurn(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	base := t.TempDir()
+	profDir := filepath.Join(base, "profiles", "finance")
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profDir, "SOUL.md"), []byte("FINANCE_SOUL_MARKER"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st := openTestStore(t)
+	if err := st.UpsertProfileMeta("finance", "재무담당 비서", "[]", "test"); err != nil {
+		t.Fatalf("seed profile meta: %v", err)
+	}
+	cfg := core.DefaultConfig()
+	provider := &promptCaptureProvider{response: `return "finance ok";`}
+	sess := &Session{
+		Provider:  provider,
+		Sandbox:   sandbox.New(cfg.Sandbox),
+		Store:     st,
+		Config:    &cfg,
+		BaseDir:   base,
+		AccountID: "alice",
+		Pipeline:  NewPipelineState(),
+	}
+
+	out, err := sess.Run(context.Background(), webChatEvent("@finance 포트폴리오 정리해줘"), nil)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if out != "finance ok" {
+		t.Fatalf("out = %q, want finance ok", out)
+	}
+
+	if len(provider.messages) == 0 || !strings.Contains(provider.messages[0].Content, "FINANCE_SOUL_MARKER") {
+		t.Fatalf("prompt did not include mentioned profile soul: %+v", provider.messages)
+	}
+
+	turns, err := st.ListConversationTurns(10)
+	if err != nil {
+		t.Fatalf("list turns: %v", err)
+	}
+	if len(turns) < 1 {
+		t.Fatal("expected stored conversation turns")
+	}
+	if turns[0].Role != core.RoleUser || turns[0].Content != "포트폴리오 정리해줘" {
+		t.Fatalf("first turn = (%s,%q), want stripped user text", turns[0].Role, turns[0].Content)
+	}
+	if turns[0].Channel != "web" || turns[0].ChannelUserID != "test-session" {
+		t.Fatalf("turn metadata = channel %q user %q", turns[0].Channel, turns[0].ChannelUserID)
+	}
+}
+
+func TestRunCanCreatePersonaFromConversationRequest(t *testing.T) {
+	skipWithoutRuntime(t)
+
+	st := openTestStore(t)
+	cfg := core.DefaultConfig()
+	provider := &promptCaptureProvider{response: `
+const created = Profile.create("finance", "재무담당 비서");
+return created.success ? "finance profile created" : created.error;
+`}
+	sess := &Session{
+		Provider:  provider,
+		Sandbox:   sandbox.New(cfg.Sandbox),
+		Store:     st,
+		Config:    &cfg,
+		BaseDir:   t.TempDir(),
+		AccountID: "alice",
+		Pipeline:  NewPipelineState(),
+	}
+
+	out, err := sess.Run(context.Background(), webChatEvent("재무담당 비서를 고용해"), nil)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if out != "finance profile created" {
+		t.Fatalf("out = %q", out)
+	}
+	meta, ok, err := st.GetProfileMeta("finance")
+	if err != nil || !ok {
+		t.Fatalf("finance profile meta missing: ok=%v err=%v", ok, err)
+	}
+	if meta.Description != "재무담당 비서" || !meta.Active || meta.CreatedBy != "agent" {
+		t.Fatalf("profile meta = %+v", meta)
 	}
 }
 

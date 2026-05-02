@@ -1376,11 +1376,12 @@ func (b *InstallConsentBranch) Execute(ctx context.Context, sess *Session, event
 		return "'" + target.Name + "' 설치 중 문제가 발생했어요: " + err.Error(), nil
 	}
 
+	params, _ := sess.Pipeline.RecentPendingSkillRun(pkg.Meta.ID)
+
 	// Clear so a later unrelated "네" doesn't re-install the same skill.
 	sess.Pipeline.ClearSkillSearch()
 
 	// Run immediately — match the user vision of "agree → see result".
-	params, _ := sess.Pipeline.RecentPendingSkillRun(pkg.Meta.ID)
 	output, _ := runSkillOrPackageWithParams(ctx, pkg.Meta.ID, sess, params)
 	runOutput := extractOutputField(output)
 	if runOutput == "" {

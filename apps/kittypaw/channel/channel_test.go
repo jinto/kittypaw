@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -224,6 +225,76 @@ func TestTelegramSessionIDFromUserID(t *testing.T) {
 
 	if decoded.ID != 12345678 {
 		t.Errorf("expected user ID 12345678, got %d", decoded.ID)
+	}
+}
+
+func TestTelegramTextUpdateFixtureBuildsEvent(t *testing.T) {
+	raw, err := os.ReadFile("testdata/telegram/text_update.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var update telegramUpdate
+	if err := json.Unmarshal(raw, &update); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	event, chatID, ok := telegramMessageEvent("alice", update.Message, update.Message.Text)
+	if !ok {
+		t.Fatal("expected fixture to produce an event")
+	}
+	if chatID != 987654321 {
+		t.Fatalf("chatID = %d, want 987654321", chatID)
+	}
+	if event.Type != core.EventTelegram || event.AccountID != "alice" {
+		t.Fatalf("event identity = (%s,%s), want telegram/alice", event.Type, event.AccountID)
+	}
+	payload, err := event.ParsePayload()
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if payload.Text != "환율 알려줘" || payload.ChatID != "987654321" {
+		t.Fatalf("payload text/chat = %q/%q", payload.Text, payload.ChatID)
+	}
+	if payload.SessionID != "12345678" {
+		t.Fatalf("SessionID = %q, want Telegram user id", payload.SessionID)
+	}
+	if payload.FromName != "Jin" {
+		t.Fatalf("FromName = %q, want Jin", payload.FromName)
+	}
+	if payload.ReplyToMessageID != "42" {
+		t.Fatalf("ReplyToMessageID = %q, want 42", payload.ReplyToMessageID)
+	}
+}
+
+func TestKakaoIncomingFixtureBuildsEvent(t *testing.T) {
+	raw, err := os.ReadFile("testdata/kakao/ws_incoming.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var msg kakaoRelayMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	event, ok := kakaoRelayEvent("alice", msg)
+	if !ok {
+		t.Fatal("expected fixture to produce an event")
+	}
+	if event.Type != core.EventKakaoTalk || event.AccountID != "alice" {
+		t.Fatalf("event identity = (%s,%s), want kakao_talk/alice", event.Type, event.AccountID)
+	}
+	payload, err := event.ParsePayload()
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if payload.ChatID != "kakao-action-123" {
+		t.Fatalf("ChatID = %q, want relay action id", payload.ChatID)
+	}
+	if payload.SessionID != "kakao-user-42" {
+		t.Fatalf("SessionID = %q, want Kakao user id", payload.SessionID)
+	}
+	if payload.Text != "강남역에 비오나? 지금?" {
+		t.Fatalf("Text = %q", payload.Text)
 	}
 }
 
