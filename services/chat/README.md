@@ -51,6 +51,13 @@ make lint
 make build
 ```
 
+Run the local end-to-end smoke to verify a fake daemon can receive an
+OpenAI-compatible chat completion request and stream a response back:
+
+```bash
+make smoke-local
+```
+
 Example local run:
 
 ```bash
