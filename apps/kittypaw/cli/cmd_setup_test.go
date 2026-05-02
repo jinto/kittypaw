@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -447,6 +450,8 @@ func TestRunWizardUsesNamedAccountSecrets(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	t.Setenv("KITTYPAW_ACCOUNT", "")
+	stubFetchDiscovery(t, nil, errors.New("offline"))
+
 	secrets, err := core.LoadAccountSecrets("alice")
 	if err != nil {
 		t.Fatalf("LoadAccountSecrets alice: %v", err)
@@ -463,6 +468,48 @@ func TestRunWizardUsesNamedAccountSecrets(t *testing.T) {
 		t.Fatalf("APIServerURL = %q, want %q", w.APIServerURL, core.DefaultAPIServerURL)
 	}
 	mustNotExist(t, filepath.Join(root, "accounts", "default", "secrets.json"))
+}
+
+func TestWizardAPIServerAutoPairsChatRelayWhenAlreadyLoggedIn(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/devices/pair" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"device_id":"dev_123","device_access_token":"access-1","device_refresh_token":"refresh-1","expires_in":900}`)
+	}))
+	defer ts.Close()
+	stubFetchDiscovery(t, &core.DiscoveryResponse{
+		APIBaseURL:   core.DefaultAPIServerURL,
+		AuthBaseURL:  ts.URL + "/auth",
+		ChatRelayURL: "https://chat.kittypaw.app",
+	}, nil)
+
+	secrets, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatalf("LoadAccountSecrets alice: %v", err)
+	}
+	mgr := core.NewAPITokenManager("", secrets)
+	if err := mgr.SaveTokens(core.DefaultAPIServerURL, makeSetupTestJWT(t), "refresh"); err != nil {
+		t.Fatalf("SaveTokens: %v", err)
+	}
+
+	var w core.WizardResult
+	wizardAPIServer(bufio.NewScanner(strings.NewReader("")), "alice", &w)
+
+	reloaded, err := core.LoadAccountSecrets("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens, ok := core.NewAPITokenManager("", reloaded).LoadChatRelayDeviceTokens(core.DefaultAPIServerURL)
+	if !ok || tokens.DeviceID != "dev_123" || tokens.AccessToken != "access-1" || tokens.RefreshToken != "refresh-1" {
+		t.Fatalf("chat relay tokens = (%#v, %v), want paired tokens", tokens, ok)
+	}
 }
 
 func TestWizardAPIServerLoginDefaultsToYes(t *testing.T) {

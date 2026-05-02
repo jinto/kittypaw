@@ -742,6 +742,8 @@ func wizardAPIServer(scanner *bufio.Scanner, accountID string, w *core.WizardRes
 	// the stored refresh_token, so a live refresh session counts as "logged in".
 	if tok, err := mgr.LoadAccessToken(apiURL); err == nil && tok != "" {
 		fmt.Printf("  ✓ Logged in (%s)\n", apiURL)
+		_ = applyDiscovery(apiURL, mgr)
+		maybePairChatRelayDevice(apiURL, mgr, tok, os.Stderr)
 		w.APIServerURL = apiURL
 		return
 	}
