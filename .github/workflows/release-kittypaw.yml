@@ -76,7 +76,7 @@ jobs:
           ## Install
 
           \`\`\`sh
-          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh
           \`\`\`
 
           Set \`VERSION=${VERSION}\` to install this version explicitly.

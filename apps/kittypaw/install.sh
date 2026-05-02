@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="kittypaw-app/kitty"
+REPO="kittypaw-app/kittypaw"
 BINARY="kittypaw"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
