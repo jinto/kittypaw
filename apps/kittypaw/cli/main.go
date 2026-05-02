@@ -158,11 +158,8 @@ to register it with the OS as a per-user background service.`,
 	cmd.AddCommand(
 		newServerStartCmd(),
 		newServerStopCmd(),
-		newServiceInstallCmd(),
-		newServiceUninstallCmd(),
-		newServiceStatusCmd(),
-		newServiceLogsCmd(),
 	)
+	addServerServiceCommands(cmd)
 	return cmd
 }
 
