@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -205,14 +206,14 @@ func TestSignDeviceJWT_WireFormatMatchesIssueDeviceJWT(t *testing.T) {
 
 	// Pin specific values.
 	for _, k := range []string{"sub", "user_id", "iss", "v"} {
-		if !equalAny(prodPayload[k], fixPayload[k]) {
+		if prodPayload[k] != fixPayload[k] {
 			t.Fatalf("payload[%q] mismatch: prod=%v fixture=%v", k, prodPayload[k], fixPayload[k])
 		}
 	}
-	if !equalAnySlice(prodPayload["aud"], fixPayload["aud"]) {
+	if !reflect.DeepEqual(prodPayload["aud"], fixPayload["aud"]) {
 		t.Fatalf("payload[aud] mismatch: prod=%v fixture=%v", prodPayload["aud"], fixPayload["aud"])
 	}
-	if !equalAnySlice(prodPayload["scope"], fixPayload["scope"]) {
+	if !reflect.DeepEqual(prodPayload["scope"], fixPayload["scope"]) {
 		t.Fatalf("payload[scope] mismatch: prod=%v fixture=%v", prodPayload["scope"], fixPayload["scope"])
 	}
 	// Sub must start with "device:" prefix in both.
@@ -254,27 +255,6 @@ func decodeSegments(t *testing.T, token string) (hdr, payload map[string]any) {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
 	return hdr, payload
-}
-
-func equalAny(a, b any) bool {
-	return a == b
-}
-
-func equalAnySlice(a, b any) bool {
-	as, aok := a.([]any)
-	bs, bok := b.([]any)
-	if !aok || !bok {
-		return false
-	}
-	if len(as) != len(bs) {
-		return false
-	}
-	for i := range as {
-		if as[i] != bs[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // --- Pair handler ---

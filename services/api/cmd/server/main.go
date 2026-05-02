@@ -161,7 +161,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		ExposedHeaders:   []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After", "Warning"},
 		AllowCredentials: false,
@@ -250,13 +250,16 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		discovery["chat_relay_url"] = cfg.ChatRelayURL
 	}
 
-	// Routes split into two chi.Groups (Plan 23 PR-D 결정 3):
+	// Routes split into two chi.Groups (Plan 23 PR-D 결정 3 + PR-D
+	// follow-up review fix):
 	//
-	//   Group 1: Authorization-FREE — device refresh only. Sits outside
-	//     authMW so a daemon's stale Authorization header (e.g. revoked
-	//     device JWT with aud=chat) can't trip the user-aud middleware
-	//     and 401 before the handler ever runs. The opaque refresh
-	//     token in the body is the credential.
+	//   Group 1: ratelimit-only — device refresh. Sits outside authMW
+	//     so a daemon's stale Authorization header (e.g. revoked device
+	//     JWT with aud=chat) can't trip the user-aud middleware and 401
+	//     before the handler ever runs. The opaque refresh token in
+	//     the body is the credential. STILL gets ratelimit (anonymous
+	//     IP-based key) — without this, the route is a credential-
+	//     stuffing oracle + DB-pool DoS surface (review HIGH 0.95).
 	//
 	//   Group 2: authMW + rate-limit — every other route. Anonymous
 	//     callers fall through (User=nil in context); auth'd callers
@@ -265,6 +268,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// chi requires Use() before any route registration on a mux, so
 	// the split MUST be expressed via Groups (not via positional Use()).
 	r.Group(func(r chi.Router) {
+		r.Use(ratelimit.Middleware(limiter))
 		r.Post("/auth/devices/refresh", oauthHandler.HandleDeviceRefresh())
 	})
 

@@ -27,6 +27,17 @@ const (
 	// is a nested object (daemon_version, supported_protocols, etc.) —
 	// 4 KiB is enough for legitimate payloads while still bounding abuse.
 	maxDevicePairBodyBytes = 4 * 1024
+
+	// maxDeviceNameBytes caps the device name length to prevent storage
+	// amplification — body cap alone wouldn't stop an attacker from
+	// stuffing the entire 4 KiB into the name field.
+	maxDeviceNameBytes = 100
+
+	// maxDeviceCapabilitiesBytes caps the JSON-encoded capabilities
+	// object size. Daemons advertise feature flags in capabilities;
+	// 2 KiB accommodates current daemon contracts (daemon_version,
+	// supported_protocols, hostname, OS info) with room to spare.
+	maxDeviceCapabilitiesBytes = 2 * 1024
 )
 
 // deviceClaimsPayload is the wire shape of a device JWT. Mirrors
@@ -123,7 +134,26 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 		}
 		// `name` is optional per spec (silly-wiggling-balloon.md L222).
 		// An unnamed device is valid — daemon may label later via a
-		// future PATCH endpoint.
+		// future PATCH endpoint. Length-capped to prevent storage
+		// amplification (review HIGH 0.85 follow-up).
+		if len(req.Name) > maxDeviceNameBytes {
+			http.Error(w, "name too long", http.StatusBadRequest)
+			return
+		}
+		// Cap capabilities by JSON-encoded size — body cap is
+		// per-request, not per-field. A malicious daemon could stuff
+		// the entire 4 KiB into capabilities and amplify storage.
+		if req.Capabilities != nil {
+			capsCheck, err := json.Marshal(req.Capabilities)
+			if err != nil {
+				http.Error(w, "invalid capabilities", http.StatusBadRequest)
+				return
+			}
+			if len(capsCheck) > maxDeviceCapabilitiesBytes {
+				http.Error(w, "capabilities too large", http.StatusBadRequest)
+				return
+			}
+		}
 
 		ctx := r.Context()
 		dev, err := h.DeviceStore.Create(ctx, user.ID, req.Name, req.Capabilities)
@@ -158,14 +188,23 @@ func (h *OAuthHandler) HandlePair() http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(pairResponse{
+		writeTokenResponse(w, pairResponse{
 			DeviceID:           dev.ID,
 			DeviceAccessToken:  accessToken,
 			DeviceRefreshToken: rawRefresh,
 			ExpiresIn:          int(DeviceAccessTokenTTL.Seconds()),
 		})
 	}
+}
+
+// writeTokenResponse encodes a pairResponse with RFC 6749 §5.1
+// Cache-Control headers — token responses must NEVER be cached by
+// intermediate proxies or browsers (refresh token leak).
+func writeTokenResponse(w http.ResponseWriter, resp pairResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // HandleDeviceRefresh rotates a device-scoped opaque refresh token.
@@ -261,8 +300,7 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(pairResponse{
+		writeTokenResponse(w, pairResponse{
 			DeviceID:           dev.ID,
 			DeviceAccessToken:  accessToken,
 			DeviceRefreshToken: rawRefresh,
