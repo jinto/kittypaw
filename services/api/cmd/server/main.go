@@ -192,10 +192,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// OAuth handler — wired here (before route registration) so the
 	// device refresh route can be registered Authorization-free below.
 	states := auth.NewStateStore()
+	webCodes := auth.NewWebCodeStore()
 	oauthHandler := &auth.OAuthHandler{
 		UserStore:         userStore,
 		RefreshTokenStore: refreshStore,
 		DeviceStore:       deviceStore,
+		WebCodeStore:      webCodes,
 		StateStore:        states,
 		JWTPrivateKey:     cfg.JWTPrivateKey,
 		JWTKID:            cfg.JWTKID,
@@ -284,6 +286,16 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Post("/auth/devices/refresh", oauthHandler.HandleDeviceRefresh())
 	})
 
+	// Web OAuth exchange (Plan 25). Outside authMW because the credential
+	// is the body-bound code+verifier pair, not the Authorization header —
+	// same reasoning as /auth/devices/refresh. Separate ratelimit bucket
+	// "web" so a noisy chat-server IP cannot starve daemon refresh and
+	// vice versa.
+	r.Group(func(r chi.Router) {
+		r.Use(ratelimit.Middleware(limiter, "web"))
+		r.Post("/auth/web/exchange", oauthHandler.HandleWebExchange())
+	})
+
 	r.Group(func(r chi.Router) {
 		r.Use(authMW)
 		r.Use(ratelimit.Middleware(limiter))
@@ -302,6 +314,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 			CodeStore: cliCodes,
 			BaseURL:   cfg.BaseURL,
 		}
+		webCfg := auth.WebLoginConfig{
+			GoogleCfg:            googleCfg,
+			CodeStore:            webCodes,
+			RedirectURIAllowlist: cfg.WebRedirectURIAllowlist,
+		}
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/google", oauthHandler.HandleGoogleLogin(googleCfg))
 			r.Get("/google/callback", oauthHandler.HandleGoogleCallback(googleCfg))
@@ -314,6 +331,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 			r.Get("/cli/{provider}", oauthHandler.HandleCLILogin(cliCfg))
 			r.Get("/cli/callback", oauthHandler.HandleCLICallback(cliCfg))
 			r.Post("/cli/exchange", oauthHandler.HandleCLIExchange(cliCfg))
+
+			// Web OAuth login (Plan 25) — exchange is registered above
+			// outside authMW. /auth/web/google is anonymous-OK so it
+			// stays in the authMW group (User=nil falls through).
+			r.Get("/web/google", oauthHandler.HandleWebGoogleLogin(webCfg))
 
 			// Device endpoints (Plan 23 PR-D). Refresh is registered
 			// outside authMW above; pair/list/delete require user JWT.
@@ -357,6 +379,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		dataCache.Close()
 		states.Close()
 		cliCodes.Close()
+		webCodes.Close()
 		limiter.Close()
 	}
 	return r, cleanup

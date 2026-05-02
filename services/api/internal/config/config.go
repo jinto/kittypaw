@@ -36,6 +36,12 @@ type Config struct {
 	ChatRelayURL       string
 	APIBaseURL         string
 	SkillsRegistryURL  string
+	// WebRedirectURIAllowlist — exact-match list of redirect_uri values
+	// accepted by the web OAuth flow (Plan 25). CSV from env. Empty list
+	// disables the web flow entirely (HandleWebGoogleLogin will reject
+	// every request) — chosen over a permissive default to fail-safe in
+	// dev/CI without explicit allowlist config.
+	WebRedirectURIAllowlist []string
 }
 
 func Load() (*Config, error) {
@@ -95,6 +101,19 @@ func Load() (*Config, error) {
 		c.AllowedOrigins = strings.Split(origins, ",")
 	} else {
 		c.AllowedOrigins = []string{c.BaseURL}
+	}
+
+	if allow := os.Getenv("WEB_REDIRECT_URI_ALLOWLIST"); allow != "" {
+		// Trim whitespace per entry — operators sometimes wrap CSVs across
+		// lines in .env and the parser must not silently fail to match a
+		// "https://chat.kittypaw.app/auth/callback " entry.
+		raw := strings.Split(allow, ",")
+		c.WebRedirectURIAllowlist = make([]string, 0, len(raw))
+		for _, e := range raw {
+			if t := strings.TrimSpace(e); t != "" {
+				c.WebRedirectURIAllowlist = append(c.WebRedirectURIAllowlist, t)
+			}
+		}
 	}
 
 	return c, nil

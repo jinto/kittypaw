@@ -654,6 +654,61 @@
 - [ ] 분기: idle threshold 60일이 적정한지 검증 (사용자 churn / 분실 device 메트릭)
 - [ ] per-user device cap 일감 (Plan 25 후보) — device-stuffing 방어
 
+## Plan 25: KittyChat Web OAuth Flow (PKCE + Code Exchange) ← 현재
+
+> Spec: chat 팀과 합의된 contract — Authorization Code with PKCE, BFF 패턴.
+> Goal: chat.kittypaw.app가 server-to-server로 OAuth 처리. browser에는 HttpOnly session cookie만, token은 chat 서버 session-only.
+> 의사결정 (확정):
+> - **Refresh**: 기존 `/auth/token/refresh` 그대로 사용 (모든 user OAuth token이 동일 multi-aud `[api, chat]` 발급, audience 컬럼 추가는 YAGNI)
+> - **Audience**: 기존 multi-aud 재사용 (`scopes.go` `DefaultAPIClientAudiences`). web user JWT는 `aud=[api, chat]`, `scope=[chat:relay, models:read]`, `sub=<user_id>` — daemon JWT (`sub=device:<id>`, `scope=[daemon:connect]`)와 sub/scope으로 명확히 구분.
+> - **Code TTL**: 60s (chat → API 왕복 충분, browser 외부 노출 시 빠른 만료)
+> - **redirect_uri allowlist**: env `WEB_REDIRECT_URI_ALLOWLIST` (CSV exact match)
+> - **CORS**: `/auth/web/exchange`는 server-to-server. `cors.AllowedOrigins`에 chat.kittypaw.app 미포함 → browser 자동 차단.
+> - **code_challenge_method**: S256만 허용 (plain 거부)
+
+**Contract 요약**:
+```
+1. chat → API:
+   GET /auth/web/google?redirect_uri=...&state=<chat_state>
+       &code_challenge=<S256(verifier)>&code_challenge_method=S256
+
+2. API → chat callback:
+   302 {redirect_uri}?code=<one-time>&state=<echoed-chat_state>
+
+3. chat 서버 → API (server-to-server):
+   POST /auth/web/exchange
+   { "code", "code_verifier", "redirect_uri" }
+
+   → { access_token, refresh_token, token_type, expires_in }
+```
+
+- [ ] **T1: WebCodeStore (1회용 60s TTL store)**
+      RED: `web_code_store_test.go` — Create/Consume happy / unknown code → error / expired → error / one-time use (두 번 Consume → 두 번째 fail).
+      GREEN: `internal/auth/web_code_store.go` — `WebCodeEntry { UserID, RedirectURI, CodeChallenge }`. CLICodeStore 미러 (mu + map + sweep goroutine, 60s TTL).
+
+- [ ] **T2: HandleWebGoogleLogin + Google callback web 분기**
+      RED: `web_test.go` — allowlist 외 redirect_uri → 400 / S256 외 method → 400 / missing chat_state → 400 / happy path → 302 to Google with state metadata 박음 / callback web 분기 → redirect to {redirect_uri}?code=&state=
+      GREEN:
+      - `internal/auth/web.go` `HandleWebGoogleLogin` — redirect_uri allowlist 검증 → state.CreateWithMeta({mode=web, redirect_uri, chat_state, code_challenge}) → Google redirect.
+      - `google.go` `HandleGoogleCallback` web 분기: state.metadata["mode"]=="web" → token 발급 안 함 → WebCodeStore.Create → 302 redirect_uri.
+
+- [ ] **T3: HandleWebExchange (PKCE 검증 + token 발급)**
+      RED: `web_test.go` — unknown code → 401 / expired code → 401 / verifier mismatch → 401 / redirect_uri mismatch → 400 / happy → 200 with TokenResponse (multi-aud token).
+      GREEN: `web.go` `HandleWebExchange` — body decode (1KB cap) → WebCodeStore.Consume → redirect_uri 매치 검증 → ChallengeS256(verifier) == stored_challenge → UserStore.FindByID → issueTokenPair (재사용).
+
+- [ ] **T4: config + main.go wire**
+      `internal/config/config.go` — `WebRedirectURIAllowlist []string` (CSV parse).
+      `cmd/server/main.go` — WebCodeStore 인스턴스 + cleanup wire / 라우트 등록 (`/auth/web/google`, `/auth/web/exchange`) / cors AllowedOrigins에 chat.kittypaw.app 미포함 검증.
+
+- [ ] **T5: 통합 검증 + chat 팀 알림**
+      `make build / lint / test / test-integration -p 1` 모두 pass. **사용자 명시 허락 후** atomic commit.
+      chat 팀 알림: scope-based authorization 구현 명시 (device endpoint는 `daemon:connect` scope만, user endpoint는 `chat:relay` 만).
+
+**Operational Checklist** (배포 후):
+- [ ] `.env` 갱신: `WEB_REDIRECT_URI_ALLOWLIST=https://chat.kittypaw.app/auth/callback`
+- [ ] `fab deploy`
+- [ ] chat 팀 BFF 구현 시작 신호
+
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 

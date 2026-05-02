@@ -80,7 +80,7 @@ func (h *OAuthHandler) HandleGoogleCallback(cfg GoogleConfig) http.HandlerFunc {
 			return
 		}
 
-		verifier, err := h.StateStore.Consume(state)
+		verifier, meta, err := h.StateStore.ConsumeMeta(state)
 		if err != nil {
 			http.Error(w, "invalid state", http.StatusBadRequest)
 			return
@@ -104,6 +104,13 @@ func (h *OAuthHandler) HandleGoogleCallback(cfg GoogleConfig) http.HandlerFunc {
 		if err != nil {
 			log.Printf("user upsert: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// Plan 25: web flow dispatch. Standard browser flow leaves meta
+		// nil (StateStore.Create) and falls through to issueTokens.
+		if meta != nil && meta[stateMetaKeyMode] == stateMetaModeWeb {
+			h.emitWebCallback(w, r, user, meta)
 			return
 		}
 
