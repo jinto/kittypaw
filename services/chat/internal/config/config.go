@@ -30,7 +30,7 @@ func Load() (Config, error) {
 		DeviceID:       os.Getenv("KITTYCHAT_DEVICE_ID"),
 		LocalAccountID: os.Getenv("KITTYCHAT_LOCAL_ACCOUNT_ID"),
 		PublicBaseURL:  env("KITTYCHAT_PUBLIC_BASE_URL", "https://chat.kittypaw.app"),
-		APIAuthBaseURL: env("KITTYCHAT_API_AUTH_BASE_URL", "https://api.kittypaw.app/auth"),
+		APIAuthBaseURL: env("KITTYCHAT_API_AUTH_BASE_URL", "https://portal.kittypaw.app/auth"),
 		Version:        env("KITTYCHAT_VERSION", "dev"),
 	}
 

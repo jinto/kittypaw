@@ -22,17 +22,29 @@ KittyPaw binary.
 
 ### `services/api`
 
-The cloud authority and public API surface:
+The cloud resource API surface:
+
+- public data proxy endpoints
+- API resource audience: `https://api.kittypaw.app`
+- transition host for identity implementation until `services/portal` is
+  extracted
+
+During the phase-1 portal split, the binary can still contain identity code,
+but public identity routes are served only on `portal.kittypaw.app`.
+
+### `services/portal`
+
+The identity and bootstrap surface. In phase 1 this is a logical service hosted
+by the API binary; phase 2 extracts it into its own deployable:
 
 - OAuth login
 - JWT and refresh token issuance
 - device pair, refresh, list, revoke
 - JWKS publication
 - service discovery
-- public data proxy endpoints
+- future account and device UI
 
-`services/api` is the auth authority today, even when auth endpoints live under
-`api.kittypaw.app/auth`.
+Canonical issuer: `https://portal.kittypaw.app/auth`.
 
 ### `services/chat`
 
@@ -90,6 +102,8 @@ Each service remains independently deployed:
 
 - `apps/kittypaw`: GitHub release assets and install script
 - `services/api`: service binary and API database migrations
+- `services/portal`: identity service binary and auth database migrations
+  after extraction
 - `services/chat`: service binary and hosted chat static assets
 - `services/kakao`: service binary and Kakao gateway data store
 

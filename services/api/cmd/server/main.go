@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -245,9 +247,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	}
 
 	// Service discovery — SDK reads this once on startup.
-	// auth_base_url is derived from BaseURL because /auth/* is currently
-	// hosted under the api host; future host split (auth.kittypaw.app)
-	// only requires changing this single line.
+	// auth_base_url is derived from BaseURL, whose canonical production
+	// value is portal.kittypaw.app. APIBaseURL remains the resource-server
+	// origin so clients do not infer topology from the identity host.
 	discovery := map[string]string{
 		"api_base_url":        cfg.APIBaseURL,
 		"auth_base_url":       strings.TrimRight(cfg.BaseURL, "/") + "/auth",
@@ -260,7 +262,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		discovery["chat_relay_url"] = cfg.ChatRelayURL
 	}
 
-	// Routes split into two chi.Groups (Plan 23 PR-D 결정 3 + PR-D
+	identityOnly := hostBoundaryMiddleware(cfg.BaseURL, cfg.APIBaseURL, cfg.BaseURL)
+	resourceOnly := hostBoundaryMiddleware(cfg.BaseURL, cfg.APIBaseURL, cfg.APIBaseURL)
+
+	r.Get("/health", handleHealth)
+
+	// Routes split into chi.Groups (Plan 23 PR-D 결정 3 + PR-D
 	// follow-up review fix):
 	//
 	//   Group 1: ratelimit-only — device refresh. Sits outside authMW
@@ -278,6 +285,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// chi requires Use() before any route registration on a mux, so
 	// the split MUST be expressed via Groups (not via positional Use()).
 	r.Group(func(r chi.Router) {
+		r.Use(identityOnly)
 		// Per-route bucket "refresh:ip:<peer>" — isolated from the
 		// shared anonymous bucket so noisy data-fetch IPs cannot
 		// starve daemon refresh from the same source (Round 3
@@ -292,15 +300,16 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	// "web" so a noisy chat-server IP cannot starve daemon refresh and
 	// vice versa.
 	r.Group(func(r chi.Router) {
+		r.Use(identityOnly)
 		r.Use(ratelimit.Middleware(limiter, "web"))
 		r.Post("/auth/web/exchange", oauthHandler.HandleWebExchange())
 	})
 
 	r.Group(func(r chi.Router) {
+		r.Use(identityOnly)
 		r.Use(authMW)
 		r.Use(ratelimit.Middleware(limiter))
 
-		r.Get("/health", handleHealth)
 		r.Get("/.well-known/jwks.json", auth.HandleJWKS(jwksProvider))
 		r.Get("/discovery", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -343,6 +352,12 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 			r.Get("/devices", oauthHandler.HandleDevicesList())
 			r.Delete("/devices/{id}", oauthHandler.HandleDeviceDelete())
 		})
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(resourceOnly)
+		r.Use(authMW)
+		r.Use(ratelimit.Middleware(limiter))
 
 		r.Route("/v1/air/airkorea", func(r chi.Router) {
 			r.Get("/realtime/station", airKorea.RealtimeByStation())
@@ -373,7 +388,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		r.Route("/v1/geo", func(r chi.Router) {
 			r.Get("/resolve", places.Resolve())
 		})
-	}) // close authMW + ratelimit Group
+	})
 
 	cleanup := func() {
 		dataCache.Close()
@@ -388,4 +403,51 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+}
+
+func hostBoundaryMiddleware(identityBaseURL, resourceBaseURL, allowedBaseURL string) func(http.Handler) http.Handler {
+	identityHost := canonicalURLHost(identityBaseURL)
+	resourceHost := canonicalURLHost(resourceBaseURL)
+	allowedHost := canonicalURLHost(allowedBaseURL)
+	splitHosts := identityHost != "" && resourceHost != "" && identityHost != resourceHost
+	if !splitHosts || allowedHost == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestHost := canonicalHost(r.Host)
+			if requestHost == allowedHost || isLocalRequestHost(requestHost) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
+	}
+}
+
+func canonicalURLHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return canonicalHost(u.Host)
+}
+
+func canonicalHost(hostport string) string {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		hostport = host
+	}
+	return strings.ToLower(strings.Trim(hostport, "[]"))
+}
+
+func isLocalRequestHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

@@ -26,7 +26,7 @@ Make `https://chat.kittypaw.app` the user-facing chat surface instead of a manua
   - Starts a PKCE login.
   - Generates `state`, `code_verifier`, and S256 `code_challenge`.
   - Stores the verifier server-side for a short TTL.
-  - Redirects to `api.kittypaw.app/auth/web/google` with `redirect_uri`, `state`, `code_challenge`, and `code_challenge_method=S256`.
+  - Redirects to `portal.kittypaw.app/auth/web/google` with `redirect_uri`, `state`, `code_challenge`, and `code_challenge_method=S256`.
 
 - `/auth/callback`
   - Server-side callback endpoint.
@@ -66,7 +66,7 @@ Access and refresh tokens live only in `kittychat` process memory. This is accep
 Hosted login uses API Plan 25:
 
 ```text
-GET https://api.kittypaw.app/auth/web/google
+GET https://portal.kittypaw.app/auth/web/google
   ?redirect_uri=https%3A%2F%2Fchat.kittypaw.app%2Fauth%2Fcallback
   &state=<chat_state>
   &code_challenge=<S256(code_verifier)>
@@ -82,14 +82,14 @@ https://chat.kittypaw.app/auth/callback?code=<one_time_code>&state=<chat_state>
 Then `kittychat` exchanges the code:
 
 ```text
-POST https://api.kittypaw.app/auth/web/exchange
+POST https://portal.kittypaw.app/auth/web/exchange
 { "code": "...", "code_verifier": "...", "redirect_uri": "https://chat.kittypaw.app/auth/callback" }
 ```
 
 Refresh uses the existing API endpoint:
 
 ```text
-POST https://api.kittypaw.app/auth/token/refresh
+POST https://portal.kittypaw.app/auth/token/refresh
 { "refresh_token": "..." }
 ```
 

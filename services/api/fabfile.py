@@ -10,6 +10,7 @@ from fabric import task
 
 HOST = os.environ.get("DEPLOY_HOST", "second")
 DOMAIN = os.environ.get("DEPLOY_DOMAIN", "")
+PORTAL_DOMAIN = os.environ.get("DEPLOY_PORTAL_DOMAIN", "portal.kittypaw.app")
 REMOTE_DIR = "/home/jinto/kittyapi"
 SERVICE = "kittyapi"
 BINARY = "kittypaw-api"
@@ -52,8 +53,9 @@ def setup(ctx):
     c.put(str(LOCAL_ROOT / "deploy" / "kittyapi.service"), "/tmp/kittyapi.service")
     c.put(str(LOCAL_ROOT / "deploy" / "kittyapi.nginx"), "/tmp/kittyapi.nginx")
 
-    # Replace {{DOMAIN}} placeholder on server
+    # Replace domain placeholders on server
     c.run(f"sed -i 's/{{{{DOMAIN}}}}/{DOMAIN}/g' /tmp/kittyapi.nginx")
+    c.run(f"sed -i 's/{{{{PORTAL_DOMAIN}}}}/{PORTAL_DOMAIN}/g' /tmp/kittyapi.nginx")
 
     c.sudo("cp /tmp/kittyapi.service /etc/systemd/system/kittyapi.service")
     c.sudo("cp /tmp/kittyapi.nginx /etc/nginx/sites-enabled/kittyapi")

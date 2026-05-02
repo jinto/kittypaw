@@ -8,7 +8,7 @@
   "properties": {
     "iss": {
       "type": "string",
-      "const": "https://api.kittypaw.app/auth"
+      "const": "https://portal.kittypaw.app/auth"
     },
     "sub": {
       "type": "string",

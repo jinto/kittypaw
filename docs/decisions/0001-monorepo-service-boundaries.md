@@ -11,8 +11,8 @@ separate.
 
 The current projects change together through shared wire contracts:
 
-- API discovery is produced by the API service and consumed by Kittypaw.
-- JWT/JWKS credentials are issued by the API service and verified by Chat.
+- Discovery is produced by the portal identity surface and consumed by Kittypaw.
+- JWT/JWKS credentials are issued by the portal identity surface and verified by Chat.
 - Chat relay frames are produced by Chat and consumed by the Kittypaw daemon.
 - Kakao relay frames are produced by the Kakao gateway and consumed by Kittypaw.
 

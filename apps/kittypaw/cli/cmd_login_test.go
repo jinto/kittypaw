@@ -31,7 +31,7 @@ func TestApplyDiscoveryStoresChatRelayURL(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{
 			"api_base_url":"https://api.kittypaw.app",
-			"auth_base_url":"https://api.kittypaw.app/auth",
+			"auth_base_url":"https://portal.kittypaw.app/auth",
 			"chat_relay_url":"https://chat.kittypaw.app",
 			"kakao_relay_url":"https://kakao.kittypaw.app",
 			"skills_registry_url":"https://github.com/kittypaw-app/skills"
@@ -55,7 +55,7 @@ func TestApplyDiscoveryStoresChatRelayURL(t *testing.T) {
 		t.Fatalf("LoadChatRelayURL = (%q, %v), want chat relay URL", gotChatRelay, ok)
 	}
 	gotAuthBase, ok := mgr.LoadAuthBaseURL(ts.URL)
-	if !ok || gotAuthBase != "https://api.kittypaw.app/auth" {
+	if !ok || gotAuthBase != "https://portal.kittypaw.app/auth" {
 		t.Fatalf("LoadAuthBaseURL = (%q, %v), want auth base URL", gotAuthBase, ok)
 	}
 }

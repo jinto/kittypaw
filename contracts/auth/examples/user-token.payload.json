@@ -1,5 +1,5 @@
 {
-  "iss": "https://api.kittypaw.app/auth",
+  "iss": "https://portal.kittypaw.app/auth",
   "sub": "user_123",
   "aud": ["https://api.kittypaw.app", "https://chat.kittypaw.app"],
   "scope": ["chat:relay", "models:read"],

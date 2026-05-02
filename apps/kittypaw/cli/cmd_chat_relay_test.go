@@ -87,7 +87,7 @@ func TestRunChatRelayStatusDoesNotPrintDeviceInternals(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := core.NewAPITokenManager("", secrets)
-	if err := mgr.SaveAuthBaseURL(core.DefaultAPIServerURL, "https://api.kittypaw.app/auth"); err != nil {
+	if err := mgr.SaveAuthBaseURL(core.DefaultAPIServerURL, "https://portal.kittypaw.app/auth"); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.SaveChatRelayURL(core.DefaultAPIServerURL, "https://chat.kittypaw.app"); err != nil {

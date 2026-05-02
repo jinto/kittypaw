@@ -46,6 +46,22 @@ func TestLoginGoogleRedirectsToAPIWithPKCE(t *testing.T) {
 	}
 }
 
+func TestNewDefaultsToPortalAuthBase(t *testing.T) {
+	handler, err := New(Config{
+		PublicBaseURL: "https://chat.test",
+		Verifier:      testVerifier{},
+		OpenAIHandler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if handler.apiAuthBaseURL != "https://portal.kittypaw.app/auth" {
+		t.Fatalf("apiAuthBaseURL = %q, want portal auth base", handler.apiAuthBaseURL)
+	}
+}
+
 func TestCallbackExchangesCodeAndSetsHttpOnlySessionCookie(t *testing.T) {
 	var exchangeCalled bool
 	handler := newTestHandler(t, func(w http.ResponseWriter, r *http.Request) {

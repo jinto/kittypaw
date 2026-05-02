@@ -48,8 +48,8 @@ func TestLoadUsesEnvAndDefaults(t *testing.T) {
 	if cfg.PublicBaseURL != "https://chat.kittypaw.app" {
 		t.Fatalf("PublicBaseURL = %q, want prod chat URL", cfg.PublicBaseURL)
 	}
-	if cfg.APIAuthBaseURL != "https://api.kittypaw.app/auth" {
-		t.Fatalf("APIAuthBaseURL = %q, want prod API auth URL", cfg.APIAuthBaseURL)
+	if cfg.APIAuthBaseURL != "https://portal.kittypaw.app/auth" {
+		t.Fatalf("APIAuthBaseURL = %q, want prod portal auth URL", cfg.APIAuthBaseURL)
 	}
 }
 
@@ -138,7 +138,7 @@ func TestLoadAllowsJWKSOnlyCredentials(t *testing.T) {
 	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
 	t.Setenv("KITTYCHAT_JWT_SECRET", "")
 	t.Setenv("JWT_SECRET", "")
-	t.Setenv("KITTYCHAT_JWKS_URL", "https://api.kittypaw.app/.well-known/jwks.json")
+	t.Setenv("KITTYCHAT_JWKS_URL", "https://portal.kittypaw.app/.well-known/jwks.json")
 	t.Setenv("KITTYCHAT_USER_ID", "")
 	t.Setenv("KITTYCHAT_DEVICE_ID", "")
 	t.Setenv("KITTYCHAT_LOCAL_ACCOUNT_ID", "")
@@ -147,7 +147,7 @@ func TestLoadAllowsJWKSOnlyCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.JWKSURL != "https://api.kittypaw.app/.well-known/jwks.json" {
+	if cfg.JWKSURL != "https://portal.kittypaw.app/.well-known/jwks.json" {
 		t.Fatalf("JWKSURL = %q", cfg.JWKSURL)
 	}
 }

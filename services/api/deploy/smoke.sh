@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # kittyapi prod smoke test — Plan 8 v2 D4(A) bash + curl + jq.
 # Verifies HTTP 200 + JSON envelope `response.header.resultCode == "00"` for
-# every external-API-backed endpoint, plus /health + /discovery + /v1/geo/resolve.
+# every API-backed endpoint, plus API /health and portal identity routes.
 #
 # Usage:
-#   bash deploy/smoke.sh                              # default https://api.kittypaw.app
-#   BASE_URL=http://localhost:9712 bash deploy/smoke.sh
+#   bash deploy/smoke.sh
+#   BASE_URL=http://localhost:9712 PORTAL_BASE_URL=http://localhost:9712 bash deploy/smoke.sh
 #   make smoke
 #
 # Exit: 0 on all-pass, 1 on any failure (rate-limit warnings don't fail).
@@ -14,6 +14,7 @@
 set -uo pipefail
 
 BASE="${BASE_URL:-https://api.kittypaw.app}"
+PORTAL_BASE="${PORTAL_BASE_URL:-https://portal.kittypaw.app}"
 THROTTLE="${SMOKE_THROTTLE:-0.5}"
 
 PASS=0
@@ -51,11 +52,21 @@ do_curl() {
 }
 
 check_status() {
+    check_status_at "$BASE" "$@"
+}
+
+check_portal_status() {
+    check_status_at "$PORTAL_BASE" "$@"
+}
+
+check_status_at() {
+    local base="$1"
+    shift
     local path="$1"
     local expected="$2"
     local desc="${3:-$path}"
     local method="${4:-GET}"
-    do_curl "${BASE}${path}" "$method"
+    do_curl "${base}${path}" "$method"
     if [[ "$CODE" == "$expected" ]]; then
         printf "${G}✓${N} %s [%s]\n" "$desc" "$CODE"
         PASS=$((PASS + 1))
@@ -164,7 +175,7 @@ check_geo() {
 # layer integration tests can't see.
 check_discovery_keys() {
     local raw
-    raw=$(curl -sS -w $'\n%{http_code}' "${BASE}/discovery" 2>/dev/null || printf '\n000')
+    raw=$(curl -sS -w $'\n%{http_code}' "${PORTAL_BASE}/discovery" 2>/dev/null || printf '\n000')
     _split_body_code "$raw"
     if [[ "$CODE" != "200" ]]; then
         printf "${R}✗${N} discovery [HTTP %s]\n" "$CODE"
@@ -196,11 +207,16 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 echo "=== kittyapi smoke: ${BASE} ==="
+echo "=== portal identity smoke: ${PORTAL_BASE} ==="
 
 echo
 echo "--- Infrastructure ---"
 check_status "/health" "200"
 check_discovery_keys
+if [[ "$BASE" != "$PORTAL_BASE" ]]; then
+    check_status "/discovery" "404" "api/discovery closed on resource host"
+    check_status "/.well-known/jwks.json" "404" "api/jwks closed on resource host"
+fi
 
 echo
 echo "--- Calendar (KASI SpcdeInfoService) ---"
@@ -242,25 +258,25 @@ check_geo "Tokyo" "geo/resolve (Tokyo, out-of-korea)" "4xx"
 # 401 = auth required without token — middleware reachable.
 echo
 echo "--- Auth (OAuth + CLI, endpoint liveness only) ---"
-check_status "/auth/google" "302" "auth/google (Google redirect)"
-check_status "/auth/github" "302" "auth/github (GitHub redirect)"
-check_status "/auth/me" "401" "auth/me (no token)"
-check_status "/auth/google/callback" "400" "auth/google/callback (no params)"
-check_status "/auth/github/callback" "400" "auth/github/callback (no params)"
-check_status "/auth/cli/google" "400" "auth/cli/google (no params)"
-check_status "/auth/cli/callback" "400" "auth/cli/callback (no params)"
-check_status "/auth/token/refresh" "400" "auth/token/refresh POST (no body)" "POST"
-check_status "/auth/cli/exchange" "400" "auth/cli/exchange POST (no body)" "POST"
+check_portal_status "/auth/google" "302" "auth/google (Google redirect)"
+check_portal_status "/auth/github" "302" "auth/github (GitHub redirect)"
+check_portal_status "/auth/me" "401" "auth/me (no token)"
+check_portal_status "/auth/google/callback" "400" "auth/google/callback (no params)"
+check_portal_status "/auth/github/callback" "400" "auth/github/callback (no params)"
+check_portal_status "/auth/cli/google" "400" "auth/cli/google (no params)"
+check_portal_status "/auth/cli/callback" "400" "auth/cli/callback (no params)"
+check_portal_status "/auth/token/refresh" "400" "auth/token/refresh POST (no body)" "POST"
+check_portal_status "/auth/cli/exchange" "400" "auth/cli/exchange POST (no body)" "POST"
 
 # Plan 23 PR-D — device endpoints. Auth-required routes return 401 to
 # anonymous probes; refresh sits OUTSIDE authMW so it returns 400 (no body)
 # instead of 401 — that asymmetry is the wire test for 결정 3.
 echo
 echo "--- Auth (device endpoints, Plan 23 PR-D) ---"
-check_status "/auth/devices/pair" "401" "auth/devices/pair (no auth)" "POST"
-check_status "/auth/devices/refresh" "400" "auth/devices/refresh (no body, no auth required)" "POST"
-check_status "/auth/devices" "401" "auth/devices GET (no auth)"
-check_status "/auth/devices/00000000-0000-0000-0000-000000000000" "401" "auth/devices/{id} DELETE (no auth)" "DELETE"
+check_portal_status "/auth/devices/pair" "401" "auth/devices/pair (no auth)" "POST"
+check_portal_status "/auth/devices/refresh" "400" "auth/devices/refresh (no body, no auth required)" "POST"
+check_portal_status "/auth/devices" "401" "auth/devices GET (no auth)"
+check_portal_status "/auth/devices/00000000-0000-0000-0000-000000000000" "401" "auth/devices/{id} DELETE (no auth)" "DELETE"
 
 # Plan 25 — web OAuth flow (PKCE + code exchange).
 # /auth/web/google: no-params → 400 (handler reachable, validation path).
@@ -270,7 +286,7 @@ check_origin_rejected() {
     local path="$1"
     local desc="$2"
     local raw
-    raw=$(curl -sS -X POST -H "Origin: https://example.com" -w $'\n%{http_code}' "${BASE}${path}" 2>/dev/null || printf '\n000')
+    raw=$(curl -sS -X POST -H "Origin: https://example.com" -w $'\n%{http_code}' "${PORTAL_BASE}${path}" 2>/dev/null || printf '\n000')
     _split_body_code "$raw"
     if [[ "$CODE" == "403" ]]; then
         printf "${G}✓${N} %s [403, Origin blocked]\n" "$desc"
@@ -285,8 +301,8 @@ check_origin_rejected() {
 
 echo
 echo "--- Auth (web OAuth flow, Plan 25) ---"
-check_status "/auth/web/google" "400" "auth/web/google (no params)"
-check_status "/auth/web/exchange" "400" "auth/web/exchange POST (no body)" "POST"
+check_portal_status "/auth/web/google" "400" "auth/web/google (no params)"
+check_portal_status "/auth/web/exchange" "400" "auth/web/exchange POST (no body)" "POST"
 check_origin_rejected "/auth/web/exchange" "auth/web/exchange (browser Origin blocked)"
 
 TOTAL=$((PASS + FAIL))

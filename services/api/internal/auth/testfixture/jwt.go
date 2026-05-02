@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/kittypaw-app/kittyapi/internal/auth"
 )
 
 // DeviceClaims is the input shape for IssueDeviceJWT — the wire-level
@@ -32,7 +33,7 @@ type deviceClaimsPayload struct {
 // IssueDeviceJWT signs a device JWT in the wire format kittychat's
 // verifier expects. The header carries `alg=RS256` and `kid=<kid>`; the
 // payload carries sub=device:<device_id>, user_id, aud, scope, v, iat,
-// exp, iss=kittyapi auth endpoint.
+// exp, iss=portal auth endpoint.
 //
 // This helper exists primarily for fixture generation in tests on both
 // sides of the contract — production token issuance lives elsewhere.
@@ -51,7 +52,7 @@ func IssueDeviceJWT(privateKey *rsa.PrivateKey, kid string, claims DeviceClaims)
 		Scope:  claims.Scope,
 		V:      claims.Version,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "https://api.kittypaw.app/auth",
+			Issuer:    auth.Issuer,
 			Subject:   "device:" + claims.DeviceID,
 			Audience:  jwt.ClaimStrings(claims.Audience),
 			IssuedAt:  jwt.NewNumericDate(claims.IssuedAt),

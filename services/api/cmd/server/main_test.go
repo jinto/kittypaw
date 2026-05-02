@@ -135,6 +135,93 @@ func TestDiscoveryReturnsAuthBaseURL(t *testing.T) {
 	}
 }
 
+func TestDiscoveryReturnsPortalAuthBaseURLAndAPIBaseURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["api_base_url"]; got != "https://api.kittypaw.app" {
+		t.Fatalf("api_base_url = %q, want api host", got)
+	}
+	if got := body["auth_base_url"]; got != "https://portal.kittypaw.app/auth" {
+		t.Fatalf("auth_base_url = %q, want portal auth host", got)
+	}
+}
+
+func TestSplitHostsRestrictIdentityRoutesToPortalHost(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+	}{
+		{method: http.MethodGet, path: "/discovery"},
+		{method: http.MethodGet, path: "/.well-known/jwks.json"},
+		{method: http.MethodGet, path: "/auth/google"},
+		{method: http.MethodPost, path: "/auth/devices/refresh"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Host = "api.kittypaw.app"
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 on api host", w.Code)
+			}
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("portal discovery status = %d, want 200", w.Code)
+	}
+}
+
+func TestSplitHostsRestrictResourceRoutesToAPIHost(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/geo/resolve", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("portal resource status = %d, want 404", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Host = "api.kittypaw.app"
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("api health status = %d, want 200", w.Code)
+	}
+}
+
 // TestJWKSEndpoint_Anonymous200 pins the /.well-known/jwks.json contract:
 // status 200, Content-Type application/json, body decodes into a JWK Set
 // with at least one key whose kid matches the router's configured key.

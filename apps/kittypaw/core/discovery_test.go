@@ -16,7 +16,7 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app",
-  "auth_base_url": "https://api.kittypaw.app/auth",
+  "auth_base_url": "https://portal.kittypaw.app/auth",
   "chat_relay_url": "https://chat.kittypaw.app",
   "kakao_relay_url": "https://kakao.kittypaw.app",
   "skills_registry_url": "https://github.com/kittypaw-app/skills"
@@ -31,7 +31,7 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 	if got.APIBaseURL != "https://api.kittypaw.app" {
 		t.Errorf("APIBaseURL = %q", got.APIBaseURL)
 	}
-	if got.AuthBaseURL != "https://api.kittypaw.app/auth" {
+	if got.AuthBaseURL != "https://portal.kittypaw.app/auth" {
 		t.Errorf("AuthBaseURL = %q", got.AuthBaseURL)
 	}
 	if got.ChatRelayURL != "https://chat.kittypaw.app" {
@@ -49,7 +49,7 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app/",
-  "auth_base_url": "https://api.kittypaw.app/auth///",
+  "auth_base_url": "https://portal.kittypaw.app/auth///",
   "chat_relay_url": "https://chat.kittypaw.app///",
   "kakao_relay_url": "https://kakao.kittypaw.app///",
   "skills_registry_url": "https://github.com/kittypaw-app/skills/"
@@ -64,7 +64,7 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 	if got.APIBaseURL != "https://api.kittypaw.app" {
 		t.Errorf("APIBaseURL trailing slash not trimmed: %q", got.APIBaseURL)
 	}
-	if got.AuthBaseURL != "https://api.kittypaw.app/auth" {
+	if got.AuthBaseURL != "https://portal.kittypaw.app/auth" {
 		t.Errorf("AuthBaseURL trailing slash not trimmed: %q", got.AuthBaseURL)
 	}
 	if got.ChatRelayURL != "https://chat.kittypaw.app" {

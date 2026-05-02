@@ -262,7 +262,7 @@ Expected: FAIL until scripts are referenced.
 Entry page:
 
 - If `loadAuth(localStorage)` returns a valid token, `location.replace("/app/")`.
-- Login button target defaults to `https://api.kittypaw.app/auth/web/google?redirect_uri=<encoded chat callback>`.
+- Login button target defaults to `https://portal.kittypaw.app/auth/web/google?redirect_uri=<encoded chat callback>`.
 - Show a precise note if the endpoint is not live yet: “API web login endpoint pending; use /manual/ for QA.”
 
 Callback page:

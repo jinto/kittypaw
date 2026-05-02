@@ -152,8 +152,8 @@ func TestSignForAudiences_RoundTrip(t *testing.T) {
 	if claims.V != 2 {
 		t.Fatalf("V = %d, want 2", claims.V)
 	}
-	if claims.Issuer != "https://api.kittypaw.app/auth" {
-		t.Fatalf("Issuer = %q, want https://api.kittypaw.app/auth (RFC 7519 iss, Plan 13 URL form)", claims.Issuer)
+	if claims.Issuer != "https://portal.kittypaw.app/auth" {
+		t.Fatalf("Issuer = %q, want https://portal.kittypaw.app/auth (RFC 7519 iss)", claims.Issuer)
 	}
 }
 
@@ -193,8 +193,8 @@ func TestClaimsJSONUsesSubField(t *testing.T) {
 	if _, ok := raw["uid"]; ok {
 		t.Fatalf(`payload must not contain legacy "uid" key, got: %v`, raw)
 	}
-	if got, ok := raw["iss"].(string); !ok || got != "https://api.kittypaw.app/auth" {
-		t.Fatalf(`payload "iss" = %v, want "https://api.kittypaw.app/auth"`, raw["iss"])
+	if got, ok := raw["iss"].(string); !ok || got != "https://portal.kittypaw.app/auth" {
+		t.Fatalf(`payload "iss" = %v, want "https://portal.kittypaw.app/auth"`, raw["iss"])
 	}
 }
 

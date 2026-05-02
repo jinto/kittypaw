@@ -75,7 +75,7 @@ kittyapi wire format and include the KittyChat audience:
 
 ```json
 {
-  "iss": "https://api.kittypaw.app/auth",
+  "iss": "https://portal.kittypaw.app/auth",
   "sub": "user_<id>",
   "aud": ["https://chat.kittypaw.app"],
   "scope": ["chat:relay", "models:read"],
@@ -93,7 +93,7 @@ Daemon device credentials are also accepted as kittyapi JWTs:
 
 ```json
 {
-  "iss": "https://api.kittypaw.app/auth",
+  "iss": "https://portal.kittypaw.app/auth",
   "sub": "device:dev_1",
   "aud": ["https://chat.kittypaw.app"],
   "scope": ["daemon:connect"],

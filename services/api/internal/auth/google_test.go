@@ -318,8 +318,8 @@ func TestGoogleCallbackSuccess(t *testing.T) {
 	if got, _ := raw["sub"].(string); got != "user-google-g-user-1" {
 		t.Fatalf(`wire-format regression in issueTokenPair: sub = %v, want "user-google-g-user-1"`, raw["sub"])
 	}
-	if got, _ := raw["iss"].(string); got != "https://api.kittypaw.app/auth" {
-		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "https://api.kittypaw.app/auth"`, raw["iss"])
+	if got, _ := raw["iss"].(string); got != "https://portal.kittypaw.app/auth" {
+		t.Fatalf(`wire-format regression in issueTokenPair: iss = %v, want "https://portal.kittypaw.app/auth"`, raw["iss"])
 	}
 	if v, _ := raw["v"].(float64); v != 2 {
 		t.Fatalf("wire-format regression in issueTokenPair: v = %v, want 2", raw["v"])

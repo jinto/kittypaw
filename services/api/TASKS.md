@@ -309,7 +309,7 @@
 ## Plan 13: B1 — auth /me + refresh rotation + contract revision ✅
 
 > **Spec**: `.claude/plans/plan-13-auth-me-refresh-contract-revision.md` (β 묶음, Phase 1 + Phase 2 ITERATE 모두 반영)
-> **사용자 결정 2026-05-02**: D1 issuer = `"https://api.kittypaw.app/auth"` (path-based) / D2 audience = `["https://api.kittypaw.app", "https://chat.kittypaw.app"]` (URL form)
+> **사용자 결정 2026-05-02**: D1 issuer = `"https://api.kittypaw.app/auth"` (path-based) / D2 audience = `["https://api.kittypaw.app", "https://chat.kittypaw.app"]` (URL form). Superseded by portal split: issuer = `"https://portal.kittypaw.app/auth"`.
 
 - [x] **T1**: contract revision. `scopes.go` const 정정 (`Issuer`/`AudienceAPI`/`AudienceChat` URL form, 기존 `IssuerKittyAPI` 등 이름 변경) + `jwt.go` 참조 정정 + `main.go` discovery `auth_base_url` derive (`strings.TrimRight(cfg.BaseURL, "/") + "/auth"`, R6 trailing slash) + `main_test.go` `TestDiscoveryReturnsAuthBaseURL` 신규 + `google_test.go` wire-format URL form + `jwt_test.go` 의 Plan 17 박제 갱신 + `docs/specs/kittychat-credential-foundation.md` D2 + 새 D8.
 - [x] **T2**: `internal/auth/me_integration_test.go` 신규. `setupAuthIntegration(t)` Plan 12 패턴 (`_test` guard + pgxpool + middleware-wrapped httptest, advisory_lock 불필요). Plan 11 testfixture 활용. 3 case (NoToken 401 / ValidJWT 200 + body / ExpiredJWT 401) PASS.
@@ -445,13 +445,13 @@
 
 **검증**: `make build` ✓ / `make lint` 0 issues / `make test` (T1~T5 단위 14건 + 통합 3건) PASS / `make test-integration -p 1` 회귀 0 / fixture key의 thumbprint = T1 expected 매칭.
 
-**완료 신호**: 채팅팀이 `https://api.kittypaw.app/.well-known/jwks.json` fetch + fixture private key로 동적 mock JWT 생성하여 verifier 통합 테스트 시작 가능.
+**완료 신호**: 채팅팀이 `https://portal.kittypaw.app/.well-known/jwks.json` fetch + fixture private key로 동적 mock JWT 생성하여 verifier 통합 테스트 시작 가능.
 
 **Operational Checklist** (이 PR 머지 후):
 - [ ] secret manager에 prod RSA private key 등록 (test fixture key는 prod 사용 절대 금지)
 - [ ] systemd EnvironmentFile에 `JWT_PRIVATE_KEY_PEM_B64` 추가
 - [ ] `fab deploy` (build + upload + restart + smoke)
-- [ ] `curl https://api.kittypaw.app/.well-known/jwks.json` 200 + JSON 응답 검증
+- [ ] `curl https://portal.kittypaw.app/.well-known/jwks.json` 200 + JSON 응답 검증
 - [ ] 채팅팀에 PR-A 머지 신호 (verifier 통합 테스트 unblock)
 - [ ] PR-B (RS256 cutover) ina:plan kickoff
 

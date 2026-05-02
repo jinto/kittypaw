@@ -15,7 +15,7 @@ sudo mv migrate /usr/local/bin/
 
 ```bash
 # 서버에 디렉토리, nginx, systemd 설정
-DEPLOY_DOMAIN=api.kittypaw.app fab setup
+DEPLOY_DOMAIN=api.kittypaw.app DEPLOY_PORTAL_DOMAIN=portal.kittypaw.app fab setup
 
 # 서버에 SSH 접속 후 .env 편집
 ssh second
@@ -48,12 +48,14 @@ fab migrate    # DB 마이그레이션
 
 ```bash
 curl https://api.kittypaw.app/health
-curl https://api.kittypaw.app/.well-known/jwks.json   # Plan 20 PR-A
+curl https://portal.kittypaw.app/discovery
+curl https://portal.kittypaw.app/.well-known/jwks.json
+curl https://api.kittypaw.app/.well-known/jwks.json   # 404 after portal split
 ```
 
 ## RS256 서명 키 (Plan 20 PR-A)
 
-JWT는 RS256으로 서명되며, 공개 키는 `/.well-known/jwks.json`으로 노출됩니다.
+JWT는 RS256으로 서명되며, 공개 키는 portal의 `/.well-known/jwks.json`으로 노출됩니다.
 
 ```bash
 # 1) RSA 2048-bit private key 생성 (dev 또는 일회성)

@@ -10,10 +10,10 @@
 #
 # Usage:
 #   USER_JWT=<token> bash deploy/e2e_devices.sh
-#   USER_JWT=<token> BASE_URL=http://localhost:9712 bash deploy/e2e_devices.sh
+#   USER_JWT=<token> PORTAL_BASE_URL=http://localhost:9712 bash deploy/e2e_devices.sh
 #
 # Obtaining USER_JWT (one-time, manual):
-#   1. open https://api.kittypaw.app/auth/google in a browser
+#   1. open https://portal.kittypaw.app/auth/google in a browser
 #   2. complete Google OAuth — final redirect lands on a localhost URL
 #      with access_token=... in the query string
 #   3. copy that access_token value into USER_JWT
@@ -23,7 +23,7 @@
 
 set -uo pipefail
 
-BASE="${BASE_URL:-https://api.kittypaw.app}"
+BASE="${PORTAL_BASE_URL:-${BASE_URL:-https://portal.kittypaw.app}}"
 USER_JWT="${USER_JWT:-}"
 
 if [[ -z "$USER_JWT" ]]; then
@@ -147,7 +147,7 @@ ISS=$(echo "$PAYLOAD" | jq -r '.iss')
 [[ "$AUD" == "https://chat.kittypaw.app" ]]        && pass "aud = chat"             || fail "aud = $AUD"
 [[ "$SCOPE" == "daemon:connect" ]]                 && pass "scope = daemon:connect" || fail "scope = $SCOPE"
 [[ "$V" == "2" ]]                                  && pass "v = 2"                  || fail "v = $V"
-[[ "$ISS" == "https://api.kittypaw.app/auth" ]]    && pass "iss correct"            || fail "iss = $ISS"
+[[ "$ISS" == "https://portal.kittypaw.app/auth" ]] && pass "iss correct"            || fail "iss = $ISS"
 
 # --- Step 4: pair response Cache-Control ------------------------------------
 echo

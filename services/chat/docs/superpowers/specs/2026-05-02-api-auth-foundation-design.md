@@ -53,7 +53,7 @@ to the package-specific principals used by the relay:
 
 Claims include the fields that `api.kittypaw.app` will own:
 
-- `issuer`: must be `https://api.kittypaw.app/auth`.
+- `issuer`: must be `https://portal.kittypaw.app/auth`.
 - `audiences`: must include canonical `https://chat.kittypaw.app`. API server
   JWTs can use `["https://api.kittypaw.app", "https://chat.kittypaw.app"]`
   for multi-audience tokens.

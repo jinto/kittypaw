@@ -305,14 +305,14 @@ func TestAPITokenManager_SaveAuthBaseURL_EmptyDeletes(t *testing.T) {
 	apiURL := "https://portal.kittypaw.app"
 	ns := NamespaceForURL(apiURL)
 
-	if err := mgr.SaveAuthBaseURL(apiURL, "https://api.kittypaw.app/auth"); err != nil {
+	if err := mgr.SaveAuthBaseURL(apiURL, "https://portal.kittypaw.app/auth"); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := mgr.LoadAuthBaseURL(apiURL)
-	if !ok || got != "https://api.kittypaw.app/auth" {
+	if !ok || got != "https://portal.kittypaw.app/auth" {
 		t.Fatalf("LoadAuthBaseURL = (%q, %v), want auth base URL", got, ok)
 	}
-	if stored, ok := secrets.Get(ns, "auth_base_url"); !ok || stored != "https://api.kittypaw.app/auth" {
+	if stored, ok := secrets.Get(ns, "auth_base_url"); !ok || stored != "https://portal.kittypaw.app/auth" {
 		t.Fatalf("stored auth base URL = (%q, %v), want auth_base_url", stored, ok)
 	}
 

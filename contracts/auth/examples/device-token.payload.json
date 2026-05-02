@@ -1,5 +1,5 @@
 {
-  "iss": "https://api.kittypaw.app/auth",
+  "iss": "https://portal.kittypaw.app/auth",
   "sub": "device:dev_123",
   "aud": ["https://chat.kittypaw.app"],
   "scope": ["daemon:connect"],

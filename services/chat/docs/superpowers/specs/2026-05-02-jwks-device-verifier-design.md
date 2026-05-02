@@ -11,7 +11,7 @@ KittyChat accepts daemon device credentials issued by kittyapi as RS256 JWTs ver
 Device JWTs use:
 
 - `alg=RS256` with a `kid` header.
-- `iss=https://api.kittypaw.app/auth`
+- `iss=https://portal.kittypaw.app/auth`
 - `aud=https://chat.kittypaw.app`
 - `scope=["daemon:connect"]`
 - `v=2`

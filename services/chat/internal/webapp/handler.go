@@ -30,7 +30,7 @@ const (
 	defaultTokenType   = "Bearer"
 	defaultRedirectURI = "/auth/callback"
 	defaultPublicBase  = "https://chat.kittypaw.app"
-	defaultAPIAuthBase = "https://api.kittypaw.app/auth"
+	defaultAPIAuthBase = "https://portal.kittypaw.app/auth"
 )
 
 type Config struct {

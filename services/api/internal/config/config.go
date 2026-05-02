@@ -102,6 +102,9 @@ func Load() (*Config, error) {
 	} else {
 		c.AllowedOrigins = []string{c.BaseURL}
 	}
+	if c.APIBaseURL == "" {
+		c.APIBaseURL = c.BaseURL
+	}
 
 	if allow := os.Getenv("WEB_REDIRECT_URI_ALLOWLIST"); allow != "" {
 		// Trim whitespace per entry — operators sometimes wrap CSVs across
@@ -133,6 +136,7 @@ func LoadForTest() *Config {
 	return &Config{
 		Port:           env("PORT", "8080"),
 		BaseURL:        env("BASE_URL", "http://localhost:8080"),
+		APIBaseURL:     env("BASE_URL", "http://localhost:8080"),
 		AllowedOrigins: []string{"http://localhost:8080"},
 		JWTPrivateKey:  priv,
 		JWTKID:         kid,

@@ -2,25 +2,21 @@
 
 [한국어](README.ko.md)
 
-Backend API server for [KittyPaw](https://github.com/kittypaw-app). Provides public data proxying with caching and OAuth authentication for zero-config data access from KittyPaw skills.
+Backend API server for [KittyPaw](https://github.com/kittypaw-app). Provides public data proxying with caching. During the portal split transition, the same binary also serves identity routes on `portal.kittypaw.app`.
 
 ```
-KittyPaw Client ──► KittyAPI ──► Public Data APIs (AirKorea, etc.)
-                        │
-                        ├── OAuth (Google, GitHub)
-                        ├── JWT + Refresh Token Rotation
-                        ├── Rate Limiting (anon 5/min, auth 60/min)
-                        └── /discovery (service URLs for SDK)
+KittyPaw Client ──► portal.kittypaw.app ──► discovery, OAuth, JWKS
+             └──► api.kittypaw.app ───────► /v1 public data APIs
 ```
 
 ## Features
 
 - **Data proxy** — cached access to public APIs (AirKorea air quality: realtime, forecast, weekly, unhealthy stations)
-- **OAuth authentication** — Google + GitHub with PKCE, no email/password
+- **Portal identity transition** — OAuth, token issuance, JWKS, and discovery are exposed on `portal.kittypaw.app` until `services/portal` is extracted.
 - **CLI login** — `kittypaw login` via HTTP callback or one-time code paste
-- **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection. Issued tokens carry `aud=["kittyapi","kittychat"]`, `scope`, and `v=1` claims — see [`docs/specs/kittychat-credential-foundation.md`](docs/specs/kittychat-credential-foundation.md).
+- **JWT + refresh tokens** — 15min access, 7-day refresh with rotation and reuse detection. Issuer is `https://portal.kittypaw.app/auth`; resource audiences remain URL-form API/chat origins.
 - **Rate limiting** — per-IP anonymous (5/min) + per-user authenticated (60/min), daily 10K cap
-- **Service discovery** — `GET /discovery` returns Kakao relay, API, and skills registry URLs
+- **Service discovery** — `GET /discovery` on the portal host returns auth, chat, Kakao, API, and skills registry URLs
 - **Stale-while-revalidate** — serves stale cached data when upstream is down
 
 ## Quick Start
@@ -30,7 +26,7 @@ KittyPaw Client ──► KittyAPI ──► Public Data APIs (AirKorea, etc.)
 
 # Configure
 cp .env.example .env
-# Edit .env — set DATABASE_URL, JWT_SECRET, OAuth credentials
+# Edit .env — set DATABASE_URL, JWT_PRIVATE_KEY_PEM_B64, OAuth credentials
 
 # Database
 createdb kittypaw_api
@@ -47,7 +43,7 @@ make run
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check |
-| `GET` | `/discovery` | Service URLs (Kakao relay, API base, skills registry) |
+| `GET` | `/discovery` | Portal-host only. Service URLs (auth, chat relay, Kakao relay, API base, skills registry) |
 
 ### Auth
 
@@ -99,9 +95,9 @@ All configuration is via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `8080` | Server port |
-| `BASE_URL` | `http://localhost:8080` | Public base URL |
+| `BASE_URL` | `http://localhost:8080` | Portal/auth public base URL |
 | `DATABASE_URL` | *(required)* | PostgreSQL connection string |
-| `JWT_SECRET` | *(required, 32+ chars)* | JWT signing secret |
+| `JWT_PRIVATE_KEY_PEM_B64` | *(required)* | Base64 PEM RSA private key for RS256 JWT signing |
 | `GOOGLE_CLIENT_ID` | | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | | Google OAuth client secret |
 | `GITHUB_CLIENT_ID` | | GitHub OAuth client ID |
@@ -110,7 +106,7 @@ All configuration is via environment variables:
 | `AIRKOREA_API_KEY` | | AirKorea public data API key |
 | `KAKAO_RELAY_URL` | | KakaoTalk relay server URL |
 | `CHAT_RELAY_URL` | | Chat remote relay control plane URL |
-| `API_BASE_URL` | | API base URL (for /discovery) |
+| `API_BASE_URL` | `BASE_URL` | API resource base URL (for /discovery) |
 | `SKILLS_REGISTRY_URL` | `https://github.com/kittypaw-app/skills` | Skills package registry |
 
 ## Deployment

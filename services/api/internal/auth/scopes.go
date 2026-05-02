@@ -18,10 +18,10 @@ const (
 	AudienceAPI  = "https://api.kittypaw.app"
 	AudienceChat = "https://chat.kittypaw.app"
 
-	// Issuer identifies the auth authority. Path-based (api.kittypaw.app/auth)
-	// matches today's deployment where /auth/* is hosted under the api host.
-	// Future host split (auth.kittypaw.app) requires dual-accept migration.
-	Issuer = "https://api.kittypaw.app/auth"
+	// Issuer identifies the auth authority. Public identity contracts are
+	// canonical under portal.kittypaw.app; api.kittypaw.app remains the
+	// resource-server audience.
+	Issuer = "https://portal.kittypaw.app/auth"
 
 	ClaimsVersion = 2
 )

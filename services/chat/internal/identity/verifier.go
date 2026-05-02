@@ -13,7 +13,7 @@ import (
 const (
 	AudienceKittyAPI  = "https://api.kittypaw.app"
 	AudienceKittyChat = "https://chat.kittypaw.app"
-	IssuerKittyAPI    = "https://api.kittypaw.app/auth"
+	IssuerKittyAPI    = "https://portal.kittypaw.app/auth"
 
 	CredentialVersion1 = 1
 	CredentialVersion2 = 2
