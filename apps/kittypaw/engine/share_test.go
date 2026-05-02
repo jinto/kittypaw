@@ -112,7 +112,7 @@ func TestShareRead_AllowlistMiss(t *testing.T) {
 // AccountRouter's strict routing vanishes if share reads silently
 // rewrite unknown targets.
 //
-// The externally-visible error string is the same as a non-family target
+// The externally-visible error string is the same as a non-shared target
 // (defense against account ID enumeration via error oracle); the audit log
 // carries reason=unknown_account for forensics.
 func TestShareRead_UnknownAccount(t *testing.T) {
@@ -237,7 +237,7 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	// wording changes don't force test churn, but the key property —
 	// rejected without a "content" field — is pinned.
 	if _, ok := resp["content"]; ok {
-		t.Errorf("must not return content for non-family target: %q", resp["content"])
+		t.Errorf("must not return content for non-shared target: %q", resp["content"])
 	}
 	if resp["error"] == "" {
 		t.Errorf("expected an error field, got %+v", resp)

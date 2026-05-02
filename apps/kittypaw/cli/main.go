@@ -134,7 +134,6 @@ func newRootCmd() *cobra.Command {
 		newLoginCmd(),
 		newChatRelayCmd(),
 		newAccountCmd(),
-		newFamilyCmd(),
 	)
 
 	return cmd
@@ -442,7 +441,7 @@ func validateSetupConfig(cfgDir, accountID string, cfg *core.Config) error {
 		return fmt.Errorf("channel validation: %w", err)
 	}
 	if err := core.ValidateFamilyAccounts(finalAccounts); err != nil {
-		return fmt.Errorf("family validation: %w", err)
+		return fmt.Errorf("shared account validation: %w", err)
 	}
 	return nil
 }

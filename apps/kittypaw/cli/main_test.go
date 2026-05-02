@@ -129,6 +129,16 @@ func TestRootCommandGroupsServerLifecycleCommands(t *testing.T) {
 	}
 }
 
+func TestRootCommandDoesNotExposeFamilyCommand(t *testing.T) {
+	root := newRootCmd()
+
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "family" {
+			t.Fatal("root command must not expose family; shared accounts are managed through account commands")
+		}
+	}
+}
+
 func TestRootCommandPlacesRunUnderSkill(t *testing.T) {
 	root := newRootCmd()
 

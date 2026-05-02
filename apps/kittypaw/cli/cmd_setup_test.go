@@ -616,35 +616,35 @@ func TestSetupRejectsDuplicateTelegramBeforeWriting(t *testing.T) {
 	mustNotExist(t, filepath.Join(root, "auth.json"))
 }
 
-func TestSetupRejectsFamilyAccountWithChannelBeforeWriting(t *testing.T) {
+func TestSetupRejectsSharedAccountWithChannelBeforeWriting(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
 	t.Setenv("KITTYPAW_ACCOUNT", "")
-	cfgPath := filepath.Join(root, "accounts", "family", "config.toml")
+	cfgPath := filepath.Join(root, "accounts", "shared", "config.toml")
 	mustWriteTestConfigWith(t, cfgPath, func(cfg *core.Config) {
-		cfg.IsFamily = true
+		cfg.IsShared = true
 	})
 	token := "123456:ABCDefghijklmnopqrstuvwxyz012345"
 
 	cmd := newSetupCmd()
 	cmd.SetIn(strings.NewReader("secret-password\n"))
-	flags := setupTestFlags("family")
+	flags := setupTestFlags("shared")
 	flags.passwordStdin = true
 	flags.telegramToken = token
 	flags.telegramChatID = "100"
 
 	err := runSetup(cmd, &flags)
-	if err == nil || !strings.Contains(err.Error(), "family validation") {
-		t.Fatalf("runSetup error = %v, want family validation", err)
+	if err == nil || !strings.Contains(err.Error(), "shared account validation") {
+		t.Fatalf("runSetup error = %v, want shared account validation", err)
 	}
 	mustNotExist(t, filepath.Join(root, "auth.json"))
 
 	cfg, err := core.LoadConfig(cfgPath)
 	if err != nil {
-		t.Fatalf("load family config: %v", err)
+		t.Fatalf("load shared config: %v", err)
 	}
 	if len(cfg.Channels) != 0 {
-		t.Fatalf("family config channels = %v, want unchanged empty", cfg.Channels)
+		t.Fatalf("shared config channels = %v, want unchanged empty", cfg.Channels)
 	}
 }
 

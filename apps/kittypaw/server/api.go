@@ -690,8 +690,8 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	if err := core.ValidateFamilyAccounts(accounts); err != nil {
-		slog.Error("reload rejected", "reason", "family_with_channels", "error", err)
-		writeError(w, http.StatusConflict, "family validation: "+err.Error())
+		slog.Error("reload rejected", "reason", "shared_account_with_channels", "error", err)
+		writeError(w, http.StatusConflict, "shared account validation: "+err.Error())
 		return
 	}
 

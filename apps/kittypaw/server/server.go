@@ -501,9 +501,9 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 //   - ValidateAccountChannels: a single Telegram bot token / Kakao relay
 //     URL cannot be claimed by two accounts (C3 — prevents silent update
 //     races where one account's bot steals another's messages).
-//   - ValidateFamilyAccounts: the family account must not declare channels
-//     (C10 — family is a coordinator, not a channel owner; a misconfigured
-//     [telegram] on family would race the real personal bot for updates).
+//   - ValidateFamilyAccounts: shared accounts must not declare channels
+//     (C10 — shared is a coordinator, not a channel owner; a misconfigured
+//     [telegram] on shared would race the real personal bot for updates).
 func (s *Server) StartChannels(ctx context.Context) error {
 	accountChannels := make(map[string][]core.ChannelConfig, len(s.accountList))
 	for _, t := range s.accountList {
@@ -517,7 +517,7 @@ func (s *Server) StartChannels(ctx context.Context) error {
 		return fmt.Errorf("channel config validation: %w", err)
 	}
 	if err := core.ValidateFamilyAccounts(s.accountList); err != nil {
-		return fmt.Errorf("family account validation: %w", err)
+		return fmt.Errorf("shared account validation: %w", err)
 	}
 
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)

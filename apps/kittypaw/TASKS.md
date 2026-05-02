@@ -148,8 +148,7 @@ KittyPaw 의 weather-now skill 이 KR 좌표에서 KittyAPI KMA primary 호출�
 - **Plan 27 Follow-up** — Indexer v2 hardening (bundle 1+2): dir-remove FTS cascade + watcher partial-add visibility. `e575f53`
 - **Plan 27** — Workspace Indexer v2: fsnotify live filesystem watching + FTS5 incremental update. `8c45a4f`
 - **Setup → Chat Auto-Entry** (Plan 26) — `kittypaw setup` 완료 시 TTY 에서 chat REPL 자동 진입 + 서버 hot-reload. `814cc89` + `74acdaf`(/reload validation)
-- **Account Remove** — `kittypaw account remove`: LIFO 드레인 → family config scrub → `.trash/` 이동 + BotFather 경고. `4ee9c95`
-- **Family Init Wizard** — `kittypaw family init`: 인터랙티브 CLI, N명 일괄 온보딩, idempotent. `4007b41`
+- **Account Remove** — `kittypaw account remove`: LIFO 드레인 → shared account config scrub → `.trash/` 이동 + BotFather 경고. `4ee9c95`
 - **Multi-user Blockers** — MB1 account ID regex 완화, MB2/MB3 는 `account==user` 확정으로 revert. `e24cd9e` + `aedf04a`(revert)
 
 ### Plan 25 — Family Multi-Account (macOS 단일 서버, 7 personal + 1 family)

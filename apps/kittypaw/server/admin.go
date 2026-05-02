@@ -73,7 +73,7 @@ func (s *Server) AddAccount(t *core.Account) error {
 		return fmt.Errorf("channel validation: %w", err)
 	}
 	if err := core.ValidateFamilyAccounts(append(append([]*core.Account(nil), s.accountList...), t)); err != nil {
-		return fmt.Errorf("family validation: %w", err)
+		return fmt.Errorf("shared account validation: %w", err)
 	}
 
 	td, err := OpenAccountDeps(t)

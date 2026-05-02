@@ -13,10 +13,10 @@ import (
 
 // needsAccountPrompt returns true when `account add` was invoked without enough
 // info to proceed unattended: no Telegram token source AND no LLM key (and the
-// account is not a family coordinator). In that state we'd otherwise reject
+// account is not a shared coordinator). In that state we'd otherwise reject
 // the command — the interactive prompt is a friendlier path.
 func needsAccountPrompt(f *accountAddFlags) bool {
-	if f.isFamily {
+	if f.isShared {
 		return false
 	}
 	hasTokenSource := f.telegramToken != "" || f.telegramTokenStdin || os.Getenv(accountEnvBotToken) != ""

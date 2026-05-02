@@ -50,7 +50,7 @@ func (s *Server) validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID stri
 		return fmt.Errorf("channel validation: %w", err)
 	}
 	if err := core.ValidateFamilyAccounts(accounts); err != nil {
-		return fmt.Errorf("family validation: %w", err)
+		return fmt.Errorf("shared account validation: %w", err)
 	}
 	return nil
 }

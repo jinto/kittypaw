@@ -28,7 +28,7 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 	}
 
 	if opts.IsFamily && opts.TelegramToken != "" {
-		return nil, fmt.Errorf("family account %q must not declare channels (telegram token rejected)", id)
+		return nil, fmt.Errorf("shared account %q must not declare channels (telegram token rejected)", id)
 	}
 
 	if err := os.MkdirAll(accountsDir, 0o755); err != nil {

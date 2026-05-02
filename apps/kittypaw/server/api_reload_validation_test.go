@@ -139,8 +139,8 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "family validation") {
-		t.Errorf("body = %q, want 'family validation' prefix", body)
+	if !strings.Contains(string(body), "shared account validation") {
+		t.Errorf("body = %q, want 'shared account validation' prefix", body)
 	}
 
 	if srv.config.LLM.APIKey != "old-key" {

@@ -85,7 +85,7 @@ func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
 
 // TestNeedsAccountPrompt covers the gating logic that decides when to launch
 // the interactive prompt. The contract: launch only when no token source AND
-// no LLM key are available, AND the account isn't a family coordinator.
+// no LLM key are available, AND the account isn't a shared coordinator.
 func TestNeedsAccountPrompt(t *testing.T) {
 	cases := []struct {
 		name string
@@ -97,7 +97,7 @@ func TestNeedsAccountPrompt(t *testing.T) {
 		{"token via stdin flag", &accountAddFlags{telegramTokenStdin: true}, false},
 		{"llm key only", &accountAddFlags{llmAPIKey: "sk-x"}, false},
 		{"local provider", &accountAddFlags{llmProvider: "local"}, false},
-		{"family — no prompt regardless", &accountAddFlags{isFamily: true}, false},
+		{"shared — no prompt regardless", &accountAddFlags{isShared: true}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

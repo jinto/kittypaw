@@ -82,6 +82,16 @@ func TestNewAccountAddCmd_RegistersPasswordStdinFlag(t *testing.T) {
 	}
 }
 
+func TestNewAccountAddCmd_UsesSharedAccountFlag(t *testing.T) {
+	cmd := newAccountAddCmd()
+	if f := cmd.Flags().Lookup("is-shared"); f == nil {
+		t.Fatal("--is-shared flag not registered on `kittypaw account add`")
+	}
+	if f := cmd.Flags().Lookup("is-family"); f != nil {
+		t.Fatal("--is-family must not be exposed; use --is-shared")
+	}
+}
+
 func TestAccountCredentialsIntroLocalizedWithAccountID(t *testing.T) {
 	t.Run("korean with account id", func(t *testing.T) {
 		t.Setenv("LC_ALL", "")
@@ -111,7 +121,7 @@ func TestAccountAddCreatesAuthUser(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	f := &accountAddFlags{
-		isFamily:      true,
+		isShared:      true,
 		passwordStdin: true,
 		noActivate:    true,
 	}
@@ -172,7 +182,7 @@ func TestAccountAddAuthRollback(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	f := &accountAddFlags{
-		isFamily:      true,
+		isShared:      true,
 		passwordStdin: true,
 		noActivate:    true,
 	}
@@ -218,23 +228,23 @@ func TestRunAccountAdd_HappyPath(t *testing.T) {
 	}
 }
 
-func TestRunAccountAdd_Family(t *testing.T) {
+func TestRunAccountAdd_Shared(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	var stdout, stderr bytes.Buffer
-	f := &accountAddFlags{isFamily: true, passwordStdin: true}
-	if err := runAccountAdd("family", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
-		t.Fatalf("runAccountAdd family: %v", err)
+	f := &accountAddFlags{isShared: true, passwordStdin: true}
+	if err := runAccountAdd("shared", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountAdd shared: %v", err)
 	}
 
-	accountDir := filepath.Join(home, ".kittypaw", "accounts", "family")
+	accountDir := filepath.Join(home, ".kittypaw", "accounts", "shared")
 	if _, err := os.Stat(filepath.Join(accountDir, "config.toml")); err != nil {
-		t.Errorf("family config.toml missing: %v", err)
+		t.Errorf("shared config.toml missing: %v", err)
 	}
 }
 
-// Most common mistake: omitting both --is-family and any token source.
+// Most common mistake: omitting both --is-shared and any token source.
 func TestRunAccountAdd_NoTokenRejected(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -282,13 +292,13 @@ func setupRemoveFixture(t *testing.T, members map[string]bool) string {
 	t.Setenv("HOME", home)
 
 	accountsDir := filepath.Join(home, ".kittypaw", "accounts")
-	for name, isFamily := range members {
+	for name, isShared := range members {
 		dir := filepath.Join(accountsDir, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", name, err)
 		}
 		cfg := "[llm]\nprovider = \"anthropic\"\n"
-		if isFamily {
+		if isShared {
 			cfg = "is_shared = true\n" + cfg + "\n[share.alice]\nread = [\"pub/index.txt\"]\n[share.bob]\nread = [\"pub/index.txt\"]\n"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(cfg), 0o640); err != nil {
@@ -336,12 +346,12 @@ func TestRunAccountRemove_ServerDown_OfflinePath(t *testing.T) {
 	}
 }
 
-// AC-RM1(d): family/config.toml loses [share.alice], [share.bob] untouched.
-func TestRunAccountRemove_FamilyConfigScrub(t *testing.T) {
+// AC-RM1(d): shared/config.toml loses [share.alice], [share.bob] untouched.
+func TestRunAccountRemove_SharedConfigScrub(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{
 		"alice":  false,
 		"bob":    false,
-		"family": true,
+		"shared": true,
 	})
 
 	var stdout, stderr bytes.Buffer
@@ -349,29 +359,29 @@ func TestRunAccountRemove_FamilyConfigScrub(t *testing.T) {
 		t.Fatalf("runAccountRemove: %v", err)
 	}
 
-	famCfg, err := core.LoadConfig(filepath.Join(home, ".kittypaw", "accounts", "family", "config.toml"))
+	famCfg, err := core.LoadConfig(filepath.Join(home, ".kittypaw", "accounts", "shared", "config.toml"))
 	if err != nil {
-		t.Fatalf("reload family config: %v", err)
+		t.Fatalf("reload shared config: %v", err)
 	}
 	if _, ok := famCfg.Share["alice"]; ok {
-		t.Error("[share.alice] still in family config after removal")
+		t.Error("[share.alice] still in shared config after removal")
 	}
 	if _, ok := famCfg.Share["bob"]; !ok {
-		t.Error("[share.bob] should be preserved in family config")
+		t.Error("[share.bob] should be preserved in shared config")
 	}
 }
 
-// AC-RM4: removing a personal account when no family exists is a no-op
-// (no family to scrub), not an error.
-func TestRunAccountRemove_NoFamily_NoOp(t *testing.T) {
+// AC-RM4: removing a personal account when no shared exists is a no-op
+// (no shared to scrub), not an error.
+func TestRunAccountRemove_NoShared_NoOp(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{"alice": false})
 	var stdout, stderr bytes.Buffer
 	if err := runAccountRemove("alice", &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountRemove: %v", err)
 	}
-	// Assertion: no panic, no family config magically appears.
-	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "family")); !os.IsNotExist(err) {
-		t.Errorf("family account should not exist, stat err = %v", err)
+	// Assertion: no panic, no shared config magically appears.
+	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "shared")); !os.IsNotExist(err) {
+		t.Errorf("shared account should not exist, stat err = %v", err)
 	}
 }
 
@@ -418,11 +428,11 @@ func TestRunAccountRemove_TrashCollision(t *testing.T) {
 
 // AC-RM7: removing the shared account itself surfaces an extra warning AND
 // skips the scrub step (no "upstream" shared account to clean).
-func TestRunAccountRemove_FamilySelf_ExtraWarning(t *testing.T) {
-	home := setupRemoveFixture(t, map[string]bool{"family": true, "alice": false})
+func TestRunAccountRemove_SharedSelf_ExtraWarning(t *testing.T) {
+	home := setupRemoveFixture(t, map[string]bool{"shared": true, "alice": false})
 	var stdout, stderr bytes.Buffer
-	if err := runAccountRemove("family", &stdout, &stderr); err != nil {
-		t.Fatalf("runAccountRemove(family): %v", err)
+	if err := runAccountRemove("shared", &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountRemove(shared): %v", err)
 	}
 
 	if !strings.Contains(stderr.String(), "shared account removed") {
@@ -437,19 +447,19 @@ func TestRunAccountRemove_FamilySelf_ExtraWarning(t *testing.T) {
 }
 
 // CLI-layer rejection gives a flag-oriented message, not a config-file one.
-func TestRunAccountAdd_FamilyWithTokenRejected(t *testing.T) {
+func TestRunAccountAdd_SharedWithTokenRejected(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
 	var stdout, stderr bytes.Buffer
 	f := &accountAddFlags{
-		isFamily:      true,
+		isShared:      true,
 		telegramToken: "12345:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",
 		adminChatID:   "111",
 	}
-	err := runAccountAdd("family", f, strings.NewReader(""), &stdout, &stderr)
+	err := runAccountAdd("shared", f, strings.NewReader(""), &stdout, &stderr)
 	if err == nil {
-		t.Fatal("expected rejection of family+token, got nil")
+		t.Fatal("expected rejection of shared+token, got nil")
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error should say mutually exclusive: %q", err.Error())

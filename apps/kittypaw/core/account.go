@@ -265,13 +265,13 @@ func FirstAllowedChatID(cfg *Config) string {
 }
 
 // ValidateFamilyAccounts fails fast when an account marked `is_shared=true`
-// declares channel configs. Family accounts are coordinators (scheduled
+// declares channel configs. Shared accounts are coordinators (scheduled
 // skills + fanout push); they never own a Telegram/Kakao account of their
-// own. A misconfigured `[telegram]` on family would race the real
+// own. A misconfigured `[telegram]` on a shared account would race the real
 // personal bot for updates — that race must never boot in the first place.
 //
 // Pair with ValidateAccountChannels at server startup; this covers the
-// family-specific rule that the token/URL collision check cannot see.
+// shared-account-specific rule that the token/URL collision check cannot see.
 func ValidateFamilyAccounts(accounts []*Account) error {
 	var offenders []string
 	for _, t := range accounts {
@@ -290,7 +290,7 @@ func ValidateFamilyAccounts(accounts []*Account) error {
 	if len(offenders) == 0 {
 		return nil
 	}
-	return fmt.Errorf("family account must not declare channels: %v", offenders)
+	return fmt.Errorf("shared account must not declare channels: %v", offenders)
 }
 
 // MigrateTenantsToAccounts renames a legacy ~/.kittypaw/tenants/ directory
