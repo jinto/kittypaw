@@ -97,6 +97,9 @@ func TestAPITokenManager_SaveAndLoad(t *testing.T) {
 	if got != validToken {
 		t.Errorf("LoadAccessToken = %q, want %q", got, validToken)
 	}
+	if got, ok := secrets.Get("kittypaw-api", "api_url"); !ok || got != apiURL {
+		t.Fatalf("default api_url = (%q, %v), want %q true", got, ok, apiURL)
+	}
 }
 
 func TestAPITokenManager_NotLoggedIn(t *testing.T) {

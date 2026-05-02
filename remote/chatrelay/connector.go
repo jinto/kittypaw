@@ -107,6 +107,9 @@ func (c *Connector) DialAndSendHello(ctx context.Context) (*websocket.Conn, erro
 	})
 	if err != nil {
 		if resp != nil {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			if resp.StatusCode == http.StatusUnauthorized {
 				return nil, fmt.Errorf("%w (%s): %v", ErrUnauthorized, resp.Status, err)
 			}
