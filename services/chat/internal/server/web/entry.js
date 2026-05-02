@@ -12,6 +12,13 @@
 
   const link = document.getElementById("googleLoginLink");
   if (link) {
-    link.href = loginURL.toString();
+    link.dataset.pendingHref = loginURL.toString();
+    link.addEventListener("click", () => {
+      const status = document.getElementById("entryStatus");
+      if (status) {
+        status.textContent = "API web login endpoint is not live yet. Use Manual QA or open /auth/callback with a token fragment for integration testing.";
+        status.classList.add("error");
+      }
+    });
   }
 })();

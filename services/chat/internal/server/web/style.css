@@ -108,6 +108,11 @@ h1 {
   background: var(--accent-dark);
 }
 
+.primary-action:disabled {
+  background: #9aa7b5;
+  cursor: not-allowed;
+}
+
 .secondary-action {
   background: #e8eef5;
   color: var(--ink);

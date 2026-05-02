@@ -55,6 +55,9 @@ func TestRouterServesHostedChatEntry(t *testing.T) {
 	if body := rr.Body.String(); !strings.Contains(body, `/assets/entry.js`) {
 		t.Fatalf("entry script missing from body:\n%s", body)
 	}
+	if body := rr.Body.String(); !strings.Contains(body, `disabled>Continue with Google`) {
+		t.Fatalf("pending login button should be disabled until API web login is live:\n%s", body)
+	}
 }
 
 func TestRouterServesHostedChatApp(t *testing.T) {
