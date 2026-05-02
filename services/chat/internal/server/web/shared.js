@@ -1,18 +1,4 @@
 (function () {
-  const authStorageKey = "kittychat-auth-v1";
-
-  function parseTokenParams(searchOrHash) {
-    const raw = (searchOrHash || "").replace(/^[?#]/, "");
-    const params = new URLSearchParams(raw);
-    const expiresIn = Number.parseInt(params.get("expires_in") || "0", 10);
-    return {
-      accessToken: params.get("access_token") || "",
-      refreshToken: params.get("refresh_token") || "",
-      tokenType: params.get("token_type") || "Bearer",
-      expiresIn: Number.isFinite(expiresIn) ? expiresIn : 0,
-    };
-  }
-
   function errorStatus(resp) {
     const label = resp.statusText ? ` ${resp.statusText}` : "";
     return `HTTP ${resp.status}${label}`;
@@ -69,43 +55,9 @@
     return { deviceID: route.device_id || "", accountID };
   }
 
-  function saveAuth(storage, tokenPayload, now = Date.now()) {
-    const expiresAt = tokenPayload.expiresIn > 0 ? now + tokenPayload.expiresIn * 1000 : 0;
-    storage.setItem(authStorageKey, JSON.stringify({
-      accessToken: tokenPayload.accessToken,
-      refreshToken: tokenPayload.refreshToken,
-      tokenType: tokenPayload.tokenType || "Bearer",
-      expiresAt,
-    }));
-  }
-
-  function loadAuth(storage, now = Date.now()) {
-    try {
-      const auth = JSON.parse(storage.getItem(authStorageKey) || "{}");
-      if (!auth.accessToken) {
-        return null;
-      }
-      if (auth.expiresAt && auth.expiresAt <= now + 30000) {
-        return null;
-      }
-      return auth;
-    } catch {
-      return null;
-    }
-  }
-
-  function clearAuth(storage) {
-    storage.removeItem(authStorageKey);
-  }
-
   const api = {
-    authStorageKey,
-    parseTokenParams,
     formatHTTPError,
     selectFirstAvailableRoute,
-    saveAuth,
-    loadAuth,
-    clearAuth,
   };
 
   if (typeof window !== "undefined") {

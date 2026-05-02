@@ -11,30 +11,13 @@ function loadHelpers() {
   return context.KittyChatWeb;
 }
 
-function memoryStorage() {
-  const values = new Map();
-  return {
-    getItem(key) {
-      return values.has(key) ? values.get(key) : null;
-    },
-    setItem(key, value) {
-      values.set(key, value);
-    },
-    removeItem(key) {
-      values.delete(key);
-    },
-  };
-}
-
-test("parseTokenParams reads callback fragment tokens", () => {
+test("shared helpers do not expose browser token storage APIs", () => {
   const helpers = loadHelpers();
 
-  const tokens = helpers.parseTokenParams("#access_token=a&refresh_token=r&token_type=Bearer&expires_in=900");
-
-  assert.equal(tokens.accessToken, "a");
-  assert.equal(tokens.refreshToken, "r");
-  assert.equal(tokens.tokenType, "Bearer");
-  assert.equal(tokens.expiresIn, 900);
+  assert.equal(helpers.parseTokenParams, undefined);
+  assert.equal(helpers.saveAuth, undefined);
+  assert.equal(helpers.loadAuth, undefined);
+  assert.equal(helpers.clearAuth, undefined);
 });
 
 test("formatHTTPError combines status with JSON error message", () => {
@@ -70,17 +53,4 @@ test("selectFirstAvailableRoute replaces stale device and account", () => {
   );
 
   assert.equal(JSON.stringify(selected), JSON.stringify({ deviceID: "dev", accountID: "jinto" }));
-});
-
-test("loadAuth rejects expired tokens", () => {
-  const helpers = loadHelpers();
-  const storage = memoryStorage();
-  helpers.saveAuth(storage, {
-    accessToken: "token",
-    refreshToken: "refresh",
-    tokenType: "Bearer",
-    expiresIn: 10,
-  }, 1000);
-
-  assert.equal(helpers.loadAuth(storage, 2000), null);
 });

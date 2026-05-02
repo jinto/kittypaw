@@ -45,6 +45,33 @@ func TestLoadUsesEnvAndDefaults(t *testing.T) {
 	if cfg.UserID != "user_1" || cfg.DeviceID != "dev_1" || cfg.LocalAccountID != "alice" {
 		t.Fatalf("principal not loaded: %+v", cfg)
 	}
+	if cfg.PublicBaseURL != "https://chat.kittypaw.app" {
+		t.Fatalf("PublicBaseURL = %q, want prod chat URL", cfg.PublicBaseURL)
+	}
+	if cfg.APIAuthBaseURL != "https://api.kittypaw.app/auth" {
+		t.Fatalf("APIAuthBaseURL = %q, want prod API auth URL", cfg.APIAuthBaseURL)
+	}
+}
+
+func TestLoadUsesHostedWebAuthEnv(t *testing.T) {
+	t.Setenv("KITTYCHAT_API_TOKEN", "")
+	t.Setenv("KITTYCHAT_DEVICE_TOKEN", "")
+	t.Setenv("KITTYCHAT_JWT_SECRET", "test-jwt-secret-with-at-least-32-bytes")
+	t.Setenv("JWT_SECRET", "")
+	t.Setenv("KITTYCHAT_JWKS_URL", "")
+	t.Setenv("KITTYCHAT_PUBLIC_BASE_URL", "http://localhost:8080")
+	t.Setenv("KITTYCHAT_API_AUTH_BASE_URL", "http://localhost:9712/auth")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.PublicBaseURL != "http://localhost:8080" {
+		t.Fatalf("PublicBaseURL = %q", cfg.PublicBaseURL)
+	}
+	if cfg.APIAuthBaseURL != "http://localhost:9712/auth" {
+		t.Fatalf("APIAuthBaseURL = %q", cfg.APIAuthBaseURL)
+	}
 }
 
 func TestLoadPrefersExplicitBindAddrOverPort(t *testing.T) {

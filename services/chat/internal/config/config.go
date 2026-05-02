@@ -14,6 +14,8 @@ type Config struct {
 	UserID         string
 	DeviceID       string
 	LocalAccountID string
+	PublicBaseURL  string
+	APIAuthBaseURL string
 	Version        string
 }
 
@@ -27,6 +29,8 @@ func Load() (Config, error) {
 		UserID:         os.Getenv("KITTYCHAT_USER_ID"),
 		DeviceID:       os.Getenv("KITTYCHAT_DEVICE_ID"),
 		LocalAccountID: os.Getenv("KITTYCHAT_LOCAL_ACCOUNT_ID"),
+		PublicBaseURL:  env("KITTYCHAT_PUBLIC_BASE_URL", "https://chat.kittypaw.app"),
+		APIAuthBaseURL: env("KITTYCHAT_API_AUTH_BASE_URL", "https://api.kittypaw.app/auth"),
 		Version:        env("KITTYCHAT_VERSION", "dev"),
 	}
 

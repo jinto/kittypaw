@@ -36,6 +36,46 @@ func TestNewServerBuildsRunnableRouter(t *testing.T) {
 	}
 }
 
+func TestNewServerMountsHostedWebLogin(t *testing.T) {
+	cfg := testConfig()
+	router, err := newRouter(cfg)
+	if err != nil {
+		t.Fatalf("newRouter() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/login/google", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rr.Code, rr.Body.String())
+	}
+	location := rr.Header().Get("Location")
+	if !strings.HasPrefix(location, "http://api.test/auth/web/google?") {
+		t.Fatalf("Location = %q, want API web OAuth redirect", location)
+	}
+	if !strings.Contains(location, "redirect_uri=http%3A%2F%2Fchat.test%2Fauth%2Fcallback") {
+		t.Fatalf("Location missing chat callback: %q", location)
+	}
+}
+
+func TestNewServerUsesBFFSessionForHostedRoutes(t *testing.T) {
+	cfg := testConfig()
+	router, err := newRouter(cfg)
+	if err != nil {
+		t.Fatalf("newRouter() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/app/api/routes", nil)
+	req.AddCookie(&http.Cookie{Name: "kittychat_session", Value: "missing"})
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for missing server-side session", rr.Code)
+	}
+}
+
 func TestNewServerUsesSeededCredentialVerifier(t *testing.T) {
 	router, err := newRouter(testConfig())
 	if err != nil {
@@ -275,6 +315,8 @@ func testConfig() config.Config {
 		UserID:         "user_1",
 		DeviceID:       "dev_1",
 		LocalAccountID: "alice",
+		PublicBaseURL:  "http://chat.test",
+		APIAuthBaseURL: "http://api.test/auth",
 		Version:        "test",
 	}
 }

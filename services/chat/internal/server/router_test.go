@@ -58,8 +58,11 @@ func TestRouterServesHostedChatEntry(t *testing.T) {
 	if body := rr.Body.String(); !strings.Contains(body, `/assets/entry.js`) {
 		t.Fatalf("entry script missing from body:\n%s", body)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, `disabled>Continue with Google`) {
-		t.Fatalf("pending login button should be disabled until API web login is live:\n%s", body)
+	if body := rr.Body.String(); !strings.Contains(body, `href="/auth/login/google"`) {
+		t.Fatalf("login link should target chat BFF login route:\n%s", body)
+	}
+	if body := rr.Body.String(); strings.Contains(body, `disabled`) {
+		t.Fatalf("login link should be enabled now that PKCE BFF is live:\n%s", body)
 	}
 }
 
@@ -84,7 +87,7 @@ func TestRouterServesHostedChatApp(t *testing.T) {
 	}
 }
 
-func TestRouterServesHostedAuthCallback(t *testing.T) {
+func TestRouterDoesNotServeStaticAuthCallbackWithoutWebHandler(t *testing.T) {
 	router := NewRouter(Config{
 		Version:       "dev",
 		OpenAIHandler: openai.NewHandler(nilAuth{}, nilBroker{}),
@@ -94,14 +97,8 @@ func TestRouterServesHostedAuthCallback(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rr.Code)
-	}
-	if body := rr.Body.String(); !strings.Contains(body, `id="auth-callback"`) {
-		t.Fatalf("auth callback marker missing from body:\n%s", body)
-	}
-	if body := rr.Body.String(); !strings.Contains(body, `/assets/callback.js`) {
-		t.Fatalf("callback script missing from body:\n%s", body)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
 	}
 }
 
@@ -124,7 +121,7 @@ func TestRouterServesHostedChatAssets(t *testing.T) {
 	if cc := rr.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("cache-control = %q, want no-store", cc)
 	}
-	if body := rr.Body.String(); !strings.Contains(body, "parseTokenParams") {
+	if body := rr.Body.String(); !strings.Contains(body, "formatHTTPError") {
 		t.Fatalf("hosted shared helper missing from body:\n%s", body)
 	}
 }

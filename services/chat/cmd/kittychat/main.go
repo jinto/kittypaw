@@ -11,6 +11,7 @@ import (
 	"github.com/kittypaw-app/kittychat/internal/identity"
 	"github.com/kittypaw-app/kittychat/internal/openai"
 	"github.com/kittypaw-app/kittychat/internal/server"
+	"github.com/kittypaw-app/kittychat/internal/webapp"
 )
 
 func main() {
@@ -35,15 +36,26 @@ func newRouter(cfg config.Config) (http.Handler, error) {
 		return nil, err
 	}
 	b := broker.New(broker.Config{})
+	openAIHandler := openai.NewHandler(identity.APIAuthenticator{
+		Verifier: verifier,
+	}, b)
+	hostedWebHandler, err := webapp.New(webapp.Config{
+		PublicBaseURL:  cfg.PublicBaseURL,
+		APIAuthBaseURL: cfg.APIAuthBaseURL,
+		Verifier:       verifier,
+		OpenAIHandler:  openAIHandler.Routes(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("web app: %w", err)
+	}
 
 	return server.NewRouter(server.Config{
-		Version: cfg.Version,
+		Version:    cfg.Version,
+		WebHandler: hostedWebHandler,
 		DaemonHandler: daemonws.NewHandler(identity.DeviceAuthenticator{
 			Verifier: verifier,
 		}, b),
-		OpenAIHandler: openai.NewHandler(identity.APIAuthenticator{
-			Verifier: verifier,
-		}, b),
+		OpenAIHandler: openAIHandler,
 	}), nil
 }
 

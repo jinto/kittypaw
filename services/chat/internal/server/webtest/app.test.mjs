@@ -38,14 +38,7 @@ async function loadAppWithFetch(fetchImpl) {
   const app = fs.readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
   const elements = new Map();
   const replacements = [];
-  const storage = memoryStorage({
-    "kittychat-auth-v1": JSON.stringify({
-      accessToken: "expired-token",
-      refreshToken: "",
-      tokenType: "Bearer",
-      expiresAt: Date.now() + 900000,
-    }),
-  });
+  const storage = memoryStorage();
 
   const context = {
     console,
@@ -83,7 +76,27 @@ async function loadAppWithFetch(fetchImpl) {
   return { replacements, storage };
 }
 
-test("app redirects to entry when API token is rejected", async () => {
+test("app uses BFF routes without browser bearer token", async () => {
+  const paths = [];
+  const authHeaders = [];
+  const { replacements, storage } = await loadAppWithFetch(async (path, options = {}) => {
+    paths.push(path);
+    authHeaders.push(options.headers && options.headers.Authorization);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => "{\"object\":\"list\",\"data\":[]}",
+    };
+  });
+
+  assert.deepEqual(paths, ["/app/api/routes"]);
+  assert.deepEqual(authHeaders, [undefined]);
+  assert.equal(storage.getItem("kittychat-auth-v1"), null);
+  assert.deepEqual(replacements, []);
+});
+
+test("app redirects to entry when BFF session is rejected", async () => {
   const { replacements, storage } = await loadAppWithFetch(async () => ({
     ok: false,
     status: 401,

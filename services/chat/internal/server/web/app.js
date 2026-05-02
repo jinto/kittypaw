@@ -1,11 +1,6 @@
 (function () {
   const web = window.KittyChatWeb;
   const appStorageKey = "kittychat-app-state-v1";
-  const auth = web.loadAuth(window.localStorage);
-  if (!auth) {
-    window.location.replace("/");
-    return;
-  }
 
   const state = {
     routes: [],
@@ -60,7 +55,6 @@
       ...options,
       headers: {
         Accept: "application/json",
-        Authorization: `${auth.tokenType || "Bearer"} ${auth.accessToken}`,
         ...(options.headers || {}),
       },
     });
@@ -75,7 +69,6 @@
     }
     if (!resp.ok) {
       if (resp.status === 401) {
-        web.clearAuth(window.localStorage);
         window.location.replace("/");
       }
       throw new Error(web.formatHTTPError(resp, body, text));
@@ -132,12 +125,12 @@
     if (!state.deviceID || !state.accountID) {
       throw new Error("No daemon route is available.");
     }
-    return `/nodes/${encodeURIComponent(state.deviceID)}/accounts/${encodeURIComponent(state.accountID)}${suffix}`;
+    return `/app/api/nodes/${encodeURIComponent(state.deviceID)}/accounts/${encodeURIComponent(state.accountID)}${suffix}`;
   }
 
   async function loadRoutes() {
     setStatus("Loading routes");
-    const body = await requestJSON("/v1/routes");
+    const body = await requestJSON("/app/api/routes");
     state.routes = Array.isArray(body.data) ? body.data : [];
     const selected = web.selectFirstAvailableRoute(state, state.routes);
     state.deviceID = selected.deviceID;
@@ -190,8 +183,12 @@
     }
   }
 
-  function logout() {
-    web.clearAuth(window.localStorage);
+  async function logout() {
+    try {
+      await window.fetch("/auth/logout", { method: "POST" });
+    } catch {
+      // Local state is still cleared; the server cookie may already be gone.
+    }
     window.localStorage.removeItem(appStorageKey);
     window.location.replace("/");
   }

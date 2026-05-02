@@ -15,7 +15,10 @@ import (
 var staticAssets embed.FS
 
 type Config struct {
-	Version       string
+	Version    string
+	WebHandler interface {
+		MountRoutes(chi.Router)
+	}
 	DaemonHandler interface {
 		Routes() http.Handler
 	}
@@ -39,12 +42,14 @@ func NewRouter(cfg Config) http.Handler {
 			"version": version,
 		})
 	})
+	if cfg.WebHandler != nil {
+		cfg.WebHandler.MountRoutes(r)
+	}
 	r.Get("/", serveStaticFile("web/index.html"))
 	r.Get("/app", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
 	})
 	r.Get("/app/", serveStaticFile("web/app.html"))
-	r.Get("/auth/callback", serveStaticFile("web/auth-callback.html"))
 	r.Handle("/assets/*", http.StripPrefix("/assets/", webAssetHandler()))
 	r.Get("/manual", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/manual/", http.StatusMovedPermanently)
