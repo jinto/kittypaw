@@ -129,7 +129,6 @@ func newRootCmd() *cobra.Command {
 		newSkillCmd(),
 		newConfigCmd(),
 		newAgentCmd(),
-		newLogCmd(),
 		newPersonaCmd(),
 		newReflectionCmd(),
 		newMemoryCmd(),
@@ -770,6 +769,7 @@ func newSkillCmd() *cobra.Command {
 		newSkillDisableCmd(),
 		newSkillExplainCmd(),
 		newSkillRunCmd(),
+		newSkillLogCmd(),
 		newSkillConfigCmd(),
 		newSkillSuggestCmd(),
 	)
@@ -1569,16 +1569,15 @@ func runAgentList(_ *cobra.Command, _ []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// log
+// skill log
 // ---------------------------------------------------------------------------
 
-func newLogCmd() *cobra.Command {
+func newSkillLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "log",
-		Short: "Show execution log",
+		Short: "Show skill execution log",
 		RunE:  runLog,
 	}
-	addAccountFlag(cmd)
 	cmd.Flags().StringVar(&flagSkill, "skill", "", "filter by skill name")
 	cmd.Flags().IntVar(&flagLimit, "limit", 20, "number of entries to show")
 	return cmd

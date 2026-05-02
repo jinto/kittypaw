@@ -22,8 +22,10 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: apps/kittypaw/go.mod
-          cache-dependency-path: apps/kittypaw/go.sum
+          go-version-file: go.work
+          cache-dependency-path: |
+            go.work
+            apps/kittypaw/go.sum
 
       - name: Build archives
         env:
