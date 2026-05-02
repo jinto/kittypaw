@@ -21,12 +21,16 @@ type RefreshToken struct {
 // is data-dependent. Revisit if a 3rd device-only column appears.
 //
 // Revocation semantics:
-//   - RevokeIfActive(id): single-token rotation primitive
+//   - RevokeIfActive(id): single-token rotation primitive (user-side)
 //   - RevokeAllForUser(userID): user-logout — covers both user AND
 //     device refresh on this user (the existing WHERE user_id filter
 //     was always principal-agnostic; column add doesn't change that)
 //   - RevokeAllForDevice(deviceID): device delete or device-side reuse
 //     detection — preserves user refresh
+//   - RotateForDevice: atomic revoke-old + insert-new for device refresh.
+//     Plan 23 follow-up review fix — pre-fix two-step (RevokeIfActive +
+//     CreateForDevice as separate pool ops) had a self-lockout race
+//     window. Single transaction → all-or-nothing.
 type RefreshTokenStore interface {
 	Create(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error
 	CreateForDevice(ctx context.Context, userID, deviceID, tokenHash string, expiresAt time.Time) error
@@ -34,4 +38,5 @@ type RefreshTokenStore interface {
 	RevokeIfActive(ctx context.Context, id string) (bool, error)
 	RevokeAllForUser(ctx context.Context, userID string) error
 	RevokeAllForDevice(ctx context.Context, deviceID string) error
+	RotateForDevice(ctx context.Context, oldID, userID, deviceID, newHash string, newExpiresAt time.Time) error
 }

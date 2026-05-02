@@ -198,3 +198,110 @@ func TestRevokeAllForUser_RevokesBoth(t *testing.T) {
 		}
 	}
 }
+
+// RotateForDevice atomicity — Plan 23 follow-up review HIGH 0.85 fix.
+//
+// The pre-fix sequence (RevokeIfActive then CreateForDevice as separate
+// pool operations) had a window where the old refresh got revoked but
+// the new one failed to insert; the daemon's retry then presented the
+// already-revoked token, tripping reuse detection and self-locking the
+// device. RotateForDevice runs both operations in a single transaction
+// so partial failure rolls back — the daemon retry sees the original
+// active row and succeeds.
+
+// TestRotateForDevice_Happy: old row revoked, new row inserted, both
+// observable in a single FindByHash round-trip.
+func TestRotateForDevice_Happy(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "rot1")
+	dev := seedDevice(t, pool, user.ID, "D")
+	store := model.NewRefreshTokenStore(pool)
+	ctx := context.Background()
+
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "old-hash", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	old, _ := store.FindByHash(ctx, "old-hash")
+
+	if err := store.RotateForDevice(ctx, old.ID, user.ID, dev.ID, "new-hash", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("RotateForDevice: %v", err)
+	}
+
+	// Old should be revoked.
+	got, _ := store.FindByHash(ctx, "old-hash")
+	if got.RevokedAt == nil {
+		t.Fatal("old refresh must be revoked")
+	}
+	// New should be active.
+	newRT, err := store.FindByHash(ctx, "new-hash")
+	if err != nil {
+		t.Fatalf("FindByHash new-hash: %v", err)
+	}
+	if newRT.RevokedAt != nil {
+		t.Fatal("new refresh must be active")
+	}
+	if newRT.DeviceID == nil || *newRT.DeviceID != dev.ID {
+		t.Fatalf("new refresh device_id = %v, want %q", newRT.DeviceID, dev.ID)
+	}
+}
+
+// TestRotateForDevice_StaleDeviceID_OldRowPreserved: when the new
+// INSERT fails (FK violation here — non-existent deviceID for the new
+// row), the transaction rolls back. Old row must remain ACTIVE so the
+// daemon's retry succeeds. This is the actual fix — pre-fix code
+// would have left the old row revoked.
+func TestRotateForDevice_StaleDeviceID_OldRowPreserved(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "rot2")
+	dev := seedDevice(t, pool, user.ID, "D")
+	store := model.NewRefreshTokenStore(pool)
+	ctx := context.Background()
+
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "preserve-hash", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	old, _ := store.FindByHash(ctx, "preserve-hash")
+
+	// Trigger FK 23503 on the new row by passing a non-existent deviceID.
+	stale := "00000000-0000-0000-0000-000000000000"
+	err := store.RotateForDevice(ctx, old.ID, user.ID, stale, "new-hash", time.Now().Add(time.Hour))
+	if !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound (FK violation rollback)", err)
+	}
+
+	// Old row MUST remain active — transaction rolled back.
+	got, _ := store.FindByHash(ctx, "preserve-hash")
+	if got.RevokedAt != nil {
+		t.Fatal("old refresh must remain active after rollback (atomicity)")
+	}
+	// New row must NOT exist.
+	if _, err := store.FindByHash(ctx, "new-hash"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatalf("new refresh found despite rollback: %v", err)
+	}
+}
+
+// TestRotateForDevice_OldAlreadyRevoked: the rotation primitive itself
+// should fail when the old row was already revoked — the caller's
+// reuse-detection branch handles that case before reaching here.
+func TestRotateForDevice_OldAlreadyRevoked(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "rot3")
+	dev := seedDevice(t, pool, user.ID, "D")
+	store := model.NewRefreshTokenStore(pool)
+	ctx := context.Background()
+
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "rev-hash", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	old, _ := store.FindByHash(ctx, "rev-hash")
+	_, _ = store.RevokeIfActive(ctx, old.ID)
+
+	err := store.RotateForDevice(ctx, old.ID, user.ID, dev.ID, "after-rev", time.Now().Add(time.Hour))
+	if err == nil {
+		t.Fatal("expected error when rotating an already-revoked row")
+	}
+	// New row must NOT have been inserted.
+	if _, err := store.FindByHash(ctx, "after-rev"); !errors.Is(err, model.ErrNotFound) {
+		t.Fatal("new refresh must not exist when old was already revoked")
+	}
+}

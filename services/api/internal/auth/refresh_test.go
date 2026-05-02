@@ -78,6 +78,12 @@ func (s *refreshTestRefreshStore) RevokeAllForDevice(_ context.Context, _ string
 	return nil
 }
 
+// RotateForDevice — not exercised by user-refresh tests, but the
+// interface requires it. No-op implementation.
+func (s *refreshTestRefreshStore) RotateForDevice(_ context.Context, _, _, _, _ string, _ time.Time) error {
+	return nil
+}
+
 func setupRefreshTest(t *testing.T) (*auth.OAuthHandler, *refreshTestRefreshStore) {
 	t.Helper()
 	cfg := config.LoadForTest()

@@ -108,3 +108,46 @@ func (s *PostgresRefreshTokenStore) RevokeAllForDevice(ctx context.Context, devi
 	`, deviceID)
 	return err
 }
+
+// RotateForDevice atomically revokes the old refresh row and inserts
+// a new device-scoped one in a single transaction. If either step
+// fails the whole rotation rolls back — the daemon's retry then sees
+// the original active row and succeeds, instead of self-locking via
+// reuse detection.
+//
+// Failure modes:
+//   - oldID not found OR already revoked → returns "rotation aborted"
+//     error (caller's reuse-detection branch should have caught those
+//     cases first; this is a belt-and-suspenders consistency guard).
+//   - new INSERT FK violation on device_id → ErrNotFound (PR-D contract).
+//   - other pgx errors propagate as-is.
+func (s *PostgresRefreshTokenStore) RotateForDevice(ctx context.Context, oldID, userID, deviceID, newHash string, newExpiresAt time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens SET revoked_at = now()
+		WHERE id = $1 AND revoked_at IS NULL
+	`, oldID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrRotationAborted
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO refresh_tokens (user_id, device_id, token_hash, expires_at)
+		VALUES ($1, $2, $3, $4)
+	`, userID, deviceID, newHash, newExpiresAt); err != nil {
+		if isFKViolation(err, "refresh_tokens_device_id_fkey") {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	return tx.Commit(ctx)
+}

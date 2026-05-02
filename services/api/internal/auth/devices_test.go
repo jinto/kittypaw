@@ -607,19 +607,40 @@ func TestHandleDeviceRefresh_RevokedDevice_401(t *testing.T) {
 	}
 }
 
-// Race-loser path: RevokeIfActive returns false on the second call,
-// meaning a concurrent request just grabbed this refresh row. The
-// loser must 401, not 500. Plan 23 결정 3 step 7.
+// Race-loser path: RotateForDevice returns ErrRotationAborted when a
+// concurrent request rotated the same refresh row first. The loser
+// must 401, not 500. Plan 23 결정 3 + follow-up review HIGH 0.85 fix
+// (atomic transaction).
 func TestHandleDeviceRefresh_RevokeRace_401(t *testing.T) {
 	h, _, rtStore, _, _, raw := setupRefreshTest_Devices(t)
-	// First call to RevokeIfActive returns false (race-loser).
-	rtStore.revokeIfActiveSeq = []bool{false}
+	// Force RotateForDevice to return ErrRotationAborted (race-loser).
+	rtStore.rotateForDeviceErr = model.ErrRotationAborted
 
 	body, _ := json.Marshal(map[string]string{"refresh_token": raw})
 	w := postDeviceRefresh(h, body)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 (race-loser)", w.Code)
 	}
+}
+
+// AC7 follow-up: refresh-rotation atomicity. RotateForDevice failure
+// (e.g. forced generic DB error) must NOT silently leave the old row
+// revoked — the daemon's retry would then trip reuse-detection. With
+// the transactional fix, RotateForDevice rolls back so the old row
+// stays active.
+func TestHandleDeviceRefresh_RotationFailure_500(t *testing.T) {
+	h, _, rtStore, _, _, raw := setupRefreshTest_Devices(t)
+	rtStore.rotateForDeviceErr = errors.New("forced rotation failure")
+
+	body, _ := json.Marshal(map[string]string{"refresh_token": raw})
+	w := postDeviceRefresh(h, body)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	// Old refresh must still be active — caller (daemon) should be
+	// able to retry without tripping reuse-detection. The PG store's
+	// transaction rollback enforces this; the mock test just pins the
+	// 500 response shape.
 }
 
 func TestHandleDeviceRefresh_BodyTooLarge_400(t *testing.T) {

@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -256,20 +257,8 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			return
 		}
 
-		// Race-aware revoke: returns false if a concurrent request beat us.
-		revoked, err := h.RefreshTokenStore.RevokeIfActive(ctx, rt.ID)
-		if err != nil {
-			slog.Error("RevokeIfActive failed", "id", rt.ID, "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		if !revoked {
-			// Race-loser — another request just rotated this row.
-			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
-			return
-		}
-
-		// Verify device is still active (not deleted).
+		// Verify device is still active (not deleted) BEFORE rotation —
+		// no point burning a new refresh row if the device is gone.
 		dev, err := h.DeviceStore.FindByID(ctx, *rt.DeviceID)
 		if err != nil {
 			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
@@ -280,7 +269,8 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			return
 		}
 
-		// Issue new pair.
+		// Issue new pair. Generate token bytes BEFORE rotation so a
+		// crypto/rand failure can't leave the rotation half-done.
 		accessToken, err := SignDeviceJWT(rt.UserID, dev.ID, h.JWTPrivateKey, h.JWTKID, DeviceAccessTokenTTL)
 		if err != nil {
 			slog.Error("SignDeviceJWT failed", "device_id", dev.ID, "err", err)
@@ -294,8 +284,20 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			return
 		}
 		newHash := HashRefreshToken(rawRefresh)
-		if err := h.RefreshTokenStore.CreateForDevice(ctx, rt.UserID, dev.ID, newHash, time.Now().Add(DeviceRefreshTokenTTL)); err != nil {
-			slog.Error("CreateForDevice failed", "device_id", dev.ID, "err", err)
+
+		// Atomic rotation — revoke old + insert new in a single
+		// transaction. Replaces the pre-fix two-step (RevokeIfActive
+		// + CreateForDevice as separate pool ops) which had a self-
+		// lockout race window if the new INSERT failed after the old
+		// revoke committed (Plan 23 follow-up review HIGH 0.85 fix).
+		if err := h.RefreshTokenStore.RotateForDevice(ctx, rt.ID, rt.UserID, dev.ID, newHash, time.Now().Add(DeviceRefreshTokenTTL)); err != nil {
+			// Race-loser: another request rotated this row first.
+			// Silent 401 (don't disclose which path failed).
+			if errors.Is(err, model.ErrRotationAborted) {
+				http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+				return
+			}
+			slog.Error("RotateForDevice failed", "device_id", dev.ID, "err", err)
 			http.Error(w, "failed to issue token", http.StatusInternalServerError)
 			return
 		}

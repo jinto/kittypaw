@@ -63,6 +63,7 @@ type mockRefreshTokenStore struct {
 	createForDeviceErr      error  // forced error for pair-atomicity tests (T2)
 	revokeIfActiveSeq       []bool // per-call return values (T3 race tests)
 	revokeAllForDeviceCalls int    // counter for T3 reuse-detect assertions
+	rotateForDeviceErr      error  // forced error for T3 race / atomicity tests
 }
 
 func (m *mockRefreshTokenStore) Create(_ context.Context, userID, tokenHash string, expiresAt time.Time) error {
@@ -140,6 +141,36 @@ func (m *mockRefreshTokenStore) RevokeAllForDevice(_ context.Context, deviceID s
 		}
 	}
 	return nil
+}
+
+// rotateForDeviceErr lets T3 race tests force RotateForDevice to fail
+// without affecting the seeded refresh state.
+func (m *mockRefreshTokenStore) RotateForDevice(_ context.Context, oldID, userID, deviceID, newHash string, newExpiresAt time.Time) error {
+	if m.rotateForDeviceErr != nil {
+		return m.rotateForDeviceErr
+	}
+	// Atomic semantics in the mock: revoke old + insert new only if old
+	// is currently active. Mirrors the PG transaction's all-or-nothing.
+	for i := range m.tokens {
+		if m.tokens[i].ID == oldID {
+			if m.tokens[i].RevokedAt != nil {
+				return model.ErrRotationAborted
+			}
+			now := time.Now()
+			m.tokens[i].RevokedAt = &now
+			dev := deviceID
+			m.tokens = append(m.tokens, model.RefreshToken{
+				ID:        "rt-rot-" + newHash[:min(8, len(newHash))],
+				UserID:    userID,
+				DeviceID:  &dev,
+				TokenHash: newHash,
+				ExpiresAt: newExpiresAt,
+				CreatedAt: time.Now(),
+			})
+			return nil
+		}
+	}
+	return model.ErrRotationAborted
 }
 
 func setupGoogleTest(t *testing.T, googleServer *httptest.Server) (*auth.OAuthHandler, auth.GoogleConfig) {

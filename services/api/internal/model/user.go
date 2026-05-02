@@ -9,7 +9,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	// ErrRotationAborted signals that RotateForDevice's old-row revoke
+	// matched 0 rows — the row was either never present or already
+	// revoked. Caller's reuse-detection branch should have handled the
+	// already-revoked case before reaching here; this sentinel exists so
+	// the handler can map a race-loser cleanly to a silent 401 rather
+	// than a generic 500.
+	ErrRotationAborted = errors.New("rotation aborted: old refresh not active")
+)
 
 type User struct {
 	ID         string    `json:"id"`
