@@ -210,6 +210,61 @@ func TestReflectionCommandUsesReportName(t *testing.T) {
 	}
 }
 
+func TestRootCommandPlacesStatsUnderSkill(t *testing.T) {
+	root := newRootCmd()
+
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "status" {
+			t.Fatal("root command must not expose status; use kittypaw skill stats instead")
+		}
+	}
+
+	skillCmd, _, err := root.Find([]string{"skill"})
+	if err != nil || skillCmd == nil || skillCmd.Name() != "skill" {
+		t.Fatalf("root Find(skill) = %v, %v; want skill command", skillCmd, err)
+	}
+	children := map[string]*cobra.Command{}
+	for _, cmd := range skillCmd.Commands() {
+		children[cmd.Name()] = cmd
+	}
+	if _, ok := children["reset"]; ok {
+		t.Fatal("skill command must not expose reset hint command")
+	}
+	statsCmd := children["stats"]
+	if statsCmd == nil {
+		t.Fatalf("skill command missing stats child; got %#v", children)
+	}
+	if statsCmd.Short != "Show skill execution stats" {
+		t.Fatalf("skill stats short = %q", statsCmd.Short)
+	}
+}
+
+func TestRootCommandPlacesResetUnderAgent(t *testing.T) {
+	root := newRootCmd()
+
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "reset" {
+			t.Fatal("root command must not expose reset; use kittypaw agent reset instead")
+		}
+	}
+
+	agentCmd, _, err := root.Find([]string{"agent"})
+	if err != nil || agentCmd == nil || agentCmd.Name() != "agent" {
+		t.Fatalf("root Find(agent) = %v, %v; want agent command", agentCmd, err)
+	}
+	children := map[string]*cobra.Command{}
+	for _, cmd := range agentCmd.Commands() {
+		children[cmd.Name()] = cmd
+	}
+	resetCmd := children["reset"]
+	if resetCmd == nil {
+		t.Fatalf("agent command missing reset child; got %#v", children)
+	}
+	if resetCmd.Short != "Reset conversation history" {
+		t.Fatalf("agent reset short = %q", resetCmd.Short)
+	}
+}
+
 func TestRunSkillDryRunUsesSelectedAccount(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
@@ -257,16 +312,16 @@ func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
 	root := newRootCmd()
 	for _, path := range [][]string{
 		{"chat"},
-		{"status"},
 		{"skill"},
+		{"skill", "stats"},
 		{"skill", "log"},
 		{"config", "check"},
 		{"agent"},
+		{"agent", "reset"},
 		{"persona"},
 		{"reflection"},
 		{"memory"},
 		{"channels"},
-		{"reset"},
 	} {
 		cmd, _, err := root.Find(path)
 		if err != nil || cmd == nil {
@@ -392,15 +447,6 @@ func TestFormatChatHeaderUsesCompactAccountFirstShape(t *testing.T) {
 	want := "KittyPaw chat · jinto · claude-test · telegram"
 	if got != want {
 		t.Fatalf("formatChatHeader = %q, want %q", got, want)
-	}
-}
-
-func TestSkillResetHintMessagePointsToRightCommands(t *testing.T) {
-	got := skillResetHintMessage()
-	for _, want := range []string{"kittypaw reset", "kittypaw skill uninstall <name>"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("skill reset hint %q missing %q", got, want)
-		}
 	}
 }
 

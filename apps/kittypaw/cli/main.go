@@ -125,7 +125,6 @@ func newRootCmd() *cobra.Command {
 		newServerCmd(),
 		newSetupCmd(),
 		newChatCmd(),
-		newStatusCmd(),
 		newSkillCmd(),
 		newConfigCmd(),
 		newAgentCmd(),
@@ -133,7 +132,6 @@ func newRootCmd() *cobra.Command {
 		newReflectionCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
-		newResetCmd(),
 		newLoginCmd(),
 		newChatRelayCmd(),
 		newAccountCmd(),
@@ -713,20 +711,19 @@ func isTransportDropErr(err error) bool {
 }
 
 // ---------------------------------------------------------------------------
-// status
+// skill stats
 // ---------------------------------------------------------------------------
 
-func newStatusCmd() *cobra.Command {
+func newSkillStatsCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show today's execution stats",
-		RunE:  runStatus,
+		Use:   "stats",
+		Short: "Show skill execution stats",
+		RunE:  runSkillStats,
 	}
-	addAccountFlag(cmd)
 	return cmd
 }
 
-func runStatus(_ *cobra.Command, _ []string) error {
+func runSkillStats(_ *cobra.Command, _ []string) error {
 	cl, err := connectServerForCLIAccount()
 	if err != nil {
 		return err
@@ -762,7 +759,6 @@ func newSkillCmd() *cobra.Command {
 		newSkillSearchCmd(),
 		newSkillInstallCmd(),
 		newSkillUninstallCmd(),
-		newSkillResetHintCmd(),
 		newSkillInfoCmd(),
 		newSkillCreateCmd(),
 		newSkillEnableCmd(),
@@ -770,29 +766,11 @@ func newSkillCmd() *cobra.Command {
 		newSkillExplainCmd(),
 		newSkillRunCmd(),
 		newSkillLogCmd(),
+		newSkillStatsCmd(),
 		newSkillConfigCmd(),
 		newSkillSuggestCmd(),
 	)
 	return cmd
-}
-
-func newSkillResetHintCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reset",
-		Short: "Show how to reset chat history or remove skills",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			fmt.Print(skillResetHintMessage())
-			return nil
-		},
-	}
-}
-
-func skillResetHintMessage() string {
-	return "kittypaw skill reset is not a separate command.\n\n" +
-		"To clear chat history:\n" +
-		"  kittypaw reset\n\n" +
-		"To remove an installed skill or package:\n" +
-		"  kittypaw skill uninstall <name>\n"
 }
 
 // --- skill list ---
@@ -1531,7 +1509,7 @@ func newAgentCmd() *cobra.Command {
 		Short: "Agent management",
 	}
 	addPersistentAccountFlag(cmd)
-	cmd.AddCommand(newAgentListCmd())
+	cmd.AddCommand(newAgentListCmd(), newAgentResetCmd())
 	return cmd
 }
 
@@ -1614,17 +1592,16 @@ func runLog(_ *cobra.Command, _ []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// reset
+// agent reset
 // ---------------------------------------------------------------------------
 
-func newResetCmd() *cobra.Command {
+func newAgentResetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reset [agent-id]",
 		Short: "Reset conversation history",
 		Long:  "Clear conversation history for all agents, or a specific agent if specified.",
 		RunE:  runReset,
 	}
-	addAccountFlag(cmd)
 	return cmd
 }
 
