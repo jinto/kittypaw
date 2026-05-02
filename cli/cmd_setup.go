@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"runtime"
 
 	"github.com/jinto/kittypaw/client"
 )
@@ -15,16 +14,15 @@ import (
 // deliberate test update, not a silent drift.
 const (
 	// Base prompt (no hint) — promptYesNo appends " (Y/n): " itself.
-	setupPromptAutoChat        = "> 지금 바로 대화를 시작할까요?"
-	setupPromptInstallService  = "> 서버가 자동으로 실행되게 할까요?"
-	setupMsgReloaded           = "✓ 서버 설정 재적용"
-	setupMsgDaemonOff          = "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
-	setupMsgReloadFailedFmt    = "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."
-	setupMsgAutoChatBlocked    = "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
-	setupMsgServiceInstalled   = "✓ 서비스 등록 완료 — 'kittypaw server status' 로 상태 확인"
-	setupMsgServiceSkipped     = "서비스 등록을 건너뜁니다. 나중에 'kittypaw server install' 로 등록할 수 있습니다."
-	setupMsgServiceUnsupported = "현재 플랫폼에서는 자동 서비스 등록을 지원하지 않습니다 — docs/deployment.md 참고."
-	setupMsgServiceFailedFmt   = "서비스 등록 실패: %v"
+	setupPromptAutoChat       = "> 지금 바로 대화를 시작할까요?"
+	setupPromptInstallService = "> 서버가 자동으로 실행되게 할까요?"
+	setupMsgReloaded          = "✓ 서버 설정 재적용"
+	setupMsgDaemonOff         = "다음 단계: 'kittypaw server start' 로 서버를 시작하거나 'kittypaw chat' 이 자동으로 기동합니다."
+	setupMsgReloadFailedFmt   = "경고: 서버 reload 실패: %v — 'kittypaw server stop && kittypaw server start' 로 재시작하세요."
+	setupMsgAutoChatBlocked   = "자동 채팅 진입을 건너뜁니다 — 현재 서버가 이전 설정을 그대로 쓰고 있습니다. 재시작 후 'kittypaw chat' 으로 다시 시도하세요."
+	setupMsgServiceInstalled  = "✓ 서비스 등록 완료 — 'kittypaw server status' 로 상태 확인"
+	setupMsgServiceSkipped    = "서비스 등록을 건너뜁니다. 나중에 'kittypaw server install' 로 등록할 수 있습니다."
+	setupMsgServiceFailedFmt  = "서비스 등록 실패: %v"
 )
 
 // serviceInstallEligible decides whether runSetup should offer the inline
@@ -35,7 +33,7 @@ func serviceInstallEligible(f setupFlags, stdinIsTTY, stdoutIsTTY bool) bool {
 	if f.provider != "" || f.noService {
 		return false
 	}
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+	if !serverServiceSupported() {
 		return false
 	}
 	return stdinIsTTY && stdoutIsTTY
@@ -47,16 +45,14 @@ func serviceInstallEligible(f setupFlags, stdinIsTTY, stdoutIsTTY bool) bool {
 // surfaced on stderr but is non-fatal: the chat auto-entry should still
 // proceed because setup itself succeeded.
 func maybeInstallService(scanner *bufio.Scanner, stdout, stderr io.Writer) bool {
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		_, _ = fmt.Fprintln(stderr, setupMsgServiceUnsupported)
+	if !serverServiceSupported() {
 		return false
 	}
 	if !promptYesNo(scanner, setupPromptInstallService, true) {
 		_, _ = fmt.Fprintln(stdout, setupMsgServiceSkipped)
 		return false
 	}
-	sf := &serviceFlags{bindHost: "127.0.0.1", bindPort: 3000}
-	if err := serviceInstall(stdout, stderr, sf); err != nil {
+	if err := installServerServiceFromSetup(stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, setupMsgServiceFailedFmt+"\n", err)
 		return false
 	}
