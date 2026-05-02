@@ -17,7 +17,7 @@ In a monorepo, the latest repository release might belong to another service.
 The script should list releases and select the newest tag that starts with
 `kittypaw/v`.
 
-Kittypaw releases are published from `kittypaw-app/kittypaw` and built by
+Kittypaw releases are published from `kittypaw-app/kitty` and built by
 `.github/workflows/release-kittypaw.yml`. The workflow intentionally builds
 archives directly with `go build` instead of GoReleaser because prefixed
 monorepo tags such as `kittypaw/v0.4.0` require GoReleaser Pro's monorepo

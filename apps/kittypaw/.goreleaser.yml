@@ -36,12 +36,12 @@ changelog:
 release:
   github:
     owner: kittypaw-app
-    name: kittypaw
+    name: kitty
   header: |
     ## Install
 
     ```sh
-    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install.sh | sh
     ```
 
     The script auto-detects your OS and architecture. For manual download:

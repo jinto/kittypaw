@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="${KITTYPAW_INSTALL_REPO:-kittypaw-app/kittypaw}"
+REPO="${KITTYPAW_INSTALL_REPO:-kittypaw-app/kitty}"
 SCRIPT_URL="${KITTYPAW_INSTALL_SCRIPT_URL:-https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/install.sh}"
 
 if command -v curl >/dev/null 2>&1; then

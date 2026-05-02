@@ -12,11 +12,11 @@ func TestReleaseConfigTargetsKittypawOrg(t *testing.T) {
 	checks := map[string][]string{
 		filepath.Join(root, ".goreleaser.yml"): {
 			"owner: kittypaw-app",
-			"name: kittypaw",
-			"https://raw.githubusercontent.com/kittypaw-app/kittypaw/main/install.sh",
+			"name: kitty",
+			"https://raw.githubusercontent.com/kittypaw-app/kitty/main/install.sh",
 		},
 		filepath.Join(root, "install.sh"): {
-			`REPO="kittypaw-app/kittypaw"`,
+			`REPO="kittypaw-app/kitty"`,
 		},
 	}
 
