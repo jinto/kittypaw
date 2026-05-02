@@ -17,14 +17,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/term"
 
-	"github.com/chzyer/readline"
 	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
@@ -581,24 +578,21 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Show server info.
 	cl := client.New(conn.BaseURL, conn.APIKey)
 	srvVer, model, channels, _ := cl.ServerInfo()
-	fmt.Println(formatChatHeader(version, srvVer, model, accountID, channels))
-
-	if srvVer != "" && version != srvVer {
-		fmt.Printf("  ⚠ CLI/server versions differ (cli %s, server %s). Restart: kittypaw stop && kittypaw serve\n", version, srvVer)
-	}
-	fmt.Println()
+	header := formatChatHeader(version, srvVer, model, accountID, channels)
+	warning := versionMismatchWarning(version, srvVer)
 
 	cs, err := client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
 	if err != nil {
 		return err
 	}
 
-	// Readline with history. Per-account so a household using multiple
+	// Per-account history so a household using multiple
 	// accounts (one human user per account per CLAUDE.md) does not leak chat
 	// fragments from one person's REPL into another's. Falls back to the
 	// top-level path before migration.
@@ -606,40 +600,15 @@ func runChat(cmd *cobra.Command, args []string) error {
 	if base, err := defaultAccountBase(); err == nil {
 		historyFile = filepath.Join(base, "chat_history")
 	}
-	rl, err := readline.NewEx(&readline.Config{
-		Prompt:         "you> ",
-		HistoryFile:    historyFile,
-		UniqueEditLine: true,
-	})
-	if err != nil {
-		cs.Close()
-		return fmt.Errorf("readline init: %w", err)
-	}
-
-	// Resource cleanup with sync.Once — safe from both normal exit and SIGINT.
-	var cleanupOnce sync.Once
-	closeResources := func() {
-		cleanupOnce.Do(func() {
-			_ = rl.Close()
-			cs.Close()
-			fmt.Print("\033[?25h") // ensure cursor visible
-		})
-	}
-	defer closeResources()
-
-	// Catch Ctrl-C: restore terminal then exit. Daemon keeps running.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT)
-	go func() {
-		<-sigCh
-		signal.Stop(sigCh)
-		fmt.Println()
-		closeResources()
-		os.Exit(0)
-	}()
 
 	// One-shot mode: send the message, print result, exit.
 	if oneShot != "" {
+		defer cs.Close()
+		fmt.Println(header)
+		if warning != "" {
+			fmt.Println("  " + warning)
+		}
+		fmt.Println()
 		spin := newSpinner("paw> ")
 		spin.Start()
 		var chatErr error
@@ -660,79 +629,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return chatErr
 	}
 
-	turnCh := make(chan string, 32)
-	go pumpChatInput(rl, turnCh)
-
-	for text := range turnCh {
-		// turnID is allocated once per user input. The transport-drop
-		// retry path below replays sendOnce with the same turnID so
-		// the server's RunTurn dedupes — the LLM is invoked once, the
-		// retry waits for the in-flight result.
-		turnID := uuid.NewString()
-
-		// sendOnce drives one Send attempt. Output goes through readline's
-		// writer so a response can appear while the next user input remains
-		// editable at the bottom prompt.
-		sendOnce := func() (gotResult bool, sendErr error) {
-			opts := client.ChatOptions{
-				OnDone: func(result string, _ *int64) {
-					gotResult = true
-					writeChatLine(rl, "paw> %s\n\n", result)
-				},
-				OnError: func(msg string) {
-					writeChatLine(rl, "paw> %s\n\n", msg)
-				},
-			}
-			sendErr = cs.SendTurn(text, turnID, opts)
-			return
-		}
-
-		gotResult, sendErr := sendOnce()
-		// Silent reconnect on transport drop: redial once and replay
-		// the same input. Surface only if the retry also fails.
-		// Server-side application errors (ErrServerSide) are excluded —
-		// retrying them would double-charge the user without healing
-		// the underlying failure.
-		if sendErr != nil && !gotResult && isTransportDropErr(sendErr) {
-			cs.Close()
-			cs, err = client.DialChat(ctx, conn.WebSocketURL(), conn.APIKey)
-			if err != nil {
-				return fmt.Errorf("재연결 실패: %w", err)
-			}
-			gotResult, sendErr = sendOnce()
-		}
-		if shouldPrintChatSendError(gotResult, sendErr) {
-			writeChatLine(rl, "error: %v\n\n", sendErr)
-		}
-	}
-
-	fmt.Println()
-	closeResources() // restore terminal before any post-chat output
-
-	return nil
-}
-
-type chatLineReader interface {
-	Readline() (string, error)
-}
-
-func pumpChatInput(reader chatLineReader, out chan<- string) {
-	defer close(out)
-	for {
-		text, err := reader.Readline()
-		if err != nil {
-			return
-		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			continue
-		}
-		out <- text
-	}
-}
-
-func writeChatLine(w io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprintf(w, format, args...)
+	return runInteractiveChatTUI(ctx, conn, cs, header, warning, historyFile)
 }
 
 func formatChatHeader(cliVersion, serverVersion, model, accountID string, channels []string) string {
@@ -756,8 +653,11 @@ func formatChatHeader(cliVersion, serverVersion, model, accountID string, channe
 	return strings.Join(parts, " · ")
 }
 
-func shouldPrintChatSendError(gotResult bool, sendErr error) bool {
-	return sendErr != nil && !gotResult && !errors.Is(sendErr, client.ErrServerSide)
+func versionMismatchWarning(cliVersion, serverVersion string) string {
+	if serverVersion != "" && cliVersion != serverVersion {
+		return fmt.Sprintf("CLI/server versions differ (cli %s, server %s). Restart: kittypaw stop && kittypaw serve", cliVersion, serverVersion)
+	}
+	return ""
 }
 
 // isTransportDropErr reports whether err is a transient WebSocket
