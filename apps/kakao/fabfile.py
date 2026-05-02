@@ -10,8 +10,8 @@ from fabric import task
 
 HOST = os.environ.get("DEPLOY_HOST", "second")
 DOMAIN = os.environ.get("DEPLOY_DOMAIN", "")
-REMOTE_DIR = os.environ.get("DEPLOY_REMOTE_DIR", "/home/ubuntu/kittykakao")
-SERVICE_USER = os.environ.get("DEPLOY_USER", "ubuntu")
+REMOTE_DIR = os.environ.get("DEPLOY_REMOTE_DIR", "/home/jinto/kittykakao")
+SERVICE_USER = os.environ.get("DEPLOY_USER", "jinto")
 SERVICE_GROUP = os.environ.get("DEPLOY_GROUP", SERVICE_USER)
 SERVICE = "kittykakao"
 BINARY = "kittykakao"
