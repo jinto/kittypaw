@@ -151,3 +151,32 @@ func (s *PostgresRefreshTokenStore) RotateForDevice(ctx context.Context, oldID, 
 
 	return tx.Commit(ctx)
 }
+
+// DeleteExpiredOlderThan hard-deletes refresh tokens whose expires_at is
+// before olderThan. Catches both revoked-and-expired and unused-and-expired
+// rows in a single sweep — once expired, retention is purely forensic.
+//
+// Batched at janitorBatchSize. Janitor calls this with
+// (now - 30d) to keep a 30-day forensic window. Plan 24 T2.
+func (s *PostgresRefreshTokenStore) DeleteExpiredOlderThan(ctx context.Context, olderThan time.Time) (int64, error) {
+	var total int64
+	for {
+		tag, err := s.pool.Exec(ctx, `
+			DELETE FROM refresh_tokens
+			WHERE id = ANY (
+				SELECT id FROM refresh_tokens
+				WHERE expires_at < $1
+				ORDER BY expires_at ASC
+				LIMIT $2
+			)
+		`, olderThan, janitorBatchSize)
+		if err != nil {
+			return total, err
+		}
+		n := tag.RowsAffected()
+		total += n
+		if n < janitorBatchSize {
+			return total, nil
+		}
+	}
+}

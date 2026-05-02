@@ -84,6 +84,12 @@ func (s *refreshTestRefreshStore) RotateForDevice(_ context.Context, _, _, _, _ 
 	return nil
 }
 
+// DeleteExpiredOlderThan — janitor-only, not exercised by user-refresh
+// tests. Stub for interface compliance.
+func (s *refreshTestRefreshStore) DeleteExpiredOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 func setupRefreshTest(t *testing.T) (*auth.OAuthHandler, *refreshTestRefreshStore) {
 	t.Helper()
 	cfg := config.LoadForTest()

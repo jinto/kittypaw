@@ -614,6 +614,46 @@
 - [ ] 채팅팀에 머지 신호 — cross-repo verifier가 첫 device JWT E2E 검증 가능
 - [ ] daemon 첫 pairing 수동 검증 (kittypaw CLI ready 시점)
 
+## Plan 24: Credential Lifecycle Janitor ← 현재
+
+> Goal: device + refresh_token 자동 GC. 사용자는 "설치 → 로그인 → 채팅"만 알면 되고, idle/expired/revoked credential은 서버가 알아서 정리.
+> 의사결정 (사용자 confirm 완료):
+> - **Idle threshold**: 60일 (last_used_at 기준, soft revoke)
+> - **Revoked retention**: 90일 (revoked_at 기준, hard delete — refresh_tokens CASCADE)
+> - **Expired refresh retention**: 30일 (expires_at 기준, hard delete)
+> - **Cadence**: 매일 KST 04:00 (Go ticker, in-process, graceful-shutdown 연동)
+> - **last_used_at touch**: refresh 호출 성공 시 1번 (best-effort, transaction 외부)
+> - **per-user device cap**: 별도 일감 (이 PR 범위 밖)
+
+- [ ] **T1: device.Touch + last_used_at refresh wiring + index**
+      RED: `device_test.go` mockDeviceStore.Touch — refresh 성공 시 last_used_at non-nil. `device_integration_test.go` Touch round-trip.
+      GREEN:
+      - `internal/model/device.go` DeviceStore 인터페이스에 `Touch(ctx, id) error` 추가
+      - `internal/model/device_pg.go` `UPDATE devices SET last_used_at = now() WHERE id = $1 AND revoked_at IS NULL`
+      - `internal/auth/devices.go` `HandleDeviceRefresh` 성공 경로 끝에 `_ = h.DeviceStore.Touch(ctx, dev.ID)` (best-effort, 실패 시 logStoreErr Warn)
+      - `internal/auth/devices_test.go` mockDeviceStore.Touch in-memory 갱신
+      - migration 008: `idx_devices_last_used ON devices(last_used_at) WHERE revoked_at IS NULL`, `idx_refresh_tokens_expires ON refresh_tokens(expires_at) WHERE revoked_at IS NULL`
+
+- [ ] **T2: cleanup 메소드 (DeviceStore + RefreshTokenStore) + janitor 패키지**
+      RED: `device_integration_test.go` ReapIdle / DeleteRevokedOlderThan; `refresh_token_integration_test.go` DeleteExpiredOlderThan; `janitor/janitor_test.go` mock 기반 1tick 시 호출 verify + clock injection.
+      GREEN:
+      - `internal/model/device.go` `ReapIdle(ctx, olderThan) (int64, error)`, `DeleteRevokedOlderThan(ctx, olderThan) (int64, error)`
+      - `internal/model/refresh_token.go` `DeleteExpiredOlderThan(ctx, olderThan) (int64, error)`
+      - 각 구현: LIMIT 1000 LOOP 패턴 (autovacuum 압력 + lock 시간 제한)
+      - mockDeviceStore / mockRefreshTokenStore stub 메소드 (test 갱신)
+      - `internal/janitor/janitor.go` 신규: `New(devices, refresh, policy, clock) *Janitor` + `Run(ctx)` (24h ticker + KST 04:00 첫 alignment)
+      - `cmd/server/main.go` janitor goroutine wire (graceful-shutdown 연동, 이미 Plan 19에서 패턴 박힘)
+
+- [ ] **T3: 통합 검증 + Operational Checklist 갱신**
+      RED: `janitor_integration_test.go` (`//go:build integration`) — fixture insert (idle device 60일+, revoked 90일+, expired 30일+) → janitor 1tick → row count 검증.
+      GREEN: `make build / lint / test / test-integration / test-migration` 모두 pass. **사용자 명시 허락 후** atomic commit.
+
+**Operational Checklist** (PR 머지 후, 정기):
+- [ ] `fab deploy` (binary upload + restart) — migration 008 자동 적용
+- [ ] 매주: slog `janitor.tick` 라인에서 reaped/deleted count 확인 (0이 7일+ = 정책 이상 신호)
+- [ ] 분기: idle threshold 60일이 적정한지 검증 (사용자 churn / 분실 device 메트릭)
+- [ ] per-user device cap 일감 (Plan 25 후보) — device-stuffing 방어
+
 ## Follow-up 일감 (별도 PR / 별도 plan 권장)
 
 

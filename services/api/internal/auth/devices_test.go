@@ -26,6 +26,8 @@ type mockDeviceStore struct {
 	devices     map[string]*model.Device
 	createErr   error // forced error for compensating-revoke tests
 	revokeCalls int   // count for atomicity assertions
+	touchCalls  int   // count for Plan 24 T1 refresh-side wiring assertion
+	touchErr    error // forced error to verify Touch failure stays best-effort
 }
 
 func newMockDeviceStore() *mockDeviceStore {
@@ -79,6 +81,27 @@ func (m *mockDeviceStore) Revoke(_ context.Context, id string) error {
 		dev.RevokedAt = &now
 	}
 	return nil
+}
+
+func (m *mockDeviceStore) Touch(_ context.Context, id string) error {
+	m.touchCalls++
+	if m.touchErr != nil {
+		return m.touchErr
+	}
+	if dev, ok := m.devices[id]; ok && dev.RevokedAt == nil {
+		now := time.Now()
+		dev.LastUsedAt = &now
+	}
+	return nil
+}
+
+// ReapIdle / DeleteRevokedOlderThan — janitor-only stubs. Pair/refresh
+// handler tests don't exercise these; janitor has its own mock.
+func (m *mockDeviceStore) ReapIdle(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+func (m *mockDeviceStore) DeleteRevokedOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
 }
 
 // TestSignDeviceJWT_RoundTrip pins the prod-issue path: SignDeviceJWT

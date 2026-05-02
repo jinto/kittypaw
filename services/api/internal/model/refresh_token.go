@@ -39,4 +39,10 @@ type RefreshTokenStore interface {
 	RevokeAllForUser(ctx context.Context, userID string) error
 	RevokeAllForDevice(ctx context.Context, deviceID string) error
 	RotateForDevice(ctx context.Context, oldID, userID, deviceID, newHash string, newExpiresAt time.Time) error
+
+	// DeleteExpiredOlderThan hard-deletes refresh tokens whose expires_at
+	// is older than olderThan. Janitor-only. LIMIT-batched so large
+	// retention sweeps don't hold long locks. Plan 24 T2 — 30-day expired
+	// retention policy.
+	DeleteExpiredOlderThan(ctx context.Context, olderThan time.Time) (int64, error)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/kittypaw-app/kittyapi/internal/auth"
 	"github.com/kittypaw-app/kittyapi/internal/cache"
 	"github.com/kittypaw-app/kittyapi/internal/config"
+	"github.com/kittypaw-app/kittyapi/internal/janitor"
 	"github.com/kittypaw-app/kittyapi/internal/model"
 	"github.com/kittypaw-app/kittyapi/internal/proxy"
 	"github.com/kittypaw-app/kittyapi/internal/ratelimit"
@@ -100,6 +101,13 @@ func run() error {
 
 	router, cleanup := NewRouter(cfg, userStore, refreshStore, deviceStore, placeStore)
 	defer cleanup()
+
+	// Credential lifecycle janitor — daily KST 04:00 sweep over devices
+	// (idle reap + revoked retention) and refresh_tokens (expired
+	// retention). Plan 24. Goroutine returns on ctx cancel; the in-flight
+	// sweep (~ms-scale unless N rows hit batch caps) is allowed to drop
+	// rather than block shutdown — next process restart picks up.
+	go janitor.New(deviceStore, refreshStore, janitor.DefaultPolicy, nil).Run(ctx)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

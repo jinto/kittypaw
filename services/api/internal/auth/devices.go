@@ -329,6 +329,16 @@ func (h *OAuthHandler) HandleDeviceRefresh() http.HandlerFunc {
 			return
 		}
 
+		// Best-effort idle signal for the lifecycle janitor (Plan 24 T1).
+		// Outside the rotation transaction by design — a Touch failure
+		// (DB blip, etc.) must not roll back a successful refresh, and
+		// the next refresh (within DeviceAccessTokenTTL=15min) will set
+		// last_used_at then. Worst case: 15 extra minutes of staleness
+		// before idle-reaping starts the 60-day clock.
+		if err := h.DeviceStore.Touch(ctx, dev.ID); err != nil {
+			logStoreErr("DeviceStore.Touch failed (best-effort, ignored)", err, "device_id", dev.ID)
+		}
+
 		writeTokenResponse(w, pairResponse{
 			DeviceID:           dev.ID,
 			DeviceAccessToken:  accessToken,

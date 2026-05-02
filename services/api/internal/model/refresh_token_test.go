@@ -305,3 +305,52 @@ func TestRotateForDevice_OldAlreadyRevoked(t *testing.T) {
 		t.Fatal("new refresh must not exist when old was already revoked")
 	}
 }
+
+// TestRefreshTokenStore_DeleteExpiredOlderThan pins the 30-day expired
+// retention boundary. Both expired-revoked and expired-active rows
+// (revoked_at IS NULL but expires_at past) get deleted — once a row
+// is past its expiry, retention is purely forensic regardless of
+// revoke state. Rows whose expires_at is still in the future MUST be
+// untouched, even if revoked.
+func TestRefreshTokenStore_DeleteExpiredOlderThan(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "delexp")
+	dev := seedDevice(t, pool, user.ID, "D")
+	store := model.NewRefreshTokenStore(pool)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+
+	// Seed three rows: expired 60 days ago / expired 5 days ago /
+	// not yet expired (1 day from now).
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "long-expired", now.Add(-60*24*time.Hour)); err != nil {
+		t.Fatalf("seed long-expired: %v", err)
+	}
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "recently-expired", now.Add(-5*24*time.Hour)); err != nil {
+		t.Fatalf("seed recently-expired: %v", err)
+	}
+	if err := store.CreateForDevice(ctx, user.ID, dev.ID, "active", now.Add(24*time.Hour)); err != nil {
+		t.Fatalf("seed active: %v", err)
+	}
+
+	cutoff := now.Add(-30 * 24 * time.Hour)
+	deleted, err := store.DeleteExpiredOlderThan(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("DeleteExpiredOlderThan: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted count = %d, want 1", deleted)
+	}
+
+	// long-expired should be gone.
+	if _, err := store.FindByHash(ctx, "long-expired"); !errors.Is(err, model.ErrNotFound) {
+		t.Error("long-expired row not deleted")
+	}
+	// recently-expired and active must remain.
+	if _, err := store.FindByHash(ctx, "recently-expired"); err != nil {
+		t.Errorf("recently-expired row incorrectly deleted: %v", err)
+	}
+	if _, err := store.FindByHash(ctx, "active"); err != nil {
+		t.Errorf("active row incorrectly deleted: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -184,6 +185,166 @@ func TestDeviceStore_Revoke_Idempotent(t *testing.T) {
 	}
 	if !second.RevokedAt.Equal(firstRevokedAt) {
 		t.Fatalf("second Revoke overwrote revoked_at: %v → %v", firstRevokedAt, *second.RevokedAt)
+	}
+}
+
+// TestDeviceStore_Touch_SetsLastUsedAt pins the Plan 24 T1 contract:
+// Touch on an active device must set last_used_at to the current
+// time. The janitor's idle-reaping logic depends on this column being
+// fresh — if Touch silently failed to write, every active device
+// would look idle and get reaped on day 60.
+func TestDeviceStore_Touch_SetsLastUsedAt(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "touch")
+	store := model.NewDeviceStore(pool)
+	ctx := context.Background()
+
+	dev, err := store.Create(ctx, user.ID, "n1", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if dev.LastUsedAt != nil {
+		t.Fatalf("Create: expected last_used_at NULL, got %v", *dev.LastUsedAt)
+	}
+
+	if err := store.Touch(ctx, dev.ID); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+
+	got, err := store.FindByID(ctx, dev.ID)
+	if err != nil {
+		t.Fatalf("FindByID after Touch: %v", err)
+	}
+	if got.LastUsedAt == nil {
+		t.Fatal("Touch did not set last_used_at")
+	}
+}
+
+// TestDeviceStore_Touch_NoOpForRevoked: Touch on a revoked device
+// must NOT resurrect last_used_at — that would partially un-revoke
+// in the eyes of the janitor and confuse forensic queries. The
+// `WHERE revoked_at IS NULL` clause in Touch's UPDATE is the guard.
+func TestDeviceStore_Touch_NoOpForRevoked(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "touch-rev")
+	store := model.NewDeviceStore(pool)
+	ctx := context.Background()
+
+	dev, err := store.Create(ctx, user.ID, "n1", nil)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := store.Revoke(ctx, dev.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	// Touch must succeed (nil error) but write nothing.
+	if err := store.Touch(ctx, dev.ID); err != nil {
+		t.Fatalf("Touch on revoked: %v", err)
+	}
+
+	got, _ := store.FindByID(ctx, dev.ID)
+	if got.LastUsedAt != nil {
+		t.Fatalf("Touch on revoked device wrote last_used_at = %v", *got.LastUsedAt)
+	}
+}
+
+// TestDeviceStore_ReapIdle pins the 60-day idle policy boundary:
+// devices whose latest activity (last_used_at, or paired_at as
+// fallback) predates the cutoff get soft-revoked; everything newer
+// stays active. Off-by-one bugs here would either reap recently-paired
+// devices or leak truly-idle ones — both fail-silent in production.
+func TestDeviceStore_ReapIdle(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "reap")
+	store := model.NewDeviceStore(pool)
+	ctx := context.Background()
+
+	idle, _ := store.Create(ctx, user.ID, "idle", nil)
+	fresh, _ := store.Create(ctx, user.ID, "fresh", nil)
+	alreadyRevoked, _ := store.Create(ctx, user.ID, "rev", nil)
+	if err := store.Revoke(ctx, alreadyRevoked.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	revokedSnapshot, _ := store.FindByID(ctx, alreadyRevoked.ID)
+
+	// Push idle's paired_at way back; bump fresh's last_used_at to now.
+	// Bypass DeviceStore — direct SQL is needed to forge old timestamps.
+	now := time.Now().UTC()
+	farPast := now.Add(-100 * 24 * time.Hour)
+	if _, err := pool.Exec(ctx, `UPDATE devices SET paired_at = $1, last_used_at = NULL WHERE id = $2`, farPast, idle.ID); err != nil {
+		t.Fatalf("forge idle: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE devices SET last_used_at = $1 WHERE id = $2`, now, fresh.ID); err != nil {
+		t.Fatalf("forge fresh: %v", err)
+	}
+
+	cutoff := now.Add(-60 * 24 * time.Hour)
+	reaped, err := store.ReapIdle(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("ReapIdle: %v", err)
+	}
+	if reaped != 1 {
+		t.Errorf("reaped count = %d, want 1", reaped)
+	}
+
+	idleAfter, _ := store.FindByID(ctx, idle.ID)
+	if idleAfter.RevokedAt == nil {
+		t.Error("idle device was not revoked")
+	}
+	freshAfter, _ := store.FindByID(ctx, fresh.ID)
+	if freshAfter.RevokedAt != nil {
+		t.Error("fresh device was incorrectly revoked")
+	}
+	revokedAfter, _ := store.FindByID(ctx, alreadyRevoked.ID)
+	if !revokedAfter.RevokedAt.Equal(*revokedSnapshot.RevokedAt) {
+		// ReapIdle must skip already-revoked rows (WHERE revoked_at IS NULL).
+		// Touching them would overwrite the original revoke timestamp,
+		// breaking forensic timelines.
+		t.Error("ReapIdle clobbered an already-revoked row's timestamp")
+	}
+}
+
+// TestDeviceStore_DeleteRevokedOlderThan pins the 90-day retention
+// hard-delete boundary. Rows past cutoff get deleted; rows still in
+// the retention window survive. CASCADE behavior on
+// refresh_tokens.device_id is exercised by the janitor end-to-end
+// integration test.
+func TestDeviceStore_DeleteRevokedOlderThan(t *testing.T) {
+	pool := setupTestDB(t)
+	user := seedDeviceUser(t, pool, "delrev")
+	store := model.NewDeviceStore(pool)
+	ctx := context.Background()
+
+	old, _ := store.Create(ctx, user.ID, "old-revoked", nil)
+	recent, _ := store.Create(ctx, user.ID, "recent-revoked", nil)
+	active, _ := store.Create(ctx, user.ID, "active", nil)
+
+	now := time.Now().UTC()
+	if _, err := pool.Exec(ctx, `UPDATE devices SET revoked_at = $1 WHERE id = $2`, now.Add(-100*24*time.Hour), old.ID); err != nil {
+		t.Fatalf("forge old: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE devices SET revoked_at = $1 WHERE id = $2`, now.Add(-30*24*time.Hour), recent.ID); err != nil {
+		t.Fatalf("forge recent: %v", err)
+	}
+
+	cutoff := now.Add(-90 * 24 * time.Hour)
+	deleted, err := store.DeleteRevokedOlderThan(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("DeleteRevokedOlderThan: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted count = %d, want 1", deleted)
+	}
+
+	if _, err := store.FindByID(ctx, old.ID); !errors.Is(err, model.ErrNotFound) {
+		t.Errorf("old revoked device not deleted: %v", err)
+	}
+	if _, err := store.FindByID(ctx, recent.ID); err != nil {
+		t.Errorf("recent revoked device incorrectly deleted: %v", err)
+	}
+	if _, err := store.FindByID(ctx, active.ID); err != nil {
+		t.Errorf("active device incorrectly affected: %v", err)
 	}
 }
 

@@ -32,8 +32,17 @@ func setupAddressesTestDB(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("migrate new: %v", err)
 	}
-	if err := m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		// ignore — first run with empty schema
+	// m.Drop() instead of m.Down() — sidesteps 007's "refresh_tokens
+	// contains device_id rows" abort guard when prior tests in the
+	// model_test binary leave device-scoped refresh rows behind. Same
+	// pattern as setupTestDB. Plan 24 follow-up.
+	if err := m.Drop(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrate drop: %v", err)
+	}
+	_, _ = m.Close()
+	m, err = migrate.New("file://../../migrations", "pgx5://"+stripScheme(dbURL))
+	if err != nil {
+		t.Fatalf("migrate new (post-drop): %v", err)
 	}
 	if err := m.Up(); err != nil {
 		t.Fatalf("migrate up: %v", err)

@@ -143,6 +143,12 @@ func (m *mockRefreshTokenStore) RevokeAllForDevice(_ context.Context, deviceID s
 	return nil
 }
 
+// DeleteExpiredOlderThan — janitor-only stub for handler-level tests.
+// Janitor has its own dedicated mock.
+func (m *mockRefreshTokenStore) DeleteExpiredOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
+
 // rotateForDeviceErr lets T3 race tests force RotateForDevice to fail
 // without affecting the seeded refresh state.
 func (m *mockRefreshTokenStore) RotateForDevice(_ context.Context, oldID, userID, deviceID, newHash string, newExpiresAt time.Time) error {

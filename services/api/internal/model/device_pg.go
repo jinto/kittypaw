@@ -4,10 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// janitorBatchSize caps each DELETE / UPDATE in the lifecycle janitor.
+// 1000 row batches keep individual statement lock time bounded so a
+// multi-million-row sweep can't block hot-path transactions. Plan 24 T2.
+const janitorBatchSize = 1000
 
 type PostgresDeviceStore struct {
 	pool *pgxpool.Pool
@@ -87,6 +93,74 @@ func (s *PostgresDeviceStore) ListActiveForUser(ctx context.Context, userID stri
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// Touch sets last_used_at = now() on an active device. No-op (nil error,
+// 0 rows affected) when the device is missing or already revoked — Touch
+// is best-effort idle signal for the janitor, not a security primitive.
+func (s *PostgresDeviceStore) Touch(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE devices SET last_used_at = now()
+		WHERE id = $1 AND revoked_at IS NULL
+	`, id)
+	return err
+}
+
+// ReapIdle soft-revokes devices whose latest activity is older than
+// olderThan. "Latest activity" = COALESCE(last_used_at, paired_at) — a
+// freshly-paired device that has never refreshed still has paired_at as
+// its floor, so a 60-day idle threshold won't reap a device paired 5
+// minutes ago.
+//
+// Batches of janitorBatchSize. Returns total rows revoked across batches.
+func (s *PostgresDeviceStore) ReapIdle(ctx context.Context, olderThan time.Time) (int64, error) {
+	var total int64
+	for {
+		tag, err := s.pool.Exec(ctx, `
+			UPDATE devices SET revoked_at = now()
+			WHERE id = ANY (
+				SELECT id FROM devices
+				WHERE revoked_at IS NULL
+				  AND COALESCE(last_used_at, paired_at) < $1
+				ORDER BY COALESCE(last_used_at, paired_at) ASC
+				LIMIT $2
+			)
+		`, olderThan, janitorBatchSize)
+		if err != nil {
+			return total, err
+		}
+		n := tag.RowsAffected()
+		total += n
+		if n < janitorBatchSize {
+			return total, nil
+		}
+	}
+}
+
+// DeleteRevokedOlderThan hard-deletes devices revoked before olderThan.
+// refresh_tokens.device_id ON DELETE CASCADE reaps the orphan refresh
+// rows automatically — no separate refresh sweep needed for these.
+func (s *PostgresDeviceStore) DeleteRevokedOlderThan(ctx context.Context, olderThan time.Time) (int64, error) {
+	var total int64
+	for {
+		tag, err := s.pool.Exec(ctx, `
+			DELETE FROM devices
+			WHERE id = ANY (
+				SELECT id FROM devices
+				WHERE revoked_at IS NOT NULL AND revoked_at < $1
+				ORDER BY revoked_at ASC
+				LIMIT $2
+			)
+		`, olderThan, janitorBatchSize)
+		if err != nil {
+			return total, err
+		}
+		n := tag.RowsAffected()
+		total += n
+		if n < janitorBatchSize {
+			return total, nil
+		}
+	}
 }
 
 // Revoke soft-deletes by setting revoked_at = now(). Idempotent: a
