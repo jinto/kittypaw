@@ -62,8 +62,8 @@ jobs:
           build_windows amd64
           build_windows arm64
 
-          cp install.sh "$DIST/install.sh"
-          (cd "$DIST" && sha256sum kittypaw_* install.sh > checksums.txt)
+          cp install-kittypaw.sh "$DIST/install-kittypaw.sh"
+          (cd "$DIST" && sha256sum kittypaw_* install-kittypaw.sh > checksums.txt)
 
       - name: Create or update release
         env:
@@ -79,7 +79,7 @@ jobs:
           ## Install
 
           \`\`\`sh
-          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install-kittypaw.sh | sh
           \`\`\`
 
           Set \`VERSION=${VERSION}\` to install this version explicitly.
@@ -212,10 +212,10 @@ jobs:
           WORKDIR="$(mktemp -d)"
 
           gh release download "$TAG" --dir "$WORKDIR" --repo "$REPO" \
-            --pattern "kittypaw_*" --pattern "install.sh"
+            --pattern "kittypaw_*" --pattern "install-kittypaw.sh"
 
           cd "$WORKDIR"
-          shasum -a 256 kittypaw_* install.sh > checksums.txt
+          shasum -a 256 kittypaw_* install-kittypaw.sh > checksums.txt
           gh release upload "$TAG" checksums.txt --clobber --repo "$REPO"
           rm -rf "$WORKDIR"
 

@@ -41,7 +41,7 @@ release:
     ## Install
 
     ```sh
-    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
     ```
 
     The script auto-detects your OS and architecture. For manual download:
@@ -55,4 +55,4 @@ release:
     | Windows | 64-bit | `windows_amd64` |
     | Windows | ARM | `windows_arm64` |
   extra_files:
-    - glob: ./install.sh
+    - glob: ./install-kittypaw.sh

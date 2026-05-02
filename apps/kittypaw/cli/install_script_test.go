@@ -15,7 +15,7 @@ func TestInstallScriptRestartsLoadedMacOSService(t *testing.T) {
 
 	out, err := env.runInstallScript()
 	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
 	}
 
 	log := env.readLog()
@@ -34,7 +34,7 @@ func TestInstallScriptDoesNotUseLegacyStandaloneDaemonFallback(t *testing.T) {
 
 	out, err := env.runInstallScript()
 	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
 	}
 
 	log := env.readLog()
@@ -52,7 +52,7 @@ func TestInstallScriptRestartsActiveLinuxService(t *testing.T) {
 
 	out, err := env.runInstallScript()
 	if err != nil {
-		t.Fatalf("install.sh failed: %v\n%s", err, out)
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
 	}
 
 	log := env.readLog()
@@ -194,7 +194,7 @@ func (e *installScriptEnv) setFake(key, value string) {
 
 func (e *installScriptEnv) runInstallScript() (string, error) {
 	e.t.Helper()
-	cmd := exec.Command("/bin/sh", filepath.Join(e.root, "install.sh"))
+	cmd := exec.Command("/bin/sh", filepath.Join(e.root, "install-kittypaw.sh"))
 	cmd.Dir = e.root
 	cmd.Env = e.env
 	out, err := cmd.CombinedOutput()

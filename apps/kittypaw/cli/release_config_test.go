@@ -9,15 +9,24 @@ import (
 
 func TestReleaseConfigTargetsKittypawOrg(t *testing.T) {
 	root := filepath.Join("..")
+	repoRoot := filepath.Join(root, "..", "..")
 	checks := map[string][]string{
 		filepath.Join(root, ".goreleaser.yml"): {
 			"owner: kittypaw-app",
 			"name: kitty",
-			"https://raw.githubusercontent.com/kittypaw-app/kitty/main/install.sh",
+			"https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh",
+			"install-kittypaw.sh",
 		},
-		filepath.Join(root, "install.sh"): {
+		filepath.Join(root, "install-kittypaw.sh"): {
 			`REPO="kittypaw-app/kitty"`,
 		},
+		filepath.Join(repoRoot, "install-kittypaw.sh"): {
+			"https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/install-kittypaw.sh",
+		},
+	}
+	legacyPaths := []string{
+		filepath.Join(root, "install.sh"),
+		filepath.Join(repoRoot, "install.sh"),
 	}
 
 	for path, wants := range checks {
@@ -33,6 +42,14 @@ func TestReleaseConfigTargetsKittypawOrg(t *testing.T) {
 			if !strings.Contains(content, want) {
 				t.Fatalf("%s missing %q", path, want)
 			}
+		}
+	}
+
+	for _, path := range legacyPaths {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("%s should not exist; use install-kittypaw.sh", path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
 		}
 	}
 }
