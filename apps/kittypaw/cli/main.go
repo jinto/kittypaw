@@ -127,7 +127,6 @@ func newRootCmd() *cobra.Command {
 		newChatCmd(),
 		newSkillCmd(),
 		newConfigCmd(),
-		newPersonaCmd(),
 		newMemoryCmd(),
 		newChannelsCmd(),
 		newLoginCmd(),
@@ -1776,101 +1775,6 @@ func removePidFileIfMatches(pidPath string, pid int) {
 	if currentPID, _, ok := client.ReadPidFile(pidPath); ok && currentPID == pid {
 		os.Remove(pidPath)
 	}
-}
-
-// ---------------------------------------------------------------------------
-// persona
-// ---------------------------------------------------------------------------
-
-func newPersonaCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "persona",
-		Short: "Manage persona presets",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
-			}
-			return cmd.Help()
-		},
-	}
-	addPersistentAccountFlag(cmd)
-	cmd.AddCommand(newPersonaListCmd(), newPersonaApplyCmd())
-	return cmd
-}
-
-func newPersonaListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List profiles with preset status",
-		RunE:  runPersonaList,
-	}
-}
-
-func runPersonaList(_ *cobra.Command, _ []string) error {
-	cl, err := connectServerForCLIAccount()
-	if err != nil {
-		return err
-	}
-
-	res, err := cl.ProfileList()
-	if err != nil {
-		return fmt.Errorf("list profiles: %w", err)
-	}
-
-	profiles := jsonSlice(res, "profiles")
-	if len(profiles) == 0 {
-		fmt.Println("No profiles found. Run 'kittypaw setup' to create a default profile.")
-		return nil
-	}
-
-	fmt.Printf("%s %s %s %s\n", padW("ID", 20), padW("DESCRIPTION", 30), padW("STATUS", 12), "PRESET")
-	fmt.Println(strings.Repeat("-", 75))
-
-	for _, p := range profiles {
-		statusStr := jsonStr(p, "preset_status")
-		if statusStr == "" {
-			statusStr = "unknown"
-		}
-		presetStr := jsonStr(p, "preset_id")
-		if presetStr == "" {
-			presetStr = "-"
-		}
-		if statusStr == "custom" && presetStr != "-" {
-			presetStr += " (modified)"
-		}
-		desc := truncW(jsonStr(p, "description"), 30)
-		fmt.Printf("%s %s %s %s\n", padW(jsonStr(p, "id"), 20), padW(desc, 30), padW(statusStr, 12), presetStr)
-	}
-	return nil
-}
-
-func newPersonaApplyCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "apply <preset-id> [profile-id]",
-		Short: "Apply a preset to a profile (default: 'default')",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE:  runPersonaApply,
-	}
-}
-
-func runPersonaApply(_ *cobra.Command, args []string) error {
-	presetID := args[0]
-	profileID := "default"
-	if len(args) > 1 {
-		profileID = args[1]
-	}
-
-	cl, err := connectServerForCLIAccount()
-	if err != nil {
-		return err
-	}
-
-	if _, err := cl.ProfileActivate(profileID, presetID); err != nil {
-		return fmt.Errorf("apply preset: %w", err)
-	}
-
-	fmt.Printf("Applied preset %q to profile %q.\n", presetID, profileID)
-	return nil
 }
 
 // promptPackageConfig prompts the user to configure package settings after install.

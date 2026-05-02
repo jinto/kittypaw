@@ -207,31 +207,27 @@ func TestRootCommandDoesNotExposeReflection(t *testing.T) {
 	}
 }
 
-func TestPersonaCommandDoesNotExposeEvolution(t *testing.T) {
+func TestRootCommandDoesNotExposePersona(t *testing.T) {
 	root := newRootCmd()
 
-	personaCmd, _, err := root.Find([]string{"persona"})
-	if err != nil || personaCmd == nil || personaCmd.Name() != "persona" {
-		t.Fatalf("root Find(persona) = %v, %v; want persona command", personaCmd, err)
-	}
-	for _, cmd := range personaCmd.Commands() {
-		if cmd.Name() == "evolution" {
-			t.Fatal("persona command must not expose evolution approval internals")
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "persona" {
+			t.Fatal("root command must not expose persona internals")
 		}
 	}
 }
 
-func TestPersonaCommandRejectsRemovedEvolution(t *testing.T) {
+func TestPersonaCommandRejected(t *testing.T) {
 	root := newRootCmd()
-	root.SetArgs([]string{"persona", "evolution"})
+	root.SetArgs([]string{"persona"})
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 
 	err := root.Execute()
 	if err == nil {
-		t.Fatal("kittypaw persona evolution must fail after evolution approval is removed")
+		t.Fatal("kittypaw persona must fail after persona management moves to chat")
 	}
-	if !strings.Contains(err.Error(), `unknown command "evolution" for "kittypaw persona"`) {
+	if !strings.Contains(err.Error(), `unknown command "persona" for "kittypaw"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -360,7 +356,6 @@ func TestAccountScopedCommandsExposeAccountFlag(t *testing.T) {
 		{"chat", "history"},
 		{"chat", "forget"},
 		{"chat", "compact"},
-		{"persona"},
 		{"memory"},
 		{"channels"},
 	} {
