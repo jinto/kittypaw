@@ -1,0 +1,23 @@
+upstream kittykakao {
+  server unix:{{REMOTE_DIR}}/kittykakao.sock;
+}
+
+server {
+  listen 80;
+  server_name {{DOMAIN}};
+
+  location /ws/ {
+    proxy_pass http://kittykakao;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 86400s;
+  }
+
+  location / {
+    proxy_pass http://kittykakao;
+    include proxy_params;
+  }
+}
