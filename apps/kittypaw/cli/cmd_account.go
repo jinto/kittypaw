@@ -391,7 +391,7 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 	}
 
 	if !removedIsShared {
-		if err := scrubSharedShare(accountsDir, name, stderr); err != nil {
+		if err := scrubTeamSpaceAccountReferences(accountsDir, name, stderr); err != nil {
 			return fmt.Errorf("update shared account config: %w", err)
 		}
 	}
@@ -442,34 +442,53 @@ func deactivateAccountOnServer(name string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// scrubSharedShare removes the [share.<removed>] stanza from the shared
-// account's config.toml. No-op if no shared account exists (AC-RM4) or the
-// stanza is already absent. Uses WriteConfigAtomic so a crash mid-write
-// never leaves the file truncated (AC-RM6).
-func scrubSharedShare(accountsDir, removed string, stderr io.Writer) error {
+// scrubTeamSpaceAccountReferences removes the [share.<removed>] stanza and
+// team_space.members entry from each team-space account's config.toml. No-op
+// if no team-space account exists (AC-RM4) or the account is not referenced.
+// Uses WriteConfigAtomic so a crash mid-write never leaves the file truncated
+// (AC-RM6).
+func scrubTeamSpaceAccountReferences(accountsDir, removed string, stderr io.Writer) error {
 	accounts, err := core.DiscoverAccounts(accountsDir)
 	if err != nil {
 		return err
 	}
-	var shared *core.Account
-	for _, tt := range accounts {
-		if tt != nil && tt.Config != nil && tt.Config.IsSharedAccount() {
-			shared = tt
-			break
+	for _, account := range accounts {
+		if account == nil || account.Config == nil || !account.Config.IsSharedAccount() {
+			continue
+		}
+
+		changed := false
+		removedLegacyShare := false
+		if _, ok := account.Config.Share[removed]; ok {
+			delete(account.Config.Share, removed)
+			changed = true
+			removedLegacyShare = true
+		}
+
+		members := account.Config.TeamSpace.Members
+		if len(members) > 0 {
+			filtered := members[:0]
+			for _, member := range members {
+				if member == removed {
+					changed = true
+					continue
+				}
+				filtered = append(filtered, member)
+			}
+			account.Config.TeamSpace.Members = filtered
+		}
+
+		if !changed {
+			continue
+		}
+		cfgPath := filepath.Join(account.BaseDir, "config.toml")
+		if err := core.WriteConfigAtomic(account.Config, cfgPath); err != nil {
+			return fmt.Errorf("atomic write %s: %w", cfgPath, err)
+		}
+		if removedLegacyShare {
+			_, _ = fmt.Fprintf(stderr, "info: removed [share.%s] from shared account config at %s\n", removed, cfgPath)
 		}
 	}
-	if shared == nil {
-		return nil
-	}
-	if _, ok := shared.Config.Share[removed]; !ok {
-		return nil
-	}
-	delete(shared.Config.Share, removed)
-	cfgPath := filepath.Join(shared.BaseDir, "config.toml")
-	if err := core.WriteConfigAtomic(shared.Config, cfgPath); err != nil {
-		return fmt.Errorf("atomic write %s: %w", cfgPath, err)
-	}
-	_, _ = fmt.Fprintf(stderr, "info: removed [share.%s] from shared account config at %s\n", removed, cfgPath)
 	return nil
 }
 

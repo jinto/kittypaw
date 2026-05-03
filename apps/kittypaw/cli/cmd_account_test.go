@@ -503,6 +503,39 @@ func TestRunAccountRemove_SharedConfigScrub(t *testing.T) {
 	}
 }
 
+func TestRunAccountRemove_TeamSpaceMembershipScrub(t *testing.T) {
+	home := setupRemoveFixture(t, map[string]bool{
+		"alice":  false,
+		"bob":    false,
+		"shared": true,
+	})
+	cfgPath := filepath.Join(home, ".kittypaw", "accounts", "shared", "config.toml")
+	cfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load shared config: %v", err)
+	}
+	cfg.TeamSpace.Members = []string{"alice", "bob"}
+	if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
+		t.Fatalf("write shared config: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := runAccountRemove("alice", &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountRemove: %v", err)
+	}
+
+	teamCfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("reload shared config: %v", err)
+	}
+	if teamCfg.TeamSpaceHasMember("alice") {
+		t.Error("team_space.members still includes alice after removal")
+	}
+	if !teamCfg.TeamSpaceHasMember("bob") {
+		t.Error("team_space.members should preserve bob")
+	}
+}
+
 // AC-RM4: removing a personal account when no shared exists is a no-op
 // (no shared to scrub), not an error.
 func TestRunAccountRemove_NoShared_NoOp(t *testing.T) {
