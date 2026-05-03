@@ -222,8 +222,9 @@ Browser control is treated as a side-effecting tool surface.
 - Private/internal hosts are blocked unless explicitly listed in
   `[browser].allowed_hosts`.
 - CDP discovery and WebSocket URLs must resolve to loopback for managed mode.
-- `Browser.evaluate`, `Browser.click`, `Browser.type`, `Browser.navigate`, and
-  `Browser.close` are added to the default approval list for supervised mode.
+- `Browser.open`, `Browser.navigate`, `Browser.click`, `Browser.type`,
+  `Browser.evaluate`, and `Browser.close` are added to the default approval
+  list for supervised mode.
 - Snapshot and evaluate outputs are truncated before entering LLM context.
 - Screenshots are saved under the account base directory and never written
   outside it.
