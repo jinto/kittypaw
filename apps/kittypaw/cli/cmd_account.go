@@ -89,7 +89,7 @@ and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
 	cmd.Flags().StringVar(&f.telegramToken, "telegram-bot-token", "", "Telegram bot token (visible in ps; prefer --telegram-bot-token-stdin)")
 	cmd.Flags().BoolVar(&f.telegramTokenStdin, "telegram-bot-token-stdin", false, "Read Telegram bot token from stdin")
 	cmd.Flags().StringVar(&f.adminChatID, "admin-chat-id", "", "Telegram admin chat ID (auto-detected from getUpdates when omitted)")
-	cmd.Flags().BoolVar(&f.isShared, "is-shared", false, "Mark this account as the shared coordinator (no channels)")
+	cmd.Flags().BoolVar(&f.isShared, "is-shared", false, "Mark this account as the team-space coordinator (no channels)")
 	cmd.Flags().StringVar(&f.llmProvider, "llm-provider", "", "LLM provider (anthropic|openai|local)")
 	cmd.Flags().StringVar(&f.llmAPIKey, "llm-api-key", "", "LLM API key")
 	cmd.Flags().StringVar(&f.llmModel, "llm-model", "", "LLM model name")

@@ -97,7 +97,9 @@ type Config struct {
 	// IsShared marks an account as a team-space/coordinator account. Team
 	// spaces run scheduled skills for explicit members and fanout to member
 	// accounts, but MUST NOT own chat channels.
-	IsShared  bool            `toml:"is_shared"`
+	IsShared bool `toml:"is_shared"`
+	// IsFamily is a legacy in-memory alias for IsShared retained for
+	// compatibility with older callsites and tests.
 	IsFamily  bool            `toml:"-"`
 	TeamSpace TeamSpaceConfig `toml:"team_space"`
 
@@ -111,7 +113,7 @@ type Config struct {
 // access. Read paths are account-relative (e.g. "memory/weather.json") and
 // must match exactly after traversal/symlink validation in ValidateSharedReadPath.
 // Write sharing is intentionally absent — the S3-lite scope forbids cross-account
-// writes so a family skill bug can't corrupt alice's store.
+// writes so a team-space skill bug can't corrupt alice's store.
 type ShareConfig struct {
 	Read []string `toml:"read"`
 }

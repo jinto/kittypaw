@@ -107,8 +107,15 @@ func TestNewAccountAddCmd_RegistersPasswordStdinFlag(t *testing.T) {
 
 func TestNewAccountAddCmd_UsesSharedAccountFlag(t *testing.T) {
 	cmd := newAccountAddCmd()
-	if f := cmd.Flags().Lookup("is-shared"); f == nil {
+	f := cmd.Flags().Lookup("is-shared")
+	if f == nil {
 		t.Fatal("--is-shared flag not registered on `kittypaw account add`")
+	}
+	if !strings.Contains(strings.ToLower(f.Usage), "team-space") {
+		t.Fatalf("--is-shared help should use team-space wording, got %q", f.Usage)
+	}
+	if strings.Contains(strings.ToLower(f.Usage), "shared coordinator") {
+		t.Fatalf("--is-shared help exposes old shared-coordinator wording: %q", f.Usage)
 	}
 	if f := cmd.Flags().Lookup("is-family"); f != nil {
 		t.Fatal("--is-family must not be exposed; use --is-shared")

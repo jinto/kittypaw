@@ -287,6 +287,8 @@ func ValidateTeamSpaceAccounts(accounts []*Account) error {
 	return fmt.Errorf("team space must not declare channels: %v", offenders)
 }
 
+// ValidateFamilyAccounts is a legacy compatibility alias for
+// ValidateTeamSpaceAccounts.
 func ValidateFamilyAccounts(accounts []*Account) error {
 	return ValidateTeamSpaceAccounts(accounts)
 }

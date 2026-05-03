@@ -317,7 +317,7 @@ func (s *Server) handleAdminAccountAdd(w http.ResponseWriter, r *http.Request) {
 // The server does NOT touch the filesystem — that's the CLI's job after a
 // 200 response. Status mapping: 200 on success, 404 if not active, 400 on
 // malformed ID, 500 on reconcile-drain failure (AC-RM5: CLI aborts before
-// touching family config or disk).
+// touching team-space config or disk).
 func (s *Server) handleAdminAccountRemove(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
