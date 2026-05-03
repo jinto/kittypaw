@@ -1,5 +1,7 @@
 # Local E2E Smoke Design
 
+> Historical plan snapshot. This document records an app-local implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and the app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 Add a local end-to-end smoke command that proves KittyChat can relay an

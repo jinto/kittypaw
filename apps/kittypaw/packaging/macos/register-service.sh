@@ -57,7 +57,7 @@ if port_in_use "$KITTYPAW_BIND_PORT"; then
   echo "    KITTYPAW_BIND_PORT=3001 sh $(basename "$0")" >&2
   echo "" >&2
   echo "  Then point your client at the same port, e.g.:" >&2
-  echo "    kittypaw chat --server http://127.0.0.1:3001" >&2
+  echo "    kittypaw chat --remote http://127.0.0.1:3001" >&2
   exit 1
 fi
 

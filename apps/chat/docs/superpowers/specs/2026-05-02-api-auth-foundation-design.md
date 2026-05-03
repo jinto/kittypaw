@@ -1,5 +1,7 @@
 # API Auth Foundation Design
 
+> Historical plan snapshot. This document records an app-local implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and the app README/DEPLOY docs for the current live shape.
+
 ## Context
 
 KittyChat currently accepts static environment tokens for one API client and one

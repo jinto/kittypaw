@@ -1,5 +1,7 @@
 # Channel Image Delivery Design
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 When the engine produces an image response, channels should render it as an image where the platform supports it instead of sending only markdown text such as `![alt](url)`.

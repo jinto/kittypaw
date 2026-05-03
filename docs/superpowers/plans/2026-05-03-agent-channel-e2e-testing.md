@@ -1,5 +1,7 @@
 # Agent Channel E2E Testing Implementation Plan
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add deterministic local tests for chat-driven skill installation and channel delivery, then connect them to the monorepo smoke/E2E test tiers.
@@ -14,8 +16,11 @@ fixtures, `/persona`, assistant mention routing, chat-created personas, and
 reflection/evolution over `conversation_turns`. The Docker-backed
 `make e2e-local` harness now also covers Portal fake-Google login, device
 pairing, browser cookie session auth, Chat relay routing to a real Kittypaw
-dispatcher, fake registry exchange-rate install consent, and installed skill
-execution through the Chat BFF.
+dispatcher, fake registry exchange-rate install consent, installed exchange-rate
+reuse with KRW conversion, weather-now install consent with fake KittyAPI geo
+resolution for Gangnam Station, and installed weather skill reuse through the
+Chat BFF. The remaining real-use scenario backlog is tracked in
+`apps/kittypaw/TASKS.md` under "Plan 9: Real-use scenario test expansion".
 
 ---
 

@@ -56,8 +56,12 @@ deployable product work should live under `apps/<name>`.
 ## Local Smoke
 
 ```bash
+make help
+make contracts-check
 make smoke-local
 ```
 
-Runs contracts, deploy-script syntax checks, Go/Rust package tests, and the
-Chat in-process e2e smoke without touching production hosts.
+`make contracts-check` validates JSON contract fixtures. `make smoke-local`
+runs contracts, deploy-script syntax checks, Go/Rust package tests, and the Chat
+in-process e2e smoke without touching production hosts. `make e2e-local` runs
+the Docker-backed local auth/chat E2E.

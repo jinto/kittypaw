@@ -68,6 +68,80 @@ func TestWSOutgoingSerializesSnakeCase(t *testing.T) {
 	}
 }
 
+func TestKakaoPayloadExtractsImageMediaParam(t *testing.T) {
+	raw := []byte(`{
+		"action": {"id": "act_123"},
+		"userRequest": {
+			"utterance": "이미지 봐줘",
+			"user": {"id": "user_456"},
+			"params": {
+				"media": {"type": "image", "url": "https://cdn.example.com/cat.png"}
+			}
+		}
+	}`)
+
+	var payload KakaoPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	attachments := payload.UserRequest.MediaAttachments()
+	if len(attachments) != 1 {
+		t.Fatalf("attachments = %#v", attachments)
+	}
+	if attachments[0].Type != "image" || attachments[0].URL != "https://cdn.example.com/cat.png" {
+		t.Fatalf("attachment = %#v", attachments[0])
+	}
+}
+
+func TestKakaoPayloadExtractsFileMediaParam(t *testing.T) {
+	raw := []byte(`{
+		"action": {"id": "act_123"},
+		"userRequest": {
+			"utterance": "파일 확인해줘",
+			"user": {"id": "user_456"},
+			"params": {
+				"media": {"type": "file", "url": "https://cdn.example.com/report.pdf", "name": "report.pdf", "mimeType": "application/pdf", "size": 2048}
+			}
+		}
+	}`)
+
+	var payload KakaoPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	attachments := payload.UserRequest.MediaAttachments()
+	if len(attachments) != 1 {
+		t.Fatalf("attachments = %#v", attachments)
+	}
+	att := attachments[0]
+	if att.Type != "file" || att.FileName != "report.pdf" || att.MimeType != "application/pdf" || att.SizeBytes != 2048 {
+		t.Fatalf("attachment = %#v", att)
+	}
+}
+
+func TestWSOutgoingSerializesAttachments(t *testing.T) {
+	frame := WSOutgoing{
+		ID:     "act_123",
+		Text:   "이미지 봐줘",
+		UserID: "user_456",
+		Attachments: []WSAttachment{{
+			ID:     "kakao_media_0",
+			Type:   "image",
+			Source: "kakao",
+			URL:    "https://cdn.example.com/cat.png",
+		}},
+	}
+
+	raw, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `"attachments"`) || !strings.Contains(got, `"url":"https://cdn.example.com/cat.png"`) {
+		t.Fatalf("frame missing attachments: %s", got)
+	}
+}
+
 func TestWSIncomingDeserializesImageFields(t *testing.T) {
 	raw := []byte(`{"id":"act_123","text":"response","image_url":"https://cdn.example.com/cat.png","image_alt":"cat"}`)
 

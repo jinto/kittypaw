@@ -92,10 +92,10 @@ fi
 
 # Resolve Anthropic key.
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/tenants/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
+  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/accounts/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
 fi
 if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml"
+  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in accounts/default/config.toml"
 fi
 
 # Strip ANSI + spinner glyphs + REPL prompts from `kittypaw chat <text>`

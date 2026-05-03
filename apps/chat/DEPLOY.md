@@ -9,6 +9,12 @@ DEPLOY_DOMAIN=chat.kittypaw.app fab setup
 The setup task creates `/home/jinto/kittychat/.env` with generated MVP tokens if
 one does not already exist.
 
+Current production templates bind the process to a Unix socket:
+
+```env
+KITTYCHAT_BIND_ADDR=/home/jinto/kittychat/kittychat.sock
+```
+
 For production auth, set `KITTYCHAT_JWKS_URL` in `/home/jinto/kittychat/.env`
 to the portal JWKS endpoint:
 
@@ -19,8 +25,8 @@ KITTYCHAT_JWKS_URL=https://portal.kittypaw.app/.well-known/jwks.json
 That enables verification of RS256 portal-issued access tokens and daemon device
 credentials with `iss="https://portal.kittypaw.app/auth"`, `aud` containing
 `https://chat.kittypaw.app`, `scope`, and `v=2`. Static
-`KITTYCHAT_API_TOKEN`/`KITTYCHAT_DEVICE_TOKEN` values remain only as MVP
-fallbacks while issuance and pairing flows are being rolled out.
+`KITTYCHAT_API_TOKEN`/`KITTYCHAT_DEVICE_TOKEN` values remain only as local/manual
+smoke fallbacks.
 
 ## Deploy
 

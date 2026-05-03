@@ -129,10 +129,10 @@ if [[ ! -f "$BASELINE_FILE" ]]; then
 fi
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/tenants/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
+  ANTHROPIC_API_KEY=$(grep -m1 'api_key = "sk-ant' ~/.kittypaw/accounts/default/config.toml 2>/dev/null | sed 's/.*"\(sk-ant[^"]*\)".*/\1/')
 fi
 if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in tenants/default/config.toml"
+  finish INFRA 2 "ANTHROPIC_API_KEY not set and not found in accounts/default/config.toml"
 fi
 
 load_provider_baselines() {
@@ -165,8 +165,8 @@ load_provider_baselines "$PROVIDER_FAMILY"
 reset_server() {
   "$KITTY_BIN" server stop >/dev/null 2>&1 || true
   pkill -9 -f "kittypaw server start" 2>/dev/null || true
-  rm -rf "$HOME/.kittypaw/tenants/default/packages/"* \
-         "$HOME/.kittypaw/tenants/default/skills/"* 2>/dev/null || true
+  rm -rf "$HOME/.kittypaw/accounts/default/packages/"* \
+         "$HOME/.kittypaw/accounts/default/skills/"* 2>/dev/null || true
   sleep 1
 }
 

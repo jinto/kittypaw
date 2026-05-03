@@ -1,5 +1,7 @@
 # Local Auth Chat E2E Design
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 Date: 2026-05-02
 
 ## Goal

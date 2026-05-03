@@ -1045,7 +1045,7 @@ func executeLLM(ctx context.Context, call core.SkillCall, s *Session) (string, e
 	_ = json.Unmarshal(call.Args[0], &prompt)
 
 	messages := buildSubLLMMessages(prompt)
-	resp, err := s.Provider.Generate(ctx, messages)
+	resp, err := s.Provider.Generate(WithLLMCallKind(ctx, "tool.llm"), messages)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}

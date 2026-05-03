@@ -150,8 +150,10 @@ func TestPortalChatRelayRunsKittypawSkillInstallFlow(t *testing.T) {
 	fakeGoogle := newFakeGoogle(t)
 	defer fakeGoogle.Close()
 
-	registry := newFakeRegistry(t, exchangeRateRegistryPackage())
+	registry := newFakeRegistry(t, exchangeRateRegistryPackage(), weatherNowRegistryPackage())
 	defer registry.Close()
+	kittypawAPI := newFakeKittypawAPI(t)
+	defer kittypawAPI.Close()
 	t.Setenv("KITTYPAW_ALLOW_INSECURE_REGISTRY", "1")
 
 	portalAddr := reserveAddr(t)
@@ -189,7 +191,10 @@ func TestPortalChatRelayRunsKittypawSkillInstallFlow(t *testing.T) {
 	apiClient := &http.Client{Timeout: 10 * time.Second}
 	userTokens := portalGoogleLogin(t, apiClient, portalURL)
 	device := pairDevice(t, apiClient, portalURL, userTokens.AccessToken)
-	kittypaw := newKittypawRelayServer(t, registry.URL)
+	kittypaw := newKittypawRelayServer(t, registry.URL,
+		withKittypawAPIBaseURL(kittypawAPI.URL),
+		withE2EWeatherSlots("강남역"),
+	)
 
 	relayCtx, relayCancel := context.WithCancel(ctx)
 	t.Cleanup(relayCancel)
@@ -227,6 +232,36 @@ func TestPortalChatRelayRunsKittypawSkillInstallFlow(t *testing.T) {
 		if !strings.Contains(installed, want) {
 			t.Fatalf("install chat response missing %q:\n%s", want, installed)
 		}
+	}
+
+	reused := browserChatCompletion(t, browser, chatURL, device.DeviceID, "원화로 환율 다시 알려줘")
+	if strings.Contains(reused, "설치해서") || strings.Contains(reused, "설치하면") {
+		t.Fatalf("installed follow-up should not offer exchange-rate reinstall:\n%s", reused)
+	}
+	for _, want := range []string{"1 KRW =", "USD", "JPY"} {
+		if !strings.Contains(reused, want) {
+			t.Fatalf("installed follow-up did not convert exchange-rate with %q:\n%s", want, reused)
+		}
+	}
+
+	weatherOffer := browserChatCompletion(t, browser, chatURL, device.DeviceID, "강남역 날씨 알려줘")
+	if !strings.Contains(weatherOffer, "현재 날씨") || !strings.Contains(weatherOffer, "설치") {
+		t.Fatalf("weather chat response did not offer weather install:\n%s", weatherOffer)
+	}
+
+	weatherInstalled := browserChatCompletion(t, browser, chatURL, device.DeviceID, "네")
+	for _, want := range []string{"설치했어요", "강남역 현재 날씨", "37.4979", "127.0276"} {
+		if !strings.Contains(weatherInstalled, want) {
+			t.Fatalf("weather install chat response missing %q:\n%s", want, weatherInstalled)
+		}
+	}
+
+	weatherReused := browserChatCompletion(t, browser, chatURL, device.DeviceID, "강남역 날씨 다시")
+	if strings.Contains(weatherReused, "설치해서") || strings.Contains(weatherReused, "설치하면") {
+		t.Fatalf("installed weather follow-up should not offer reinstall:\n%s", weatherReused)
+	}
+	if !strings.Contains(weatherReused, "강남역 현재 날씨") {
+		t.Fatalf("installed weather follow-up did not run weather-now:\n%s", weatherReused)
 	}
 }
 
@@ -766,11 +801,68 @@ description = "키 없이 환율 표를 바로 조회합니다."
 	}
 }
 
-func newKittypawRelayServer(t *testing.T, registryURL string) *kittypawserver.Server {
+func weatherNowRegistryPackage() registryPackage {
+	return registryPackage{
+		ID: "weather-now",
+		TOML: `[meta]
+id = "weather-now"
+name = "현재 날씨"
+version = "1.0.0"
+description = "현재 날씨와 비 여부를 즉답합니다."
+
+[permissions]
+context = ["location"]
+`,
+		JS: `const ctx = JSON.parse(__context__);
+const loc = ctx.params.location;
+return loc.label + " 현재 날씨\n좌표 " + loc.lat + "," + loc.lon + "\n1시간 강수: 없음";`,
+	}
+}
+
+func newFakeKittypawAPI(t *testing.T) *httptest.Server {
 	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/geo/resolve", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("q"); got != "강남역" {
+			http.Error(w, fmt.Sprintf("geo query = %q, want 강남역", got), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"lat":37.4979,"lon":127.0276,"name_matched":"강남역"}`))
+	})
+	return httptest.NewServer(mux)
+}
+
+type kittypawRelayConfig struct {
+	registryURL          string
+	apiBaseURL           string
+	weatherSlotsResponse string
+}
+
+type kittypawRelayOption func(*kittypawRelayConfig)
+
+func withKittypawAPIBaseURL(apiBaseURL string) kittypawRelayOption {
+	return func(cfg *kittypawRelayConfig) {
+		cfg.apiBaseURL = apiBaseURL
+	}
+}
+
+func withE2EWeatherSlots(locationQuery string) kittypawRelayOption {
+	return func(cfg *kittypawRelayConfig) {
+		cfg.weatherSlotsResponse = fmt.Sprintf(`{"location_query":%q}`, locationQuery)
+	}
+}
+
+func newKittypawRelayServer(t *testing.T, registryURL string, opts ...kittypawRelayOption) *kittypawserver.Server {
+	t.Helper()
+	relayCfg := kittypawRelayConfig{registryURL: registryURL}
+	for _, opt := range opts {
+		opt(&relayCfg)
+	}
+
 	baseDir := filepath.Join(t.TempDir(), "accounts", localAccountID)
 	cfg := core.DefaultConfig()
-	cfg.Registry.URL = registryURL
+	cfg.Registry.URL = relayCfg.registryURL
 	cfg.Sandbox.TimeoutSecs = 5
 
 	account := &core.Account{ID: localAccountID, BaseDir: baseDir, Config: &cfg}
@@ -783,20 +875,36 @@ func newKittypawRelayServer(t *testing.T, registryURL string) *kittypawserver.Se
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
+	secrets, err := core.LoadSecretsFrom(account.SecretsPath())
+	if err != nil {
+		t.Fatalf("load kittypaw secrets: %v", err)
+	}
+	apiTokenMgr := core.NewAPITokenManager(baseDir, secrets)
+	if relayCfg.apiBaseURL != "" {
+		if err := apiTokenMgr.SaveAPIBaseURL(core.DefaultAPIServerURL, relayCfg.apiBaseURL); err != nil {
+			t.Fatalf("save kittypaw api base url: %v", err)
+		}
+	}
+
 	deps := &kittypawserver.AccountDeps{
 		Account:     account,
 		Store:       st,
-		Provider:    e2eLLMProvider{},
+		Provider:    e2eLLMProvider{weatherSlotsResponse: relayCfg.weatherSlotsResponse},
 		Sandbox:     sandbox.New(cfg.Sandbox),
-		PkgMgr:      core.NewPackageManagerFrom(baseDir, nil),
-		APITokenMgr: core.NewAPITokenManager(baseDir, nil),
+		PkgMgr:      core.NewPackageManagerFrom(baseDir, secrets),
+		APITokenMgr: apiTokenMgr,
 	}
 	return kittypawserver.New([]*kittypawserver.AccountDeps{deps}, "local-e2e")
 }
 
-type e2eLLMProvider struct{}
+type e2eLLMProvider struct {
+	weatherSlotsResponse string
+}
 
-func (e2eLLMProvider) Generate(context.Context, []core.LlmMessage) (*llm.Response, error) {
+func (p e2eLLMProvider) Generate(_ context.Context, msgs []core.LlmMessage) (*llm.Response, error) {
+	if p.weatherSlotsResponse != "" && strings.Contains(e2eMessageText(msgs), `"location_query"`) {
+		return &llm.Response{Content: p.weatherSlotsResponse}, nil
+	}
 	return &llm.Response{Content: "local e2e provider fallback"}, nil
 }
 
@@ -807,3 +915,14 @@ func (p e2eLLMProvider) GenerateWithTools(ctx context.Context, msgs []core.LlmMe
 func (e2eLLMProvider) ContextWindow() int { return 128_000 }
 
 func (e2eLLMProvider) MaxTokens() int { return 4_096 }
+
+func e2eMessageText(msgs []core.LlmMessage) string {
+	var b strings.Builder
+	for _, msg := range msgs {
+		b.WriteString(msg.Content)
+		for _, block := range msg.ContentBlocks {
+			b.WriteString(block.Content)
+		}
+	}
+	return b.String()
+}

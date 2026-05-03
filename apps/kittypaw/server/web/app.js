@@ -293,6 +293,9 @@ const App = {
         <h2>Conversation</h2>
         <table><thead><tr><th>Time</th><th>Role</th><th>Channel</th><th>Content</th></tr></thead>
         <tbody id="conversation"></tbody></table>
+        <h2 class="mt-20">LLM Usage</h2>
+        <table><thead><tr><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>Cache</th><th>Cost</th></tr></thead>
+        <tbody id="llm-usage"></tbody></table>
         <h2 class="mt-20">Recent Executions</h2>
         <table><thead><tr><th>Time</th><th>Skill</th><th>Status</th><th>Duration</th><th>Summary</th></tr></thead>
         <tbody id="exec"></tbody></table>
@@ -310,7 +313,25 @@ const App = {
           statCard(s.total_runs || 0, "Today's Runs") +
           statCard(s.successful || 0, 'Successful', 'ok') +
           statCard(s.failed || 0, 'Failed', 'fail') +
-          statCard(s.total_tokens || 0, 'Tokens');
+          statCard(s.total_tokens || 0, 'Tokens') +
+          statCard(formatUSD(s.estimated_cost_usd || 0), 'Est. Cost');
+      }
+
+      const usageRows = s.llm_usage_by_model || [];
+      const usageEl = document.getElementById('llm-usage');
+      if (usageEl) {
+        usageEl.innerHTML = usageRows.length
+          ? usageRows.map(r => {
+            const cacheTokens = (r.cache_creation_input_tokens || 0) + (r.cache_read_input_tokens || 0);
+            const model = r.provider ? `${r.provider}/${r.model || ''}` : (r.model || '');
+            return `<tr><td>${esc(model)}</td>` +
+              `<td>${esc(String(r.calls || 0))}</td>` +
+              `<td>${esc(String(r.input_tokens || 0))}</td>` +
+              `<td>${esc(String(r.output_tokens || 0))}</td>` +
+              `<td>${esc(String(cacheTokens))}</td>` +
+              `<td>${esc(formatUSD(r.estimated_cost_usd || 0))}</td></tr>`;
+          }).join('')
+          : '<tr><td colspan="6">No LLM usage yet</td></tr>';
       }
 
       const historyData = await api('/api/v1/chat/history?limit=10');
@@ -347,6 +368,10 @@ const App = {
 
 function statCard(value, label, cls) {
   return `<div class="stat-card"><div class="value ${cls||''}">${esc(String(value))}</div><div class="label">${esc(label)}</div></div>`;
+}
+
+function formatUSD(value) {
+  return `$${Number(value || 0).toFixed(6)}`;
 }
 
 // ── Helpers ──────────────────────────────────────────────

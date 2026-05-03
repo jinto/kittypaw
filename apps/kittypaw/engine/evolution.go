@@ -89,7 +89,7 @@ JSON으로 응답하세요 (마크다운 펜스 없이):
 - 기존 페르소나의 핵심은 유지하면서 사용자 패턴에 맞게 조정하세요.
 - JSON만 출력하세요.`, currentSOUL, patterns.String())
 
-	resp, err := s.Provider.Generate(ctx, []core.LlmMessage{
+	resp, err := s.Provider.Generate(WithLLMCallKind(ctx, "evolution"), []core.LlmMessage{
 		{Role: core.RoleUser, Content: prompt},
 	})
 	if err != nil {

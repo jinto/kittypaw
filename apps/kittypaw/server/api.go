@@ -13,6 +13,7 @@ import (
 
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
+	"github.com/jinto/kittypaw/store"
 )
 
 var safeSkillName = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
@@ -78,12 +79,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	byModel, err := s.store.TodayLLMUsageByModel()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if byModel == nil {
+		byModel = []store.LLMUsageByModel{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_runs":   stats.TotalRuns,
-		"successful":   stats.Successful,
-		"failed":       stats.Failed,
-		"auto_retries": stats.AutoRetries,
-		"total_tokens": stats.TotalTokens,
+		"total_runs":         stats.TotalRuns,
+		"successful":         stats.Successful,
+		"failed":             stats.Failed,
+		"auto_retries":       stats.AutoRetries,
+		"total_tokens":       stats.TotalTokens,
+		"estimated_cost_usd": stats.EstimatedCostUSD,
+		"llm_usage_by_model": byModel,
 	})
 }
 
@@ -417,7 +428,7 @@ func (s *Server) handleSkillExplain(w http.ResponseWriter, r *http.Request) {
 	messages := []core.LlmMessage{
 		{Role: core.RoleUser, Content: prompt},
 	}
-	resp, err := s.session.Provider.Generate(r.Context(), messages)
+	resp, err := s.session.Provider.Generate(engine.WithLLMCallKind(r.Context(), "skill.explain"), messages)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

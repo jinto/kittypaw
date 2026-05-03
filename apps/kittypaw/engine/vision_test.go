@@ -510,6 +510,37 @@ func TestExecuteVision_UnknownMethod(t *testing.T) {
 	}
 }
 
+func TestExecuteVisionAnalyzeAttachmentUsesCurrentEvent(t *testing.T) {
+	eventPayload, _ := json.Marshal(core.ChatPayload{
+		Text: "이 사진 설명해줘",
+		Attachments: []core.ChatAttachment{{
+			ID:     "tg_42_0",
+			Type:   "image",
+			Source: "telegram",
+			URL:    "https://api.telegram.org/file/botsecret-token/photos/cat.jpg",
+		}},
+	})
+	event := core.Event{Type: core.EventTelegram, Payload: eventPayload}
+	ctx := ContextWithEvent(context.Background(), &event)
+
+	s := &Session{Config: &core.Config{}}
+	args := []json.RawMessage{
+		json.RawMessage(`"tg_42_0"`),
+		json.RawMessage(`"Describe this image"`),
+	}
+	call := core.SkillCall{SkillName: "Vision", Method: "analyzeAttachment", Args: args}
+	result, err := executeVision(ctx, call, s)
+	if err != nil {
+		t.Fatalf("executeVision: %v", err)
+	}
+	if strings.Contains(result, "attachment not found") || strings.Contains(result, "unknown Vision method") {
+		t.Fatalf("attachment was not resolved: %s", result)
+	}
+	if !strings.Contains(result, "no vision provider API key configured") {
+		t.Fatalf("result = %s, want provider configuration error after attachment resolution", result)
+	}
+}
+
 func TestExecuteImage_MissingArgs(t *testing.T) {
 	s := &Session{Config: &core.Config{}}
 	call := core.SkillCall{SkillName: "Image", Method: "generate", Args: nil}

@@ -111,10 +111,12 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 		_ = st.Close()
 		return nil, fmt.Errorf("create llm provider for %s: %w", t.ID, err)
 	}
+	provider = engine.NewUsageRecordingProvider(provider, st, defaultModel.Provider)
 
 	var fallback llm.Provider
 	if m, ok := t.Config.RuntimeFallbackModel(secrets); ok {
 		fallback, _ = llm.NewProviderFromModelConfig(m)
+		fallback = engine.NewUsageRecordingProvider(fallback, st, m.Provider)
 	}
 
 	sbox := sandbox.New(t.Config.Sandbox)

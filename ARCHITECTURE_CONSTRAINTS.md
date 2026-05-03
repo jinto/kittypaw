@@ -8,6 +8,7 @@ Each deployable unit must be buildable and releasable on its own.
 
 - `apps/kittypaw` releases the local product binary.
 - `apps/kittyapi` releases the cloud API service.
+- `apps/portal` releases the identity and discovery service.
 - `apps/chat` releases the chat relay service.
 - `apps/kakao` releases the Kakao gateway service.
 
@@ -69,6 +70,7 @@ Product release tags must be namespaced:
 ```text
 kittypaw/v0.1.0
 kittyapi/v0.1.0
+portal/v0.1.0
 chat/v0.1.0
 kakao/v0.1.0
 ```

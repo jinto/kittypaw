@@ -29,8 +29,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if count != 22 {
-		t.Fatalf("expected 22 migrations, got %d", count)
+	if count != 23 {
+		t.Fatalf("expected 23 migrations, got %d", count)
 	}
 }
 
@@ -411,7 +411,7 @@ func TestTodayStats(t *testing.T) {
 	st := openTestStore(t)
 
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	usage := `{"total_tokens": 100, "input_tokens": 60, "output_tokens": 40}`
+	usage := `{"input_tokens": 60, "output_tokens": 40, "model": "mock"}`
 
 	// Two successes with usage.
 	for i := 0; i < 2; i++ {
@@ -450,6 +450,103 @@ func TestTodayStats(t *testing.T) {
 	}
 	if stats.TotalTokens != 200 {
 		t.Errorf("total tokens: got %d, want 200", stats.TotalTokens)
+	}
+}
+
+func TestRecordLLMCallUsageTodayStats(t *testing.T) {
+	st := openTestStore(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+
+	if err := st.RecordLLMCallUsage(&LLMCallUsageRecord{
+		CallKind:       "chat",
+		Provider:       "openai",
+		Model:          "gpt-4o-mini",
+		StartedAt:      now,
+		FinishedAt:     now,
+		DurationMs:     125,
+		InputTokens:    1_000_000,
+		OutputTokens:   1_000_000,
+		EstimatedCost:  0.75,
+		PricingSource:  "builtin:2026-05-03",
+		PricingMatched: true,
+	}); err != nil {
+		t.Fatalf("record llm usage: %v", err)
+	}
+	if err := st.RecordLLMCallUsage(&LLMCallUsageRecord{
+		CallKind:                 "file.summary",
+		Provider:                 "anthropic",
+		Model:                    "claude-3-5-sonnet-20241022",
+		StartedAt:                now,
+		FinishedAt:               now,
+		InputTokens:              10,
+		OutputTokens:             20,
+		CacheCreationInputTokens: 30,
+		CacheReadInputTokens:     40,
+	}); err != nil {
+		t.Fatalf("record llm cached usage: %v", err)
+	}
+
+	stats, err := st.TodayStats()
+	if err != nil {
+		t.Fatalf("today stats: %v", err)
+	}
+	if stats.TotalTokens != 2_000_100 {
+		t.Errorf("total tokens: got %d, want 2000100", stats.TotalTokens)
+	}
+	if stats.EstimatedCostUSD != 0.75 {
+		t.Errorf("estimated cost: got %.6f, want 0.750000", stats.EstimatedCostUSD)
+	}
+
+	byModel, err := st.TodayLLMUsageByModel()
+	if err != nil {
+		t.Fatalf("usage by model: %v", err)
+	}
+	if len(byModel) != 2 {
+		t.Fatalf("models: got %d, want 2", len(byModel))
+	}
+	if byModel[0].Model != "gpt-4o-mini" {
+		t.Fatalf("first model = %q, want gpt-4o-mini", byModel[0].Model)
+	}
+	if byModel[0].InputTokens != 1_000_000 || byModel[0].OutputTokens != 1_000_000 {
+		t.Errorf("first model tokens: got input=%d output=%d", byModel[0].InputTokens, byModel[0].OutputTokens)
+	}
+	if byModel[0].EstimatedCostUSD != 0.75 {
+		t.Errorf("first model cost: got %.6f, want 0.750000", byModel[0].EstimatedCostUSD)
+	}
+}
+
+func TestTodayStatsIncludesLegacyUsageBeforeFirstLLMCallUsage(t *testing.T) {
+	st := openTestStore(t)
+	now := time.Now().UTC()
+	legacyAt := now.Add(-time.Minute).Format("2006-01-02 15:04:05")
+	usageAt := now.Format("2006-01-02 15:04:05")
+
+	if err := st.RecordExecution(&ExecutionRecord{
+		SkillID:   "chat",
+		SkillName: "chat",
+		StartedAt: legacyAt,
+		Success:   true,
+		UsageJSON: `{"input_tokens":25,"output_tokens":25}`,
+	}); err != nil {
+		t.Fatalf("record legacy execution: %v", err)
+	}
+	if err := st.RecordLLMCallUsage(&LLMCallUsageRecord{
+		CallKind:     "chat",
+		Provider:     "openai",
+		Model:        "gpt-4o-mini",
+		StartedAt:    usageAt,
+		InputTokens:  100,
+		OutputTokens: 200,
+	}); err != nil {
+		t.Fatalf("record llm usage: %v", err)
+	}
+
+	stats, err := st.TodayStats()
+	if err != nil {
+		t.Fatalf("today stats: %v", err)
+	}
+	if stats.TotalTokens != 350 {
+		t.Errorf("total tokens: got %d, want 350", stats.TotalTokens)
 	}
 }
 

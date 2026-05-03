@@ -152,7 +152,7 @@ Output ONLY valid JSON.`, text, profileList.String())
 		{Role: core.RoleUser, Content: pmPrompt},
 	}
 
-	resp, err := provider.Generate(ctx, messages)
+	resp, err := provider.Generate(WithLLMCallKind(ctx, "orchestration.route"), messages)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func executeDelegateTask(
 	}
 	_ = maxTokens // TODO: pass to provider when token limit per-call is supported
 
-	resp, err := provider.Generate(ctx, messages)
+	resp, err := provider.Generate(WithLLMCallKind(ctx, "orchestration.delegate"), messages)
 	if err != nil {
 		result.Result = fmt.Sprintf("LLM error: %s", err)
 		return result
@@ -370,7 +370,7 @@ Provide a unified, natural response.`, sections.String())
 		{Role: core.RoleUser, Content: synthPrompt},
 	}
 
-	resp, err := provider.Generate(ctx, messages)
+	resp, err := provider.Generate(WithLLMCallKind(ctx, "orchestration.synthesis"), messages)
 	if err != nil {
 		// Fallback: return raw sections.
 		return sections.String(), nil

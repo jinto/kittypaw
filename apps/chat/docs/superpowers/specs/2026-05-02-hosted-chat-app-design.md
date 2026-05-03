@@ -1,5 +1,7 @@
 # Hosted Chat App Design
 
+> Historical plan snapshot. This document records an app-local implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and the app README/DEPLOY docs for the current live shape.
+
 Date: 2026-05-02
 
 ## Goal

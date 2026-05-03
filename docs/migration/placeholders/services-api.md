@@ -1,14 +1,11 @@
 # services/api
 
-Cloud API and auth authority:
+Historical placeholder from the initial monorepo import. The live app path is
+`apps/kittyapi`.
 
-- OAuth login
-- JWT and refresh token lifecycle
-- device credentials
-- JWKS
-- service discovery
-- public data proxy endpoints
+Current ownership:
 
-This directory will eventually contain the current `kittyapi` repository.
+- `apps/kittyapi`: `/v1/*` public data API and resource data storage
+- `apps/portal`: OAuth, users, devices, discovery, JWKS
 
-Release tags use the `api/v*` prefix.
+Release tags use the `kittyapi/v*` prefix.

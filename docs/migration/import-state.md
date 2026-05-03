@@ -2,6 +2,12 @@
 
 Date: 2026-05-02
 
+This is a historical import snapshot. The paths below record where repositories
+landed during the history-preserving import, before the later `services/*` to
+`apps/*` directory normalization and portal extraction. Do not use this file as
+the current repository layout reference; use `README.md` and `ARCHITECTURE.md`
+for the live shape.
+
 ## Imported Repositories
 
 | Source | Source HEAD | Target path | Monorepo merge commit |

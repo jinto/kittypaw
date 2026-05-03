@@ -1,5 +1,7 @@
 # Server Health Build Version Implementation Plan
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every server deployed to `second` exposes build identity through `/health` so a deploy can be verified immediately.

@@ -14,7 +14,7 @@
 
 ### 허용되는 것
 
-- 환경변수에서 읽는 코드 (`env::var("WEBHOOK_SECRET")`)
+- 환경변수에서 읽는 코드 (`os.Getenv("WEBHOOK_SECRET")`)
 - 플레이스홀더 (`{{DOMAIN}}`, `your.domain.example`)
 - 테스트 전용 더미 값 (`https://pf.kakao.com/test`)
 - SSH alias를 환경변수로 읽는 배포 스크립트 (`DEPLOY_HOST`)
@@ -23,7 +23,7 @@
 
 | 파일 | 수정 내용 | 이유 |
 |------|-----------|------|
-| `src/types.rs` | `channel_url` 기본값을 `unwrap_or_default()`로 변경 | 카카오 채널 ID 하드코딩 제거 |
+| `internal/config/config.go` | `CHANNEL_URL`은 환경변수에서 읽고 기본값은 빈 값으로 유지 | 카카오 채널 ID 하드코딩 제거 |
 | `deploy/env.example` | `CHANNEL_URL`을 플레이스홀더로 | 동일 |
 | `deploy/kittykakao.nginx` | `server_name`을 `{{DOMAIN}}`으로 | 운영 도메인 노출 방지 |
 | `DEPLOY.md` | 도메인, 호스트명을 일반화 | 내부 인프라 정보 제거 |

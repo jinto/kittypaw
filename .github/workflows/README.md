@@ -1,12 +1,15 @@
 # Workflows
 
-Future GitHub Actions workflows should be product-scoped.
+Active workflows live only in this root `.github/workflows/` directory. Workflow
+files preserved under imported app subdirectories are historical and are not
+executed by GitHub from the monorepo.
 
-Expected release workflows:
+Current release workflows:
 
 - `release-kittypaw.yml` for `kittypaw/v*`
-- `release-kittyapi.yml` for `kittyapi/v*`
-- `release-chat.yml` for `chat/v*`
-- `release-kakao.yml` for `kakao/v*`
+
+Hosted service binaries are currently deployed from local build/deploy scripts,
+not from product release workflows. Add future release workflows here only when
+the corresponding `.yml` file exists in this directory.
 
 Do not trigger product releases from a plain `v*` tag.

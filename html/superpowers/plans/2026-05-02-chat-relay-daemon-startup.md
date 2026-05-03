@@ -1,5 +1,7 @@
 # Chat Relay Server Startup Implementation Plan
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Start the outbound chat relay connector from `kittypaw server start` when an account already has relay topology and a device credential stored.

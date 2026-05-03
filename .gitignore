@@ -1,8 +1,12 @@
 .DS_Store
 default.profraw
 *.profraw
+__pycache__/
+*.pyc
 dist/
 tmp/
 .env
 .env.*
 !.env.example
+apps/chat/kittychat-linux
+apps/portal/kittyportal-linux

@@ -1,5 +1,7 @@
 # Multi-Workspace Management With Aliases
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 KittyPaw should let each local account register multiple file workspaces and

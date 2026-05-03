@@ -81,7 +81,8 @@ func (s *State) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	actionID := payload.Action.ID
 	utterance := payload.UserRequest.Utterance
 	userID := payload.UserRequest.User.ID
-	if actionID == "" || utterance == "" || userID == "" {
+	attachments := payload.UserRequest.MediaAttachments()
+	if actionID == "" || userID == "" || (utterance == "" && len(attachments) == 0) {
 		http.Error(w, "missing required fields", http.StatusBadRequest)
 		return
 	}
@@ -152,7 +153,7 @@ func (s *State) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := session.Send(relay.WSOutgoing{ID: actionID, Text: utterance, UserID: userID}); err != nil {
+	if err := session.Send(relay.WSOutgoing{ID: actionID, Text: utterance, UserID: userID, Attachments: attachments}); err != nil {
 		slog.Warn("websocket send failed", "token", relayToken, "err", err)
 		writeJSON(w, http.StatusOK, relay.Text(relay.MsgOffline))
 		return

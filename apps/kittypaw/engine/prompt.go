@@ -248,7 +248,51 @@ func FormatEvent(event *core.Event) string {
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return string(event.Payload)
 	}
-	return payload.Text
+	if len(payload.Attachments) == 0 {
+		return payload.Text
+	}
+
+	var b strings.Builder
+	if payload.Text != "" {
+		b.WriteString(payload.Text)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Attachments:\n")
+	for _, att := range payload.Attachments {
+		b.WriteString("- ")
+		b.WriteString(formatAttachmentHandle(att))
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func formatAttachmentHandle(att core.ChatAttachment) string {
+	parts := []string{}
+	if att.ID != "" {
+		parts = append(parts, "id="+att.ID)
+	}
+	if att.Type != "" {
+		parts = append(parts, "type="+att.Type)
+	}
+	if att.Source != "" {
+		parts = append(parts, "source="+att.Source)
+	}
+	if att.MimeType != "" {
+		parts = append(parts, "mime_type="+att.MimeType)
+	}
+	if att.FileName != "" {
+		parts = append(parts, "file_name="+att.FileName)
+	}
+	if att.Width > 0 && att.Height > 0 {
+		parts = append(parts, fmt.Sprintf("size=%dx%d", att.Width, att.Height))
+	}
+	if att.Caption != "" {
+		parts = append(parts, "caption="+att.Caption)
+	}
+	if len(parts) == 0 {
+		return "attachment"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // FormatExecResult summarizes an execution result for conversation history.
@@ -376,6 +420,7 @@ func buildSkillsSection(baseDir string) string {
 	lines = append(lines, "- Relative File paths are inside the configured workspace. Use `File.write(\"memo.txt\", content)` to write `<workspace>/memo.txt`; use absolute paths only when the user gives one.")
 	lines = append(lines, "- For user image-generation requests, call Image.generate(prompt) first. Do not claim image generation is unavailable, missing, or unconfigured unless Image.generate returns an error.")
 	lines = append(lines, "- Image.generate guard: `const img = Image.generate(prompt); if (img.error || !img.url) return \"이미지 생성 실패: \"+(img.error || \"결과 URL이 비어 있어요\"); return \"이미지를 생성했어요.\\n\\n![generated image](\"+img.url+\")\";` Use `img.url`; `img.imageUrl` is only a compatibility alias.")
+	lines = append(lines, "- For user-attached images listed in the event as `Attachments`, call `Vision.analyzeAttachment(attachmentId, prompt)`; never invent or expose a channel file URL.")
 	lines = append(lines, "- console.log(...args) — Log output (for debugging)")
 
 	// Append installed user skills + packages (callable via Skill.run).

@@ -777,7 +777,7 @@ observeLoop:
 
 			// Call LLM
 			var resp *llm.Response
-			resp, err = activeProvider.Generate(ctx, messages)
+			resp, err = activeProvider.Generate(WithLLMCallKind(ctx, "chat"), messages)
 
 			if err != nil {
 				// Handle retryable errors
@@ -1019,7 +1019,7 @@ func (s *Session) resolveProvider(model string) llm.Provider {
 		slog.Warn("resolveProvider: failed to create provider for named model", "model", model, "error", err)
 		return s.Provider
 	}
-	return p
+	return NewUsageRecordingProvider(p, s.Store, mc.Provider)
 }
 
 // ResolveProfileName determines which profile to use for this request.

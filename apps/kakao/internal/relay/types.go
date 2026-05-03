@@ -1,5 +1,11 @@
 package relay
 
+import (
+	"encoding/json"
+	"strconv"
+	"strings"
+)
+
 const (
 	MsgRateLimited     = "일일 사용 한도에 도달했습니다."
 	MsgNoCallback      = "KittyPaw 스킬 서버가 정상 동작 중입니다. 오픈빌더에서 비동기 콜백을 활성화하면 AI 응답을 받을 수 있습니다."
@@ -21,9 +27,10 @@ type KakaoAction struct {
 }
 
 type KakaoUserRequest struct {
-	Utterance   string    `json:"utterance"`
-	User        KakaoUser `json:"user"`
-	CallbackURL *string   `json:"callbackUrl,omitempty"`
+	Utterance   string                     `json:"utterance"`
+	User        KakaoUser                  `json:"user"`
+	CallbackURL *string                    `json:"callbackUrl,omitempty"`
+	Params      map[string]json.RawMessage `json:"params,omitempty"`
 }
 
 type KakaoUser struct {
@@ -97,9 +104,23 @@ func AsyncAck() KakaoAsyncAck {
 }
 
 type WSOutgoing struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	UserID string `json:"user_id"`
+	ID          string         `json:"id"`
+	Text        string         `json:"text"`
+	UserID      string         `json:"user_id"`
+	Attachments []WSAttachment `json:"attachments,omitempty"`
+}
+
+type WSAttachment struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	Source    string `json:"source,omitempty"`
+	URL       string `json:"url,omitempty"`
+	MimeType  string `json:"mime_type,omitempty"`
+	FileName  string `json:"file_name,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Caption   string `json:"caption,omitempty"`
 }
 
 type WSIncoming struct {
@@ -152,4 +173,99 @@ type RateLimitResult struct {
 type Stats struct {
 	Daily   uint64
 	Monthly uint64
+}
+
+type KakaoMediaParam struct {
+	Type      string `json:"type,omitempty"`
+	URL       string `json:"url,omitempty"`
+	ImageURL  string `json:"imageUrl,omitempty"`
+	MimeType  string `json:"mimeType,omitempty"`
+	FileName  string `json:"fileName,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+}
+
+func (r KakaoUserRequest) MediaAttachments() []WSAttachment {
+	raw, ok := r.Params["media"]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return nil
+	}
+
+	var media []KakaoMediaParam
+	if trimmed[0] == '[' {
+		if err := json.Unmarshal([]byte(trimmed), &media); err != nil {
+			return nil
+		}
+	} else {
+		var one KakaoMediaParam
+		if err := json.Unmarshal([]byte(trimmed), &one); err != nil {
+			return nil
+		}
+		media = []KakaoMediaParam{one}
+	}
+
+	attachments := make([]WSAttachment, 0, len(media))
+	for _, item := range media {
+		url := firstNonEmpty(item.URL, item.ImageURL)
+		if url == "" {
+			continue
+		}
+		typ := normalizeAttachmentType(item.Type, item.MimeType, url)
+		size := item.SizeBytes
+		if size == 0 {
+			size = item.Size
+		}
+		attachments = append(attachments, WSAttachment{
+			ID:        "kakao_media_" + strconv.Itoa(len(attachments)),
+			Type:      typ,
+			Source:    "kakao",
+			URL:       url,
+			MimeType:  item.MimeType,
+			FileName:  firstNonEmpty(item.FileName, item.Name),
+			SizeBytes: size,
+			Width:     item.Width,
+			Height:    item.Height,
+			Caption:   r.Utterance,
+		})
+	}
+	return attachments
+}
+
+func normalizeAttachmentType(rawType, mimeType, rawURL string) string {
+	typ := strings.ToLower(strings.TrimSpace(rawType))
+	switch typ {
+	case "photo", "picture":
+		return "image"
+	case "":
+		mimeType = strings.ToLower(mimeType)
+		rawURL = strings.ToLower(rawURL)
+		if strings.HasPrefix(mimeType, "image/") ||
+			strings.HasSuffix(rawURL, ".jpg") ||
+			strings.HasSuffix(rawURL, ".jpeg") ||
+			strings.HasSuffix(rawURL, ".png") ||
+			strings.HasSuffix(rawURL, ".gif") ||
+			strings.HasSuffix(rawURL, ".webp") {
+			return "image"
+		}
+		return "file"
+	default:
+		return typ
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

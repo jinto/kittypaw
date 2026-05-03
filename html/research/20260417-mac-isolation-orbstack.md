@@ -7,6 +7,10 @@ decision: α1 — OrbStack as Mac prerequisite, single Linux cgroup path
 
 # Mac Multi-Tenant Isolation — OrbStack 결정 연구
 
+> Historical research snapshot. This document captures the code and service
+> shape observed at the time of the research; use repository README,
+> ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## 문제
 
 Per-Tenant Isolation 스펙 v5 는 Mac / Linux 격리 수준이 비대칭이었다:

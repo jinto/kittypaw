@@ -79,12 +79,26 @@ WEBHOOK_SECRET=your-secret ./kittykakao
 
 **서버 → 클라이언트** (수신 메시지):
 ```json
-{"id": "action_id", "text": "사용자 메시지", "user_id": "kakao_user_id"}
+{
+  "id": "action_id",
+  "text": "사용자 메시지",
+  "user_id": "kakao_user_id",
+  "attachments": [
+    {
+      "id": "kakao_media_0",
+      "type": "image",
+      "source": "kakao",
+      "url": "https://cdn.example.com/cat.png"
+    }
+  ]
+}
 ```
+
+카카오 오픈빌더 payload에 미디어가 없으면 `attachments`는 생략됩니다.
 
 **클라이언트 → 서버** (응답):
 ```json
-{"id": "action_id", "text": "응답 메시지"}
+{"id": "action_id", "text": "응답 메시지", "image_url": "https://cdn.example.com/reply.png", "image_alt": "응답 이미지"}
 ```
 
 ## 배포

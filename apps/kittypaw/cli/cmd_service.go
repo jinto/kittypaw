@@ -138,6 +138,6 @@ func preflightPort(host string, port int) error {
 			"  bound to this port. Pick a free port and retry:\n\n"+
 			"    kittypaw server install --bind-port 3001\n\n"+
 			"  Then point your client at the same port:\n"+
-			"    kittypaw chat --server http://%s",
+			"    kittypaw chat --remote http://%s",
 		addr, net.JoinHostPort(host, "3001"))
 }

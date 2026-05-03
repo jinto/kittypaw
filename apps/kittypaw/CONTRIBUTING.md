@@ -27,6 +27,13 @@ make test
 make build       # Build binary
 make test        # All tests (verbose, no cache)
 make test-unit   # Short tests only
+make test-integration
+make test-e2e
+make test-ci
+make eval-secretary
+make eval-user-flows
+make eval-local
+make smoke
 make lint        # Lint (golangci-lint)
 make fmt         # Format (gofmt + goimports)
 make run         # Build and run

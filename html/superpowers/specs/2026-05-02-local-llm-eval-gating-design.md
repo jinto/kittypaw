@@ -1,5 +1,7 @@
 # Local LLM Eval Gating
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 KittyPaw should keep GitHub CI deterministic while still treating locally-run

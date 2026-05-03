@@ -1,13 +1,14 @@
 # services/chat
 
-Hosted chat and daemon relay:
+Historical placeholder from the initial monorepo import. The live app path is
+`apps/chat`.
+
+Current ownership:
 
 - hosted chat static app
 - daemon outbound WebSocket relay
 - route discovery
 - OpenAI-compatible relay endpoints
-- API-issued JWT/JWKS verification
-
-This directory will eventually contain the current `kittychat` repository.
+- portal-issued JWT/JWKS verification
 
 Release tags use the `chat/v*` prefix.

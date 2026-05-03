@@ -1,5 +1,7 @@
 # Account Config V2 Implementation Plan
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the current mixed account config with a clean v2 layout: per-account `account.toml`, non-secret `config.toml`, and per-account `secrets.json`.

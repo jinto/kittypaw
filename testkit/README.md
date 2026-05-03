@@ -6,11 +6,14 @@ Current coverage:
 
 - Docker-backed Portal + Chat browser-session E2E.
 - Chat relay -> real Kittypaw dispatcher -> fake registry skill install E2E.
+  The heavier flow covers exchange-rate install/run, installed exchange-rate
+  reuse with KRW conversion, weather-now install/run with fake geo resolution,
+  and installed weather-now reuse.
 
 Initial candidates:
 
 - JWKS fixture server
-- API token issuer fixtures
+- Portal-issued token fixtures
 - fake Kakao callback server
 - contract validation helpers
 

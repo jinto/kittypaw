@@ -18,14 +18,17 @@ portal.kittypaw.app
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check with version and commit hash |
 | `GET` | `/discovery` | Service URL discovery document |
 | `GET` | `/.well-known/jwks.json` | Public JWK Set for RS256 JWTs |
 | `GET` | `/auth/google` | Google OAuth login |
+| `GET` | `/auth/google/callback` | Google OAuth callback; also completes web login states |
 | `GET` | `/auth/github` | GitHub OAuth login |
+| `GET` | `/auth/github/callback` | GitHub OAuth callback |
 | `POST` | `/auth/token/refresh` | Refresh user access token |
 | `GET` | `/auth/me` | Current user |
 | `GET` | `/auth/cli/{provider}` | CLI OAuth login |
+| `GET` | `/auth/cli/callback` | CLI OAuth callback |
 | `POST` | `/auth/cli/exchange` | Exchange CLI one-time code |
 | `GET` | `/auth/web/google` | Web OAuth login for chat callback |
 | `POST` | `/auth/web/exchange` | Exchange web OAuth code |
@@ -38,7 +41,8 @@ portal.kittypaw.app
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | Server port |
+| `PORT` | `8080` | Server port; production deploy env currently overrides this to `9714` |
+| `UNIX_SOCKET` | unset | Optional Unix socket path; when set, nginx should proxy to this socket instead of a TCP port |
 | `BASE_URL` | `http://localhost:8080` | Portal public origin |
 | `API_BASE_URL` | `BASE_URL` | KittyAPI resource origin |
 | `DATABASE_URL` | required | PostgreSQL connection string |

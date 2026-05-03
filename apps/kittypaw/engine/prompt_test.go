@@ -105,6 +105,29 @@ func TestFormatEvent(t *testing.T) {
 	}
 }
 
+func TestFormatEventAttachmentDoesNotExposePrivateURL(t *testing.T) {
+	payload := core.ChatPayload{
+		Text: "이 사진 설명해줘",
+		Attachments: []core.ChatAttachment{{
+			ID:      "tg_42_0",
+			Type:    "image",
+			Source:  "telegram",
+			URL:     "https://api.telegram.org/file/botsecret-token/photos/cat.jpg",
+			Caption: "이 사진 설명해줘",
+		}},
+	}
+	raw, _ := json.Marshal(payload)
+	event := &core.Event{Type: core.EventTelegram, Payload: raw}
+
+	got := FormatEvent(event)
+	if !strings.Contains(got, "tg_42_0") || !strings.Contains(got, "image") {
+		t.Fatalf("FormatEvent missing attachment handle: %q", got)
+	}
+	if strings.Contains(got, "secret-token") || strings.Contains(got, "api.telegram.org") {
+		t.Fatalf("FormatEvent leaked private URL: %q", got)
+	}
+}
+
 func TestFormatExecResult(t *testing.T) {
 	tests := []struct {
 		result *core.ExecutionResult

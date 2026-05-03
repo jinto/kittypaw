@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -28,7 +29,7 @@ func tryHandleCommand(ctx context.Context, text string, s *Session) (string, boo
 		return handleSkills(s), true
 	case "/run":
 		if len(parts) > 1 {
-			return handleRun(parts[1]), true
+			return handleRun(ctx, parts[1], s), true
 		}
 		return "사용법: /run <skill-name>", true
 	case "/teach":
@@ -87,9 +88,28 @@ func handleSkills(s *Session) string {
 	return sb.String()
 }
 
-func handleRun(name string) string {
-	// TODO: dispatch skill execution
-	return fmt.Sprintf("스킬 '%s' 실행 요청됨", name)
+func handleRun(ctx context.Context, name string, s *Session) string {
+	if s == nil || s.Sandbox == nil {
+		return "스킬 실행을 위한 세션이 준비되지 않았습니다."
+	}
+	resultJSON, err := runSkillOrPackage(ctx, name, s)
+	if err != nil {
+		return fmt.Sprintf("스킬 실행 실패: %s", err)
+	}
+	var result struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return resultJSON
+	}
+	if result.Error != "" {
+		if result.Output != "" {
+			return result.Output
+		}
+		return fmt.Sprintf("스킬 실행 실패: %s", result.Error)
+	}
+	return result.Output
 }
 
 func handleTeach(ctx context.Context, description string, s *Session) string {

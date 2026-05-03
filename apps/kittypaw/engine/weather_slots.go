@@ -37,7 +37,7 @@ func extractWeatherNowSlots(ctx context.Context, sess *Session, userText string)
 		return slots, nil
 	}
 	prompt := buildWeatherSlotPrompt(userText)
-	resp, err := sess.Provider.Generate(ctx, buildSubLLMMessages(prompt))
+	resp, err := sess.Provider.Generate(WithLLMCallKind(ctx, "weather.slots"), buildSubLLMMessages(prompt))
 	if err != nil || resp == nil {
 		return slots, err
 	}

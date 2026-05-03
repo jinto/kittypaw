@@ -103,6 +103,12 @@ Each app remains independently deployed or released:
 - `apps/chat`: service binary and hosted chat static assets
 - `apps/kakao`: service binary and Kakao gateway data store
 
+Hosted services expose `/health` with build identity (`status`, `version`, and
+`commit`) so deployment smoke can verify the running binary immediately after a
+restart. Current nginx/systemd deployment favors Unix socket binding for hosted
+Go services where supported, with nginx proxying public HTTPS traffic to the
+socket instead of a public TCP port.
+
 Databases remain owned by their service. The first portal split keeps the
 existing production database physical layout; identity migrations are copied to
 `apps/portal`, while `apps/kittyapi` keeps historical migrations until the DB

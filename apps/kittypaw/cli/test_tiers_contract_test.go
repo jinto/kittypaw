@@ -60,6 +60,36 @@ func TestEvalRunnersExposeStateExitContract(t *testing.T) {
 	}
 }
 
+func TestEvalRunnersUseAccountConfigPaths(t *testing.T) {
+	for _, path := range []string{
+		"eval/secretary_smoke/run.sh",
+		"eval/user_vision_flows/run.sh",
+	} {
+		body := readRepoFile(t, path)
+		if strings.Contains(body, ".kittypaw/tenants/default") || strings.Contains(body, "tenants/default") {
+			t.Fatalf("%s still references legacy tenants/default path", path)
+		}
+		if !strings.Contains(body, ".kittypaw/accounts/default") {
+			t.Fatalf("%s missing account config path", path)
+		}
+	}
+}
+
+func TestServiceInstallScriptsUseRemoteChatFlag(t *testing.T) {
+	for _, path := range []string{
+		"packaging/macos/register-service.sh",
+		"packaging/linux/register-service.sh",
+	} {
+		body := readRepoFile(t, path)
+		if strings.Contains(body, "kittypaw chat --server") {
+			t.Fatalf("%s still suggests removed --server flag", path)
+		}
+		if !strings.Contains(body, "kittypaw chat --remote http://127.0.0.1:3001") {
+			t.Fatalf("%s missing --remote fallback example", path)
+		}
+	}
+}
+
 func TestSecretarySmokeTreatsJudgeAndChatFailuresAsInfra(t *testing.T) {
 	body := readRepoFile(t, "eval/secretary_smoke/run.sh")
 	for _, want := range []string{

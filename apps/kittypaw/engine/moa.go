@@ -135,7 +135,7 @@ func QueryMoA(ctx context.Context, req MoARequest, resolver ProviderResolver, bu
 	}
 
 	synthMsg := buildSynthesisMessages(req.Prompt, candidates)
-	synthResp, err := synthProvider.Generate(ctx, synthMsg)
+	synthResp, err := synthProvider.Generate(WithLLMCallKind(ctx, "moa.synthesis"), synthMsg)
 	if err != nil {
 		slog.Warn("moa: synthesis failed, returning first success", "moa_model", synthName, "error", err)
 		return unsynthesizedResult(firstSuccess, candidates), nil
@@ -186,7 +186,7 @@ func runCandidate(ctx context.Context, prompt, model string, resolver ProviderRe
 	defer cancel()
 
 	msgs := []core.LlmMessage{{Role: core.RoleUser, Content: prompt}}
-	resp, err := provider.Generate(callCtx, msgs)
+	resp, err := provider.Generate(WithLLMCallKind(callCtx, "moa.candidate"), msgs)
 	cand.LatencyMs = time.Since(start).Milliseconds()
 	if err != nil {
 		cand.Error = err.Error()

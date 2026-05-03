@@ -1,5 +1,7 @@
 # Remote Relay Control Plane Design
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 Provide `chat.kittypaw.app` and OpenAI-compatible hosted API access that can reach a user's home or server Kittypaw server without requiring Tailscale, port forwarding, or inbound firewall changes.

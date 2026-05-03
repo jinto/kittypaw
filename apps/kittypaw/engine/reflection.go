@@ -179,7 +179,7 @@ JSON으로 응답하세요 (마크다운 펜스 없이):
 - ratio는 전체 메시지 대비 비율 (0.0~1.0).
 - JSON만 출력하세요.`, combinedMessages, rejectedLabels.String())
 
-	resp, err := s.Provider.Generate(ctx, []core.LlmMessage{
+	resp, err := s.Provider.Generate(WithLLMCallKind(ctx, "reflection"), []core.LlmMessage{
 		{Role: core.RoleUser, Content: prompt},
 	})
 	if err != nil {

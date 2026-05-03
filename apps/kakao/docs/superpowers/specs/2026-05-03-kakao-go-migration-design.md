@@ -1,5 +1,7 @@
 # KittyKakao Go Migration Design
 
+> Historical plan snapshot. This document records an app-local implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and the app README/DEPLOY docs for the current live shape.
+
 ## Context
 
 `apps/kakao` is the only hosted Kitty app implemented in Rust. The rest of the

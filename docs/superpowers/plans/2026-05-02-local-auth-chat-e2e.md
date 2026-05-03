@@ -1,5 +1,7 @@
 # Local Auth Chat E2E Implementation Plan
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build `make e2e-local`, an opt-in Docker-backed E2E that proves Portal login, Chat BFF session access, JWKS verification, device pairing, daemon route discovery, and chat completion relay.

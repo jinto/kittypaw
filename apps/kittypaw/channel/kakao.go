@@ -17,11 +17,12 @@ import (
 // --- Kakao relay DTOs ---
 
 // kakaoRelayMessage is a message frame from the relay WebSocket.
-// Matches the JSON the KittyPawSession DO sends: {id, text, user_id}.
+// Matches the JSON the Kakao relay sends: {id, text, user_id, attachments?}.
 type kakaoRelayMessage struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	UserID string `json:"user_id,omitempty"`
+	ID          string                `json:"id"`
+	Text        string                `json:"text"`
+	UserID      string                `json:"user_id,omitempty"`
+	Attachments []core.ChatAttachment `json:"attachments,omitempty"`
 }
 
 // kakaoReplyMessage is sent back to the relay to dispatch to Kakao callback.
@@ -40,7 +41,7 @@ type kakaoReplyMessage struct {
 // Protocol:
 //
 //	WS — receive messages, send replies
-//	Recv: {"id":"action_id","text":"utterance","user_id":"kakao_user_id"}
+//	Recv: {"id":"action_id","text":"utterance","user_id":"kakao_user_id","attachments":[...]}
 //	Send: {"id":"action_id","text":"response_text"}
 type KakaoChannel struct {
 	accountID  string
@@ -165,13 +166,14 @@ func (k *KakaoChannel) connectAndListen(ctx context.Context, eventCh chan<- core
 }
 
 func kakaoRelayEvent(accountID string, msg kakaoRelayMessage) (core.Event, bool) {
-	if msg.Text == "" {
+	if msg.Text == "" && len(msg.Attachments) == 0 {
 		return core.Event{}, false
 	}
 	payload := core.ChatPayload{
-		ChatID:    msg.ID,
-		Text:      msg.Text,
-		SessionID: msg.UserID,
+		ChatID:      msg.ID,
+		Text:        msg.Text,
+		SessionID:   msg.UserID,
+		Attachments: msg.Attachments,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

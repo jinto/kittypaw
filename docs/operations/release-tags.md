@@ -4,7 +4,8 @@ Use namespaced tags for product releases:
 
 ```text
 kittypaw/v0.1.0
-api/v0.1.0
+kittyapi/v0.1.0
+portal/v0.1.0
 chat/v0.1.0
 kakao/v0.1.0
 ```

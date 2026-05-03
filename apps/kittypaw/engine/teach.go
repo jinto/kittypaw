@@ -140,7 +140,7 @@ func generateCode(ctx context.Context, desc, chatID string, provider llm.Provide
 		{Role: core.RoleUser, Content: desc},
 	}
 
-	resp, err := provider.Generate(ctx, messages)
+	resp, err := provider.Generate(WithLLMCallKind(ctx, "teach"), messages)
 	if err != nil {
 		return "", fmt.Errorf("LLM generation failed: %w", err)
 	}

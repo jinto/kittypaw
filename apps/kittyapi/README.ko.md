@@ -34,7 +34,7 @@ make run
 
 | Method | Path | 설명 |
 |---|---|---|
-| `GET` | `/health` | 헬스 체크 |
+| `GET` | `/health` | 버전 및 커밋 해시 포함 헬스 체크 |
 | `GET` | `/v1/air/airkorea/realtime/station` | 측정소별 실시간 대기질 |
 | `GET` | `/v1/air/airkorea/realtime/city` | 시도별 실시간 대기질 |
 | `GET` | `/v1/air/airkorea/forecast` | 대기질 예보 |
@@ -61,7 +61,8 @@ make run
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PORT` | `8080` | 서버 포트 |
+| `PORT` | `8080` | 서버 포트. 프로덕션 deploy env는 현재 `9712`로 override합니다 |
+| `UNIX_SOCKET` | 없음 | 선택 Unix 소켓 경로. 설정하면 nginx는 TCP 포트 대신 이 소켓으로 프록시합니다 |
 | `BASE_URL` | `http://localhost:8080` | CORS 기본값으로 쓰는 API origin |
 | `DATABASE_URL` | 필수 | PostgreSQL 연결 문자열 |
 | `CORS_ORIGINS` | `BASE_URL` | 허용 origin CSV |

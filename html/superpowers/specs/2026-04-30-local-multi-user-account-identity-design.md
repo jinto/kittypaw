@@ -1,5 +1,7 @@
 # Local Multi-User Account Identity Design
 
+> Historical plan snapshot. This document records the implementation plan or design state at the time it was written; use repository README, ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 ## Goal
 
 Make `~/.kittypaw/accounts/<id>/` a first-class human account from the first setup, instead of creating `accounts/default/` and treating account selection as a later concern.

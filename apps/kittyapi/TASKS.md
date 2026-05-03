@@ -1,5 +1,11 @@
 # kittypaw-api v1
 
+> Historical task log for the pre-portal-split KittyAPI repository. Runtime
+> identity, OAuth, users, devices, discovery, and JWKS moved to `apps/portal`.
+> Current KittyAPI ownership is `/v1/*` public data APIs and resource-data
+> storage. Treat older auth/JWKS entries below as archive context unless they
+> are explicitly promoted in a new monorepo plan.
+
 ## Plan 1: Project Scaffolding ✅
 
 - [x] **T1: Go module + health endpoint** — `go mod init`, `cmd/server/main.go` (chi + /health), `internal/config/config.go`, 테스트 통과

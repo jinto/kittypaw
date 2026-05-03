@@ -9,7 +9,7 @@ Tailscale/port forwarding.
 
 This repository currently contains the relay core:
 
-- `GET /health`
+- `GET /health` with version and commit hash
 - `GET /daemon/connect` for local daemon outbound WebSocket connections
 - `GET /v1/routes` for authenticated online daemon/account discovery
 - `GET /nodes/{device_id}/accounts/{account_id}/v1/models`
@@ -40,9 +40,12 @@ All configuration is via environment variables:
 | `KITTYCHAT_USER_ID` | required for static token fallback | MVP cloud user id |
 | `KITTYCHAT_DEVICE_ID` | required for static token fallback | MVP device id |
 | `KITTYCHAT_LOCAL_ACCOUNT_ID` | required for static token fallback | Local KittyPaw account id routed through this device |
-| `KITTYCHAT_BIND_ADDR` | `:$PORT` or `:8080` | HTTP bind address |
+| `KITTYCHAT_BIND_ADDR` | `:$PORT` or `:8080` | TCP bind address or Unix socket path |
 | `PORT` | `8080` | Port fallback when `KITTYCHAT_BIND_ADDR` is unset |
+| `KITTYCHAT_PUBLIC_BASE_URL` | `https://chat.kittypaw.app` | Public Chat origin used in route metadata |
+| `KITTYCHAT_API_AUTH_BASE_URL` | `https://portal.kittypaw.app/auth` | Portal auth base URL used by OpenAI-compatible clients |
 | `KITTYCHAT_VERSION` | `dev` | Version string returned by `/health` |
+| `KITTYCHAT_COMMIT` | unset | Commit hash returned by `/health` |
 
 ## Development
 
@@ -175,7 +178,8 @@ default account should use the account-scoped routes.
 
 ## Next Steps
 
-- Replace static fallback credentials with API-server-issued API keys and
-  pairing codes backed by Postgres.
-- Add the real KittyPaw daemon outbound connector.
-- Add web chat UI after the OpenAI-compatible streaming path is stable.
+- Keep static fallback credentials only for local/manual smoke paths.
+- Expand local E2E coverage for offline devices, token refresh, and account
+  isolation.
+- Continue tightening the Chat BFF browser-session surface around cookie auth
+  and account-scoped routing.

@@ -16,8 +16,9 @@ This repo is a Go-first monorepo for KittyPaw apps.
 
 - `apps/kittypaw` owns the local CLI, daemon, local web UI, engine, local store,
   and local channel adapters.
-- `apps/kittyapi` owns cloud auth, users, devices, discovery, JWKS, and public API
-  proxy endpoints.
+- `apps/kittyapi` owns hosted `/v1/*` public data API and proxy endpoints.
+- `apps/portal` owns OAuth, users, refresh tokens, devices, discovery, JWKS,
+  and service bootstrap metadata.
 - `apps/chat` owns hosted chat, route discovery, OpenAI-compatible relay
   endpoints, and daemon outbound WebSocket relay.
 - `apps/kakao` owns Kakao OpenBuilder webhook, Kakao callback dispatch, and
@@ -34,7 +35,7 @@ When changing anything under `contracts/`:
 2. Update at least one example fixture.
 3. Add or update producer tests in the owning service.
 4. Add or update consumer tests in every affected service.
-5. Run the root contract verification target once it exists.
+5. Run `make contracts-check` from the repository root.
 
 ## Release Tags
 
@@ -42,6 +43,7 @@ Use namespaced tags:
 
 - `kittypaw/vX.Y.Z`
 - `kittyapi/vX.Y.Z`
+- `portal/vX.Y.Z`
 - `chat/vX.Y.Z`
 - `kakao/vX.Y.Z`
 

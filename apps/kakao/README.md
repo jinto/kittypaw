@@ -81,12 +81,26 @@ All configuration is via environment variables:
 
 **Server → Client** (incoming message):
 ```json
-{"id": "action_id", "text": "user message", "user_id": "kakao_user_id"}
+{
+  "id": "action_id",
+  "text": "user message",
+  "user_id": "kakao_user_id",
+  "attachments": [
+    {
+      "id": "kakao_media_0",
+      "type": "image",
+      "source": "kakao",
+      "url": "https://cdn.example.com/cat.png"
+    }
+  ]
+}
 ```
+
+`attachments` is omitted when the Kakao OpenBuilder payload has no media.
 
 **Client → Server** (response):
 ```json
-{"id": "action_id", "text": "response message"}
+{"id": "action_id", "text": "response message", "image_url": "https://cdn.example.com/reply.png", "image_alt": "reply image"}
 ```
 
 ## Deployment

@@ -84,6 +84,13 @@ func webhookPayload(actionID, utterance, userID string, callbackURL string) map[
 	}
 }
 
+func webhookPayloadWithMedia(actionID, utterance, userID string, callbackURL string, media map[string]any) map[string]any {
+	payload := webhookPayload(actionID, utterance, userID, callbackURL)
+	userRequest := payload["userRequest"].(map[string]any)
+	userRequest["params"] = map[string]any{"media": media}
+	return payload
+}
+
 func decodeJSON(t *testing.T, resp *http.Response) map[string]any {
 	t.Helper()
 	defer resp.Body.Close()
@@ -179,6 +186,48 @@ func TestHappyPathRegisterPairWebhookWS(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for callback dispatch")
+	}
+}
+
+func TestWebhookForwardsImageMediaAttachment(t *testing.T) {
+	ts, _ := spawnServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg := decodeJSON(t, postJSON(t, ts.URL+"/register", nil))
+	token := reg["token"].(string)
+	pairCode := reg["pair_code"].(string)
+	conn, _, err := websocket.Dial(ctx, wsURL(ts, token), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+
+	decodeJSON(t, postJSON(t, ts.URL+"/webhook?secret=test-secret", webhookPayload("pair_act", pairCode, "kakao_user_media", "https://callback.kakao.com/pair")))
+
+	msgResp := postJSON(t, ts.URL+"/webhook?secret=test-secret", webhookPayloadWithMedia(
+		"act_media",
+		"이 이미지 봐줘",
+		"kakao_user_media",
+		"https://callback.kakao.com/reply",
+		map[string]any{"type": "image", "url": "https://cdn.example.com/cat.png"},
+	))
+	msgBody := decodeJSON(t, msgResp)
+	if msgBody["useCallback"] != true {
+		t.Fatalf("useCallback = %v", msgBody["useCallback"])
+	}
+
+	var frame map[string]any
+	if err := wsjson.Read(ctx, conn, &frame); err != nil {
+		t.Fatalf("read websocket frame: %v", err)
+	}
+	attachments, ok := frame["attachments"].([]any)
+	if !ok || len(attachments) != 1 {
+		t.Fatalf("frame attachments = %+v", frame)
+	}
+	att := attachments[0].(map[string]any)
+	if att["type"] != "image" || att["url"] != "https://cdn.example.com/cat.png" {
+		t.Fatalf("attachment = %+v", att)
 	}
 }
 

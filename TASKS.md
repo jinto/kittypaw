@@ -14,5 +14,5 @@
 - [x] Add root-level contract verification commands.
 - [x] Add migration plan for current `kittypaw`, `kittyapi`, `kittychat`, and
   `kittykakao` repositories.
-- [ ] Add `apps/kittypaw` release workflow plan for `kittypaw/v*` tags.
+- [x] Add `apps/kittypaw` release workflow plan for `kittypaw/v*` tags.
 - [ ] Add initial CI path-filter strategy.

@@ -101,9 +101,11 @@ func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) er
 	if err != nil {
 		return fmt.Errorf("create llm provider: %w", err)
 	}
+	provider = engine.NewUsageRecordingProvider(provider, td.Store, defaultModel.Provider)
 	var fallback llm.Provider
 	if m, ok := cfgCopy.RuntimeFallbackModel(td.Secrets); ok {
 		fallback, _ = llm.NewProviderFromModelConfig(m)
+		fallback = engine.NewUsageRecordingProvider(fallback, td.Store, m.Provider)
 	}
 
 	td.Account.Config = &cfgCopy

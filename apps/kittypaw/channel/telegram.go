@@ -97,11 +97,14 @@ type telegramInlineKeyboardMarkup struct {
 
 // telegramMessage is the message object inside an update.
 type telegramMessage struct {
-	MessageID int64          `json:"message_id"`
-	Chat      telegramChat   `json:"chat"`
-	Text      string         `json:"text"`
-	From      *telegramUser  `json:"from,omitempty"`
-	Voice     *telegramVoice `json:"voice,omitempty"`
+	MessageID int64               `json:"message_id"`
+	Chat      telegramChat        `json:"chat"`
+	Text      string              `json:"text"`
+	Caption   string              `json:"caption,omitempty"`
+	From      *telegramUser       `json:"from,omitempty"`
+	Voice     *telegramVoice      `json:"voice,omitempty"`
+	Photo     []telegramPhotoSize `json:"photo,omitempty"`
+	Document  *telegramDocument   `json:"document,omitempty"`
 }
 
 // telegramChat identifies a Telegram chat.
@@ -137,6 +140,22 @@ func (u *telegramUser) displayName() string {
 // telegramVoice holds voice message metadata.
 type telegramVoice struct {
 	FileID string `json:"file_id"`
+}
+
+type telegramPhotoSize struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	Width        int    `json:"width"`
+	Height       int    `json:"height"`
+}
+
+type telegramDocument struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id,omitempty"`
+	FileName     string `json:"file_name,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
 }
 
 // telegramFile is the response from getFile.
@@ -241,9 +260,13 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 			t.mu.Unlock()
 
 			text := msg.Text
+			if text == "" {
+				text = msg.Caption
+			}
+			attachments := t.telegramAttachments(ctx, msg, text)
 
 			// Voice message: download and transcribe via Whisper.
-			if msg.Voice != nil && text == "" {
+			if msg.Voice != nil && text == "" && len(attachments) == 0 {
 				transcribed, err := t.transcribeVoice(ctx, msg.Voice.FileID)
 				if err != nil {
 					slog.Warn("telegram: voice transcription failed", "error", err)
@@ -252,11 +275,11 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 				text = transcribed
 			}
 
-			if text == "" {
+			if text == "" && len(attachments) == 0 {
 				continue
 			}
 
-			event, chatID, ok := telegramMessageEvent(t.accountID, msg, text)
+			event, chatID, ok := telegramMessageEvent(t.accountID, msg, text, attachments)
 			if !ok {
 				continue
 			}
@@ -274,8 +297,15 @@ func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) 
 	}
 }
 
-func telegramMessageEvent(accountID string, msg *telegramMessage, text string) (core.Event, int64, bool) {
-	if msg == nil || text == "" {
+func telegramMessageEvent(accountID string, msg *telegramMessage, text string, attachmentGroups ...[]core.ChatAttachment) (core.Event, int64, bool) {
+	if msg == nil {
+		return core.Event{}, 0, false
+	}
+	var attachments []core.ChatAttachment
+	if len(attachmentGroups) > 0 {
+		attachments = attachmentGroups[0]
+	}
+	if text == "" && len(attachments) == 0 {
 		return core.Event{}, 0, false
 	}
 	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
@@ -294,6 +324,7 @@ func telegramMessageEvent(accountID string, msg *telegramMessage, text string) (
 		Text:             text,
 		FromName:         fromName,
 		SessionID:        sessionID,
+		Attachments:      attachments,
 		ReplyToMessageID: strconv.FormatInt(msg.MessageID, 10),
 	}
 	raw, err := json.Marshal(payload)
@@ -307,6 +338,99 @@ func telegramMessageEvent(accountID string, msg *telegramMessage, text string) (
 		AccountID: accountID,
 		Payload:   raw,
 	}, msg.Chat.ID, true
+}
+
+func (t *TelegramChannel) telegramAttachments(ctx context.Context, msg *telegramMessage, caption string) []core.ChatAttachment {
+	if msg == nil {
+		return nil
+	}
+	var attachments []core.ChatAttachment
+	if len(msg.Photo) > 0 {
+		photo := largestTelegramPhoto(msg.Photo)
+		if photo.FileID != "" {
+			filePath, err := t.getFilePath(ctx, photo.FileID)
+			if err != nil {
+				slog.Warn("telegram: getFile failed for photo", "error", err)
+			} else {
+				attachments = append(attachments, core.ChatAttachment{
+					ID:        fmt.Sprintf("tg_%d_%d", msg.MessageID, len(attachments)),
+					Type:      "image",
+					Source:    "telegram",
+					URL:       telegramFileURL(t.botToken, filePath),
+					SizeBytes: photo.FileSize,
+					Width:     photo.Width,
+					Height:    photo.Height,
+					Caption:   caption,
+				})
+			}
+		}
+	}
+	if msg.Document != nil && msg.Document.FileID != "" {
+		filePath, err := t.getFilePath(ctx, msg.Document.FileID)
+		if err != nil {
+			slog.Warn("telegram: getFile failed for document", "error", err)
+		} else {
+			attachments = append(attachments, core.ChatAttachment{
+				ID:        fmt.Sprintf("tg_%d_%d", msg.MessageID, len(attachments)),
+				Type:      telegramDocumentAttachmentType(msg.Document),
+				Source:    "telegram",
+				URL:       telegramFileURL(t.botToken, filePath),
+				MimeType:  msg.Document.MimeType,
+				FileName:  msg.Document.FileName,
+				SizeBytes: msg.Document.FileSize,
+				Caption:   caption,
+			})
+		}
+	}
+	return attachments
+}
+
+func largestTelegramPhoto(photos []telegramPhotoSize) telegramPhotoSize {
+	best := photos[0]
+	bestScore := telegramPhotoScore(best)
+	for _, photo := range photos[1:] {
+		score := telegramPhotoScore(photo)
+		if score > bestScore {
+			best = photo
+			bestScore = score
+		}
+	}
+	return best
+}
+
+func telegramPhotoScore(photo telegramPhotoSize) int64 {
+	if photo.FileSize > 0 {
+		return photo.FileSize
+	}
+	return int64(photo.Width) * int64(photo.Height)
+}
+
+func isTelegramImageDocument(doc *telegramDocument) bool {
+	if doc == nil {
+		return false
+	}
+	mimeType := strings.ToLower(doc.MimeType)
+	if strings.HasPrefix(mimeType, "image/") {
+		return true
+	}
+	name := strings.ToLower(doc.FileName)
+	for _, suffix := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func telegramDocumentAttachmentType(doc *telegramDocument) string {
+	if isTelegramImageDocument(doc) {
+		return "image"
+	}
+	return "file"
+}
+
+func telegramFileURL(botToken, filePath string) string {
+	return telegramFileAPI + botToken + "/" + filePath
 }
 
 // startTyping spawns (or replaces) a typingLoop for chatID. Subsequent calls
@@ -678,7 +802,7 @@ func (t *TelegramChannel) transcribeVoice(ctx context.Context, fileID string) (s
 	}
 
 	// Step 2: download the file bytes.
-	fileURL := telegramFileAPI + t.botToken + "/" + filePath
+	fileURL := telegramFileURL(t.botToken, filePath)
 	fileReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return "", err

@@ -9,6 +9,7 @@ Portal은 `portal.kittypaw.app`에서 auth authority와 service discovery를
 
 ```text
 PORT=9714
+UNIX_SOCKET=/home/jinto/kittyportal/kittyportal.sock
 BASE_URL=https://portal.kittypaw.app
 API_BASE_URL=https://api.kittypaw.app
 DATABASE_URL=postgres://...
@@ -46,6 +47,18 @@ curl https://portal.kittypaw.app/discovery
 curl https://portal.kittypaw.app/.well-known/jwks.json
 curl https://portal.kittypaw.app/v1/geo/resolve       # 404
 bash deploy/smoke.sh
+```
+
+## Fabric 작업
+
+```bash
+uv run fab setup
+uv run fab deploy
+uv run fab smoke
+uv run fab migrate
+uv run fab rollback
+uv run fab status
+uv run fab logs
 ```
 
 ## DB

@@ -1,10 +1,12 @@
 # KittyPaw
 
-Experimental Go framework for local AI agents. Single binary, goja JS sandbox, 5 channel adapters, skill registry. **v0.0.8 alpha** — honest status over polish.
+Experimental Go framework for local AI agents. Single binary, goja JS sandbox,
+5 channel adapters, skill registry. **Alpha** — honest status over polish.
 
 ## Status
 
 - ✅ **Working** — CLI + local server, registry install, sandbox + permission, 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
+- ✅ **Working** — Telegram/Kakao inbound media metadata; attached images are available to the agent through `Vision.analyzeAttachment(...)`
 - 🚧 **Partial** — Reflection candidate surface (verified), `skill create` syntax (5/5 measured), Web search source quality
 - 🔬 **Experimental** — Family account, MoA, live workspace indexing
 - ❌ **Not / retired** — Windows GUI signing, "learns the more you use it" auto-adaptation, self-healing (retired)
@@ -12,6 +14,17 @@ Experimental Go framework for local AI agents. Single binary, goja JS sandbox, 5
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
+```
+
+Installer overrides for local forks or nonstandard install locations:
+
+```bash
+KITTYPAW_INSTALL_REPO=owner/repo \
+INSTALL_DIR="$HOME/.local/bin" \
+curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
+
+KITTYPAW_INSTALL_SCRIPT_URL=https://example.com/install-kittypaw.sh \
 curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
 ```
 
@@ -28,6 +41,20 @@ Inspect what you get: a local server, one installed skill, an LLM-backed chat. S
 ```bash
 kittypaw chat          # interactive REPL mode
 kittypaw server start  # start as HTTP/WebSocket server
+```
+
+## In-Chat Commands
+
+These commands are entered inside `kittypaw chat`, Telegram, Kakao, or another
+connected chat channel:
+
+```text
+/help                 show command help
+/status               show today's local execution stats
+/skills               list local user-created skills
+/run <name>           run an installed skill or package by id/name
+/teach <description>  create and save a draft skill from chat
+/persona <profile-id> set the default assistant profile for this account
 ```
 
 ## Accounts
@@ -69,6 +96,17 @@ metadata lives at `~/.kittypaw/auth.json`.
 url = "https://raw.githubusercontent.com/kittypaw-app/skills/main"
 ```
 
+Operational environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `KITTYPAW_ACCOUNT` | Select the local account for CLI commands |
+| `KITTYPAW_TELEGRAM_BOT_TOKEN` | Seed `kittypaw account add` / setup with a Telegram bot token |
+| `KITTYPAW_ALLOW_INSECURE_REGISTRY=1` | Test/local override that permits non-HTTPS skill registries |
+| `INSTALL_DIR` | Install destination for `apps/kittypaw/install-kittypaw.sh` |
+| `KITTYPAW_INSTALL_REPO` | Root installer repository override, e.g. `owner/repo` |
+| `KITTYPAW_INSTALL_SCRIPT_URL` | Root installer script URL override |
+
 ## Build from Source
 
 ```bash
@@ -81,12 +119,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and conventions.
 
 ## Release
 
-Tag-triggered CI via GoReleaser + GitHub Actions.
+KittyPaw releases are built from the monorepo root workflow
+`.github/workflows/release-kittypaw.yml`. Product tags are namespaced:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag kittypaw/vX.Y.Z
+git push origin kittypaw/vX.Y.Z
 ```
+
+The workflow builds archives directly with `go build`, signs and notarizes the
+macOS binaries, and updates release checksums. Do not use plain `vX.Y.Z` tags
+for monorepo product releases.
 
 ## Stop / Uninstall
 

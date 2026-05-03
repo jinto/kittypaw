@@ -910,6 +910,7 @@ func runSkillStats(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  Failed:       %d\n", jsonInt(res, "failed"))
 	fmt.Printf("  Auto-retries: %d\n", jsonInt(res, "auto_retries"))
 	fmt.Printf("  Total tokens: %d\n", jsonInt(res, "total_tokens"))
+	fmt.Printf("  Est. cost:    $%.6f\n", jsonFloat(res, "estimated_cost_usd"))
 	return nil
 }
 
@@ -2147,6 +2148,14 @@ func connectServerForAccount(accountID string) (*client.Client, error) {
 func jsonInt(m map[string]any, key string) int64 {
 	if v, ok := m[key].(float64); ok {
 		return int64(v)
+	}
+	return 0
+}
+
+// jsonFloat extracts a float from a map[string]any.
+func jsonFloat(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
 	}
 	return 0
 }

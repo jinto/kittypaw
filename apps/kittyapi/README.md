@@ -35,7 +35,7 @@ make run
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check with version and commit hash |
 | `GET` | `/v1/air/airkorea/realtime/station` | Realtime air quality by station |
 | `GET` | `/v1/air/airkorea/realtime/city` | Realtime air quality by city |
 | `GET` | `/v1/air/airkorea/forecast` | Air quality forecast |
@@ -62,7 +62,8 @@ is planned; the runtime no longer serves identity routes.
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | Server port |
+| `PORT` | `8080` | Server port; production deploy env currently overrides this to `9712` |
+| `UNIX_SOCKET` | unset | Optional Unix socket path; when set, nginx should proxy to this socket instead of a TCP port |
 | `BASE_URL` | `http://localhost:8080` | Public API origin for CORS default |
 | `DATABASE_URL` | required | PostgreSQL connection string |
 | `CORS_ORIGINS` | `BASE_URL` | Comma-separated allowed origins |

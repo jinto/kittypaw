@@ -109,6 +109,7 @@ var SkillRegistry = []SkillMeta{
 	}},
 	{Name: "Vision", Methods: []SkillMethodMeta{
 		{Name: "analyze", Signature: "Vision.analyze(imageUrl, prompt) — returns {text}"},
+		{Name: "analyzeAttachment", Signature: "Vision.analyzeAttachment(attachmentId, prompt) — analyze an image attached to the current user message; returns {text}"},
 	}},
 	{Name: "Mcp", Methods: []SkillMethodMeta{
 		{Name: "call", Signature: "Mcp.call(server, tool, args) — calls an MCP tool"},

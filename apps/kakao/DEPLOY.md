@@ -31,6 +31,12 @@ ssh <your-host>
 vi <REMOTE_DIR>/.env
 ```
 
+현재 production 템플릿은 TCP 포트 대신 Unix 소켓 파일로 nginx와 연결한다:
+
+```env
+BIND_ADDR=/home/jinto/kittykakao/kittykakao.sock
+```
+
 ### Fabric 없이 설치할 수 있나?
 
 가능하다. 이 앱은 단일 Go 바이너리와 세 개의 설정 파일만 필요하다.

@@ -1,5 +1,9 @@
 # KittyAPI Proxy 카탈로그 — 외부 API 통합 조사
 
+> Historical research snapshot. This document captures the code and service
+> shape observed at the time of the research; use repository README,
+> ARCHITECTURE.md, and app README/DEPLOY docs for the current live shape.
+
 > **조사 시점**: 2026-04-30
 > **조사 범위**: KittyPaw 내부 (`../skills` 14개 + 현재 KittyAPI proxy) + 경쟁사 (hermes-agent, openclaw) + AI agent 일반 카탈로그 + proxy 적합성 framework
 > **산출 목적**: KittyAPI proxy 가 *추가로* 지원할 외부 API 결정의 근거 자료

@@ -1475,7 +1475,7 @@ type ambiguousFollowupDecision struct {
 func classifyAmbiguousFollowup(ctx context.Context, sess *Session, userText, skillID, rawOutput string) (ambiguousFollowupDecision, error) {
 	var decision ambiguousFollowupDecision
 	prompt := buildAmbiguousFollowupPrompt(userText, skillID, rawOutput)
-	resp, err := sess.Provider.Generate(ctx, buildSubLLMMessages(prompt))
+	resp, err := sess.Provider.Generate(WithLLMCallKind(ctx, "pipeline.followup"), buildSubLLMMessages(prompt))
 	if err != nil || resp == nil {
 		return decision, err
 	}
@@ -1667,7 +1667,7 @@ func mediateSkillOutput(ctx context.Context, sess *Session, skillID, userText, r
 		truncated = truncated[:mediateSkillRawOutputCap] + "\n…(truncated)"
 	}
 	messages := buildSubLLMMessages(buildMediatePrompt(skillID, userText, truncated))
-	resp, err := sess.Provider.Generate(ctx, messages)
+	resp, err := sess.Provider.Generate(WithLLMCallKind(ctx, "pipeline.mediate"), messages)
 	if err != nil || resp == nil {
 		return rawOutput
 	}
@@ -1745,7 +1745,7 @@ func mediateSkillOutputWithTools(ctx context.Context, sess *Session, skillID, us
 	var lastTextResp *llm.Response
 	var toolResults []string
 	for i := 0; i < mediateMaxToolIterations; i++ {
-		resp, err := sess.Provider.GenerateWithTools(ctx, messages, []llm.Tool{codeExecToolDef})
+		resp, err := sess.Provider.GenerateWithTools(WithLLMCallKind(ctx, "pipeline.mediate.tools"), messages, []llm.Tool{codeExecToolDef})
 		if err != nil || resp == nil {
 			return rawOutput
 		}

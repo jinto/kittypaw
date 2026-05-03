@@ -19,10 +19,11 @@ Kittypaw agent/channel critical flows early, runs Go/Rust package tests, and
 runs the Chat in-process e2e smoke. It intentionally does not run production
 endpoint smoke scripts, DB-backed integration tests, or LLM-judged evals.
 
-The early Kittypaw flow checks cover chat-driven skill install/run,
-assistant mention routing, in-chat `/persona`, reflection over
-`conversation_turns`, persona evolution pending proposals, and captured-shape
-Telegram/Kakao channel fixtures.
+The early Kittypaw flow checks are deterministic engine/channel regressions,
+not CLI workflow tests. They cover chat-driven skill install/run, assistant
+mention routing, in-chat `/persona`, reflection over `conversation_turns`,
+persona evolution pending proposals, and captured-shape Telegram/Kakao channel
+fixtures.
 
 ## `e2e-local.sh`
 
@@ -40,7 +41,9 @@ session can reach `/app/api/*` without a browser `Authorization` header.
 The harness also runs a heavier local agent flow: browser chat -> Chat relay ->
 real Kittypaw dispatcher -> fake skill registry. It verifies that a user can ask
 for exchange rates, receive an install offer, approve it, and get the installed
-skill result back through the Chat BFF.
+skill result back through the Chat BFF. It also verifies an installed
+exchange-rate follow-up with KRW conversion, a Gangnam Station weather install
+using fake KittyAPI geo resolution, and installed weather skill reuse.
 
 Set `KITTY_E2E_KEEP_DB=1` to keep the database container after the run. Set
 `KITTY_E2E_SKIP_COMPOSE=1` and provide `DATABASE_URL` to use an already-running

@@ -15,6 +15,7 @@ engine/        Agent loop (observe + retry), skill executor, HTML-to-Markdown, S
 channel/       Messaging channels (Telegram, Slack, Discord, Kakao, WebSocket)
 server/        HTTP API (Chi) + WebSocket streaming + ChannelSpawner (hot-reload)
 client/        REST/WS client + DaemonConn (thin client: auto server discovery/start)
+remote/        Hosted-service connectors such as Chat relay
 ```
 
 ## Key Design Decisions (vs Rust original)
@@ -49,7 +50,7 @@ Provenance tracked via `SourceURL`, `SourceHash`, `SourceText` fields on Skill. 
 
 Config fields support `source = "namespace/key"` binding to resolve values from shared `secrets.json` (e.g. `source = "telegram/bot_token"`). Resolution order: package-scoped → source binding → default. Secrets file auto-migrates from flat/mixed formats to canonical nested JSON on first load.
 
-**Official skill boundary (load-bearing)**: official packages are deterministic executors, not natural-language parsers. Intent classification, slot extraction, disambiguation, and multi-skill chaining belong to the engine/LLM layer. Official JS packages may read structured `__context__.params`, structured `__context__.user`, and package `__context__.config`; they must not maintain stop-word lists, Korean particle stripping, regex grammars, or other raw utterance parsing over `ctx.message.text` / `ctx.input`. If a required structured slot is missing, the engine should clarify or resolve it before calling the package; the package should not silently fall back to an unrelated default. Caller-facing LLM requirements belong in `package.toml` (`[discovery]`, `[capabilities.*]`, `[invocation]`, `[[invocation.inputs]]`), not in package JS. See `docs/skills/official-skill-contract.md`.
+**Official skill boundary (load-bearing)**: official packages are deterministic executors, not natural-language parsers. Intent classification, slot extraction, disambiguation, and multi-skill chaining belong to the engine/LLM layer. Official JS packages may read structured `__context__.params`, structured `__context__.user`, and package `__context__.config`; they must not maintain stop-word lists, Korean particle stripping, regex grammars, or other raw utterance parsing over `ctx.message.text` / `ctx.input`. If a required structured slot is missing, the engine should clarify or resolve it before calling the package; the package should not silently fall back to an unrelated default. Caller-facing LLM requirements belong in `package.toml` (`[discovery]`, `[capabilities.*]`, `[invocation]`, `[[invocation.inputs]]`), not in package JS. See `html/skills/official-skill-contract.md`.
 
 ## API Token Management
 
@@ -198,7 +199,11 @@ lefthook install
 
 ### CI
 
-GitHub Actions runs `lint` and `test` on every push/PR to `main`. See `.github/workflows/ci.yml`.
+The imported app-local workflow files under `apps/kittypaw/.github/` are not
+active from the monorepo root. Active monorepo workflows live under
+`.github/workflows/`; currently the root owns Pages and `kittypaw/v*` release
+automation. Use root `make smoke-local` plus app-local `make test` / `make lint`
+for local verification.
 
 ## Release
 

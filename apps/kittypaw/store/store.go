@@ -88,11 +88,44 @@ type ExecutionRecord struct {
 
 // ExecutionStats is an aggregated daily summary.
 type ExecutionStats struct {
-	TotalRuns   int
-	Successful  int
-	Failed      int
-	AutoRetries int
-	TotalTokens int64
+	TotalRuns        int
+	Successful       int
+	Failed           int
+	AutoRetries      int
+	TotalTokens      int64
+	EstimatedCostUSD float64
+}
+
+// LLMCallUsageRecord captures token and estimated-cost data for one LLM API call.
+type LLMCallUsageRecord struct {
+	ID                       int64
+	CallKind                 string
+	Provider                 string
+	Model                    string
+	StartedAt                string
+	FinishedAt               string
+	DurationMs               int64
+	InputTokens              int64
+	OutputTokens             int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	EstimatedCost            float64
+	PricingSource            string
+	PricingMatched           bool
+	UsageJSON                string
+}
+
+// LLMUsageByModel is a daily aggregate grouped by provider/model.
+type LLMUsageByModel struct {
+	Provider                 string  `json:"provider"`
+	Model                    string  `json:"model"`
+	Calls                    int     `json:"calls"`
+	InputTokens              int64   `json:"input_tokens"`
+	OutputTokens             int64   `json:"output_tokens"`
+	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64   `json:"cache_read_input_tokens"`
+	TotalTokens              int64   `json:"total_tokens"`
+	EstimatedCostUSD         float64 `json:"estimated_cost_usd"`
 }
 
 // KeyValue is a generic key-value pair used for user context listings.
@@ -739,6 +772,30 @@ func (s *Store) RecordExecution(rec *ExecutionRecord) error {
 	return err
 }
 
+// RecordLLMCallUsage inserts a token/cost record for a single LLM call.
+func (s *Store) RecordLLMCallUsage(rec *LLMCallUsageRecord) error {
+	if rec == nil {
+		return fmt.Errorf("llm usage record is nil")
+	}
+	callKind := rec.CallKind
+	if callKind == "" {
+		callKind = "llm"
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO llm_call_usage
+			(call_kind, provider, model, started_at, finished_at, duration_ms,
+			 input_tokens, output_tokens, cache_creation_input_tokens,
+			 cache_read_input_tokens, estimated_cost_usd, pricing_source,
+			 pricing_matched, usage_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		callKind, rec.Provider, rec.Model, rec.StartedAt, nullString(rec.FinishedAt),
+		rec.DurationMs, rec.InputTokens, rec.OutputTokens,
+		rec.CacheCreationInputTokens, rec.CacheReadInputTokens,
+		rec.EstimatedCost, rec.PricingSource, boolToInt(rec.PricingMatched),
+		nullString(rec.UsageJSON))
+	return err
+}
+
 // RecentExecutions returns the most recent execution records.
 func (s *Store) RecentExecutions(limit int) ([]ExecutionRecord, error) {
 	rows, err := s.db.Query(`
@@ -772,11 +829,54 @@ func (s *Store) TodayStats() (*ExecutionStats, error) {
 		return nil, err
 	}
 
-	// Sum tokens from usage_json where available.
+	var usageRows int
 	var totalTokens sql.NullInt64
+	var estimatedCost sql.NullFloat64
+	var firstUsageStarted sql.NullString
+	err = s.db.QueryRow(`
+		SELECT
+			COUNT(*),
+			SUM(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens),
+			SUM(estimated_cost_usd),
+			MIN(started_at)
+		FROM llm_call_usage
+		WHERE started_at >= date('now')`).Scan(&usageRows, &totalTokens, &estimatedCost, &firstUsageStarted)
+	if err != nil {
+		return nil, err
+	}
+	if usageRows > 0 {
+		st.TotalTokens = totalTokens.Int64
+		st.EstimatedCostUSD = estimatedCost.Float64
+		if firstUsageStarted.Valid {
+			var legacyBefore sql.NullInt64
+			if err := s.db.QueryRow(`
+				SELECT SUM(
+					COALESCE(json_extract(usage_json, '$.total_tokens'), 0) +
+					COALESCE(json_extract(usage_json, '$.input_tokens'), 0) +
+					COALESCE(json_extract(usage_json, '$.output_tokens'), 0) +
+					COALESCE(json_extract(usage_json, '$.cache_creation_input_tokens'), 0) +
+					COALESCE(json_extract(usage_json, '$.cache_read_input_tokens'), 0)
+				)
+				FROM execution_history
+				WHERE started_at >= date('now')
+				  AND started_at < ?
+				  AND usage_json IS NOT NULL`, firstUsageStarted.String).Scan(&legacyBefore); err != nil {
+				return nil, err
+			}
+			st.TotalTokens += legacyBefore.Int64
+		}
+		return &st, nil
+	}
+
+	// Compatibility for databases that only have execution_history.usage_json
+	// rows. New usage accounting lives in llm_call_usage to avoid double counts.
 	err = s.db.QueryRow(`
 		SELECT SUM(
-			COALESCE(json_extract(usage_json, '$.total_tokens'), 0)
+			COALESCE(json_extract(usage_json, '$.total_tokens'), 0) +
+			COALESCE(json_extract(usage_json, '$.input_tokens'), 0) +
+			COALESCE(json_extract(usage_json, '$.output_tokens'), 0) +
+			COALESCE(json_extract(usage_json, '$.cache_creation_input_tokens'), 0) +
+			COALESCE(json_extract(usage_json, '$.cache_read_input_tokens'), 0)
 		)
 		FROM execution_history
 		WHERE started_at >= date('now')
@@ -786,6 +886,41 @@ func (s *Store) TodayStats() (*ExecutionStats, error) {
 	}
 	st.TotalTokens = totalTokens.Int64
 	return &st, nil
+}
+
+// TodayLLMUsageByModel returns today's LLM usage grouped by provider/model.
+func (s *Store) TodayLLMUsageByModel() ([]LLMUsageByModel, error) {
+	rows, err := s.db.Query(`
+		SELECT provider, model, COUNT(*),
+		       COALESCE(SUM(input_tokens), 0),
+		       COALESCE(SUM(output_tokens), 0),
+		       COALESCE(SUM(cache_creation_input_tokens), 0),
+		       COALESCE(SUM(cache_read_input_tokens), 0),
+		       COALESCE(SUM(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens), 0) AS total_tokens,
+		       COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+		FROM llm_call_usage
+		WHERE started_at >= date('now')
+		GROUP BY provider, model
+		ORDER BY estimated_cost_usd DESC, total_tokens DESC, model ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []LLMUsageByModel
+	for rows.Next() {
+		var r LLMUsageByModel
+		if err := rows.Scan(
+			&r.Provider, &r.Model, &r.Calls,
+			&r.InputTokens, &r.OutputTokens,
+			&r.CacheCreationInputTokens, &r.CacheReadInputTokens,
+			&r.TotalTokens, &r.EstimatedCostUSD,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // SearchExecutions performs a full-text search over execution history.

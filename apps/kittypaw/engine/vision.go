@@ -121,7 +121,7 @@ func resolveVisionProvider(cfg *core.Config) (provider, apiKey string, err error
 		return "gemini", key, nil
 	}
 
-	return "", "", fmt.Errorf("no API key available for vision analysis; set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY")
+	return "", "", fmt.Errorf("no vision provider API key configured; set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY")
 }
 
 // resolveImageProvider selects the best available provider for Image.generate.
@@ -270,32 +270,47 @@ func sanitizeError(err error) error {
 // --- Skill Handlers ---
 
 func executeVision(ctx context.Context, call core.SkillCall, s *Session) (string, error) {
-	if call.Method != "analyze" {
+	switch call.Method {
+	case "analyze":
+		if len(call.Args) == 0 {
+			return jsonResult(map[string]any{"error": "imageUrl argument required"})
+		}
+		var imageURL string
+		if err := json.Unmarshal(call.Args[0], &imageURL); err != nil || imageURL == "" {
+			return jsonResult(map[string]any{"error": "invalid imageUrl argument"})
+		}
+		return executeVisionAnalyzeURL(ctx, imageURL, visionPromptArg(call.Args), s)
+
+	case "analyzeAttachment":
+		if len(call.Args) == 0 {
+			return jsonResult(map[string]any{"error": "attachmentId argument required"})
+		}
+		var attachmentID string
+		if err := json.Unmarshal(call.Args[0], &attachmentID); err != nil || attachmentID == "" {
+			return jsonResult(map[string]any{"error": "invalid attachmentId argument"})
+		}
+		att, err := currentImageAttachment(ctx, attachmentID)
+		if err != nil {
+			return jsonResult(map[string]any{"error": err.Error()})
+		}
+		return executeVisionAnalyzeURL(ctx, att.URL, visionPromptArg(call.Args), s)
+
+	default:
 		return jsonResult(map[string]any{"error": fmt.Sprintf("unknown Vision method: %s", call.Method)})
 	}
-	if len(call.Args) == 0 {
-		return jsonResult(map[string]any{"error": "imageUrl argument required"})
-	}
+}
 
-	var imageURL string
-	if err := json.Unmarshal(call.Args[0], &imageURL); err != nil || imageURL == "" {
-		return jsonResult(map[string]any{"error": "invalid imageUrl argument"})
+func executeVisionAnalyzeURL(ctx context.Context, imageURL, prompt string, s *Session) (string, error) {
+	cfg := &core.Config{}
+	if s != nil && s.Config != nil {
+		cfg = s.Config
 	}
-
 	// SSRF prevention: validate URL scheme and host.
-	if err := validateImageURL(imageURL, s.Config.Sandbox.AllowedHosts); err != nil {
+	if err := validateImageURL(imageURL, cfg.Sandbox.AllowedHosts); err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
 
-	prompt := visionDefaultPrompt
-	if len(call.Args) > 1 {
-		var p string
-		if err := json.Unmarshal(call.Args[1], &p); err == nil && p != "" {
-			prompt = p
-		}
-	}
-
-	provider, apiKey, err := resolveVisionProvider(s.Config)
+	provider, apiKey, err := resolveVisionProvider(cfg)
 	if err != nil {
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
@@ -315,6 +330,41 @@ func executeVision(ctx context.Context, call core.SkillCall, s *Session) (string
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
 	return jsonResult(result)
+}
+
+func visionPromptArg(args []json.RawMessage) string {
+	prompt := visionDefaultPrompt
+	if len(args) > 1 {
+		var p string
+		if err := json.Unmarshal(args[1], &p); err == nil && p != "" {
+			prompt = p
+		}
+	}
+	return prompt
+}
+
+func currentImageAttachment(ctx context.Context, attachmentID string) (core.ChatAttachment, error) {
+	event := EventFromContext(ctx)
+	if event == nil {
+		return core.ChatAttachment{}, fmt.Errorf("attachment %q not found: no current event", attachmentID)
+	}
+	payload, err := event.ParsePayload()
+	if err != nil {
+		return core.ChatAttachment{}, err
+	}
+	for _, att := range payload.Attachments {
+		if att.ID != attachmentID {
+			continue
+		}
+		if att.Type != "image" {
+			return core.ChatAttachment{}, fmt.Errorf("attachment %q is %q, not image", attachmentID, att.Type)
+		}
+		if att.URL == "" {
+			return core.ChatAttachment{}, fmt.Errorf("attachment %q has no URL", attachmentID)
+		}
+		return att, nil
+	}
+	return core.ChatAttachment{}, fmt.Errorf("attachment %q not found", attachmentID)
 }
 
 func executeImage(ctx context.Context, call core.SkillCall, s *Session) (string, error) {

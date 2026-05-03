@@ -190,7 +190,7 @@ func runSummaryMiss(
 	}
 	msgs := buildSummaryMessages(req.AbsPath, req.Content)
 
-	resp, err := provider.Generate(ctx, msgs)
+	resp, err := provider.Generate(WithLLMCallKind(ctx, "file.summary"), msgs)
 	if err != nil {
 		return nil, err
 	}
