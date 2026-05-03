@@ -16,10 +16,10 @@ var (
 	ErrFanoutUnauthorizedTarget = errors.New("fanout: target is not a team-space member")
 )
 
-// FanoutPayload is the message body a family skill passes to
+// FanoutPayload is the message body a team-space skill passes to
 // Fanout.send/broadcast. The JS binding marshals skill arguments into
 // this struct, so additive fields are safe; renaming a tag breaks every
-// existing family skill.
+// existing fanout skill.
 type FanoutPayload struct {
 	// Text is the message body to deliver to the target account. Required.
 	Text string `json:"text"`
@@ -30,15 +30,15 @@ type FanoutPayload struct {
 	ChannelHint string `json:"channel_hint,omitempty"`
 }
 
-// Fanout is the cross-account push abstraction. Only the family Session gets
+// Fanout is the cross-account push abstraction. Only a team-space Session gets
 // a non-nil implementation; personal accounts cannot reach other personal
 // accounts because the sandbox binding is gated on a non-nil field.
 type Fanout interface {
 	// Send delivers payload to one target account. Returns immediately
 	// after the event enqueues — the target Session runs asynchronously.
 	Send(ctx context.Context, accountID string, p FanoutPayload) error
-	// Broadcast delivers payload to every registered peer except the
-	// source account. Order is registry iteration order (undefined).
+	// Broadcast delivers payload to each configured team-space member.
+	// Delivery preserves config order after deduplicating member IDs.
 	Broadcast(ctx context.Context, p FanoutPayload) error
 }
 
@@ -105,21 +105,36 @@ func (f *ChannelFanout) Send(ctx context.Context, accountID string, p FanoutPayl
 	}
 }
 
-// Broadcast sends payload to every registered account except the source.
-// Delivery is sequential and fail-fast: on the first Send error we return
-// immediately, so peers earlier in the iteration may already have received
-// the event while later peers did not. The caller sees a single error but
-// cannot tell which peers succeeded — atomic all-or-nothing would require
-// a dispatcher-level broadcast primitive that we don't have yet.
+// Broadcast sends payload to each configured team-space member. The member list
+// is validated before any event is emitted, so a bad config entry fails the
+// entire broadcast without partial delivery.
 func (f *ChannelFanout) Broadcast(ctx context.Context, p FanoutPayload) error {
 	source := f.registry.Get(f.source)
 	if source == nil || source.Config == nil || !source.Config.IsTeamSpaceAccount() {
 		return ErrFanoutUnauthorizedTarget
 	}
+	seen := map[string]bool{}
+	targets := make([]string, 0, len(source.Config.TeamSpace.Members))
 	for _, id := range source.Config.TeamSpace.Members {
+		if err := ValidateAccountID(id); err != nil {
+			return fmt.Errorf("broadcast to %q: %w", id, err)
+		}
 		if id == f.source {
+			return fmt.Errorf("broadcast to %q: %w", id, ErrFanoutSelfTarget)
+		}
+		if seen[id] {
 			continue
 		}
+		if f.registry.Get(id) == nil {
+			return fmt.Errorf("%w: %q", ErrFanoutUnknownAccount, id)
+		}
+		if !source.Config.TeamSpaceHasMember(id) {
+			return fmt.Errorf("broadcast to %q: %w", id, ErrFanoutUnauthorizedTarget)
+		}
+		seen[id] = true
+		targets = append(targets, id)
+	}
+	for _, id := range targets {
 		if err := f.Send(ctx, id, p); err != nil {
 			return fmt.Errorf("broadcast to %q: %w", id, err)
 		}

@@ -26,9 +26,9 @@ func newFanoutFixture(t *testing.T, source string, members []string, peers ...st
 }
 
 // TestChannelFanout_SendEmitsEvent pins the wire shape of a fanout push.
-// The whole cross-account flow assumes family.push events arrive at the
+// The whole cross-account flow assumes team_space.push events arrive at the
 // AccountRouter carrying the *target* account's ID (not the sender's) —
-// reversing the direction would dispatch the push back into family's own
+// reversing the direction would dispatch the push back into the team-space
 // Session, looping.
 func TestChannelFanout_SendEmitsEvent(t *testing.T) {
 	f, ch, _ := newFanoutFixture(t, "team", []string{"alice"}, "alice")
@@ -58,9 +58,9 @@ func TestChannelFanout_SendEmitsEvent(t *testing.T) {
 	}
 }
 
-// TestChannelFanout_RejectsSelfTarget blocks the self-loop — if family
-// sends to "family", AccountRouter would dispatch the push into the
-// family Session, which would (if it has a skill handling family.push)
+// TestChannelFanout_RejectsSelfTarget blocks the self-loop — if a team space
+// sends to itself, AccountRouter would dispatch the push into the team-space
+// Session, which would (if it has a skill handling team_space.push)
 // run again and potentially fanout again. Refuse at the boundary.
 func TestChannelFanout_RejectsSelfTarget(t *testing.T) {
 	f, _, _ := newFanoutFixture(t, "team", []string{"alice"}, "alice")
@@ -102,10 +102,9 @@ func TestChannelFanout_InvalidAccountID(t *testing.T) {
 	}
 }
 
-// TestChannelFanout_Broadcast sends to every registered peer except the
-// source. Skill authors write `Fanout.broadcast({text: ...})` for daily
-// morning briefs — this is the main usage pattern so it must land on
-// alice, bob, charlie simultaneously (order-insensitive).
+// TestChannelFanout_Broadcast sends to configured team-space members in config
+// order. Skill authors write `Fanout.broadcast({text: ...})` for daily morning
+// briefs — this is the main usage pattern so it must land on every member.
 func TestChannelFanout_Broadcast(t *testing.T) {
 	f, ch, _ := newFanoutFixture(t, "team", []string{"alice", "bob"}, "alice", "bob")
 
@@ -148,6 +147,63 @@ func TestChannelFanout_BroadcastSendsOnlyToMembers(t *testing.T) {
 	select {
 	case ev := <-ch:
 		t.Fatalf("unexpected second event: %#v", ev)
+	default:
+	}
+}
+
+func TestChannelFanout_BroadcastUnknownMemberEmitsNoEvents(t *testing.T) {
+	f, ch, _ := newFanoutFixture(t, "team", []string{"alice", "ghost"}, "alice")
+
+	err := f.Broadcast(context.Background(), FanoutPayload{Text: "hi"})
+	if !errors.Is(err, ErrFanoutUnknownAccount) {
+		t.Fatalf("Broadcast err = %v, want ErrFanoutUnknownAccount", err)
+	}
+	assertNoFanoutEvent(t, ch)
+}
+
+func TestChannelFanout_BroadcastDeduplicatesMembers(t *testing.T) {
+	f, ch, _ := newFanoutFixture(t, "team", []string{"alice", "alice"}, "alice")
+
+	if err := f.Broadcast(context.Background(), FanoutPayload{Text: "hi"}); err != nil {
+		t.Fatalf("Broadcast: %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.AccountID != "alice" {
+			t.Fatalf("broadcast target = %q, want alice", ev.AccountID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("event not delivered")
+	}
+	assertNoFanoutEvent(t, ch)
+}
+
+func TestChannelFanout_BroadcastInvalidMemberIDEmitsNoEvents(t *testing.T) {
+	f, ch, _ := newFanoutFixture(t, "team", []string{"alice", "../evil"}, "alice")
+
+	err := f.Broadcast(context.Background(), FanoutPayload{Text: "hi"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	assertNoFanoutEvent(t, ch)
+}
+
+func TestChannelFanout_BroadcastSelfMemberEmitsNoEvents(t *testing.T) {
+	f, ch, _ := newFanoutFixture(t, "team", []string{"alice", "team"}, "alice")
+
+	err := f.Broadcast(context.Background(), FanoutPayload{Text: "hi"})
+	if !errors.Is(err, ErrFanoutSelfTarget) {
+		t.Fatalf("Broadcast err = %v, want ErrFanoutSelfTarget", err)
+	}
+	assertNoFanoutEvent(t, ch)
+}
+
+func assertNoFanoutEvent(t *testing.T, ch <-chan Event) {
+	t.Helper()
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected event: %#v", ev)
 	default:
 	}
 }
