@@ -51,7 +51,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	}
 
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.accountMu.Unlock()
+		}
+	}()
 
 	if existing := s.accounts.Session(t.ID); existing != nil {
 		return fmt.Errorf("%w: %q", ErrAccountAlreadyActive, t.ID)
@@ -91,13 +96,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	// Rollback stack: undo side effects in LIFO order if any later step
 	// fails. Each closure is responsible for exactly one revert.
 	var rollback []func()
+	var rollbackSchedulers []*engine.Scheduler
 	rollbackAll := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
 		}
 	}
-
-	rollback = append(rollback, func() { _ = td.Close() })
 
 	sess := buildAccountSession(td, s.accountRegistry, s.eventCh)
 
@@ -117,7 +121,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 		s.schedulers = NewAccountSchedulers()
 	}
 	s.schedulers.Register(t.ID, engine.NewScheduler(sess, td.PkgMgr))
-	rollback = append(rollback, func() { s.schedulers.Remove(t.ID) })
+	rollback = append(rollback, func() {
+		if scheduler := s.schedulers.Detach(t.ID); scheduler != nil {
+			scheduler.Stop()
+			rollbackSchedulers = append(rollbackSchedulers, scheduler)
+		}
+	})
 
 	// accountList is read under accountMu by future AddAccount calls for
 	// their validation snapshot; StartChannels reads it only at boot (single
@@ -147,6 +156,10 @@ func (s *Server) AddAccount(t *core.Account) error {
 			slog.Error("account_activate_reconcile_failed",
 				"account", t.ID, "error", err)
 			rollbackAll()
+			s.accountMu.Unlock()
+			locked = false
+			waitSchedulers(rollbackSchedulers)
+			_ = td.Close()
 			return fmt.Errorf("reconcile channels: %w", err)
 		}
 	}
@@ -157,6 +170,14 @@ func (s *Server) AddAccount(t *core.Account) error {
 		"channels", len(t.Config.Channels),
 	)
 	return nil
+}
+
+func waitSchedulers(schedulers []*engine.Scheduler) {
+	for _, scheduler := range schedulers {
+		if scheduler != nil {
+			scheduler.Wait()
+		}
+	}
 }
 
 // RemoveAccount is the inverse of AddAccount — it drains the account's

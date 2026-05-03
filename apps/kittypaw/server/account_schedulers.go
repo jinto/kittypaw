@@ -42,6 +42,32 @@ func (a *AccountSchedulers) Register(accountID string, scheduler *engine.Schedul
 	}
 }
 
+func (a *AccountSchedulers) Replace(accountID string, scheduler *engine.Scheduler) *engine.Scheduler {
+	if a == nil || accountID == "" || scheduler == nil {
+		return nil
+	}
+
+	var startCtx context.Context
+	a.mu.Lock()
+	old := a.schedulers[accountID]
+	a.schedulers[accountID] = scheduler
+	if a.running {
+		a.started[accountID] = true
+		startCtx = a.ctx
+	} else {
+		delete(a.started, accountID)
+	}
+	a.mu.Unlock()
+
+	if startCtx != nil {
+		go scheduler.Start(startCtx)
+	}
+	if old != nil {
+		old.Stop()
+	}
+	return old
+}
+
 func (a *AccountSchedulers) Remove(accountID string) {
 	scheduler := a.Detach(accountID)
 	if scheduler != nil {

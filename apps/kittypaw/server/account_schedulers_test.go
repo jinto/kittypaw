@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 )
 
 func TestServerNewCreatesSchedulerPerAccount(t *testing.T) {
@@ -50,5 +51,28 @@ func TestAddRemoveAccountMaintainsScheduler(t *testing.T) {
 	}
 	if srv.schedulers.Has("alice") {
 		t.Fatal("scheduler for alice still registered after RemoveAccount")
+	}
+}
+
+func TestAccountSchedulersReplaceReturnsPreviousScheduler(t *testing.T) {
+	schedulers := NewAccountSchedulers()
+	first := engine.NewScheduler(&engine.Session{}, nil)
+	second := engine.NewScheduler(&engine.Session{}, nil)
+	third := engine.NewScheduler(&engine.Session{}, nil)
+
+	schedulers.Register("alice", first)
+	if got := schedulers.Replace("alice", second); got != first {
+		t.Fatalf("first Replace returned %p, want first scheduler %p", got, first)
+	}
+	first.Wait()
+	if got := schedulers.Replace("alice", third); got != second {
+		t.Fatalf("second Replace returned %p, want second scheduler %p", got, second)
+	}
+	second.Wait()
+	if !schedulers.Has("alice") {
+		t.Fatal("alice scheduler missing after Replace")
+	}
+	if got := schedulers.Len(); got != 1 {
+		t.Fatalf("scheduler count = %d, want 1", got)
 	}
 }
