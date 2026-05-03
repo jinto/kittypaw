@@ -563,7 +563,7 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			// ParsePayload below silently produces a zero-valued ChatPayload,
 			// the event routes through session.Run, and the push text never
 			// reaches the target channel.
-			if event.Type == core.EventTeamSpacePush {
+			if core.IsTeamSpacePushEvent(event.Type) {
 				s.deliverTeamSpacePush(ctx, event)
 				continue
 			}

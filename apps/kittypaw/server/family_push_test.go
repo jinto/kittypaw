@@ -271,6 +271,63 @@ func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 	}
 }
 
+func TestRemoveAccountScrubsLiveTeamSpaceMembership(t *testing.T) {
+	root := t.TempDir()
+
+	teamDeps := buildAccountDeps(t, root, "team", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice", "bob"}},
+	})
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{})
+	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"bob-chat"},
+	})
+	srv := New([]*AccountDeps{teamDeps, aliceDeps, bobDeps}, "test")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
+	defer srv.spawner.StopAll()
+
+	bobMock := &mockPushChannel{name: string(core.EventTelegram)}
+	if err := srv.spawner.TrySpawn("bob", bobMock, core.ChannelConfig{
+		ChannelType: core.ChannelTelegram,
+	}); err != nil {
+		t.Fatalf("TrySpawn bob: %v", err)
+	}
+
+	go srv.dispatchLoop(ctx)
+
+	if err := srv.RemoveAccount("alice"); err != nil {
+		t.Fatalf("RemoveAccount alice: %v", err)
+	}
+
+	teamSess := srv.accounts.Session("team")
+	if teamSess == nil || teamSess.Fanout == nil {
+		t.Fatal("team-space session / Fanout missing")
+	}
+	if teamSess.Config.TeamSpaceHasMember("alice") {
+		t.Fatal("removed account still present in live team-space membership")
+	}
+
+	shared := "alice removed; bob should still receive"
+	if err := teamSess.Fanout.Broadcast(ctx, core.FanoutPayload{Text: shared}); err != nil {
+		t.Fatalf("Broadcast after RemoveAccount: %v", err)
+	}
+
+	calls := waitForCalls(t, bobMock, 1, 2*time.Second)
+	if len(calls) != 1 {
+		t.Fatalf("bob expected 1 SendResponse, got %d", len(calls))
+	}
+	if calls[0].ChatID != "bob-chat" {
+		t.Errorf("bob chat_id = %q, want bob-chat", calls[0].ChatID)
+	}
+	if calls[0].Response != shared {
+		t.Errorf("bob response = %q, want %q", calls[0].Response, shared)
+	}
+}
+
 func TestTeamSpaceFanoutRejectsNonMember(t *testing.T) {
 	root := t.TempDir()
 	teamDeps := buildAccountDeps(t, root, "team", &core.Config{
@@ -300,6 +357,13 @@ func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 	return core.Event{Type: core.EventTeamSpacePush, AccountID: target, Payload: body}
 }
 
+func legacyFamilyPushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
+	t.Helper()
+	ev := pushEvent(t, target, p)
+	ev.Type = core.EventType("family.push")
+	return ev
+}
+
 // TestDispatchLoop_FamilyPush_DeliversToTargetChannel is the happy path — a
 // team-space fanout push to alice with one telegram channel configured lands on
 // that telegram channel's SendResponse with alice's AllowedChatIDs[0] as the
@@ -326,6 +390,28 @@ func TestDispatchLoop_FamilyPush_DeliversToTargetChannel(t *testing.T) {
 		t.Errorf("expected chatID 99999 (alice AllowedChatIDs[0]), got %q", calls[0].ChatID)
 	}
 	if calls[0].Response != "🍚 저녁 준비됐어!" {
+		t.Errorf("expected push text, got %q", calls[0].Response)
+	}
+}
+
+func TestDispatchLoop_LegacyFamilyPush_DeliversToTargetChannel(t *testing.T) {
+	tg := &mockPushChannel{}
+	srv, shutdown := buildFamilyPushServer(t, &core.Config{
+		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
+		AllowedChatIDs: []string{"99999"},
+	}, map[core.EventType]*mockPushChannel{core.EventTelegram: tg})
+	defer shutdown()
+
+	srv.eventCh <- legacyFamilyPushEvent(t, "alice", core.FanoutPayload{Text: "legacy event"})
+
+	calls := waitForCalls(t, tg, 1, 2*time.Second)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 SendResponse, got %d", len(calls))
+	}
+	if calls[0].ChatID != "99999" {
+		t.Errorf("expected chatID 99999, got %q", calls[0].ChatID)
+	}
+	if calls[0].Response != "legacy event" {
 		t.Errorf("expected push text, got %q", calls[0].Response)
 	}
 }

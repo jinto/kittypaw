@@ -41,6 +41,14 @@ const (
 	EventFamilyPush EventType = EventTeamSpacePush
 )
 
+const legacyTeamSpacePushEventType EventType = "family.push"
+
+// IsTeamSpacePushEvent recognizes current team-space pushes and the pre-rename
+// wire literal that may still exist in queued or persisted events.
+func IsTeamSpacePushEvent(t EventType) bool {
+	return t == EventTeamSpacePush || t == legacyTeamSpacePushEventType
+}
+
 // LoopPhase tracks the agent loop state machine position.
 type LoopPhase string
 

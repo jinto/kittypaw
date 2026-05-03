@@ -59,11 +59,11 @@ func (a *AccountSchedulers) Replace(accountID string, scheduler *engine.Schedule
 	}
 	a.mu.Unlock()
 
-	if startCtx != nil {
-		scheduler.StartAsync(startCtx)
-	}
 	if old != nil {
 		old.Stop()
+	}
+	if startCtx != nil {
+		scheduler.StartAsync(startCtx)
 	}
 	return old
 }

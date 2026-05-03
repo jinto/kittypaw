@@ -224,6 +224,7 @@ func (s *Server) RemoveAccount(id string) error {
 		s.removingAccount = make(map[string]bool)
 	}
 	s.removingAccount[id] = true
+	scrubLiveTeamSpaceMembership(s.accountList, id)
 	s.accounts.Remove(id)
 	for i, peer := range s.accountList {
 		if peer != nil && peer.ID == id {
@@ -251,6 +252,31 @@ func (s *Server) RemoveAccount(id string) error {
 
 	slog.Info("account_deactivated", "account", id)
 	return nil
+}
+
+func scrubLiveTeamSpaceMembership(accounts []*core.Account, removedID string) {
+	if removedID == "" {
+		return
+	}
+	for _, account := range accounts {
+		if account == nil || account.ID == removedID || account.Config == nil || !account.Config.IsTeamSpaceAccount() {
+			continue
+		}
+		members := account.Config.TeamSpace.Members
+		if len(members) == 0 {
+			continue
+		}
+		next := members[:0]
+		for _, member := range members {
+			if member != removedID {
+				next = append(next, member)
+			}
+		}
+		for i := len(next); i < len(members); i++ {
+			members[i] = ""
+		}
+		account.Config.TeamSpace.Members = next
+	}
 }
 
 // handleAdminAccountAdd activates an account that already exists on disk.
