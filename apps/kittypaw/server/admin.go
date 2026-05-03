@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 )
 
 // ErrAccountAlreadyActive is returned by AddAccount when an account with
@@ -39,10 +40,8 @@ var ErrAccountNotActive = errors.New("account not active")
 //     spawner) unwinds every earlier side-effect in reverse order.
 //     Deps opened by OpenAccountDeps are also closed on failure.
 //
-// Scheduler is NOT wired here — the default-account scheduler stays as
-// the sole tick source until a follow-up commit makes scheduling
-// account-aware. Channel dispatch (the AC-U3 acceptance criterion) is
-// fully live after a successful AddAccount call.
+// Scheduling is account-aware: successful activation registers a scheduler
+// for the new account and rollback removes it if any later side effect fails.
 func (s *Server) AddAccount(t *core.Account) error {
 	if t == nil || t.Config == nil {
 		return fmt.Errorf("add account: account or config is nil")
@@ -110,6 +109,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	}
 	s.accountDeps[t.ID] = td
 	rollback = append(rollback, func() { delete(s.accountDeps, t.ID) })
+
+	if s.schedulers == nil {
+		s.schedulers = NewAccountSchedulers()
+	}
+	s.schedulers.Register(t.ID, engine.NewScheduler(sess, td.PkgMgr))
+	rollback = append(rollback, func() { s.schedulers.Remove(t.ID) })
 
 	// accountList is read under accountMu by future AddAccount calls for
 	// their validation snapshot; StartChannels reads it only at boot (single
@@ -183,6 +188,10 @@ func (s *Server) RemoveAccount(id string) error {
 				"account", id, "error", err)
 			return fmt.Errorf("drain channels: %w", err)
 		}
+	}
+
+	if s.schedulers != nil {
+		s.schedulers.Remove(id)
 	}
 
 	td := s.accountDeps[id]

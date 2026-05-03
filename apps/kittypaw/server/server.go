@@ -25,14 +25,15 @@ import (
 )
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
-// to the agent engine. It owns the chi router, the engine session, the
-// scheduler, channel spawner, account router, and all handler state.
+// to the agent engine. It owns the chi router, the default-account engine
+// session, account schedulers, channel spawner, account router, and all
+// handler state.
 type Server struct {
 	config          *core.Config
 	configMu        sync.RWMutex // protects config during hot-reload
 	store           *store.Store
 	session         *engine.Session // default-account session; HTTP handlers use this
-	scheduler       *engine.Scheduler
+	schedulers      *AccountSchedulers
 	router          chi.Router
 	spawner         *ChannelSpawner         // manages channel lifecycle for hot-reload
 	accounts        *AccountRouter          // routes channel events to account-scoped sessions
@@ -73,9 +74,9 @@ const DefaultAccountID = "default"
 // Every session shares the same *core.AccountRegistry pointer so Share.read
 // can resolve peer accounts by ID.
 //
-// The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
-// the default account in PR-1; multi-account HTTP routing is scoped to a
-// follow-up. Call StartChannels before ListenAndServe to activate messaging.
+// The HTTP handler surface (/api/v1, secrets) remains bound to the default
+// account in PR-1; multi-account HTTP routing is scoped to a follow-up. Call
+// StartChannels before ListenAndServe to activate messaging.
 func New(accounts []*AccountDeps, version string, configuredDefault ...string) *Server {
 	sc := core.TopLevelServerConfig{}
 	if len(configuredDefault) > 0 {
@@ -108,11 +109,13 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 	}
 
 	router := NewAccountRouter()
+	schedulers := NewAccountSchedulers()
 	var defaultSession *engine.Session
 	depsByID := make(map[string]*AccountDeps, len(accounts))
 	for _, td := range accounts {
 		sess := buildAccountSession(td, registry, eventCh)
 		router.Register(td.Account.ID, sess)
+		schedulers.Register(td.Account.ID, engine.NewScheduler(sess, td.PkgMgr))
 		depsByID[td.Account.ID] = td
 		if td == defaultDeps {
 			defaultSession = sess
@@ -123,7 +126,7 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 		config:          cfg,
 		store:           defaultDeps.Store,
 		session:         defaultSession,
-		scheduler:       engine.NewScheduler(defaultSession, defaultDeps.PkgMgr),
+		schedulers:      schedulers,
 		accounts:        router,
 		accountList:     accountList,
 		accountRegistry: registry,
@@ -888,7 +891,7 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 	}
 }
 
-// ListenAndServe starts the HTTP server and scheduler, blocking until a
+// ListenAndServe starts the HTTP server and account schedulers, blocking until a
 // SIGINT or SIGTERM triggers graceful shutdown of both.
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
@@ -899,9 +902,11 @@ func (s *Server) ListenAndServe(addr string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Cancelable context for the scheduler goroutine.
+	// Cancelable context for account scheduler goroutines.
 	schedCtx, schedCancel := context.WithCancel(context.Background())
-	go s.scheduler.Start(schedCtx)
+	if s.schedulers != nil {
+		s.schedulers.StartAll(schedCtx)
+	}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
@@ -915,11 +920,15 @@ func (s *Server) ListenAndServe(addr string) error {
 			s.spawner.StopAll()
 		}
 
-		// Stop scheduler tick loop and cancel context, then wait for
+		// Stop scheduler tick loops and cancel context, then wait for
 		// in-flight skill goroutines to drain before shutting down HTTP.
-		s.scheduler.Stop()
+		if s.schedulers != nil {
+			s.schedulers.StopAll()
+		}
 		schedCancel()
-		s.scheduler.Wait()
+		if s.schedulers != nil {
+			s.schedulers.WaitAll()
+		}
 
 		// Close MCP server connections (CommandTransport handles 5s → SIGTERM).
 		if s.session.McpRegistry != nil {
