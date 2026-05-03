@@ -165,6 +165,66 @@ func TestChatTUIViewDoesNotRenderInputSeparatorLine(t *testing.T) {
 	}
 }
 
+func TestChatTUIArrowKeysScrollTranscriptWhenInputEmpty(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{Header: "KittyPaw chat"})
+	model.setSize(30, 6)
+	model.messages = []chatMessage{{
+		Role: "paw",
+		Text: strings.Join([]string{
+			"line 1",
+			"line 2",
+			"line 3",
+			"line 4",
+			"line 5",
+			"line 6",
+		}, "\n"),
+	}}
+	model.refreshViewport()
+	bottomOffset := model.viewport.YOffset
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(chatTUIModel)
+
+	if model.viewport.YOffset >= bottomOffset {
+		t.Fatalf("up key kept viewport offset at %d, want less than bottom offset %d", model.viewport.YOffset, bottomOffset)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(chatTUIModel)
+
+	if model.viewport.YOffset != bottomOffset {
+		t.Fatalf("down key viewport offset = %d, want bottom offset %d", model.viewport.YOffset, bottomOffset)
+	}
+}
+
+func TestChatTUIPrintableKeysDoNotPageTranscript(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{Header: "KittyPaw chat"})
+	model.setSize(30, 6)
+	model.messages = []chatMessage{{
+		Role: "paw",
+		Text: strings.Join([]string{
+			"line 1",
+			"line 2",
+			"line 3",
+			"line 4",
+			"line 5",
+			"line 6",
+		}, "\n"),
+	}}
+	model.refreshViewport()
+	model.viewport.GotoTop()
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(chatTUIModel)
+
+	if model.viewport.YOffset != 0 {
+		t.Fatalf("space key paged transcript to offset %d, want 0", model.viewport.YOffset)
+	}
+	if got := model.input.Value(); got != " " {
+		t.Fatalf("input value = %q, want one space", got)
+	}
+}
+
 func TestChatTUIStartTurnUsesAnimatedPendingText(t *testing.T) {
 	model := newChatTUIModel(chatTUIOptions{
 		Header: "KittyPaw chat",

@@ -135,6 +135,11 @@ func (m chatTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			return m, m.submitInput()
+		}
+		if m.handleTranscriptKey(msg) {
+			return m, nil
+		}
+		switch msg.String() {
 		case "up":
 			if m.history != nil {
 				m.input.SetValue(m.history.Prev(m.input.Value()))
@@ -148,12 +153,59 @@ func (m chatTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(chatInputKeyMsg(msg))
+		return m, cmd
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
-	m.viewport, _ = m.viewport.Update(msg)
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+func chatInputKeyMsg(msg tea.KeyMsg) tea.KeyMsg {
+	if msg.Type == tea.KeySpace && len(msg.Runes) == 0 {
+		msg.Runes = []rune{' '}
+	}
+	return msg
+}
+
+func (m *chatTUIModel) handleTranscriptKey(msg tea.KeyMsg) bool {
+	inputEmpty := m.input.Value() == ""
+	switch msg.String() {
+	case "pgup":
+		m.viewport.PageUp()
+		return true
+	case "pgdown":
+		m.viewport.PageDown()
+		return true
+	case "ctrl+u":
+		if inputEmpty {
+			m.viewport.HalfPageUp()
+			return true
+		}
+	case "ctrl+d":
+		if inputEmpty {
+			m.viewport.HalfPageDown()
+			return true
+		}
+	case "up":
+		if inputEmpty && m.viewport.TotalLineCount() > m.viewport.Height && !m.viewport.AtTop() {
+			m.viewport.ScrollUp(1)
+			return true
+		}
+	case "down":
+		if inputEmpty && m.viewport.TotalLineCount() > m.viewport.Height && !m.viewport.AtBottom() {
+			m.viewport.ScrollDown(1)
+			return true
+		}
+	}
+	return false
 }
 
 func (m chatTUIModel) View() string {
@@ -661,6 +713,6 @@ func runInteractiveChatTUI(ctx context.Context, conn *client.DaemonConn, cs *cli
 		CursorState: cursorState,
 	})
 	output := &chatTUICursorWriter{out: os.Stdout, file: os.Stdout, cursor: cursorState}
-	_, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithOutput(output)).Run()
+	_, err := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(output)).Run()
 	return err
 }
