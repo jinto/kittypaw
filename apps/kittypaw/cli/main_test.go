@@ -134,7 +134,7 @@ func TestRootCommandDoesNotExposeFamilyCommand(t *testing.T) {
 
 	for _, cmd := range root.Commands() {
 		if cmd.Name() == "family" {
-			t.Fatal("root command must not expose family; shared accounts are managed through account commands")
+			t.Fatal("root command must not expose family; team-space accounts are managed through account commands")
 		}
 	}
 }
@@ -544,6 +544,27 @@ func TestBootstrapRejectsMissingConfiguredDefaultAccount(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err.Error(), want)
 		}
+	}
+}
+
+func TestBootstrapRejectsUnknownTeamSpaceMemberBeforeOpeningDeps(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfigWith(t, filepath.Join(root, "accounts", "team", "config.toml"), func(cfg *core.Config) {
+		cfg.IsShared = true
+		cfg.TeamSpace.Members = []string{"ghost"}
+	})
+
+	_, _, err := bootstrap()
+	if err == nil {
+		t.Fatal("expected membership validation error")
+	}
+	if !strings.Contains(err.Error(), "team-space membership validation") {
+		t.Fatalf("bootstrap error = %v, want team-space membership validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "accounts", "team", "data")); !os.IsNotExist(statErr) {
+		t.Fatalf("account deps were opened before validation; data dir stat err = %v", statErr)
 	}
 }
 

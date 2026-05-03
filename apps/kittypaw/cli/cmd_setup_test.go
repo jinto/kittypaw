@@ -634,8 +634,8 @@ func TestSetupRejectsSharedAccountWithChannelBeforeWriting(t *testing.T) {
 	flags.telegramChatID = "100"
 
 	err := runSetup(cmd, &flags)
-	if err == nil || !strings.Contains(err.Error(), "shared account validation") {
-		t.Fatalf("runSetup error = %v, want shared account validation", err)
+	if err == nil || !strings.Contains(err.Error(), "team space validation") {
+		t.Fatalf("runSetup error = %v, want team space validation", err)
 	}
 	mustNotExist(t, filepath.Join(root, "auth.json"))
 

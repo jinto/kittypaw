@@ -18,7 +18,7 @@ import (
 //   - Degraded: at least one goroutine panicked recently and was caught
 //     by a defer recover(). The account may self-heal on the next tick
 //     that completes cleanly — callers should not treat Degraded as
-//     terminal. See family-multi-account AC-T8.
+//     terminal. This preserves account-level panic isolation.
 //   - Stopped: the server is shutting this account down. Terminal — once
 //     Stopped, the state never moves back to Ready or Degraded, so a
 //     late goroutine that wakes up and tries to MarkReady cannot make

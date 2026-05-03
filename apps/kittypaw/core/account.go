@@ -264,18 +264,12 @@ func FirstAllowedChatID(cfg *Config) string {
 	return ""
 }
 
-// ValidateFamilyAccounts fails fast when an account marked `is_shared=true`
-// declares channel configs. Shared accounts are coordinators (scheduled
-// skills + fanout push); they never own a Telegram/Kakao account of their
-// own. A misconfigured `[telegram]` on a shared account would race the real
-// personal bot for updates — that race must never boot in the first place.
-//
-// Pair with ValidateAccountChannels at server startup; this covers the
-// shared-account-specific rule that the token/URL collision check cannot see.
-func ValidateFamilyAccounts(accounts []*Account) error {
+// ValidateTeamSpaceAccounts fails fast when a team-space account declares
+// channel configs. Team spaces are coordinators, not channel owners.
+func ValidateTeamSpaceAccounts(accounts []*Account) error {
 	var offenders []string
 	for _, t := range accounts {
-		if t == nil || t.Config == nil || !t.Config.IsSharedAccount() {
+		if t == nil || t.Config == nil || !t.Config.IsTeamSpaceAccount() {
 			continue
 		}
 		if len(t.Config.Channels) == 0 {
@@ -290,7 +284,58 @@ func ValidateFamilyAccounts(accounts []*Account) error {
 	if len(offenders) == 0 {
 		return nil
 	}
-	return fmt.Errorf("shared account must not declare channels: %v", offenders)
+	return fmt.Errorf("team space must not declare channels: %v", offenders)
+}
+
+// ValidateFamilyAccounts is a legacy compatibility alias for
+// ValidateTeamSpaceAccounts.
+func ValidateFamilyAccounts(accounts []*Account) error {
+	return ValidateTeamSpaceAccounts(accounts)
+}
+
+// ValidateTeamSpaceMemberships verifies that every configured team-space member
+// is an existing personal account. An omitted or empty members list is deny-all
+// and is valid.
+//
+// This is the core validator only. Startup, reload, and hot-add paths are
+// responsible for calling it when they wire team-space account loading.
+func ValidateTeamSpaceMemberships(accounts []*Account) error {
+	byID := make(map[string]*Account, len(accounts))
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		byID[account.ID] = account
+	}
+
+	var problems []string
+	for _, team := range accounts {
+		if team == nil || team.Config == nil || !team.Config.IsTeamSpaceAccount() {
+			continue
+		}
+		for _, member := range team.Config.TeamSpace.Members {
+			if err := ValidateAccountID(member); err != nil {
+				problems = append(problems, fmt.Sprintf("%s:%s invalid member id: %v", team.ID, member, err))
+				continue
+			}
+			if member == team.ID {
+				problems = append(problems, fmt.Sprintf("%s must not list itself as a team-space member", team.ID))
+				continue
+			}
+			target := byID[member]
+			if target == nil {
+				problems = append(problems, fmt.Sprintf("%s references unknown member %s", team.ID, member))
+				continue
+			}
+			if target.Config != nil && target.Config.IsTeamSpaceAccount() {
+				problems = append(problems, fmt.Sprintf("%s member %s is another team space", team.ID, member))
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("team-space membership validation failed: %s", strings.Join(problems, "; "))
 }
 
 // MigrateTenantsToAccounts renames a legacy ~/.kittypaw/tenants/ directory

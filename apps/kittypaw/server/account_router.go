@@ -15,7 +15,7 @@ import (
 // that does not match a registered session are dropped. There is NO default
 // fallback — a silent fallback in a multi-account deployment would route
 // another user's messages into the default account's agent state (privacy
-// leak). See family-multi-account spec constraint C1.
+// leak). See the account-routing privacy constraint.
 type AccountRouter struct {
 	mu        sync.RWMutex
 	sessions  map[string]*engine.Session

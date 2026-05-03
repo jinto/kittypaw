@@ -14,7 +14,7 @@ var ErrAccountExists = errors.New("account already exists")
 type AccountOpts struct {
 	TelegramToken   string
 	AdminChatID     string
-	IsFamily        bool
+	IsFamily        bool // legacy alias for creating a team-space account
 	LLMProvider     string
 	LLMAPIKey       string
 	LLMModel        string
@@ -34,7 +34,7 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 
 	opts.KakaoEnabled = opts.KakaoEnabled || strings.TrimSpace(opts.KakaoRelayWSURL) != ""
 	if opts.IsFamily && (opts.TelegramToken != "" || opts.KakaoEnabled) {
-		return nil, fmt.Errorf("shared account %q must not declare channels", id)
+		return nil, fmt.Errorf("team-space account %q must not declare channels", id)
 	}
 	if opts.KakaoEnabled && strings.TrimSpace(opts.KakaoRelayWSURL) == "" {
 		return nil, fmt.Errorf("kakao relay URL is required when KakaoTalk is enabled")

@@ -49,8 +49,11 @@ func (s *Server) validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID stri
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		return fmt.Errorf("channel validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(accounts); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	if err := core.ValidateTeamSpaceAccounts(accounts); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(accounts); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 	return nil
 }
@@ -82,24 +85,24 @@ func injectKakaoWSURLForAPIURL(accountID string, channels []core.ChannelConfig, 
 	}
 }
 
-func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) error {
+func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) (*engine.Scheduler, error) {
 	if cfg == nil {
-		return fmt.Errorf("account config is nil")
+		return nil, fmt.Errorf("account config is nil")
 	}
 	td := s.accountDeps[accountID]
 	if td == nil || td.Account == nil {
-		return fmt.Errorf("account %q dependencies unavailable", accountID)
+		return nil, fmt.Errorf("account %q dependencies unavailable", accountID)
 	}
 
 	cfgCopy := *cfg
 	core.HydrateRuntimeSecrets(&cfgCopy, td.Secrets)
 	defaultModel, ok := cfgCopy.RuntimeDefaultModel(td.Secrets)
 	if !ok {
-		return fmt.Errorf("create llm provider: no default model configured")
+		return nil, fmt.Errorf("create llm provider: no default model configured")
 	}
 	provider, err := llm.NewProviderFromModelConfig(defaultModel)
 	if err != nil {
-		return fmt.Errorf("create llm provider: %w", err)
+		return nil, fmt.Errorf("create llm provider: %w", err)
 	}
 	provider = engine.NewUsageRecordingProvider(provider, td.Store, defaultModel.Provider)
 	var fallback llm.Provider
@@ -125,18 +128,22 @@ func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) er
 
 	oldSession := s.accounts.Session(accountID)
 	newSession := s.rebuildSessionForConfigLocked(td, oldSession)
+	var oldScheduler *engine.Scheduler
 	if accountID == s.defaultAccountID() && oldSession != nil {
 		oldSession.Provider = newSession.Provider
 		oldSession.FallbackProvider = newSession.FallbackProvider
 		oldSession.Sandbox = newSession.Sandbox
+		oldSession.Store = newSession.Store
 		oldSession.Config = newSession.Config
 		oldSession.McpRegistry = newSession.McpRegistry
+		oldSession.BaseDir = newSession.BaseDir
 		oldSession.PackageManager = newSession.PackageManager
 		oldSession.APITokenMgr = newSession.APITokenMgr
+		oldSession.AccountID = newSession.AccountID
 		oldSession.AccountRegistry = newSession.AccountRegistry
 		oldSession.Fanout = newSession.Fanout
 		if err := oldSession.RefreshAllowedPaths(); err != nil {
-			slog.Warn("setup: failed to refresh default allowed paths after config update",
+			slog.Warn("setup: failed to refresh allowed paths after config update",
 				"account", td.Account.ID, "error", err)
 		}
 		newSession = oldSession
@@ -149,8 +156,13 @@ func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) er
 		s.session = newSession
 		s.store = td.Store
 		s.pkgManager = td.PkgMgr
+	} else {
+		if s.schedulers == nil {
+			s.schedulers = NewAccountSchedulers()
+		}
+		oldScheduler = s.schedulers.Replace(accountID, engine.NewScheduler(newSession, td.PkgMgr))
 	}
-	return nil
+	return oldScheduler, nil
 }
 
 func (s *Server) rebuildSessionForConfigLocked(td *AccountDeps, old *engine.Session) *engine.Session {
@@ -185,7 +197,7 @@ func (s *Server) rebuildSessionForConfigLocked(td *AccountDeps, old *engine.Sess
 		Indexer:          indexer,
 		Pipeline:         pipeline,
 	}
-	if td.Account.Config.IsSharedAccount() {
+	if td.Account.Config.IsTeamSpaceAccount() {
 		sess.Fanout = core.NewChannelFanout(s.eventCh, s.accountRegistry, td.Account.ID)
 	}
 

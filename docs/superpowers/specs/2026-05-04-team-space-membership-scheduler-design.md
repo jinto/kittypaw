@@ -79,6 +79,8 @@ Membership validation:
 
 Removing a personal account should also remove that account ID from every
 team-space membership list, similar to the existing shared config scrub path.
+This must update both disk-side config and the running server's in-memory
+account/session config so a stale member cannot block live fanout broadcasts.
 
 ## Cross-Account Reads
 
@@ -135,6 +137,8 @@ Rename internal event terminology from family push to team-space push:
 - `EventFamilyPush` becomes `EventTeamSpacePush`.
 - The event value becomes `team_space.push`.
 - Dispatcher and retry helper names should use team-space terminology.
+- Dispatch should still accept the pre-rename wire literal for queued or
+  persisted events, but new events must emit `team_space.push`.
 
 This event is internal to the local server event channel; skills continue to use
 `Fanout`, not the event type directly.
@@ -161,6 +165,8 @@ Expected behavior:
 - `AddAccount` registers and starts a scheduler for the new account if the
   server is already running.
 - `RemoveAccount` stops and removes that account's scheduler.
+- Replacing a scheduler for a running account stops the old scheduler before
+  starting the replacement so the account never has two active scheduler loops.
 - Shutdown stops and waits for all account schedulers.
 
 Each scheduler runs only against its own account store and package manager.
@@ -220,6 +226,9 @@ Scheduler tests:
 - Starting the server starts every account scheduler.
 - Hot-added accounts get schedulers.
 - Removed accounts stop their schedulers.
+- Removed personal accounts are scrubbed from live team-space membership before
+  subsequent broadcasts.
+- Scheduler replacement stops the old scheduler before starting the new one.
 - A team-space scheduled package runs in a session with `Fanout` available.
 
 Docs and terminology tests:

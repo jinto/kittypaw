@@ -411,7 +411,7 @@ func TestReadSecretMaskedLoopPrintsStarsAndHandlesBackspace(t *testing.T) {
 
 // TestNeedsAccountPrompt covers the gating logic that decides when to launch
 // the interactive prompt. The contract: launch only when no token source AND
-// no LLM key are available, AND the account isn't a shared coordinator.
+// no LLM key are available, AND the account isn't a team-space coordinator.
 func TestNeedsAccountPrompt(t *testing.T) {
 	cases := []struct {
 		name string
