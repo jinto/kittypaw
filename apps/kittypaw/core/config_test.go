@@ -147,6 +147,9 @@ members = ["alice", "bob"]
 	if got := cfg.TeamSpace.Members; len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
 		t.Fatalf("TeamSpace.Members = %#v, want alice,bob", got)
 	}
+	if !cfg.TeamSpaceHasMember("alice") {
+		t.Fatal("alice must be recognized as a team-space member")
+	}
 }
 
 func TestTeamSpaceConfigDefaultsDenyAll(t *testing.T) {

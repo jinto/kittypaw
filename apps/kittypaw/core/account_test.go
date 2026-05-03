@@ -182,6 +182,33 @@ func TestValidateTeamSpaceMemberships_RejectsSelfMember(t *testing.T) {
 	}
 }
 
+func TestValidateTeamSpaceMemberships_RejectsInvalidMemberID(t *testing.T) {
+	accounts := []*Account{
+		{ID: "team", Config: &Config{IsShared: true, TeamSpace: TeamSpaceConfig{Members: []string{"../alice"}}}},
+	}
+	err := ValidateTeamSpaceMemberships(accounts)
+	if err == nil {
+		t.Fatal("expected invalid member id error")
+	}
+	if !strings.Contains(err.Error(), "team:../alice invalid member id") {
+		t.Errorf("error should cite team and invalid member id: %q", err.Error())
+	}
+}
+
+func TestValidateTeamSpaceMemberships_RejectsNestedTeamSpaceMember(t *testing.T) {
+	accounts := []*Account{
+		{ID: "team", Config: &Config{IsShared: true, TeamSpace: TeamSpaceConfig{Members: []string{"other_team"}}}},
+		{ID: "other_team", Config: &Config{IsShared: true}},
+	}
+	err := ValidateTeamSpaceMemberships(accounts)
+	if err == nil {
+		t.Fatal("expected nested team-space member error")
+	}
+	if !strings.Contains(err.Error(), "team") || !strings.Contains(err.Error(), "other_team") || !strings.Contains(err.Error(), "another team space") {
+		t.Errorf("error should cite team and nested team-space member: %q", err.Error())
+	}
+}
+
 // TestValidateFamilyAccounts_PersonalWithChannelsOK confirms the check is
 // scoped to the family flag — personal accounts declaring channels are
 // the normal case and must pass.

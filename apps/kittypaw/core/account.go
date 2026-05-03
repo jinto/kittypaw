@@ -292,7 +292,11 @@ func ValidateFamilyAccounts(accounts []*Account) error {
 }
 
 // ValidateTeamSpaceMemberships verifies that every configured team-space member
-// is an existing personal account. Missing members mean deny-all and are valid.
+// is an existing personal account. An omitted or empty members list is deny-all
+// and is valid.
+//
+// This is the core validator only. Startup, reload, and hot-add paths are
+// responsible for calling it when they wire team-space account loading.
 func ValidateTeamSpaceMemberships(accounts []*Account) error {
 	byID := make(map[string]*Account, len(accounts))
 	for _, account := range accounts {

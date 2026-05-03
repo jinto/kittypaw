@@ -101,8 +101,9 @@ type Config struct {
 	IsFamily  bool            `toml:"-"`
 	TeamSpace TeamSpaceConfig `toml:"team_space"`
 
-	// Share is the legacy per-path allowlist. It still parses for old configs,
-	// but team-space membership is owned by TeamSpace.Members.
+	// Share is the legacy per-path cross-account read allowlist. It remains
+	// active for existing read checks and will be superseded by team-space
+	// membership in the new read path.
 	Share map[string]ShareConfig `toml:"share"`
 }
 
