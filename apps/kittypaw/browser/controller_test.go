@@ -46,6 +46,31 @@ func (f *fakeBackend) close(_ context.Context, targetID string) error {
 	return nil
 }
 
+func (f *fakeBackend) snapshot(context.Context, map[string]any) (SnapshotResult, error) {
+	f.calls = append(f.calls, "snapshot")
+	return SnapshotResult{TargetID: f.tab.TargetID, Title: "Snap"}, nil
+}
+
+func (f *fakeBackend) click(_ context.Context, refOrSelector string) (map[string]any, error) {
+	f.calls = append(f.calls, "click:"+refOrSelector)
+	return map[string]any{"success": true}, nil
+}
+
+func (f *fakeBackend) typeText(_ context.Context, refOrSelector, text string) (map[string]any, error) {
+	f.calls = append(f.calls, "type:"+refOrSelector+":"+text)
+	return map[string]any{"success": true}, nil
+}
+
+func (f *fakeBackend) evaluate(_ context.Context, js string) (string, error) {
+	f.calls = append(f.calls, "evaluate:"+js)
+	return "2", nil
+}
+
+func (f *fakeBackend) screenshot(_ context.Context, format string) (ScreenshotResult, error) {
+	f.calls = append(f.calls, "screenshot:"+format)
+	return ScreenshotResult{Path: "/tmp/shot.png", Mime: "image/png", Bytes: 3}, nil
+}
+
 func TestControllerExecuteStatusDisabled(t *testing.T) {
 	c := NewController(ControllerOptions{
 		Config:  core.BrowserConfig{Enabled: false},
@@ -94,6 +119,25 @@ func TestControllerExecuteOpen(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 	if fake.calls[0] != "open:https://example.com" {
+		t.Fatalf("calls = %v", fake.calls)
+	}
+}
+
+func TestControllerExecuteEvaluate(t *testing.T) {
+	fake := &fakeBackend{}
+	c := newControllerWithBackend(core.BrowserConfig{Enabled: true}, t.TempDir(), fake)
+	got, err := c.Execute(context.Background(), core.SkillCall{
+		SkillName: "Browser",
+		Method:    "evaluate",
+		Args:      []json.RawMessage{json.RawMessage(`"1+1"`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `"result":"2"`) {
+		t.Fatalf("got %s", got)
+	}
+	if fake.calls[0] != "evaluate:1+1" {
 		t.Fatalf("calls = %v", fake.calls)
 	}
 }
