@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
@@ -75,4 +76,25 @@ func TestAccountSchedulersReplaceReturnsPreviousScheduler(t *testing.T) {
 	if got := schedulers.Len(); got != 1 {
 		t.Fatalf("scheduler count = %d, want 1", got)
 	}
+}
+
+func TestAccountSchedulersReplaceWhileRunningStartsReplacement(t *testing.T) {
+	schedulers := NewAccountSchedulers()
+	first := engine.NewScheduler(&engine.Session{Config: &core.Config{}}, nil)
+	second := engine.NewScheduler(&engine.Session{Config: &core.Config{}}, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	schedulers.Register("alice", first)
+	schedulers.StartAll(ctx)
+
+	old := schedulers.Replace("alice", second)
+	if old != first {
+		t.Fatalf("Replace returned %p, want first scheduler %p", old, first)
+	}
+	old.Wait()
+
+	schedulers.StopAll()
+	cancel()
+	schedulers.WaitAll()
 }

@@ -38,7 +38,7 @@ func (a *AccountSchedulers) Register(accountID string, scheduler *engine.Schedul
 	a.mu.Unlock()
 
 	if startCtx != nil {
-		go scheduler.Start(startCtx)
+		scheduler.StartAsync(startCtx)
 	}
 }
 
@@ -60,7 +60,7 @@ func (a *AccountSchedulers) Replace(accountID string, scheduler *engine.Schedule
 	a.mu.Unlock()
 
 	if startCtx != nil {
-		go scheduler.Start(startCtx)
+		scheduler.StartAsync(startCtx)
 	}
 	if old != nil {
 		old.Stop()
@@ -108,7 +108,7 @@ func (a *AccountSchedulers) StartAll(ctx context.Context) {
 	a.mu.Unlock()
 
 	for _, scheduler := range toStart {
-		go scheduler.Start(ctx)
+		scheduler.StartAsync(ctx)
 	}
 }
 
