@@ -7,9 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jinto/kittypaw/core"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // needsAccountPrompt returns true when `account add` was invoked without enough
