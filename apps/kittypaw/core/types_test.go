@@ -411,3 +411,20 @@ func TestSkillRegistryCompleteness(t *testing.T) {
 		}
 	}
 }
+
+func TestSkillMetadataUsesTeamSpaceTerminology(t *testing.T) {
+	for _, skill := range SkillRegistry {
+		if strings.Contains(strings.ToLower(skill.Name), "family account") {
+			t.Errorf("SkillRegistry[%s] exposes family-account terminology in name", skill.Name)
+		}
+		for _, m := range skill.Methods {
+			surface := strings.ToLower(m.Name + " " + m.Signature)
+			forbidden := []string{"family account", "family-only", "family account only", "family.push", "target is not the family account"}
+			for _, term := range forbidden {
+				if strings.Contains(surface, term) {
+					t.Errorf("SkillRegistry[%s].%s exposes %q in signature %q", skill.Name, m.Name, term, m.Signature)
+				}
+			}
+		}
+	}
+}

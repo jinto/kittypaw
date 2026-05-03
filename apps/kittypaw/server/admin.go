@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jinto/kittypaw/core"
+	"github.com/jinto/kittypaw/engine"
 )
 
 // ErrAccountAlreadyActive is returned by AddAccount when an account with
@@ -25,7 +26,7 @@ var ErrAccountNotActive = errors.New("account not active")
 // live server: opens its deps, builds a session, hot-wires it into
 // the AccountRegistry / AccountRouter / ChannelSpawner, and spawns its
 // channels — all without a server restart. This powers AC-U3 (30-second
-// add of a new family member).
+// add of a new team-space member).
 //
 // Invariants (enforced under accountMu so two concurrent admin calls
 // can't corrupt state):
@@ -33,15 +34,14 @@ var ErrAccountNotActive = errors.New("account not active")
 //   - Bot-token / Kakao-URL collisions against live accounts are
 //     rejected via ValidateAccountChannels BEFORE any channel spawn —
 //     otherwise the new channel would silently steal updates.
-//   - Family accounts must not declare channels (ValidateFamilyAccounts).
+//   - Team-space accounts must not declare channels (ValidateTeamSpaceAccounts).
+//   - Team-space members must resolve to existing accounts.
 //   - Any failure after a side-effect (registry, router, accountList,
 //     spawner) unwinds every earlier side-effect in reverse order.
 //     Deps opened by OpenAccountDeps are also closed on failure.
 //
-// Scheduler is NOT wired here — the default-account scheduler stays as
-// the sole tick source until a follow-up commit makes scheduling
-// account-aware. Channel dispatch (the AC-U3 acceptance criterion) is
-// fully live after a successful AddAccount call.
+// Scheduling is account-aware: successful activation registers a scheduler
+// for the new account and rollback removes it if any later side effect fails.
 func (s *Server) AddAccount(t *core.Account) error {
 	if t == nil || t.Config == nil {
 		return fmt.Errorf("add account: account or config is nil")
@@ -51,9 +51,17 @@ func (s *Server) AddAccount(t *core.Account) error {
 	}
 
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			s.accountMu.Unlock()
+		}
+	}()
 
 	if existing := s.accounts.Session(t.ID); existing != nil {
+		return fmt.Errorf("%w: %q", ErrAccountAlreadyActive, t.ID)
+	}
+	if s.removingAccount != nil && s.removingAccount[t.ID] {
 		return fmt.Errorf("%w: %q", ErrAccountAlreadyActive, t.ID)
 	}
 
@@ -72,8 +80,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		return fmt.Errorf("channel validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(append(append([]*core.Account(nil), s.accountList...), t)); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	proposedAccounts := append(append([]*core.Account(nil), s.accountList...), t)
+	if err := core.ValidateTeamSpaceAccounts(proposedAccounts); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(proposedAccounts); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 
 	td, err := OpenAccountDeps(t)
@@ -84,13 +96,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	// Rollback stack: undo side effects in LIFO order if any later step
 	// fails. Each closure is responsible for exactly one revert.
 	var rollback []func()
+	var rollbackSchedulers []*engine.Scheduler
 	rollbackAll := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
 		}
 	}
-
-	rollback = append(rollback, func() { _ = td.Close() })
 
 	sess := buildAccountSession(td, s.accountRegistry, s.eventCh)
 
@@ -105,6 +116,17 @@ func (s *Server) AddAccount(t *core.Account) error {
 	}
 	s.accountDeps[t.ID] = td
 	rollback = append(rollback, func() { delete(s.accountDeps, t.ID) })
+
+	if s.schedulers == nil {
+		s.schedulers = NewAccountSchedulers()
+	}
+	s.schedulers.Register(t.ID, engine.NewScheduler(sess, td.PkgMgr))
+	rollback = append(rollback, func() {
+		if scheduler := s.schedulers.Detach(t.ID); scheduler != nil {
+			scheduler.Stop()
+			rollbackSchedulers = append(rollbackSchedulers, scheduler)
+		}
+	})
 
 	// accountList is read under accountMu by future AddAccount calls for
 	// their validation snapshot; StartChannels reads it only at boot (single
@@ -134,6 +156,10 @@ func (s *Server) AddAccount(t *core.Account) error {
 			slog.Error("account_activate_reconcile_failed",
 				"account", t.ID, "error", err)
 			rollbackAll()
+			s.accountMu.Unlock()
+			locked = false
+			waitSchedulers(rollbackSchedulers)
+			_ = td.Close()
 			return fmt.Errorf("reconcile channels: %w", err)
 		}
 	}
@@ -144,6 +170,14 @@ func (s *Server) AddAccount(t *core.Account) error {
 		"channels", len(t.Config.Channels),
 	)
 	return nil
+}
+
+func waitSchedulers(schedulers []*engine.Scheduler) {
+	for _, scheduler := range schedulers {
+		if scheduler != nil {
+			scheduler.Wait()
+		}
+	}
 }
 
 // RemoveAccount is the inverse of AddAccount — it drains the account's
@@ -166,9 +200,9 @@ func (s *Server) RemoveAccount(id string) error {
 	}
 
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
 
 	if s.accounts == nil || s.accounts.Session(id) == nil {
+		s.accountMu.Unlock()
 		return fmt.Errorf("%w: %q", ErrAccountNotActive, id)
 	}
 
@@ -176,11 +210,21 @@ func (s *Server) RemoveAccount(id string) error {
 		if err := s.spawner.Reconcile(id, nil); err != nil {
 			slog.Error("account_remove_reconcile_failed",
 				"account", id, "error", err)
+			s.accountMu.Unlock()
 			return fmt.Errorf("drain channels: %w", err)
 		}
 	}
 
 	td := s.accountDeps[id]
+	var scheduler *engine.Scheduler
+	if s.schedulers != nil {
+		scheduler = s.schedulers.Detach(id)
+	}
+	if s.removingAccount == nil {
+		s.removingAccount = make(map[string]bool)
+	}
+	s.removingAccount[id] = true
+	scrubLiveTeamSpaceMembership(s.accountList, id)
 	s.accounts.Remove(id)
 	for i, peer := range s.accountList {
 		if peer != nil && peer.ID == id {
@@ -191,15 +235,48 @@ func (s *Server) RemoveAccount(id string) error {
 	s.accountRegistry.Unregister(id)
 	delete(s.accountDeps, id)
 
+	s.accountMu.Unlock()
+	if scheduler != nil {
+		scheduler.Stop()
+		scheduler.Wait()
+	}
 	if td != nil {
 		if err := td.Close(); err != nil {
 			slog.Warn("account_remove_close_partial",
 				"account", id, "error", err)
 		}
 	}
+	s.accountMu.Lock()
+	delete(s.removingAccount, id)
+	s.accountMu.Unlock()
 
 	slog.Info("account_deactivated", "account", id)
 	return nil
+}
+
+func scrubLiveTeamSpaceMembership(accounts []*core.Account, removedID string) {
+	if removedID == "" {
+		return
+	}
+	for _, account := range accounts {
+		if account == nil || account.ID == removedID || account.Config == nil || !account.Config.IsTeamSpaceAccount() {
+			continue
+		}
+		members := account.Config.TeamSpace.Members
+		if len(members) == 0 {
+			continue
+		}
+		next := members[:0]
+		for _, member := range members {
+			if member != removedID {
+				next = append(next, member)
+			}
+		}
+		for i := len(next); i < len(members); i++ {
+			members[i] = ""
+		}
+		account.Config.TeamSpace.Members = next
+	}
 }
 
 // handleAdminAccountAdd activates an account that already exists on disk.
@@ -266,7 +343,7 @@ func (s *Server) handleAdminAccountAdd(w http.ResponseWriter, r *http.Request) {
 // The server does NOT touch the filesystem — that's the CLI's job after a
 // 200 response. Status mapping: 200 on success, 404 if not active, 400 on
 // malformed ID, 500 on reconcile-drain failure (AC-RM5: CLI aborts before
-// touching family config or disk).
+// touching team-space config or disk).
 func (s *Server) handleAdminAccountRemove(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {

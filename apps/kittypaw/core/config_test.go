@@ -130,6 +130,63 @@ access = "read_write"
 	}
 }
 
+func TestTeamSpaceConfigParsing(t *testing.T) {
+	tomlContent := `
+is_shared = true
+
+[team_space]
+members = ["alice", "bob"]
+`
+	var cfg Config
+	if _, err := toml.Decode(tomlContent, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cfg.IsTeamSpaceAccount() {
+		t.Fatal("is_shared=true must mark account as team space")
+	}
+	if got := cfg.TeamSpace.Members; len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
+		t.Fatalf("TeamSpace.Members = %#v, want alice,bob", got)
+	}
+	if !cfg.TeamSpaceHasMember("alice") {
+		t.Fatal("alice must be recognized as a team-space member")
+	}
+}
+
+func TestTeamSpaceConfigDefaultsDenyAll(t *testing.T) {
+	var cfg Config
+	if _, err := toml.Decode(`is_shared = true`, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cfg.IsTeamSpaceAccount() {
+		t.Fatal("is_shared=true must mark account as team space")
+	}
+	if len(cfg.TeamSpace.Members) != 0 {
+		t.Fatalf("missing [team_space].members must default empty, got %#v", cfg.TeamSpace.Members)
+	}
+	if cfg.TeamSpaceHasMember("alice") {
+		t.Fatal("empty team-space members must deny all accounts")
+	}
+}
+
+func TestLegacyShareParsingStillLoads(t *testing.T) {
+	tomlContent := `
+is_shared = true
+
+[share.alice]
+read = ["memory/weather.json"]
+`
+	var cfg Config
+	if _, err := toml.Decode(tomlContent, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cfg.Share) != 1 || len(cfg.Share["alice"].Read) != 1 {
+		t.Fatalf("legacy Share did not parse: %#v", cfg.Share)
+	}
+	if cfg.TeamSpaceHasMember("alice") {
+		t.Fatal("[share.alice] must not imply team-space membership")
+	}
+}
+
 func TestConfigV2SecretsHydration(t *testing.T) {
 	t.Setenv("KITTYPAW_CONFIG_DIR", t.TempDir())
 	secrets, err := LoadAccountSecrets("jinto")
@@ -209,10 +266,9 @@ timeout_seconds = 60
 	}
 }
 
-// TestFamilyShareParsing enforces the TOML wire format for family accounts.
-// The shape ([share.<peer>] read=[...]) is the user-facing contract the spec
-// promises — this regression pins it so a future config refactor can't
-// silently reshape it into something that breaks existing family installs.
+// TestFamilyShareParsing enforces legacy share TOML compatibility for team-space accounts.
+// The shape ([share.<peer>] read=[...]) remains supported for existing installs,
+// so this regression pins it against config refactors that would break migration.
 func TestFamilyShareParsing(t *testing.T) {
 	tomlContent := `
 is_shared = true

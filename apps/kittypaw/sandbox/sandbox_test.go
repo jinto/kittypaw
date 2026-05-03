@@ -410,7 +410,7 @@ func TestFanoutHiddenByDefault(t *testing.T) {
 	}
 }
 
-// TestFanoutExposedWhenOpted verifies the family-account path. When the engine
+// TestFanoutExposedWhenOpted verifies the team-space coordinator path. When the engine
 // opts in (Session.Fanout != nil), the global appears with the expected method
 // surface. We check for the two methods explicitly — a bare `typeof` would
 // also pass if the binding was half-wired.
@@ -439,9 +439,9 @@ func TestFanoutExposedWhenOpted(t *testing.T) {
 }
 
 // TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal mirrors the
-// Fanout defense-in-depth model for Share. Family accounts do not read from
-// peers — they're the authoritative source — so the Share global must be
-// absent there. A personal account probing `typeof Share` on the family
+// Fanout defense-in-depth model for Share. Team-space coordinators do not read from
+// members — they're the authoritative source — so the Share global must be
+// absent there. A personal account probing `typeof Share` on the team-space
 // session should see undefined, not a bound object that errors on call.
 func TestExecuteWithResolverOpts_ExposeShareFalse_HidesShareGlobal(t *testing.T) {
 	sb := New(core.SandboxConfig{TimeoutSecs: 5})

@@ -346,27 +346,39 @@ func (s *Server) applySettingsWizard(acct *requestAccount, wizard core.WizardRes
 
 	accountID := acct.ID
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
 
 	if err := s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, merged, wizard.APIServerURL); err != nil {
+		s.accountMu.Unlock()
 		return err
 	}
 	if err := core.SaveWizardSecrets(accountID, wizard, merged); err != nil {
+		s.accountMu.Unlock()
 		return err
 	}
 	if err := core.WriteConfigAtomic(merged, cfgPath); err != nil {
+		s.accountMu.Unlock()
 		return err
 	}
 	if wizard.APIServerURL != "" {
 		s.saveSetupAPIServerURL(accountID, wizard.APIServerURL)
 	}
-	if err := s.applyAccountConfigLocked(accountID, merged); err != nil {
+	oldScheduler, err := s.applyAccountConfigLocked(accountID, merged)
+	if err != nil {
+		s.accountMu.Unlock()
 		return err
 	}
 	if s.spawner != nil {
 		if err := s.spawner.Reconcile(accountID, merged.Channels); err != nil {
+			s.accountMu.Unlock()
+			if oldScheduler != nil {
+				oldScheduler.Wait()
+			}
 			return err
 		}
+	}
+	s.accountMu.Unlock()
+	if oldScheduler != nil {
+		oldScheduler.Wait()
 	}
 	return nil
 }

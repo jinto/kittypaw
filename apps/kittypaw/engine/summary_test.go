@@ -482,7 +482,7 @@ func TestSummary_NotExposedToShareNamespace(t *testing.T) {
 		}
 	}
 	if shareHasSummary {
-		t.Error("Share.summary must not be exposed (family account must not read cross-account summaries)")
+		t.Error("Share.summary must not be exposed (team-space coordinator must not read cross-account summaries)")
 	}
 	if !fileHasSummary {
 		t.Error("File.summary must be registered under File namespace in core.SkillRegistry")

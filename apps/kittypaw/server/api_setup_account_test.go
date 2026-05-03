@@ -580,6 +580,12 @@ func TestSetupCompleteRefreshesLoggedInRuntimeSession(t *testing.T) {
 		writeConfigForTest(t, filepath.Join(root, "accounts", accountID), cfg)
 	}
 
+	originalBobSession := srv.accounts.Session("bob")
+	if originalBobSession == nil {
+		t.Fatal("bob session missing before setup complete")
+	}
+	originalBobProvider := originalBobSession.Provider
+
 	cookie := loginSessionCookie(t, srv, "bob", "bob-pw")
 	postSetupJSON(t, srv, cookie, "/api/setup/llm", `{"provider":"local","local_url":"http://localhost:11434/v1","local_model":"llama3"}`)
 	postSetupJSON(t, srv, cookie, "/api/setup/telegram", `{"bot_token":"123456:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","chat_id":"42"}`)
@@ -596,11 +602,20 @@ func TestSetupCompleteRefreshesLoggedInRuntimeSession(t *testing.T) {
 	if bobSession == nil {
 		t.Fatal("bob session missing after setup complete")
 	}
+	if bobSession == originalBobSession {
+		t.Fatalf("bob session pointer was preserved after setup complete: %p", bobSession)
+	}
 	if bobSession.Config.LLM.BaseURL != "http://localhost:11434/v1/chat/completions" {
 		t.Fatalf("bob runtime config base URL = %q, want generated local URL", bobSession.Config.LLM.BaseURL)
 	}
 	if bobSession.Provider == nil {
 		t.Fatal("bob runtime provider is nil after setup complete")
+	}
+	if bobSession.Provider == originalBobProvider {
+		t.Fatal("bob runtime provider was not refreshed after setup complete")
+	}
+	if !srv.schedulers.Has("bob") {
+		t.Fatal("bob scheduler missing after setup complete")
 	}
 	if len(bobSession.Config.Channels) != 1 || bobSession.Config.Channels[0].Token != "123456:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" {
 		t.Fatalf("bob runtime channels = %#v, want generated telegram channel", bobSession.Config.Channels)

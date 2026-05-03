@@ -19,7 +19,7 @@ type execOpts struct {
 	// itself), while LLM-generated code expects parsed objects.
 	rawResolverResults bool
 
-	// exposeFanout registers the Fanout global. Off by default: only family
+	// exposeFanout registers the Fanout global. Off by default: only team-space
 	// accounts (Session.Fanout != nil) may push to peers, and we want personal
 	// accounts to see `typeof Fanout === "undefined"` at the JS layer — not a
 	// bound object that happens to error on call. Defense in depth against a
@@ -27,8 +27,8 @@ type execOpts struct {
 	exposeFanout bool
 
 	// exposeShare registers the Share global. Off by default: only personal
-	// accounts read from family (family is the authoritative source and has no
-	// peer to read from), so family sessions must see `typeof Share ===
+	// accounts read from team space (team space is the authoritative source and
+	// has no peer to read from), so team-space sessions must see `typeof Share ===
 	// "undefined"`. Mirror of exposeFanout — same defense-in-depth intent.
 	exposeShare bool
 }
@@ -88,7 +88,7 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 			continue
 		}
 		if skill.Name == "Share" && !opts.exposeShare {
-			// Family accounts never even see the global; see execOpts doc.
+			// Team-space accounts never even see the global; see execOpts doc.
 			continue
 		}
 		obj := vm.NewObject()

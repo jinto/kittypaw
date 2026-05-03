@@ -107,11 +107,40 @@ func TestNewAccountAddCmd_RegistersPasswordStdinFlag(t *testing.T) {
 
 func TestNewAccountAddCmd_UsesSharedAccountFlag(t *testing.T) {
 	cmd := newAccountAddCmd()
-	if f := cmd.Flags().Lookup("is-shared"); f == nil {
+	f := cmd.Flags().Lookup("is-shared")
+	if f == nil {
 		t.Fatal("--is-shared flag not registered on `kittypaw account add`")
+	}
+	if !strings.Contains(strings.ToLower(f.Usage), "team-space") {
+		t.Fatalf("--is-shared help should use team-space wording, got %q", f.Usage)
+	}
+	if strings.Contains(strings.ToLower(f.Usage), "shared coordinator") {
+		t.Fatalf("--is-shared help exposes old shared-coordinator wording: %q", f.Usage)
 	}
 	if f := cmd.Flags().Lookup("is-family"); f != nil {
 		t.Fatal("--is-family must not be exposed; use --is-shared")
+	}
+}
+
+func TestAccountRemoveHelpUsesTeamSpaceTerminology(t *testing.T) {
+	cmd := newAccountRemoveCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("account remove --help: %v", err)
+	}
+
+	help := stdout.String() + stderr.String()
+	forbidden := []string{"family account", "shared account config"}
+	for _, term := range forbidden {
+		if strings.Contains(strings.ToLower(help), term) {
+			t.Fatalf("account remove help exposes %q:\n%s", term, help)
+		}
+	}
+	if !strings.Contains(strings.ToLower(help), "team-space") {
+		t.Fatalf("account remove help should describe team-space cleanup:\n%s", help)
 	}
 }
 
@@ -503,17 +532,50 @@ func TestRunAccountRemove_SharedConfigScrub(t *testing.T) {
 	}
 }
 
-// AC-RM4: removing a personal account when no shared exists is a no-op
-// (no shared to scrub), not an error.
+func TestRunAccountRemove_TeamSpaceMembershipScrub(t *testing.T) {
+	home := setupRemoveFixture(t, map[string]bool{
+		"alice":  false,
+		"bob":    false,
+		"shared": true,
+	})
+	cfgPath := filepath.Join(home, ".kittypaw", "accounts", "shared", "config.toml")
+	cfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load shared config: %v", err)
+	}
+	cfg.TeamSpace.Members = []string{"alice", "bob"}
+	if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
+		t.Fatalf("write shared config: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := runAccountRemove("alice", &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountRemove: %v", err)
+	}
+
+	teamCfg, err := core.LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("reload shared config: %v", err)
+	}
+	if teamCfg.TeamSpaceHasMember("alice") {
+		t.Error("team_space.members still includes alice after removal")
+	}
+	if !teamCfg.TeamSpaceHasMember("bob") {
+		t.Error("team_space.members should preserve bob")
+	}
+}
+
+// AC-RM4: removing a personal account when no team-space account exists is a
+// no-op (no team-space membership to scrub), not an error.
 func TestRunAccountRemove_NoShared_NoOp(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{"alice": false})
 	var stdout, stderr bytes.Buffer
 	if err := runAccountRemove("alice", &stdout, &stderr); err != nil {
 		t.Fatalf("runAccountRemove: %v", err)
 	}
-	// Assertion: no panic, no shared config magically appears.
+	// Assertion: no panic, no team-space config magically appears.
 	if _, err := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "shared")); !os.IsNotExist(err) {
-		t.Errorf("shared account should not exist, stat err = %v", err)
+		t.Errorf("team-space account should not exist, stat err = %v", err)
 	}
 }
 
@@ -558,8 +620,8 @@ func TestRunAccountRemove_TrashCollision(t *testing.T) {
 	}
 }
 
-// AC-RM7: removing the shared account itself surfaces an extra warning AND
-// skips the scrub step (no "upstream" shared account to clean).
+// AC-RM7: removing the team-space account itself surfaces an extra warning AND
+// skips the scrub step (no upstream team-space account to clean).
 func TestRunAccountRemove_SharedSelf_ExtraWarning(t *testing.T) {
 	home := setupRemoveFixture(t, map[string]bool{"shared": true, "alice": false})
 	var stdout, stderr bytes.Buffer
@@ -567,8 +629,8 @@ func TestRunAccountRemove_SharedSelf_ExtraWarning(t *testing.T) {
 		t.Fatalf("runAccountRemove(shared): %v", err)
 	}
 
-	if !strings.Contains(stderr.String(), "shared account removed") {
-		t.Errorf("expected extra shared-removal warning, stderr = %q", stderr.String())
+	if !strings.Contains(stderr.String(), "team-space account removed") {
+		t.Errorf("expected extra team-space removal warning, stderr = %q", stderr.String())
 	}
 	// alice's config is untouched (no cascade).
 	cfg, err := core.LoadConfig(filepath.Join(home, ".kittypaw", "accounts", "alice", "config.toml"))

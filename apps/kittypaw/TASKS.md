@@ -165,13 +165,13 @@ KittyPaw 의 weather-now skill 이 KR 좌표에서 KittyAPI KMA primary 호출�
 - **Plan 27 Follow-up** — Indexer v2 hardening (bundle 1+2): dir-remove FTS cascade + watcher partial-add visibility. `e575f53`
 - **Plan 27** — Workspace Indexer v2: fsnotify live filesystem watching + FTS5 incremental update. `8c45a4f`
 - **Setup → Chat Auto-Entry** (Plan 26) — `kittypaw setup` 완료 시 TTY 에서 chat REPL 자동 진입 + 서버 hot-reload. `814cc89` + `74acdaf`(/reload validation)
-- **Account Remove** — `kittypaw account remove`: LIFO 드레인 → shared account config scrub → `.trash/` 이동 + BotFather 경고. `4ee9c95`
+- **Account Remove** — `kittypaw account remove`: LIFO 드레인 → team-space membership/config scrub → `.trash/` 이동 + BotFather 경고. `4ee9c95`
 - **Multi-user Blockers** — MB1 account ID regex 완화, MB2/MB3 는 `account==user` 확정으로 revert. `e24cd9e` + `aedf04a`(revert)
 
 ### Plan 25 — Family Multi-Account (macOS 단일 서버, 7 personal + 1 family)
 
 - **Plan A** — multi-account routing foundation (Event.AccountID, ChannelSpawner keying, fail-fast 중복 탐지). `8b3860a`
-- **Plan B** — family account: cross-account `Share.read` + `Fanout.send/broadcast`. `a62075b` + `26ea597`(gate + dispatch)
+- **Plan B** — team space: cross-account `Share.read` + `Fanout.send/broadcast`. `a62075b` + `26ea597`(gate + dispatch)
 - **Plan C** — operations: account health + panic isolation (`57fe75a`), `kittypaw account add` CLI (`4fae3a3`), admin RPC hot-activate (`eb26ec7`), E2E demos (`aa7f9cb`)
 - Plan B→C 이월 — account fields wire + legacy migration activation. `83a986b`
 

@@ -130,10 +130,10 @@ var SkillRegistry = []SkillMeta{
 		{Name: "fetch", Signature: "Web.fetch(url) — returns {text, markdown, title, status}"},
 	}},
 	{Name: "Share", Methods: []SkillMethodMeta{
-		{Name: "read", Signature: "Share.read(accountID, path) — read a file another account has listed in [share.<you>] of their config; returns {content}"},
+		{Name: "read", Signature: "Share.read(accountID, path) — read from a team-space account where you are a configured member. Paths must be memory/... or workspace/<alias>/...; returns {content}"},
 	}},
 	{Name: "Fanout", Methods: []SkillMethodMeta{
-		{Name: "send", Signature: "Fanout.send(accountID, {text, channel_hint?}) — push a message to another account; FAMILY ACCOUNT ONLY"},
-		{Name: "broadcast", Signature: "Fanout.broadcast({text, channel_hint?}) — push to every peer except source; FAMILY ACCOUNT ONLY"},
+		{Name: "send", Signature: "Fanout.send(accountID, {text, channel_hint?}) — push a message to a configured team-space member; TEAM SPACE ONLY"},
+		{Name: "broadcast", Signature: "Fanout.broadcast({text, channel_hint?}) — push to configured team-space members; TEAM SPACE ONLY"},
 	}},
 }

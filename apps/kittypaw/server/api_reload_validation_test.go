@@ -15,7 +15,7 @@ import (
 
 // AC-RELOAD-VALIDATION: pin the symmetry contract with StartChannels and
 // AddAccount — the reload path MUST run ValidateAccountChannels and
-// ValidateFamilyAccounts before any state mutation. These tests cover the
+// ValidateTeamSpaceAccounts before any state mutation. These tests cover the
 // two classes of invalid config that the validators catch:
 //   (1) a new default-account bot_token that collides with a live peer,
 //   (2) a default account flipping is_shared=true while still owning channels.
@@ -106,9 +106,9 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 }
 
 // TestHandleReload_FamilyWithChannels_Rejects locks in the coordinator-only
-// rule for shared accounts: a reload that flips is_shared=true while still
-// declaring [telegram]/[kakao] channels must 409. A family account owning a
-// chat channel would silently intercept updates meant for the personal
+// rule for team-space accounts: a reload that flips is_shared=true while still
+// declaring [telegram]/[kakao] channels must 409. A team-space account owning
+// a chat channel would silently intercept updates meant for the personal
 // account that actually owns the real bot_token.
 func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	newCfg := core.DefaultConfig()
@@ -139,8 +139,8 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "shared account validation") {
-		t.Errorf("body = %q, want 'shared account validation' prefix", body)
+	if !strings.Contains(string(body), "team space validation") {
+		t.Errorf("body = %q, want 'team space validation' prefix", body)
 	}
 
 	if srv.config.LLM.APIKey != "old-key" {
@@ -148,6 +148,57 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	}
 	if srv.config.IsSharedAccount() {
 		t.Errorf("shared flag flipped to true despite rejection")
+	}
+	if n := atomic.LoadInt32(callN); n != 0 {
+		t.Errorf("Reconcile called %d times, want 0", n)
+	}
+}
+
+func TestHandleReload_UnknownTeamSpaceMember_Rejects(t *testing.T) {
+	newCfg := core.DefaultConfig()
+	newCfg.LLM.APIKey = "new-key"
+	newCfg.IsShared = true
+	newCfg.TeamSpace.Members = []string{"ghost"}
+	writeReloadConfig(t, newCfg)
+
+	liveCfg := core.DefaultConfig()
+	liveCfg.LLM.APIKey = "old-key"
+	peers := []*core.Account{
+		{ID: DefaultAccountID, Config: &liveCfg},
+	}
+	srv, callN := newReloadTestServer(t, &liveCfg, peers)
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleReload))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "team-space membership validation") {
+		t.Errorf("body = %q, want 'team-space membership validation' prefix", body)
+	}
+
+	if srv.config.LLM.APIKey != "old-key" {
+		t.Errorf("config swapped despite rejection: LLM.APIKey=%q", srv.config.LLM.APIKey)
+	}
+	if srv.config.IsSharedAccount() {
+		t.Errorf("shared flag flipped to true despite rejection")
+	}
+	if len(srv.config.TeamSpace.Members) != 0 {
+		t.Errorf("team-space members swapped despite rejection: %v", srv.config.TeamSpace.Members)
+	}
+	if peers[0].Config != &liveCfg {
+		t.Error("accountList default config pointer changed despite rejection")
+	}
+	if peers[0].Config.LLM.APIKey != "old-key" {
+		t.Errorf("accountList config mutated despite rejection: LLM.APIKey=%q", peers[0].Config.LLM.APIKey)
 	}
 	if n := atomic.LoadInt32(callN); n != 0 {
 		t.Errorf("Reconcile called %d times, want 0", n)

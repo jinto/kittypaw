@@ -501,10 +501,6 @@ func formatChatTranscript(messages []chatMessage, width int) string {
 	return strings.Join(blocks, "\n")
 }
 
-func formatChatMessage(prefix, text string, width int) string {
-	return formatChatMessageStyled(prefix, text, width, false, 0)
-}
-
 func formatChatMessageStyled(prefix, text string, width int, pending bool, pendingFrame int) string {
 	if text == "" {
 		text = " "

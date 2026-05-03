@@ -90,7 +90,7 @@ func TestInitAccount_HappyPath_Family(t *testing.T) {
 		t.Error("expected IsSharedAccount=true")
 	}
 	if len(cfg.Channels) != 0 {
-		t.Errorf("family account must declare no channels, got %+v", cfg.Channels)
+		t.Errorf("team-space account must declare no channels, got %+v", cfg.Channels)
 	}
 }
 
@@ -243,7 +243,7 @@ func TestInitAccount_DuplicateKakaoRelayURL(t *testing.T) {
 	}
 }
 
-// Family-no-channels invariant must reject before any file is written.
+// Team-space-no-channels invariant must reject before any file is written.
 func TestInitAccount_FamilyWithToken(t *testing.T) {
 	accountsDir := t.TempDir()
 
@@ -252,7 +252,7 @@ func TestInitAccount_FamilyWithToken(t *testing.T) {
 		TelegramToken: "12345:family",
 	})
 	if err == nil {
-		t.Fatal("expected error for family + telegram token, got nil")
+		t.Fatal("expected error for team-space + telegram token, got nil")
 	}
 	if !strings.Contains(err.Error(), "family") {
 		t.Errorf("error should cite family: %q", err.Error())
@@ -273,8 +273,8 @@ func TestInitAccount_FamilyWithKakao(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for family + kakao, got nil")
 	}
-	if !strings.Contains(err.Error(), "shared account") {
-		t.Errorf("error should cite shared account: %q", err.Error())
+	if !strings.Contains(err.Error(), "team-space account") {
+		t.Errorf("error should cite team-space account: %q", err.Error())
 	}
 	if _, err := os.Stat(filepath.Join(accountsDir, "family")); !os.IsNotExist(err) {
 		t.Errorf("family dir should not exist after rejection")

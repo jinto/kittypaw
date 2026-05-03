@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jinto/kittypaw/core"
 	"nhooyr.io/websocket"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 func TestFromConfigTelegram(t *testing.T) {

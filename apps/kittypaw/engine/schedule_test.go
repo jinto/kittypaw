@@ -48,6 +48,17 @@ func TestSchedulerStopMultipleCalls(t *testing.T) {
 	sched.Stop()
 }
 
+func TestSchedulerStartAsyncStopWaitIncludesLoops(t *testing.T) {
+	st := newTestStore(t)
+	cfg := &core.Config{}
+	cfg.Reflection.Enabled = true
+	sched := NewScheduler(&Session{Store: st, Config: cfg}, nil)
+
+	sched.StartAsync(context.Background())
+	sched.Stop()
+	sched.Wait()
+}
+
 // ---------------------------------------------------------------------------
 // isDue — requires a real store for GetLastRun/GetFailureCount
 // ---------------------------------------------------------------------------

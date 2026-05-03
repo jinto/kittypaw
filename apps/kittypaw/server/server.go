@@ -25,14 +25,15 @@ import (
 )
 
 // Server is the HTTP/WebSocket gateway that bridges REST clients and browsers
-// to the agent engine. It owns the chi router, the engine session, the
-// scheduler, channel spawner, account router, and all handler state.
+// to the agent engine. It owns the chi router, the default-account engine
+// session, account schedulers, channel spawner, account router, and all
+// handler state.
 type Server struct {
 	config          *core.Config
 	configMu        sync.RWMutex // protects config during hot-reload
 	store           *store.Store
 	session         *engine.Session // default-account session; HTTP handlers use this
-	scheduler       *engine.Scheduler
+	schedulers      *AccountSchedulers
 	router          chi.Router
 	spawner         *ChannelSpawner         // manages channel lifecycle for hot-reload
 	accounts        *AccountRouter          // routes channel events to account-scoped sessions
@@ -41,6 +42,7 @@ type Server struct {
 	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
 	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
 	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	removingAccount map[string]bool         // account IDs detached from routing but still draining scheduler/deps
 	localAuth       *core.LocalAuthStore
 	webSessionKey   []byte
 	masterAPIKey    string
@@ -65,16 +67,17 @@ const DefaultAccountID = "default"
 // Callers must pass at least one AccountDeps; New panics on an empty slice
 // because a server with no accounts has nothing to route to.
 //
-// One engine.Session is built per account. The family account (IsFamily=true)
-// receives a ChannelFanout wired to the shared eventCh so its skills can
-// push to personal accounts via Fanout.send; personal accounts keep Fanout
-// nil so the JS global stays hidden (I5 — personal cannot reach personal).
+// One engine.Session is built per account. Team-space accounts
+// (Config.IsTeamSpaceAccount()) receive a ChannelFanout wired to the shared
+// eventCh so their skills can push to configured members via Fanout.send;
+// personal accounts keep Fanout nil so the JS global stays hidden
+// (I5 — personal cannot reach personal).
 // Every session shares the same *core.AccountRegistry pointer so Share.read
 // can resolve peer accounts by ID.
 //
-// The HTTP handler surface (scheduler, /api/v1, secrets) remains bound to
-// the default account in PR-1; multi-account HTTP routing is scoped to a
-// follow-up. Call StartChannels before ListenAndServe to activate messaging.
+// The HTTP handler surface (/api/v1, secrets) remains bound to the default
+// account in PR-1; multi-account HTTP routing is scoped to a follow-up. Call
+// StartChannels before ListenAndServe to activate messaging.
 func New(accounts []*AccountDeps, version string, configuredDefault ...string) *Server {
 	sc := core.TopLevelServerConfig{}
 	if len(configuredDefault) > 0 {
@@ -107,11 +110,13 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 	}
 
 	router := NewAccountRouter()
+	schedulers := NewAccountSchedulers()
 	var defaultSession *engine.Session
 	depsByID := make(map[string]*AccountDeps, len(accounts))
 	for _, td := range accounts {
 		sess := buildAccountSession(td, registry, eventCh)
 		router.Register(td.Account.ID, sess)
+		schedulers.Register(td.Account.ID, engine.NewScheduler(sess, td.PkgMgr))
 		depsByID[td.Account.ID] = td
 		if td == defaultDeps {
 			defaultSession = sess
@@ -122,12 +127,13 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 		config:          cfg,
 		store:           defaultDeps.Store,
 		session:         defaultSession,
-		scheduler:       engine.NewScheduler(defaultSession, defaultDeps.PkgMgr),
+		schedulers:      schedulers,
 		accounts:        router,
 		accountList:     accountList,
 		accountRegistry: registry,
 		eventCh:         eventCh,
 		accountDeps:     depsByID,
+		removingAccount: make(map[string]bool),
 		localAuth:       newLocalAuthStore(),
 		webSessionKey:   newWebSessionKey(),
 		masterAPIKey:    sc.MasterAPIKey,
@@ -493,13 +499,15 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 // channel configs, and starts the dispatch and retry goroutines. Must be
 // called before ListenAndServe.
 //
-// Two startup validations run BEFORE any channel spawns:
+// Startup validations run BEFORE any channel spawns:
 //   - ValidateAccountChannels: a single Telegram bot token / Kakao relay
 //     URL cannot be claimed by two accounts (C3 — prevents silent update
 //     races where one account's bot steals another's messages).
-//   - ValidateFamilyAccounts: shared accounts must not declare channels
-//     (C10 — shared is a coordinator, not a channel owner; a misconfigured
-//     [telegram] on shared would race the real personal bot for updates).
+//   - ValidateTeamSpaceAccounts: team-space accounts must not declare channels
+//     (C10 — team-space is a coordinator, not a channel owner; a misconfigured
+//     [telegram] on team-space would race the real personal bot for updates).
+//   - ValidateTeamSpaceMemberships: configured members must resolve to
+//     existing accounts before Fanout.send can target them.
 func (s *Server) StartChannels(ctx context.Context) error {
 	accountChannels := make(map[string][]core.ChannelConfig, len(s.accountList))
 	for _, t := range s.accountList {
@@ -512,8 +520,11 @@ func (s *Server) StartChannels(ctx context.Context) error {
 	if err := core.ValidateAccountChannels(accountChannels); err != nil {
 		return fmt.Errorf("channel config validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(s.accountList); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	if err := core.ValidateTeamSpaceAccounts(s.accountList); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(s.accountList); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)
@@ -536,7 +547,7 @@ func (s *Server) StartChannels(ctx context.Context) error {
 //
 // Events with an empty or unknown AccountID are dropped by the AccountRouter
 // (no default fallback) to avoid cross-account privacy leaks — see C1 in
-// the family-multi-account spec.
+// the account-routing privacy constraint.
 func (s *Server) dispatchLoop(ctx context.Context) {
 	for {
 		select {
@@ -546,14 +557,14 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			// EventFamilyPush carries a FanoutPayload (not a ChatPayload) and
+			// EventTeamSpacePush carries a FanoutPayload (not a ChatPayload) and
 			// delivers an already-composed message to the target account —
 			// skip the agent loop entirely. Without this branch the generic
 			// ParsePayload below silently produces a zero-valued ChatPayload,
 			// the event routes through session.Run, and the push text never
 			// reaches the target channel.
-			if event.Type == core.EventFamilyPush {
-				s.deliverFamilyPush(ctx, event)
+			if core.IsTeamSpacePushEvent(event.Type) {
+				s.deliverTeamSpacePush(ctx, event)
 				continue
 			}
 			payload, err := event.ParsePayload()
@@ -696,7 +707,7 @@ func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string,
 	return ch.SendResponse(ctx, chatID, outbound.Text, replyToMessageID)
 }
 
-// deliverFamilyPush routes an EventFamilyPush to the target account's channel
+// deliverTeamSpacePush routes an EventTeamSpacePush to the target account's channel
 // and bypasses the agent loop. The payload is a finished outbound message
 // (Fanout.send already gave a skill author's hand-authored text), so we do
 // not re-invoke the LLM — doing so would paraphrase, translate, or drop the
@@ -709,65 +720,65 @@ func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string,
 //     (nowhere to send).
 //  4. If the channel is not currently running (hot-reload, post-restart),
 //     enqueue to pending_responses so the retry loop can pick it up.
-func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
+func (s *Server) deliverTeamSpacePush(ctx context.Context, event core.Event) {
 	var p core.FanoutPayload
 	if err := json.Unmarshal(event.Payload, &p); err != nil {
-		slog.Warn("family_push: bad payload", "account", event.AccountID, "error", err)
+		slog.Warn("team_space_push: bad payload", "account", event.AccountID, "error", err)
 		return
 	}
 
 	target := s.accountRegistry.Get(event.AccountID)
 	if target == nil || target.Config == nil {
-		slog.Warn("family_push: unknown target account", "account", event.AccountID)
+		slog.Warn("team_space_push: unknown target account", "account", event.AccountID)
 		return
 	}
 	if len(target.Config.Channels) == 0 {
-		slog.Warn("family_push: target has no channels configured; dropping",
+		slog.Warn("team_space_push: target has no channels configured; dropping",
 			"account", event.AccountID)
 		return
 	}
 
-	channelType := resolveFamilyPushChannel(target.Config.Channels, p.ChannelHint)
+	channelType := resolveTeamSpacePushChannel(target.Config.Channels, p.ChannelHint)
 
 	chatID := core.FirstAllowedChatID(target.Config)
 	if chatID == "" {
-		slog.Warn("family_push: target has no admin chat; dropping",
+		slog.Warn("team_space_push: target has no admin chat; dropping",
 			"account", event.AccountID, "channel", channelType)
 		return
 	}
 
 	ch, chOK := s.spawner.GetChannel(event.AccountID, channelType)
 	if !chOK {
-		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text, "channel not running")
+		s.enqueueTeamSpacePushForRetry(event.AccountID, channelType, chatID, p.Text, "channel not running")
 		return
 	}
 
 	if err := ch.SendResponse(ctx, chatID, p.Text, ""); err != nil {
-		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text,
+		s.enqueueTeamSpacePushForRetry(event.AccountID, channelType, chatID, p.Text,
 			fmt.Sprintf("send failed: %v", err))
 		return
 	}
 
-	slog.Info("family_push_delivered",
-		"from", "family", "to", event.AccountID, "channel", channelType, "chat_id", chatID)
+	slog.Info("team_space_push_delivered",
+		"from", "team_space", "to", event.AccountID, "channel", channelType, "chat_id", chatID)
 }
 
-// enqueueFamilyPushForRetry parks an undelivered family push in pending_responses
+// enqueueTeamSpacePushForRetry parks an undelivered team-space push in pending_responses
 // so the retry loop can pick it up after the channel comes back. Kakao is
 // excluded because its action IDs are ephemeral — by the time the retry fires,
 // the originating action no longer exists, so re-sending would 4xx-loop forever.
-func (s *Server) enqueueFamilyPushForRetry(accountID string, channelType core.EventType, chatID, text, reason string) {
-	slog.Warn("family_push: deferred to retry queue",
+func (s *Server) enqueueTeamSpacePushForRetry(accountID string, channelType core.EventType, chatID, text, reason string) {
+	slog.Warn("team_space_push: deferred to retry queue",
 		"account", accountID, "channel", channelType, "reason", reason)
 	if channelType == core.EventKakaoTalk {
 		return
 	}
 	if qErr := s.store.EnqueueResponse(accountID, string(channelType), chatID, text); qErr != nil {
-		slog.Error("family_push: enqueue failed", "account", accountID, "channel", channelType, "error", qErr)
+		slog.Error("team_space_push: enqueue failed", "account", accountID, "channel", channelType, "error", qErr)
 	}
 }
 
-// resolveFamilyPushChannel picks which target channel a FamilyPush lands on.
+// resolveTeamSpacePushChannel picks which target channel a team-space push lands on.
 // Hint matching is exact on the ChannelType string ("telegram", "slack",
 // "kakao_talk"); a miss falls back to the first persistent push channel so
 // delivery degrades instead of dropping.
@@ -775,10 +786,10 @@ func (s *Server) enqueueFamilyPushForRetry(accountID string, channelType core.Ev
 // web_chat is excluded from the fallback (but honored if explicitly hinted
 // — caller's explicit ask wins). web_chat is per-WebSocket-session: there
 // is no durable destination to push to in the background, so silently
-// landing every "no hint" family push on it would simply discard the
+// landing every "no hint" team-space push on it would simply discard the
 // message. Persistent channels (telegram/slack/discord/kakao_talk) own
 // their own queueing semantics and are safe defaults.
-func resolveFamilyPushChannel(channels []core.ChannelConfig, hint string) core.EventType {
+func resolveTeamSpacePushChannel(channels []core.ChannelConfig, hint string) core.EventType {
 	if hint != "" {
 		for _, c := range channels {
 			if string(c.ChannelType) == hint {
@@ -882,7 +893,7 @@ func (s *Server) retryPendingResponses(ctx context.Context) {
 	}
 }
 
-// ListenAndServe starts the HTTP server and scheduler, blocking until a
+// ListenAndServe starts the HTTP server and account schedulers, blocking until a
 // SIGINT or SIGTERM triggers graceful shutdown of both.
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
@@ -893,9 +904,11 @@ func (s *Server) ListenAndServe(addr string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Cancelable context for the scheduler goroutine.
+	// Cancelable context for account scheduler goroutines.
 	schedCtx, schedCancel := context.WithCancel(context.Background())
-	go s.scheduler.Start(schedCtx)
+	if s.schedulers != nil {
+		s.schedulers.StartAll(schedCtx)
+	}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
@@ -909,11 +922,15 @@ func (s *Server) ListenAndServe(addr string) error {
 			s.spawner.StopAll()
 		}
 
-		// Stop scheduler tick loop and cancel context, then wait for
+		// Stop scheduler tick loops and cancel context, then wait for
 		// in-flight skill goroutines to drain before shutting down HTTP.
-		s.scheduler.Stop()
+		if s.schedulers != nil {
+			s.schedulers.StopAll()
+		}
 		schedCancel()
-		s.scheduler.Wait()
+		if s.schedulers != nil {
+			s.schedulers.WaitAll()
+		}
 
 		// Close MCP server connections (CommandTransport handles 5s → SIGTERM).
 		if s.session.McpRegistry != nil {

@@ -20,6 +20,8 @@ type Scheduler struct {
 	pkgManager *core.PackageManager
 	stop       chan struct{}
 	stopOnce   sync.Once
+	startOnce  sync.Once
+	loops      sync.WaitGroup
 	inflight   sync.Map       // skill name → struct{}: prevents concurrent runs of the same skill
 	wg         sync.WaitGroup // tracks in-flight runSkill goroutines for graceful drain
 }
@@ -37,11 +39,32 @@ func NewScheduler(session *Session, pkgManager *core.PackageManager) *Scheduler 
 // Start begins the scheduling loop, checking every minute for due skills.
 // Also starts a separate goroutine for the daily reflection cycle.
 func (s *Scheduler) Start(ctx context.Context) {
+	started := false
+	s.startOnce.Do(func() {
+		started = true
+		s.loops.Add(1)
+	})
+	if !started {
+		return
+	}
+	s.run(ctx)
+}
+
+// StartAsync starts the scheduler loop in a goroutine while registering it
+// synchronously, so Wait cannot miss a just-started loop.
+func (s *Scheduler) StartAsync(ctx context.Context) {
+	s.startOnce.Do(func() {
+		s.loops.Add(1)
+		go s.run(ctx)
+	})
+}
+
+func (s *Scheduler) run(ctx context.Context) {
+	defer s.loops.Done()
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	// Start reflection cron in background.
-	go s.runReflectionLoop(ctx)
+	s.startReflectionLoop(ctx)
 
 	slog.Info("scheduler started")
 
@@ -55,6 +78,17 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.tickOnce(ctx)
 		}
 	}
+}
+
+func (s *Scheduler) startReflectionLoop(ctx context.Context) {
+	if s.session == nil || s.session.Config == nil || !s.session.Config.Reflection.Enabled {
+		return
+	}
+	s.loops.Add(1)
+	go func() {
+		defer s.loops.Done()
+		s.runReflectionLoop(ctx)
+	}()
 }
 
 // tickOnce wraps a single checkAndRun invocation in a recover block so a
@@ -73,10 +107,6 @@ func (s *Scheduler) tickOnce(ctx context.Context) {
 // runReflectionLoop checks once per hour whether the daily reflection cycle
 // should run. Default schedule: 03:00 daily.
 func (s *Scheduler) runReflectionLoop(ctx context.Context) {
-	if !s.session.Config.Reflection.Enabled {
-		return
-	}
-
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -217,8 +247,9 @@ func (s *Scheduler) Stop() {
 	s.stopOnce.Do(func() { close(s.stop) })
 }
 
-// Wait blocks until all in-flight skill executions complete.
+// Wait blocks until scheduler loops and all in-flight skill executions complete.
 func (s *Scheduler) Wait() {
+	s.loops.Wait()
 	s.wg.Wait()
 }
 

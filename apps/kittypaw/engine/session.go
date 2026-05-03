@@ -84,7 +84,7 @@ type Session struct {
 	// single-account mode; Share.read returns an "unavailable" error
 	// rather than panicking when the field is unset.
 	AccountRegistry *core.AccountRegistry
-	// Fanout is non-nil only for the family account. When nil, the sandbox
+	// Fanout is non-nil only for the team-space account. When nil, the sandbox
 	// skips the Fanout global so personal skills see
 	// `typeof Fanout === "undefined"`.
 	Fanout core.Fanout

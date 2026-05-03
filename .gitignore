@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 dist/
 tmp/
+.worktrees/
 .env
 .env.*
 !.env.example

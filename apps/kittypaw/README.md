@@ -8,7 +8,7 @@ Experimental Go framework for local AI agents. Single binary, goja JS sandbox,
 - ✅ **Working** — CLI + local server, registry install, sandbox + permission, 5 channel adapters (Telegram/Slack/Discord/Kakao/WS)
 - ✅ **Working** — Telegram/Kakao inbound media metadata; attached images are available to the agent through `Vision.analyzeAttachment(...)`
 - 🚧 **Partial** — Reflection candidate surface (verified), `skill create` syntax (5/5 measured), Web search source quality
-- 🔬 **Experimental** — Family account, MoA, live workspace indexing
+- 🔬 **Experimental** — Team space, MoA, live workspace indexing
 - ❌ **Not / retired** — Windows GUI signing, "learns the more you use it" auto-adaptation, self-healing (retired)
 
 ## Install

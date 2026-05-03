@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,7 +16,7 @@ import (
 
 // TestServer_New_WiresAccountFieldsPerAccount is the TDD lead for PR-1:
 // server.New must build one engine.Session per account with AccountID,
-// AccountRegistry (shared pointer), and Fanout (family-only) wired.
+// AccountRegistry (shared pointer), and Fanout (team-space coordinator only) wired.
 // Until this test passes, Plan B's cross-account Share.read + Fanout
 // paths are dead code — see Plan C items C9/C11 in TASKS.md.
 func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {
@@ -28,7 +29,7 @@ func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {
 
 	famSess := srv.accounts.Session("family")
 	if famSess == nil {
-		t.Fatal("family Session not registered on AccountRouter")
+		t.Fatal("team-space Session not registered on AccountRouter")
 	}
 	aliceSess := srv.accounts.Session("alice")
 	if aliceSess == nil {
@@ -52,9 +53,9 @@ func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {
 			famSess.AccountRegistry, aliceSess.AccountRegistry)
 	}
 
-	// --- Fanout: family gets it; personal does NOT.
+	// --- Fanout: team-space gets it; personal does NOT.
 	if famSess.Fanout == nil {
-		t.Error("family.Fanout must be non-nil (Fanout.send/broadcast capability)")
+		t.Error("team-space Fanout must be non-nil (Fanout.send/broadcast capability)")
 	}
 	if aliceSess.Fanout != nil {
 		t.Error("personal account.Fanout must be nil (I5 — personal cannot reach personal)")
@@ -149,6 +150,23 @@ func TestServerNewUsesMasterAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"api_key":"master-key"`) {
 		t.Fatalf("bootstrap body = %q, want master api key", rec.Body.String())
+	}
+}
+
+func TestStartChannelsRejectsUnknownTeamSpaceMember(t *testing.T) {
+	root := t.TempDir()
+	teamDeps := buildAccountDeps(t, root, "team", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"ghost"}},
+	})
+	srv := New([]*AccountDeps{teamDeps}, "test")
+
+	err := srv.StartChannels(context.Background())
+	if err == nil {
+		t.Fatal("expected membership validation error")
+	}
+	if !strings.Contains(err.Error(), "team-space membership validation") {
+		t.Fatalf("error = %v, want membership validation", err)
 	}
 }
 

@@ -162,7 +162,7 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 //   - Spawns a background goroutine that runs the FTS5 indexer over every
 //     registered workspace for this account.
 //
-// Family accounts receive a ChannelFanout wired to the shared eventCh;
+// Team-space accounts receive a ChannelFanout wired to the shared eventCh;
 // personal accounts leave sess.Fanout == nil so the sandbox hides the
 // Fanout JS global (I5 — personal cannot reach personal).
 func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventCh chan<- core.Event) *engine.Session {
@@ -187,7 +187,7 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 		Health:           core.NewHealthState(),
 		SummaryFlight:    &singleflight.Group{},
 	}
-	if td.Account.Config.IsSharedAccount() {
+	if td.Account.Config.IsTeamSpaceAccount() {
 		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Account.ID)
 	}
 

@@ -15,12 +15,15 @@ func setupShareFixture(t *testing.T) (ownerBase, outsideFile string, cfg *Config
 	t.Helper()
 	root := t.TempDir()
 
-	ownerBase = filepath.Join(root, "accounts", "family")
+	ownerBase = filepath.Join(root, "accounts", "team")
 	if err := os.MkdirAll(filepath.Join(ownerBase, "memory"), 0o755); err != nil {
 		t.Fatalf("mkdir owner: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(ownerBase, "memory", "weather.json"), []byte(`{"temp":18}`), 0o644); err != nil {
 		t.Fatalf("write weather: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ownerBase, "config.toml"), []byte("is_shared=true\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
 	outside := filepath.Join(root, "outside")
@@ -33,18 +36,13 @@ func setupShareFixture(t *testing.T) (ownerBase, outsideFile string, cfg *Config
 	}
 
 	cfg = &Config{
-		Share: map[string]ShareConfig{
-			"alice": {Read: []string{"memory/weather.json"}},
-		},
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
 	}
 	return ownerBase, outsideFile, cfg
 }
 
-// TestValidateSharedReadPath_Allowed pins the happy path: a reader listed
-// in the owner's Share map, asking for a path in the allowlist, should
-// receive the realpath to the file. Without this the whole feature is
-// DoA — every cross-account read would silently fail.
-func TestValidateSharedReadPath_Allowed(t *testing.T) {
+func TestValidateSharedReadPath_MemberCanReadMemory(t *testing.T) {
 	ownerBase, _, cfg := setupShareFixture(t)
 
 	got, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/weather.json")
@@ -57,6 +55,141 @@ func TestValidateSharedReadPath_Allowed(t *testing.T) {
 	}
 }
 
+func TestValidateSharedReadPath_NonMemberRejected(t *testing.T) {
+	ownerBase, _, cfg := setupShareFixture(t)
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "bob", "memory/weather.json")
+	if !errors.Is(err, ErrCrossAccountUnauthorized) {
+		t.Errorf("non-member must reject with unauthorized, got %v", err)
+	}
+}
+
+func TestValidateSharedReadPath_LegacyShareDoesNotGrantMembership(t *testing.T) {
+	ownerBase, _, _ := setupShareFixture(t)
+	cfg := &Config{
+		IsShared: true,
+		Share: map[string]ShareConfig{
+			"alice": {Read: []string{"memory/weather.json"}},
+		},
+	}
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/weather.json")
+	if !errors.Is(err, ErrCrossAccountUnauthorized) {
+		t.Errorf("legacy share-only config must not grant membership, got %v", err)
+	}
+}
+
+func TestValidateSharedReadPath_RejectsOperationalFiles(t *testing.T) {
+	ownerBase, _, cfg := setupShareFixture(t)
+	for _, req := range []string{"config.toml", "secrets.json", "account.toml", "data/kittypaw.db"} {
+		t.Run(req, func(t *testing.T) {
+			_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", req)
+			if !errors.Is(err, ErrCrossAccountNotShareable) {
+				t.Errorf("request %q should reject as not shareable, got %v", req, err)
+			}
+		})
+	}
+}
+
+func TestValidateSharedReadPath_MemberCanReadWorkspaceAlias(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	workspaceRoot := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "plan.md"), []byte("ship it"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+		Workspace: WorkspaceConfig{Roots: []WorkspaceRoot{{Alias: "ops", Path: workspaceRoot, Access: "read_write"}}},
+	}
+	got, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "workspace/ops/plan.md")
+	if err != nil {
+		t.Fatalf("expected workspace allow, got %v", err)
+	}
+	want, _ := filepath.EvalSymlinks(filepath.Join(workspaceRoot, "plan.md"))
+	if got != want {
+		t.Errorf("realpath = %q, want %q", got, want)
+	}
+}
+
+func TestValidateSharedReadPath_UnknownWorkspaceAliasRejected(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	workspaceRoot := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+		Workspace: WorkspaceConfig{Roots: []WorkspaceRoot{{Alias: "ops", Path: workspaceRoot, Access: "read_write"}}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "workspace/missing/plan.md")
+	if !errors.Is(err, ErrCrossAccountNotShareable) {
+		t.Errorf("unknown workspace alias must reject as not shareable, got %v", err)
+	}
+}
+
+func TestValidateSharedReadPath_RejectsWorkspaceSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	workspaceRoot := filepath.Join(root, "workspace")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	outsideFile := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(workspaceRoot, "leak.md")); err != nil {
+		t.Fatalf("symlink workspace leak: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+		Workspace: WorkspaceConfig{Roots: []WorkspaceRoot{{Alias: "ops", Path: workspaceRoot, Access: "read_write"}}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "workspace/ops/leak.md")
+	if !errors.Is(err, ErrCrossAccountBoundary) {
+		t.Errorf("workspace symlink escape must reject as boundary escape, got %v", err)
+	}
+}
+
+func TestValidateSharedReadPath_RejectsSymlinkedMemoryRootEscape(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	outsideMemory := filepath.Join(root, "outside-memory")
+	if err := os.MkdirAll(ownerBase, 0o755); err != nil {
+		t.Fatalf("mkdir owner: %v", err)
+	}
+	if err := os.MkdirAll(outsideMemory, 0o755); err != nil {
+		t.Fatalf("mkdir outside memory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideMemory, "weather.json"), []byte(`{"temp":99}`), 0o644); err != nil {
+		t.Fatalf("write outside weather: %v", err)
+	}
+	if err := os.Symlink(outsideMemory, filepath.Join(ownerBase, "memory")); err != nil {
+		t.Fatalf("symlink memory: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/weather.json")
+	if !errors.Is(err, ErrCrossAccountBoundary) {
+		t.Errorf("symlinked memory root must reject as boundary escape, got %v", err)
+	}
+}
+
 // TestValidateSharedReadPath_TraversalMatrix is the anti-cutcorner guard.
 // Every attack shape listed must be rejected at the API boundary — a single
 // variant slipping through lets a hostile path string escape the account
@@ -65,23 +198,15 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 	ownerBase, outsideFile, cfg := setupShareFixture(t)
 
 	// Prep: symlink inside ownerBase that escapes to the outside file.
-	escSymlink := filepath.Join(ownerBase, "esc.txt")
+	escSymlink := filepath.Join(ownerBase, "memory", "esc.txt")
 	if err := os.Symlink(outsideFile, escSymlink); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	// Add to allowlist so we isolate the symlink-rejection path from the
-	// allowlist-rejection path.
-	cfg.Share["alice"] = ShareConfig{Read: []string{
-		"memory/weather.json",
-		"esc.txt",
-		"hard.txt",
-		"memory/../memory/weather.json",
-	}}
 
 	// Prep: hardlink that cross-references an outside inode. On hfs/apfs
 	// hardlinks across directories share st_nlink > 1 within the same
 	// filesystem; t.TempDir allocates one filesystem so this works.
-	hardPath := filepath.Join(ownerBase, "hard.txt")
+	hardPath := filepath.Join(ownerBase, "memory", "hard.txt")
 	if err := os.Link(outsideFile, hardPath); err != nil {
 		t.Skipf("hardlink unsupported on this FS: %v", err)
 	}
@@ -95,10 +220,10 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 		{"absolute path", "alice", "/etc/passwd", ErrCrossAccountAbsolute},
 		{"dotdot prefix", "alice", "../../etc/passwd", ErrCrossAccountTraversal},
 		{"embedded dotdot", "alice", "memory/../../../etc/passwd", ErrCrossAccountTraversal},
-		{"symlink escape", "alice", "esc.txt", ErrCrossAccountBoundary},
-		{"hardlink escape", "alice", "hard.txt", ErrCrossAccountHardlink},
+		{"symlink escape", "alice", "memory/esc.txt", ErrCrossAccountBoundary},
+		{"hardlink escape", "alice", "memory/hard.txt", ErrCrossAccountHardlink},
 		{"unknown peer", "mallory", "memory/weather.json", ErrCrossAccountUnauthorized},
-		{"allowlist miss", "alice", "memory/private.json", ErrCrossAccountNotAllowlisted},
+		{"not shareable", "alice", "private.json", ErrCrossAccountNotShareable},
 		{"empty path", "alice", "", ErrCrossAccountPath},
 		{"null byte", "alice", "memory/\x00/weather.json", ErrCrossAccountPath},
 	}
@@ -114,14 +239,12 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 }
 
 // TestValidateSharedReadPath_NotFound splits the "file missing" signal
-// from the "policy violation" signals — a reader with a legit allowlist
-// entry pointing at a deleted file should get ErrCrossAccountNotFound, not
-// a boundary error. Distinct errors let the sandbox surface a useful
-// message to the skill author ("ENOENT") vs. a policy message ("not
-// allowed"). Conflating them has burned us before.
+// from policy violations. A member request pointing at a deleted file should
+// get ErrCrossAccountNotFound, not a boundary error. Distinct errors let the
+// sandbox surface a useful message to the skill author ("ENOENT") vs. a policy
+// message ("not allowed"). Conflating them has burned us before.
 func TestValidateSharedReadPath_NotFound(t *testing.T) {
 	ownerBase, _, cfg := setupShareFixture(t)
-	cfg.Share["alice"] = ShareConfig{Read: []string{"memory/missing.json"}}
 
 	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/missing.json")
 	if !errors.Is(err, ErrCrossAccountNotFound) {

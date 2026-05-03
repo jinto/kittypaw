@@ -521,15 +521,16 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 
 	accountID := acct.ID
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
 
 	if err := s.validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID, cfg, wizard.APIServerURL); err != nil {
+		s.accountMu.Unlock()
 		slog.Error("setup: complete rejected", "account", accountID, "error", err)
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 
 	if err := core.WriteConfigAtomic(cfg, cfgPath); err != nil {
+		s.accountMu.Unlock()
 		slog.Error("setup: write config failed", "account", accountID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to write config: "+err.Error())
 		return
@@ -538,7 +539,9 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		s.saveSetupAPIServerURL(accountID, wizard.APIServerURL)
 	}
 
-	if err := s.applyAccountConfigLocked(accountID, cfg); err != nil {
+	oldScheduler, err := s.applyAccountConfigLocked(accountID, cfg)
+	if err != nil {
+		s.accountMu.Unlock()
 		slog.Error("setup: config apply failed", "account", accountID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to apply config: "+err.Error())
 		return
@@ -554,6 +557,10 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = acct.Store.SetUserContext("onboarding_completed", "true", "system")
+	s.accountMu.Unlock()
+	if oldScheduler != nil {
+		oldScheduler.Wait()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"completed": true})
 }
