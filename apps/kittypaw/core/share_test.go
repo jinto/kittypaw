@@ -114,6 +114,55 @@ func TestValidateSharedReadPath_MemberCanReadWorkspaceAlias(t *testing.T) {
 	}
 }
 
+func TestValidateSharedReadPath_UnknownWorkspaceAliasRejected(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	workspaceRoot := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+		Workspace: WorkspaceConfig{Roots: []WorkspaceRoot{{Alias: "ops", Path: workspaceRoot, Access: "read_write"}}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "workspace/missing/plan.md")
+	if !errors.Is(err, ErrCrossAccountNotShareable) {
+		t.Errorf("unknown workspace alias must reject as not shareable, got %v", err)
+	}
+}
+
+func TestValidateSharedReadPath_RejectsWorkspaceSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	workspaceRoot := filepath.Join(root, "workspace")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside: %v", err)
+	}
+	outsideFile := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(workspaceRoot, "leak.md")); err != nil {
+		t.Fatalf("symlink workspace leak: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+		Workspace: WorkspaceConfig{Roots: []WorkspaceRoot{{Alias: "ops", Path: workspaceRoot, Access: "read_write"}}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "workspace/ops/leak.md")
+	if !errors.Is(err, ErrCrossAccountBoundary) {
+		t.Errorf("workspace symlink escape must reject as boundary escape, got %v", err)
+	}
+}
+
 func TestValidateSharedReadPath_RejectsSymlinkedMemoryRootEscape(t *testing.T) {
 	root := t.TempDir()
 	ownerBase := filepath.Join(root, "accounts", "team")
@@ -190,11 +239,10 @@ func TestValidateSharedReadPath_TraversalMatrix(t *testing.T) {
 }
 
 // TestValidateSharedReadPath_NotFound splits the "file missing" signal
-// from the "policy violation" signals — a reader with a legit allowlist
-// membership request pointing at a deleted file should get ErrCrossAccountNotFound, not
-// a boundary error. Distinct errors let the sandbox surface a useful
-// message to the skill author ("ENOENT") vs. a policy message ("not
-// allowed"). Conflating them has burned us before.
+// from policy violations. A member request pointing at a deleted file should
+// get ErrCrossAccountNotFound, not a boundary error. Distinct errors let the
+// sandbox surface a useful message to the skill author ("ENOENT") vs. a policy
+// message ("not allowed"). Conflating them has burned us before.
 func TestValidateSharedReadPath_NotFound(t *testing.T) {
 	ownerBase, _, cfg := setupShareFixture(t)
 

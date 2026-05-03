@@ -12,10 +12,13 @@ import (
 // future audit log) can distinguish policy rejections from filesystem
 // errors.
 var (
-	ErrCrossAccountPath           = errors.New("cross-account read: invalid path")
-	ErrCrossAccountAbsolute       = errors.New("cross-account read: absolute path not permitted")
-	ErrCrossAccountTraversal      = errors.New("cross-account read: path traversal rejected")
-	ErrCrossAccountUnauthorized   = errors.New("cross-account read: reader account is not a team space member")
+	ErrCrossAccountPath         = errors.New("cross-account read: invalid path")
+	ErrCrossAccountAbsolute     = errors.New("cross-account read: absolute path not permitted")
+	ErrCrossAccountTraversal    = errors.New("cross-account read: path traversal rejected")
+	ErrCrossAccountUnauthorized = errors.New("cross-account read: reader account is not a team space member")
+	// ErrCrossAccountNotAllowlisted is retained for compatibility with callers
+	// that may still compare the legacy sentinel. Team-space reads no longer
+	// use per-path [share.*] allowlists.
 	ErrCrossAccountNotAllowlisted = errors.New("cross-account read: path not in share allowlist")
 	ErrCrossAccountNotShareable   = errors.New("cross-account read: path is not in team-space shareable data")
 	ErrCrossAccountBoundary       = errors.New("cross-account read: symlink escapes account boundary")

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/jinto/kittypaw/core"
 )
+
+const crossAccountTeamSpaceDenied = "cross-account read: target is not the team space"
 
 // executeShare implements Share.read — the sole cross-account file read path.
 // Access control lives in core.ValidateSharedReadPath; this layer plumbs the
@@ -56,7 +59,7 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 		}
 		slog.Warn("cross_account_read_rejected",
 			"from", s.AccountID, "to", targetID, "path", filepath.Clean(reqPath), "reason", reason)
-		return jsonResult(map[string]any{"error": "cross-account read: target is not the team space"})
+		return jsonResult(map[string]any{"error": crossAccountTeamSpaceDenied})
 	}
 
 	realPath, err := core.ValidateSharedReadPath(owner.Config, owner.BaseDir, s.AccountID, reqPath)
@@ -64,6 +67,9 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 		// Clean the logged path so newlines in reqPath can't forge fake audit lines.
 		slog.Warn("cross_account_read_rejected",
 			"from", s.AccountID, "to", targetID, "path", filepath.Clean(reqPath), "error", err.Error())
+		if errors.Is(err, core.ErrCrossAccountUnauthorized) {
+			return jsonResult(map[string]any{"error": crossAccountTeamSpaceDenied})
+		}
 		return jsonResult(map[string]any{"error": err.Error()})
 	}
 

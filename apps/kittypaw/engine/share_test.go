@@ -188,6 +188,40 @@ func TestShareRead_RejectsNonMember(t *testing.T) {
 	}
 }
 
+func TestShareRead_NonMemberAndUnknownTargetShareExternalError(t *testing.T) {
+	sess, _ := newShareFixture(t)
+
+	nonMemberOut, _ := executeShare(context.Background(), mustCall(t, "team", "memory/weather.json"), &Session{
+		AccountID:       "bob",
+		AccountRegistry: sess.AccountRegistry,
+	})
+	nonTeamSpaceOut, _ := executeShare(context.Background(), mustCall(t, "alice", "memory/weather.json"), &Session{
+		AccountID:       "bob",
+		AccountRegistry: sess.AccountRegistry,
+	})
+	unknownOut, _ := executeShare(context.Background(), mustCall(t, "grandma", "memory/weather.json"), &Session{
+		AccountID:       "bob",
+		AccountRegistry: sess.AccountRegistry,
+	})
+
+	var nonMemberResp, nonTeamSpaceResp, unknownResp map[string]string
+	if err := json.Unmarshal([]byte(nonMemberOut), &nonMemberResp); err != nil {
+		t.Fatalf("non-member json: %v", err)
+	}
+	if err := json.Unmarshal([]byte(nonTeamSpaceOut), &nonTeamSpaceResp); err != nil {
+		t.Fatalf("non-team-space json: %v", err)
+	}
+	if err := json.Unmarshal([]byte(unknownOut), &unknownResp); err != nil {
+		t.Fatalf("unknown json: %v", err)
+	}
+	if nonMemberResp["error"] != unknownResp["error"] {
+		t.Errorf("non-member and unknown target errors should match, got %q vs %q", nonMemberResp["error"], unknownResp["error"])
+	}
+	if nonMemberResp["error"] != nonTeamSpaceResp["error"] {
+		t.Errorf("non-member and non-team-space target errors should match, got %q vs %q", nonMemberResp["error"], nonTeamSpaceResp["error"])
+	}
+}
+
 // TestShareRead_RejectsNonTeamSpaceTarget is the invariant that closes the I5
 // hole: even if bob's config legally contains `[share.alice] read = [...]`,
 // alice cannot read from bob because bob is not the team-space account. The
