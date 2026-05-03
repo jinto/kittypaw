@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,10 @@ func TestOpenAIBuildRequestBodyShape(t *testing.T) {
 	}
 	if body["max_tokens"] != 1024 {
 		t.Errorf("max_tokens = %v, want 1024", body["max_tokens"])
+	}
+	// AC-10: tools key must not leak when caller did not pass any tools.
+	if _, ok := body["tools"]; ok {
+		t.Error("tools key must not appear when caller did not pass any tools")
 	}
 }
 
@@ -270,5 +275,659 @@ func TestOpenAINoAuthHeaderWhenKeyEmpty(t *testing.T) {
 	}
 	if gotAuth != "" {
 		t.Errorf("Authorization header should be empty for no API key, got %q", gotAuth)
+	}
+}
+
+// --- T1: Tool definition serialization (AC-1, AC-10) ---
+
+func TestOpenAIToolDefinitionWireShape(t *testing.T) {
+	p := NewOpenAI("key", "qwen3-32b", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	tools := []Tool{{
+		Name:        "search",
+		Description: "Web search",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []string{"query"},
+		},
+	}}
+
+	body := p.buildChatRequestBodyWithTools(
+		[]core.LlmMessage{{Role: core.RoleUser, Content: "search for cats"}},
+		tools,
+	)
+
+	wireTools, ok := body["tools"].([]map[string]any)
+	if !ok {
+		t.Fatalf("body[tools] = %T, want []map[string]any", body["tools"])
+	}
+	if len(wireTools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(wireTools))
+	}
+	if wireTools[0]["type"] != "function" {
+		t.Errorf("type = %v, want function", wireTools[0]["type"])
+	}
+	fn, ok := wireTools[0]["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("function = %T, want map[string]any", wireTools[0]["function"])
+	}
+	if fn["name"] != "search" {
+		t.Errorf("name = %v, want search", fn["name"])
+	}
+	if fn["description"] != "Web search" {
+		t.Errorf("description = %v, want \"Web search\"", fn["description"])
+	}
+	if fn["parameters"] == nil {
+		t.Error("parameters must not be nil")
+	}
+}
+
+func TestOpenAIToolDefinitionNilSchema(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	tools := []Tool{{Name: "ping", Description: "Health check", InputSchema: nil}}
+	body := p.buildChatRequestBodyWithTools(
+		[]core.LlmMessage{{Role: core.RoleUser, Content: "hi"}},
+		tools,
+	)
+
+	wireTools := body["tools"].([]map[string]any)
+	fn := wireTools[0]["function"].(map[string]any)
+	params, ok := fn["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters = %T, want map[string]any (nil → empty object schema)", fn["parameters"])
+	}
+	if params["type"] != "object" {
+		t.Errorf("parameters.type = %v, want object", params["type"])
+	}
+	if _, ok := params["properties"]; !ok {
+		t.Error("parameters.properties must be present (empty object)")
+	}
+}
+
+func TestOpenAIToolsEmptyOmitted(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools(
+		[]core.LlmMessage{{Role: core.RoleUser, Content: "hi"}},
+		nil,
+	)
+	if _, ok := body["tools"]; ok {
+		t.Error("nil tools must not emit a tools key")
+	}
+
+	body = p.buildChatRequestBodyWithTools(
+		[]core.LlmMessage{{Role: core.RoleUser, Content: "hi"}},
+		[]Tool{},
+	)
+	if _, ok := body["tools"]; ok {
+		t.Error("empty tools slice must not emit a tools key")
+	}
+}
+
+// --- T2a: assistant message conversion (AC-2) ---
+
+// chatMessagesFromBody marshals through JSON to assert the wire shape, since
+// the in-memory representation may use typed structs we don't want tests to
+// depend on. Returns []map[string]any decoded from body["messages"].
+func chatMessagesFromBody(t *testing.T, body map[string]any) []map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(body["messages"])
+	if err != nil {
+		t.Fatalf("marshal messages: %v", err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal messages: %v", err)
+	}
+	return out
+}
+
+func TestOpenAIChatMessages_AssistantToolUseOnly(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleUser, Content: "search cats"},
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolUse, ID: "call_1", Name: "search",
+				Input: map[string]any{"q": "cats"}},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	if len(msgs) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(msgs))
+	}
+	asst := msgs[1]
+	if asst["role"] != "assistant" {
+		t.Errorf("role = %v, want assistant", asst["role"])
+	}
+	calls, ok := asst["tool_calls"].([]any)
+	if !ok || len(calls) != 1 {
+		t.Fatalf("tool_calls = %#v, want 1 entry", asst["tool_calls"])
+	}
+	call := calls[0].(map[string]any)
+	if call["id"] != "call_1" || call["type"] != "function" {
+		t.Errorf("call meta = %v", call)
+	}
+	fn := call["function"].(map[string]any)
+	if fn["name"] != "search" {
+		t.Errorf("function.name = %v, want search", fn["name"])
+	}
+	if args, ok := fn["arguments"].(string); !ok || !strings.Contains(args, "cats") {
+		t.Errorf("arguments = %v, want JSON string containing cats", fn["arguments"])
+	}
+}
+
+func TestOpenAIChatMessages_AssistantMixedTextAndToolUse(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeText, Text: "Let me look that up."},
+			{Type: core.BlockTypeToolUse, ID: "call_2", Name: "search",
+				Input: map[string]any{"q": "x"}},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	asst := msgs[0]
+	if got := asst["content"]; got != "Let me look that up." {
+		t.Errorf("content = %v, want preserved text", got)
+	}
+	calls := asst["tool_calls"].([]any)
+	if len(calls) != 1 {
+		t.Fatalf("len(tool_calls) = %d, want 1", len(calls))
+	}
+}
+
+func TestOpenAIChatMessages_ParallelToolUse(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolUse, ID: "a", Name: "f1", Input: map[string]any{"k": 1}},
+			{Type: core.BlockTypeToolUse, ID: "b", Name: "f2", Input: map[string]any{"k": 2}},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	calls := msgs[0]["tool_calls"].([]any)
+	if len(calls) != 2 {
+		t.Fatalf("len(tool_calls) = %d, want 2", len(calls))
+	}
+	if calls[0].(map[string]any)["id"] != "a" || calls[1].(map[string]any)["id"] != "b" {
+		t.Errorf("parallel tool_call order not preserved")
+	}
+}
+
+func TestOpenAIChatMessages_MarshalErrorPanics(t *testing.T) {
+	// json.Marshal can only fail on unsupported types (chan/func) or cyclic
+	// refs — never on validly-decoded LLM payloads. A Marshal error means
+	// the caller put bad data into ContentBlock.Input. Fail loud rather
+	// than silently rewriting Arguments to "{}" (which would let the model
+	// see Arguments different from what it emitted last turn).
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for unmarshalable Input")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "tool_use Input marshal failed") {
+			t.Errorf("panic message = %v, want to contain 'tool_use Input marshal failed'", r)
+		}
+	}()
+
+	p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolUse, ID: "x", Name: "f",
+				Input: map[string]any{"bad": make(chan int)}},
+		}},
+	}, nil)
+}
+
+func TestOpenAIChatMessages_NilArgumentsBecomeEmptyJSONObject(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleAssistant, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolUse, ID: "z", Name: "ping", Input: nil},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	calls := msgs[0]["tool_calls"].([]any)
+	args := calls[0].(map[string]any)["function"].(map[string]any)["arguments"]
+	if args != "{}" {
+		t.Errorf("arguments = %q, want \"{}\" for nil input", args)
+	}
+}
+
+// --- T2b: user message conversion (AC-2, AC-12) ---
+
+func TestOpenAIChatMessages_UserToolResultSingle(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleUser, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolResult, ToolUseID: "call_1", Content: "found 42"},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	if len(msgs) != 1 {
+		t.Fatalf("len(messages) = %d, want 1", len(msgs))
+	}
+	m := msgs[0]
+	if m["role"] != "tool" {
+		t.Errorf("role = %v, want tool", m["role"])
+	}
+	if m["tool_call_id"] != "call_1" {
+		t.Errorf("tool_call_id = %v, want call_1", m["tool_call_id"])
+	}
+	if m["content"] != "found 42" {
+		t.Errorf("content = %v, want \"found 42\"", m["content"])
+	}
+}
+
+func TestOpenAIChatMessages_MultipleToolResultsOrderPreserved(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleUser, ContentBlocks: []core.ContentBlock{
+			{Type: core.BlockTypeToolResult, ToolUseID: "a", Content: "A"},
+			{Type: core.BlockTypeToolResult, ToolUseID: "b", Content: "B"},
+			{Type: core.BlockTypeToolResult, ToolUseID: "c", Content: "C"},
+		}},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	if len(msgs) != 3 {
+		t.Fatalf("len(messages) = %d, want 3 (split per tool_result)", len(msgs))
+	}
+	wantIDs := []string{"a", "b", "c"}
+	for i, want := range wantIDs {
+		if msgs[i]["tool_call_id"] != want {
+			t.Errorf("msg[%d].tool_call_id = %v, want %s", i, msgs[i]["tool_call_id"], want)
+		}
+	}
+}
+
+func TestOpenAIChatMessages_TextOnlyPassesThrough(t *testing.T) {
+	p := NewOpenAI("key", "x", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+
+	body := p.buildChatRequestBodyWithTools([]core.LlmMessage{
+		{Role: core.RoleSystem, Content: "You are a helper."},
+		{Role: core.RoleUser, Content: "hi"},
+	}, nil)
+
+	msgs := chatMessagesFromBody(t, body)
+	if len(msgs) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(msgs))
+	}
+	if msgs[0]["role"] != "system" || msgs[0]["content"] != "You are a helper." {
+		t.Errorf("system message not preserved: %v", msgs[0])
+	}
+	if msgs[1]["role"] != "user" || msgs[1]["content"] != "hi" {
+		t.Errorf("user message not preserved: %v", msgs[1])
+	}
+}
+
+// --- T3: response parsing (AC-3, AC-4, AC-9, AC-11) ---
+
+func TestOpenAIParseChatToolCallsStringArguments(t *testing.T) {
+	body := `{
+		"choices": [{
+			"message": {"role": "assistant", "content": null, "tool_calls": [
+				{"id": "call_1", "type": "function",
+				 "function": {"name": "search", "arguments": "{\"q\":\"cats\"}"}}
+			]},
+			"finish_reason": "tool_calls"
+		}],
+		"usage": {"prompt_tokens": 10, "completion_tokens": 5},
+		"model": "qwen3-32b"
+	}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "search cats"},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use", resp.StopReason)
+	}
+	if len(resp.ContentBlocks) != 1 {
+		t.Fatalf("len(ContentBlocks) = %d, want 1", len(resp.ContentBlocks))
+	}
+	b := resp.ContentBlocks[0]
+	if b.Type != core.BlockTypeToolUse || b.ID != "call_1" || b.Name != "search" {
+		t.Errorf("ContentBlock = %+v", b)
+	}
+	if got := b.Input["q"]; got != "cats" {
+		t.Errorf("Input.q = %v, want cats", got)
+	}
+}
+
+func TestOpenAIParseChatToolCallsObjectArguments(t *testing.T) {
+	// Ollama (qwen2.5:7b, llama3.1) sometimes emits arguments as a JSON object,
+	// not a string. Provider must decode either shape into Input map.
+	body := `{
+		"choices": [{
+			"message": {"role": "assistant", "content": null, "tool_calls": [
+				{"id": "c1", "type": "function",
+				 "function": {"name": "n", "arguments": {"k": "v"}}}
+			]},
+			"finish_reason": "tool_calls"
+		}],
+		"model": "qwen2.5:7b"
+	}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "x"},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if len(resp.ContentBlocks) != 1 {
+		t.Fatalf("len(ContentBlocks) = %d", len(resp.ContentBlocks))
+	}
+	if got := resp.ContentBlocks[0].Input["k"]; got != "v" {
+		t.Errorf("Input.k = %v, want v (object arguments shape)", got)
+	}
+}
+
+func TestOpenAIParseChatToolCallsEmptyArguments(t *testing.T) {
+	body := `{
+		"choices": [{
+			"message": {"role": "assistant", "tool_calls": [
+				{"id": "c1", "type": "function",
+				 "function": {"name": "ping", "arguments": ""}}
+			]},
+			"finish_reason": "tool_calls"
+		}],
+		"model": "x"
+	}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "x"},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.ContentBlocks[0].Input == nil {
+		t.Error("Input must not be nil for empty arguments; want empty map")
+	}
+	if len(resp.ContentBlocks[0].Input) != 0 {
+		t.Errorf("Input = %v, want empty map", resp.ContentBlocks[0].Input)
+	}
+}
+
+func TestOpenAIParseChatToolCallsInvalidArgumentsErrors(t *testing.T) {
+	body := `{
+		"choices": [{
+			"message": {"role": "assistant", "tool_calls": [
+				{"id": "c1", "type": "function",
+				 "function": {"name": "ping", "arguments": "not-json{{{"}}
+			]},
+			"finish_reason": "tool_calls"
+		}],
+		"model": "x"
+	}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	_, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "x"},
+	})
+	if err == nil {
+		t.Fatal("expected error for unparseable arguments")
+	}
+}
+
+func TestOpenAIParseChatToolCallEmptyIDErrors(t *testing.T) {
+	// Some Ollama models drop the id field on single-tool calls. Without an
+	// id the caller can't echo tool_call_id on the next turn — surface the
+	// malformed response instead of letting the loop ping back with "".
+	body := `{
+		"choices": [{
+			"message": {"role": "assistant", "tool_calls": [
+				{"id": "", "type": "function",
+				 "function": {"name": "ping", "arguments": "{}"}}
+			]},
+			"finish_reason": "tool_calls"
+		}],
+		"model": "x"
+	}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	_, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "x"},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty tool_call id")
+	}
+	if !strings.Contains(err.Error(), "missing id") {
+		t.Errorf("err = %q, want to contain 'missing id'", err.Error())
+	}
+}
+
+func TestOpenAIParseStopReasonMapping(t *testing.T) {
+	cases := []struct {
+		finish string
+		want   string
+	}{
+		{"stop", "end_turn"},
+		{"tool_calls", "tool_use"},
+		{"length", "max_tokens"},
+		{"content_filter", "content_filter"}, // passthrough
+		{"function_call", "function_call"},   // passthrough
+		{"", ""},                             // passthrough (forward-compat)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.finish, func(t *testing.T) {
+			body := fmt.Sprintf(`{
+				"choices": [{"message": {"content": "ok"}, "finish_reason": %q}],
+				"model": "x"
+			}`, tc.finish)
+
+			srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, body)
+			})
+			defer srv.Close()
+
+			resp, err := p.Generate(context.Background(), []core.LlmMessage{
+				{Role: core.RoleUser, Content: "hi"},
+			})
+			if err != nil {
+				t.Fatalf("Generate(): %v", err)
+			}
+			if resp.StopReason != tc.want {
+				t.Errorf("StopReason = %q, want %q", resp.StopReason, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIParseChatUsageNilSafe(t *testing.T) {
+	// Some Ollama models omit usage entirely; provider must not panic.
+	body := `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"model":"x"}`
+
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate(): %v", err)
+	}
+	if resp.Usage != nil {
+		t.Errorf("Usage = %+v, want nil for missing usage field", resp.Usage)
+	}
+}
+
+// --- T4: end-to-end GenerateWithTools (AC-1, AC-7) ---
+
+func TestOpenAIGenerateWithToolsRoundTrip(t *testing.T) {
+	var sentBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sentBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"choices": [{
+				"message": {"role": "assistant", "content": null, "tool_calls": [
+					{"id": "c1", "type": "function",
+					 "function": {"name": "search", "arguments": "{\"q\":\"cats\"}"}}
+				]},
+				"finish_reason": "tool_calls"
+			}],
+			"usage": {"prompt_tokens": 4, "completion_tokens": 2},
+			"model": "qwen3-32b"
+		}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAI("key", "qwen3-32b", 1024,
+		WithHTTPClient(srv.Client()),
+		WithBaseURL(srv.URL),
+	)
+
+	tools := []Tool{{
+		Name:        "search",
+		Description: "Web",
+		InputSchema: map[string]any{"type": "object"},
+	}}
+
+	resp, err := p.GenerateWithTools(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "search for cats"},
+	}, tools)
+	if err != nil {
+		t.Fatalf("GenerateWithTools: %v", err)
+	}
+
+	if _, ok := sentBody["tools"]; !ok {
+		t.Error("request body missing tools key")
+	}
+	if resp.StopReason != "tool_use" {
+		t.Errorf("StopReason = %q, want tool_use", resp.StopReason)
+	}
+	if len(resp.ContentBlocks) != 1 || resp.ContentBlocks[0].Name != "search" {
+		t.Errorf("ContentBlocks = %+v", resp.ContentBlocks)
+	}
+}
+
+func TestOpenAIGenerateWithToolsNilToolsDegrades(t *testing.T) {
+	// AC-5: nil/empty tools must take the existing Generate path with no
+	// tools key on the wire.
+	var sentBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&sentBody)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],"model":"x"}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAI("key", "x", 1024,
+		WithHTTPClient(srv.Client()),
+		WithBaseURL(srv.URL),
+	)
+
+	_, err := p.GenerateWithTools(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "hi"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("GenerateWithTools(nil tools): %v", err)
+	}
+	if _, ok := sentBody["tools"]; ok {
+		t.Error("nil tools must not put a tools key on the wire")
+	}
+}
+
+func TestOpenAIGenerateWithToolsParallelResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"choices": [{
+				"message": {"role": "assistant", "tool_calls": [
+					{"id": "a", "type": "function", "function": {"name": "f1", "arguments": "{}"}},
+					{"id": "b", "type": "function", "function": {"name": "f2", "arguments": "{}"}}
+				]},
+				"finish_reason": "tool_calls"
+			}],
+			"model": "x"
+		}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAI("key", "x", 1024,
+		WithHTTPClient(srv.Client()),
+		WithBaseURL(srv.URL),
+	)
+
+	tools := []Tool{{Name: "f1"}, {Name: "f2"}}
+	resp, err := p.GenerateWithTools(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "x"},
+	}, tools)
+	if err != nil {
+		t.Fatalf("GenerateWithTools: %v", err)
+	}
+	if len(resp.ContentBlocks) != 2 {
+		t.Fatalf("len(ContentBlocks) = %d, want 2 parallel tool_use blocks", len(resp.ContentBlocks))
+	}
+	if resp.ContentBlocks[0].ID != "a" || resp.ContentBlocks[1].ID != "b" {
+		t.Errorf("parallel order broken: %v %v", resp.ContentBlocks[0].ID, resp.ContentBlocks[1].ID)
 	}
 }

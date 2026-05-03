@@ -16,3 +16,15 @@
   `kittykakao` repositories.
 - [x] Add `apps/kittypaw` release workflow plan for `kittypaw/v*` tags.
 - [ ] Add initial CI path-filter strategy.
+
+## Plan: OpenAI Function Calling ← 현재
+
+> Branch `feat/openai-tool-calling` — 변경: `apps/kittypaw/llm/openai.go` + `openai_test.go`
+> Plan: `.claude/plans/openai-tool-calling.md`
+
+- [x] **T1**: Tool 정의 직렬화 — `convertToolsToOpenAI` + `buildChatRequestBodyWithTools` + AC-10 회귀 단정
+- [x] **T2a**: assistant 메시지 변환 — text-only / tool_use only / mixed / parallel / 빈 인자
+- [x] **T2b**: user 메시지 변환 — tool_result 단독 / 멀티 순서 보존 / mixed text+tool_result + slog.Warn
+- [x] **T3**: 응답 파싱 — tool_calls 디코드 + arguments 타입 분기 + finish_reason 매핑 + usage nil-safe
+- [x] **T4**: `GenerateWithTools` end-to-end + multi-turn round-trip + parallel 응답
+- [x] **T5**: 회귀 + `make build && make test-unit && lint(llm scope)` 통과 — Cerebras smoke + 커밋 컨펌 대기
