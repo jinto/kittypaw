@@ -17,6 +17,14 @@ Experimental Go framework for local AI agents. Single binary, goja JS sandbox,
 curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
 ```
 
+Without `VERSION`, the installer follows `apps/kittypaw/stable.json`, not the
+newest GitHub release. Use `VERSION` to install a specific candidate release
+for testing:
+
+```bash
+VERSION=0.4.9 curl -fsSL https://raw.githubusercontent.com/kittypaw-app/kitty/main/install-kittypaw.sh | sh
+```
+
 Installer overrides for local forks or nonstandard install locations:
 
 ```bash
@@ -106,6 +114,8 @@ Operational environment variables:
 | `INSTALL_DIR` | Install destination for `apps/kittypaw/install-kittypaw.sh` |
 | `KITTYPAW_INSTALL_REPO` | Root installer repository override, e.g. `owner/repo` |
 | `KITTYPAW_INSTALL_SCRIPT_URL` | Root installer script URL override |
+| `KITTYPAW_CHANNEL=latest` | Installer override that follows the newest GitHub release instead of stable |
+| `VERSION` | Installer override for a specific release, e.g. `0.4.9` |
 
 ## Build from Source
 
@@ -130,6 +140,10 @@ git push origin kittypaw/vX.Y.Z
 The workflow builds archives directly with `go build`, signs and notarizes the
 macOS binaries, and updates release checksums. Do not use plain `vX.Y.Z` tags
 for monorepo product releases.
+
+Binary releases are candidates until `apps/kittypaw/stable.json` is manually
+promoted. The default install command follows stable; use `VERSION=X.Y.Z` to
+test a candidate before promotion.
 
 ## Stop / Uninstall
 

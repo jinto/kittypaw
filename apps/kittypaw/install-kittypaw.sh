@@ -1,9 +1,11 @@
 #!/bin/sh
 set -e
 
-REPO="kittypaw-app/kitty"
+REPO="${KITTYPAW_INSTALL_REPO:-kittypaw-app/kitty}"
 BINARY="kittypaw"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+CHANNEL="${KITTYPAW_CHANNEL:-stable}"
+STABLE_URL="${KITTYPAW_STABLE_URL:-https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/stable.json}"
 
 restart_after_install() {
   case "$OS" in
@@ -62,9 +64,34 @@ esac
 # ----- resolve version -----
 
 if [ -z "$VERSION" ]; then
-  TAG="$(curl -fsSL --proto '=https' --tlsv1.2 \
-    "https://api.github.com/repos/${REPO}/releases?per_page=100" \
-    | grep '"tag_name": "kittypaw/v' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/')"
+  case "$CHANNEL" in
+    stable|"")
+      if ! STABLE_JSON="$(curl -fsSL --proto '=https' --tlsv1.2 "$STABLE_URL")"; then
+        echo "Error: failed to fetch stable metadata: ${STABLE_URL}" >&2
+        echo "Set VERSION=X.Y.Z to install a specific release." >&2
+        exit 1
+      fi
+      STABLE_ONE_LINE="$(printf '%s' "$STABLE_JSON" | tr '\n' ' ')"
+      TAG="$(printf '%s\n' "$STABLE_ONE_LINE" | sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+      if [ -z "$TAG" ]; then
+        STABLE_VERSION="$(printf '%s\n' "$STABLE_ONE_LINE" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+        case "$STABLE_VERSION" in
+          kittypaw/v*) TAG="$STABLE_VERSION" ;;
+          v*) TAG="kittypaw/${STABLE_VERSION}" ;;
+          ?*) TAG="kittypaw/v${STABLE_VERSION}" ;;
+        esac
+      fi
+      ;;
+    latest)
+      TAG="$(curl -fsSL --proto '=https' --tlsv1.2 \
+        "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+        | grep '"tag_name": "kittypaw/v' | head -1 | sed 's/.*"tag_name": "\([^"]*\)".*/\1/')"
+      ;;
+    *)
+      echo "Error: unsupported KITTYPAW_CHANNEL=${CHANNEL} (use stable or latest)." >&2
+      exit 1
+      ;;
+  esac
 else
   case "$VERSION" in
     kittypaw/v*) TAG="$VERSION" ;;
@@ -76,7 +103,7 @@ fi
 VERSION="${TAG#kittypaw/v}"
 
 if [ -z "$VERSION" ]; then
-  echo "Failed to determine latest version" >&2; exit 1
+  echo "Failed to determine version" >&2; exit 1
 fi
 
 echo "Installing ${BINARY} v${VERSION} (${OS}/${ARCH})..."

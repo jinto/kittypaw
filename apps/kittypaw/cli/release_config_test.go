@@ -18,7 +18,7 @@ func TestReleaseConfigTargetsKittypawOrg(t *testing.T) {
 			"install-kittypaw.sh",
 		},
 		filepath.Join(root, "install-kittypaw.sh"): {
-			`REPO="kittypaw-app/kitty"`,
+			`REPO="${KITTYPAW_INSTALL_REPO:-kittypaw-app/kitty}"`,
 		},
 		filepath.Join(repoRoot, "install-kittypaw.sh"): {
 			"https://raw.githubusercontent.com/${REPO}/main/apps/kittypaw/install-kittypaw.sh",

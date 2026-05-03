@@ -222,6 +222,9 @@ Binary release and stable auto-update promotion are two separate approvals:
   "allow installed servers to auto-download" switch, not as part of ordinary
   release automation.
 - Do not auto-update `stable.json` from CI or from the release workflow.
+- The default installer (`curl .../install-kittypaw.sh | sh`) follows
+  `apps/kittypaw/stable.json`, not the newest GitHub release. Test candidate
+  releases with `VERSION=X.Y.Z curl .../install-kittypaw.sh | sh`.
 - Before creating a new binary release, check the current `stable.json`. If it
   still points at an older version and the previous binary release was never
   promoted to stable, warn the user once before proceeding. This may be

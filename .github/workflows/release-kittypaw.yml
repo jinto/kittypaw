@@ -78,11 +78,14 @@ jobs:
           cat > "$NOTES" <<EOF
           ## Install
 
+          The default installer follows the stable channel. To install this
+          candidate release explicitly:
+
           \`\`\`sh
-          curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install-kittypaw.sh | sh
+          VERSION=${VERSION} curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install-kittypaw.sh | sh
           \`\`\`
 
-          Set \`VERSION=${VERSION}\` to install this version explicitly.
+          Stable promotion is handled separately via \`apps/kittypaw/stable.json\`.
           EOF
 
           if gh release view "$TAG_NAME" --repo "$REPO" >/dev/null 2>&1; then

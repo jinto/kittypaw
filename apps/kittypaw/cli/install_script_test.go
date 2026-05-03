@@ -64,6 +64,82 @@ func TestInstallScriptRestartsActiveLinuxService(t *testing.T) {
 	}
 }
 
+func TestInstallScriptDefaultsToStableVersion(t *testing.T) {
+	env := installScriptFixture(t, "Darwin", "arm64")
+	env.unsetFake("VERSION")
+
+	out, err := env.runInstallScript()
+	if err != nil {
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "Installing kittypaw v9.8.7") {
+		t.Fatalf("install output = %q, want stable version 9.8.7", out)
+	}
+	log := env.readLog()
+	if !strings.Contains(log, "stable.json") {
+		t.Fatalf("default installer should fetch stable.json\nlog:\n%s", log)
+	}
+	if strings.Contains(log, "releases?per_page=100") {
+		t.Fatalf("default installer must not query latest releases\nlog:\n%s", log)
+	}
+}
+
+func TestInstallScriptVersionOverridesStable(t *testing.T) {
+	env := installScriptFixture(t, "Darwin", "arm64")
+
+	out, err := env.runInstallScript()
+	if err != nil {
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "Installing kittypaw v1.2.3") {
+		t.Fatalf("install output = %q, want explicit version 1.2.3", out)
+	}
+	if log := env.readLog(); strings.Contains(log, "stable.json") {
+		t.Fatalf("explicit VERSION must not fetch stable.json\nlog:\n%s", log)
+	}
+}
+
+func TestInstallScriptLatestChannelUsesLatestRelease(t *testing.T) {
+	env := installScriptFixture(t, "Linux", "x86_64")
+	env.unsetFake("VERSION")
+	env.setFake("KITTYPAW_CHANNEL", "latest")
+
+	out, err := env.runInstallScript()
+	if err != nil {
+		t.Fatalf("install-kittypaw.sh failed: %v\n%s", err, out)
+	}
+
+	if !strings.Contains(out, "Installing kittypaw v7.6.5") {
+		t.Fatalf("install output = %q, want latest release version 7.6.5", out)
+	}
+	log := env.readLog()
+	if !strings.Contains(log, "releases?per_page=100") {
+		t.Fatalf("latest channel should query releases\nlog:\n%s", log)
+	}
+	if strings.Contains(log, "stable.json") {
+		t.Fatalf("latest channel must not fetch stable.json\nlog:\n%s", log)
+	}
+}
+
+func TestInstallScriptStableFetchFailureDoesNotFallbackToLatest(t *testing.T) {
+	env := installScriptFixture(t, "Darwin", "arm64")
+	env.unsetFake("VERSION")
+	env.setFake("FAKE_STABLE_FAIL", "1")
+
+	out, err := env.runInstallScript()
+	if err == nil {
+		t.Fatalf("install-kittypaw.sh succeeded unexpectedly\n%s", out)
+	}
+	if !strings.Contains(out, "stable metadata") {
+		t.Fatalf("install output = %q, want stable metadata failure", out)
+	}
+	if log := env.readLog(); strings.Contains(log, "releases?per_page=100") {
+		t.Fatalf("stable failure must not fall back to latest releases\nlog:\n%s", log)
+	}
+}
+
 type installScriptEnv struct {
 	t          *testing.T
 	root       string
@@ -122,14 +198,29 @@ esac
 `)
 	env.writeFakeCommand("curl", `#!/bin/sh
 out=
+url=
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "-o" ]; then
     shift
     out="$1"
+  elif [ "${1#http}" != "$1" ]; then
+    url="$1"
   fi
   shift || true
 done
+printf 'curl %s out=%s\n' "$url" "$out" >> "$FAKE_LOG"
 if [ -z "$out" ]; then
+  case "$url" in
+    *stable.json)
+      [ "$FAKE_STABLE_FAIL" = "1" ] && exit 22
+      printf '{"channel":"stable","version":"9.8.7","tag":"kittypaw/v9.8.7","commit":"fake"}\n'
+      exit 0
+      ;;
+    *releases?per_page=100)
+      printf '{"tag_name": "kittypaw/v7.6.5"}\n'
+      exit 0
+      ;;
+  esac
   exit 1
 fi
 case "$out" in
@@ -190,6 +281,19 @@ func installScriptPlatform(osName, arch string) (string, string) {
 
 func (e *installScriptEnv) setFake(key, value string) {
 	e.env = append(e.env, key+"="+value)
+}
+
+func (e *installScriptEnv) unsetFake(key string) {
+	e.t.Helper()
+	prefix := key + "="
+	filtered := e.env[:0]
+	for _, entry := range e.env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	e.env = filtered
 }
 
 func (e *installScriptEnv) runInstallScript() (string, error) {
