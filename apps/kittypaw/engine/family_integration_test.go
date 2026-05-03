@@ -115,8 +115,8 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 	}
 }
 
-// TestFamily_FanoutE2E proves the family → personal push path end-to-end.
-// A family skill calls Fanout.send("alice", …) through the actual
+// TestFamily_FanoutE2E proves the team-space to personal push path end-to-end.
+// A team-space skill calls Fanout.send("alice", …) through the actual
 // Sandbox, the event lands on eventCh as EventTeamSpacePush with the target
 // accountID, and alice never sees the Fanout global at all (defense in
 // depth — a personal skill probing `typeof Fanout` hits undefined).

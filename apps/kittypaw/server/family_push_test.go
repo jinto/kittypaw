@@ -301,7 +301,7 @@ func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 }
 
 // TestDispatchLoop_FamilyPush_DeliversToTargetChannel is the happy path — a
-// family fanout push to alice with one telegram channel configured lands on
+// team-space fanout push to alice with one telegram channel configured lands on
 // that telegram channel's SendResponse with alice's AllowedChatIDs[0] as the
 // chat ID. Critically, the agent loop must NOT run (payload.Text is a
 // finished outbound message, not an inbound chat that needs LLM processing).
@@ -333,7 +333,7 @@ func TestDispatchLoop_FamilyPush_DeliversToTargetChannel(t *testing.T) {
 // TestDispatchLoop_FamilyPush_ChannelHintRoutesToSpecificChannel pins the
 // ChannelHint semantics: when alice has both telegram and slack wired, a
 // push with ChannelHint="slack" must land on slack and NOT on telegram.
-// Without this, every family push would default to the first-configured
+// Without this, every team-space push would default to the first-configured
 // channel regardless of intent.
 func TestDispatchLoop_FamilyPush_ChannelHintRoutesToSpecificChannel(t *testing.T) {
 	tg := &mockPushChannel{}
@@ -409,6 +409,6 @@ func TestDispatchLoop_FamilyPush_NoChannel_Enqueues(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if len(pending) == 0 {
-		t.Fatal("expected pending_responses row for undelivered family push; queue is empty")
+		t.Fatal("expected pending_responses row for undelivered team-space push; queue is empty")
 	}
 }

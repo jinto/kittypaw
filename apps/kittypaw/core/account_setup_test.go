@@ -243,7 +243,7 @@ func TestInitAccount_DuplicateKakaoRelayURL(t *testing.T) {
 	}
 }
 
-// Family-no-channels invariant must reject before any file is written.
+// Team-space-no-channels invariant must reject before any file is written.
 func TestInitAccount_FamilyWithToken(t *testing.T) {
 	accountsDir := t.TempDir()
 
@@ -252,7 +252,7 @@ func TestInitAccount_FamilyWithToken(t *testing.T) {
 		TelegramToken: "12345:family",
 	})
 	if err == nil {
-		t.Fatal("expected error for family + telegram token, got nil")
+		t.Fatal("expected error for team-space + telegram token, got nil")
 	}
 	if !strings.Contains(err.Error(), "family") {
 		t.Errorf("error should cite family: %q", err.Error())

@@ -29,7 +29,7 @@ func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {
 
 	famSess := srv.accounts.Session("family")
 	if famSess == nil {
-		t.Fatal("family Session not registered on AccountRouter")
+		t.Fatal("team-space Session not registered on AccountRouter")
 	}
 	aliceSess := srv.accounts.Session("alice")
 	if aliceSess == nil {
@@ -53,9 +53,9 @@ func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {
 			famSess.AccountRegistry, aliceSess.AccountRegistry)
 	}
 
-	// --- Fanout: family gets it; personal does NOT.
+	// --- Fanout: team-space gets it; personal does NOT.
 	if famSess.Fanout == nil {
-		t.Error("family.Fanout must be non-nil (Fanout.send/broadcast capability)")
+		t.Error("team-space Fanout must be non-nil (Fanout.send/broadcast capability)")
 	}
 	if aliceSess.Fanout != nil {
 		t.Error("personal account.Fanout must be nil (I5 — personal cannot reach personal)")

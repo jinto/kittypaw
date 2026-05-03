@@ -266,10 +266,9 @@ timeout_seconds = 60
 	}
 }
 
-// TestFamilyShareParsing enforces the TOML wire format for family accounts.
-// The shape ([share.<peer>] read=[...]) is the user-facing contract the spec
-// promises — this regression pins it so a future config refactor can't
-// silently reshape it into something that breaks existing family installs.
+// TestFamilyShareParsing enforces legacy share TOML compatibility for team-space accounts.
+// The shape ([share.<peer>] read=[...]) remains supported for existing installs,
+// so this regression pins it against config refactors that would break migration.
 func TestFamilyShareParsing(t *testing.T) {
 	tomlContent := `
 is_shared = true
