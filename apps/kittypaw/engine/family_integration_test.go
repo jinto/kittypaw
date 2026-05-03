@@ -117,12 +117,15 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 
 // TestFamily_FanoutE2E proves the family → personal push path end-to-end.
 // A family skill calls Fanout.send("alice", …) through the actual
-// Sandbox, the event lands on eventCh as EventFamilyPush with the target
+// Sandbox, the event lands on eventCh as EventTeamSpacePush with the target
 // accountID, and alice never sees the Fanout global at all (defense in
 // depth — a personal skill probing `typeof Fanout` hits undefined).
 func TestFamily_FanoutE2E(t *testing.T) {
 	root := t.TempDir()
-	family := makeAccount(t, root, "family", &core.Config{IsFamily: true})
+	family := makeAccount(t, root, "family", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice"}},
+	})
 	alice := makeAccount(t, root, "alice", &core.Config{})
 
 	registry := core.NewAccountRegistry(root, "alice")
@@ -164,8 +167,8 @@ func TestFamily_FanoutE2E(t *testing.T) {
 
 	select {
 	case ev := <-eventCh:
-		if ev.Type != core.EventFamilyPush {
-			t.Errorf("expected EventFamilyPush, got %q", ev.Type)
+		if ev.Type != core.EventTeamSpacePush {
+			t.Errorf("expected EventTeamSpacePush, got %q", ev.Type)
 		}
 		if ev.AccountID != "alice" {
 			t.Errorf("expected target=alice, got %q", ev.AccountID)
@@ -178,7 +181,7 @@ func TestFamily_FanoutE2E(t *testing.T) {
 			t.Errorf("payload text wrong: %q", body.Text)
 		}
 	default:
-		t.Fatal("expected EventFamilyPush on channel; nothing published")
+		t.Fatal("expected EventTeamSpacePush on channel; nothing published")
 	}
 
 	// --- alice: no Fanout wired → JS global hidden ---

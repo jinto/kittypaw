@@ -187,7 +187,7 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 		Health:           core.NewHealthState(),
 		SummaryFlight:    &singleflight.Group{},
 	}
-	if td.Account.Config.IsSharedAccount() {
+	if td.Account.Config.IsTeamSpaceAccount() {
 		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Account.ID)
 	}
 

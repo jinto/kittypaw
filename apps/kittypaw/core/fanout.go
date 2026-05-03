@@ -11,8 +11,9 @@ import (
 // so skill authors see "fanout: self target" instead of a generic error
 // that lumps every failure together.
 var (
-	ErrFanoutSelfTarget     = errors.New("fanout: cannot send to source account")
-	ErrFanoutUnknownAccount = errors.New("fanout: unknown target account")
+	ErrFanoutSelfTarget         = errors.New("fanout: cannot send to source account")
+	ErrFanoutUnknownAccount     = errors.New("fanout: unknown target account")
+	ErrFanoutUnauthorizedTarget = errors.New("fanout: target is not a team-space member")
 )
 
 // FanoutPayload is the message body a family skill passes to
@@ -42,7 +43,7 @@ type Fanout interface {
 }
 
 // ChannelFanout is the default Fanout implementation. It emits
-// EventFamilyPush events onto the Server's eventCh, and AccountRouter
+// EventTeamSpacePush events onto the Server's eventCh, and AccountRouter
 // dispatches each one to the target Session. Decoupling the fanout
 // publisher from the Session map means a future scheduler-driven fanout
 // (cron → Fanout) reuses the exact same path.
@@ -82,12 +83,19 @@ func (f *ChannelFanout) Send(ctx context.Context, accountID string, p FanoutPayl
 	if f.registry.Get(accountID) == nil {
 		return fmt.Errorf("%w: %q", ErrFanoutUnknownAccount, accountID)
 	}
+	source := f.registry.Get(f.source)
+	if source == nil || source.Config == nil || !source.Config.IsTeamSpaceAccount() {
+		return ErrFanoutUnauthorizedTarget
+	}
+	if !source.Config.TeamSpaceHasMember(accountID) {
+		return ErrFanoutUnauthorizedTarget
+	}
 
 	body, err := json.Marshal(p)
 	if err != nil {
 		return fmt.Errorf("fanout: marshal payload: %w", err)
 	}
-	ev := Event{Type: EventFamilyPush, AccountID: accountID, Payload: body}
+	ev := Event{Type: EventTeamSpacePush, AccountID: accountID, Payload: body}
 
 	select {
 	case f.eventCh <- ev:
@@ -104,7 +112,11 @@ func (f *ChannelFanout) Send(ctx context.Context, accountID string, p FanoutPayl
 // cannot tell which peers succeeded — atomic all-or-nothing would require
 // a dispatcher-level broadcast primitive that we don't have yet.
 func (f *ChannelFanout) Broadcast(ctx context.Context, p FanoutPayload) error {
-	for _, id := range f.registry.List() {
+	source := f.registry.Get(f.source)
+	if source == nil || source.Config == nil || !source.Config.IsTeamSpaceAccount() {
+		return ErrFanoutUnauthorizedTarget
+	}
+	for _, id := range source.Config.TeamSpace.Members {
 		if id == f.source {
 			continue
 		}

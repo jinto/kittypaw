@@ -185,7 +185,7 @@ func (s *Server) rebuildSessionForConfigLocked(td *AccountDeps, old *engine.Sess
 		Indexer:          indexer,
 		Pipeline:         pipeline,
 	}
-	if td.Account.Config.IsSharedAccount() {
+	if td.Account.Config.IsTeamSpaceAccount() {
 		sess.Fanout = core.NewChannelFanout(s.eventCh, s.accountRegistry, td.Account.ID)
 	}
 

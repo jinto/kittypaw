@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ type pushCall struct {
 }
 
 // mockPushChannel is a channel.Channel stub used to observe dispatchLoop
-// delivering EventFamilyPush without relying on a live Telegram/Slack/etc.
+// delivering EventTeamSpacePush without relying on a live Telegram/Slack/etc.
 // backend. Start blocks on ctx so ChannelSpawner's lifecycle is satisfied.
 type mockPushChannel struct {
 	name string
@@ -75,7 +76,10 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 	t.Helper()
 	root := t.TempDir()
 
-	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice"}},
+	})
 	aliceDeps := buildAccountDeps(t, root, "alice", personalCfg)
 
 	srv := New([]*AccountDeps{familyDeps, aliceDeps}, "test")
@@ -118,7 +122,10 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 	root := t.TempDir()
 
 	// Family drives fanout; three personal accounts receive their own tailored text.
-	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice", "bob", "charlie"}},
+	})
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
 		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AllowedChatIDs: []string{"alice-chat"},
@@ -207,7 +214,10 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 	root := t.TempDir()
 
-	familyDeps := buildAccountDeps(t, root, "family", &core.Config{IsFamily: true})
+	familyDeps := buildAccountDeps(t, root, "family", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice", "bob"}},
+	})
 	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{
 		Channels:       []core.ChannelConfig{{ChannelType: core.ChannelTelegram}},
 		AllowedChatIDs: []string{"alice-chat"},
@@ -261,13 +271,33 @@ func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 	}
 }
 
+func TestTeamSpaceFanoutRejectsNonMember(t *testing.T) {
+	root := t.TempDir()
+	teamDeps := buildAccountDeps(t, root, "team", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice"}},
+	})
+	aliceDeps := buildAccountDeps(t, root, "alice", &core.Config{})
+	bobDeps := buildAccountDeps(t, root, "bob", &core.Config{})
+	srv := New([]*AccountDeps{teamDeps, aliceDeps, bobDeps}, "test")
+
+	teamSess := srv.accounts.Session("team")
+	if teamSess == nil || teamSess.Fanout == nil {
+		t.Fatal("team-space session / Fanout missing")
+	}
+	err := teamSess.Fanout.Send(context.Background(), "bob", core.FanoutPayload{Text: "x"})
+	if !errors.Is(err, core.ErrFanoutUnauthorizedTarget) {
+		t.Fatalf("Send to non-member err = %v, want ErrFanoutUnauthorizedTarget", err)
+	}
+}
+
 func pushEvent(t *testing.T, target string, p core.FanoutPayload) core.Event {
 	t.Helper()
 	body, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	return core.Event{Type: core.EventFamilyPush, AccountID: target, Payload: body}
+	return core.Event{Type: core.EventTeamSpacePush, AccountID: target, Payload: body}
 }
 
 // TestDispatchLoop_FamilyPush_DeliversToTargetChannel is the happy path — a

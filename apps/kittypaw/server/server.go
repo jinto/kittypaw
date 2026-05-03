@@ -546,14 +546,14 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			// EventFamilyPush carries a FanoutPayload (not a ChatPayload) and
+			// EventTeamSpacePush carries a FanoutPayload (not a ChatPayload) and
 			// delivers an already-composed message to the target account —
 			// skip the agent loop entirely. Without this branch the generic
 			// ParsePayload below silently produces a zero-valued ChatPayload,
 			// the event routes through session.Run, and the push text never
 			// reaches the target channel.
-			if event.Type == core.EventFamilyPush {
-				s.deliverFamilyPush(ctx, event)
+			if event.Type == core.EventTeamSpacePush {
+				s.deliverTeamSpacePush(ctx, event)
 				continue
 			}
 			payload, err := event.ParsePayload()
@@ -696,7 +696,7 @@ func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string,
 	return ch.SendResponse(ctx, chatID, outbound.Text, replyToMessageID)
 }
 
-// deliverFamilyPush routes an EventFamilyPush to the target account's channel
+// deliverTeamSpacePush routes an EventTeamSpacePush to the target account's channel
 // and bypasses the agent loop. The payload is a finished outbound message
 // (Fanout.send already gave a skill author's hand-authored text), so we do
 // not re-invoke the LLM — doing so would paraphrase, translate, or drop the
@@ -709,65 +709,65 @@ func sendChannelResponse(ctx context.Context, ch channel.Channel, chatID string,
 //     (nowhere to send).
 //  4. If the channel is not currently running (hot-reload, post-restart),
 //     enqueue to pending_responses so the retry loop can pick it up.
-func (s *Server) deliverFamilyPush(ctx context.Context, event core.Event) {
+func (s *Server) deliverTeamSpacePush(ctx context.Context, event core.Event) {
 	var p core.FanoutPayload
 	if err := json.Unmarshal(event.Payload, &p); err != nil {
-		slog.Warn("family_push: bad payload", "account", event.AccountID, "error", err)
+		slog.Warn("team_space_push: bad payload", "account", event.AccountID, "error", err)
 		return
 	}
 
 	target := s.accountRegistry.Get(event.AccountID)
 	if target == nil || target.Config == nil {
-		slog.Warn("family_push: unknown target account", "account", event.AccountID)
+		slog.Warn("team_space_push: unknown target account", "account", event.AccountID)
 		return
 	}
 	if len(target.Config.Channels) == 0 {
-		slog.Warn("family_push: target has no channels configured; dropping",
+		slog.Warn("team_space_push: target has no channels configured; dropping",
 			"account", event.AccountID)
 		return
 	}
 
-	channelType := resolveFamilyPushChannel(target.Config.Channels, p.ChannelHint)
+	channelType := resolveTeamSpacePushChannel(target.Config.Channels, p.ChannelHint)
 
 	chatID := core.FirstAllowedChatID(target.Config)
 	if chatID == "" {
-		slog.Warn("family_push: target has no admin chat; dropping",
+		slog.Warn("team_space_push: target has no admin chat; dropping",
 			"account", event.AccountID, "channel", channelType)
 		return
 	}
 
 	ch, chOK := s.spawner.GetChannel(event.AccountID, channelType)
 	if !chOK {
-		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text, "channel not running")
+		s.enqueueTeamSpacePushForRetry(event.AccountID, channelType, chatID, p.Text, "channel not running")
 		return
 	}
 
 	if err := ch.SendResponse(ctx, chatID, p.Text, ""); err != nil {
-		s.enqueueFamilyPushForRetry(event.AccountID, channelType, chatID, p.Text,
+		s.enqueueTeamSpacePushForRetry(event.AccountID, channelType, chatID, p.Text,
 			fmt.Sprintf("send failed: %v", err))
 		return
 	}
 
-	slog.Info("family_push_delivered",
-		"from", "family", "to", event.AccountID, "channel", channelType, "chat_id", chatID)
+	slog.Info("team_space_push_delivered",
+		"from", "team_space", "to", event.AccountID, "channel", channelType, "chat_id", chatID)
 }
 
-// enqueueFamilyPushForRetry parks an undelivered family push in pending_responses
+// enqueueTeamSpacePushForRetry parks an undelivered team-space push in pending_responses
 // so the retry loop can pick it up after the channel comes back. Kakao is
 // excluded because its action IDs are ephemeral — by the time the retry fires,
 // the originating action no longer exists, so re-sending would 4xx-loop forever.
-func (s *Server) enqueueFamilyPushForRetry(accountID string, channelType core.EventType, chatID, text, reason string) {
-	slog.Warn("family_push: deferred to retry queue",
+func (s *Server) enqueueTeamSpacePushForRetry(accountID string, channelType core.EventType, chatID, text, reason string) {
+	slog.Warn("team_space_push: deferred to retry queue",
 		"account", accountID, "channel", channelType, "reason", reason)
 	if channelType == core.EventKakaoTalk {
 		return
 	}
 	if qErr := s.store.EnqueueResponse(accountID, string(channelType), chatID, text); qErr != nil {
-		slog.Error("family_push: enqueue failed", "account", accountID, "channel", channelType, "error", qErr)
+		slog.Error("team_space_push: enqueue failed", "account", accountID, "channel", channelType, "error", qErr)
 	}
 }
 
-// resolveFamilyPushChannel picks which target channel a FamilyPush lands on.
+// resolveTeamSpacePushChannel picks which target channel a team-space push lands on.
 // Hint matching is exact on the ChannelType string ("telegram", "slack",
 // "kakao_talk"); a miss falls back to the first persistent push channel so
 // delivery degrades instead of dropping.
@@ -775,10 +775,10 @@ func (s *Server) enqueueFamilyPushForRetry(accountID string, channelType core.Ev
 // web_chat is excluded from the fallback (but honored if explicitly hinted
 // — caller's explicit ask wins). web_chat is per-WebSocket-session: there
 // is no durable destination to push to in the background, so silently
-// landing every "no hint" family push on it would simply discard the
+// landing every "no hint" team-space push on it would simply discard the
 // message. Persistent channels (telegram/slack/discord/kakao_talk) own
 // their own queueing semantics and are safe defaults.
-func resolveFamilyPushChannel(channels []core.ChannelConfig, hint string) core.EventType {
+func resolveTeamSpacePushChannel(channels []core.ChannelConfig, hint string) core.EventType {
 	if hint != "" {
 		for _, c := range channels {
 			if string(c.ChannelType) == hint {

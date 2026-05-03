@@ -30,11 +30,15 @@ const (
 	EventKakaoTalk EventType = "kakao_talk"
 	EventSlack     EventType = "slack"
 	EventDiscord   EventType = "discord"
-	// EventFamilyPush is emitted by ChannelFanout when the family account
-	// pushes a message to a personal account. AccountRouter dispatches to
-	// the target Session the same way it dispatches inbound chat events,
-	// so the personal agent can treat it as a normal observation.
-	EventFamilyPush EventType = "family.push"
+	// EventTeamSpacePush is emitted by ChannelFanout when a team-space account
+	// pushes a message to a member account. AccountRouter dispatches to the
+	// target Session the same way it dispatches inbound chat events, so the
+	// member agent can treat it as a normal observation.
+	EventTeamSpacePush EventType = "team_space.push"
+
+	// EventFamilyPush is retained as a compile-time compatibility alias while
+	// tests and callers migrate to team-space terminology.
+	EventFamilyPush EventType = EventTeamSpacePush
 )
 
 // LoopPhase tracks the agent loop state machine position.
