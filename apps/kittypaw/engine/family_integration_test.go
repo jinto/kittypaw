@@ -15,31 +15,29 @@ import (
 )
 
 // TestFamily_ShareReadE2E drives the full cross-account read stack through the
-// JS sandbox: alice's skill calls `Share.read("family", ...)`, the call
+// JS sandbox: alice's skill calls `Share.read("team", ...)`, the call
 // crosses the resolver into executeShare, passes ValidateSharedReadPath
-// against family's `[share.alice]` allowlist, and returns the file content.
-// bob — not allowlisted — gets a denial, and the audit log captures both
+// against team-space membership, and returns the file content.
+// bob — not a member — gets a denial, and the audit log captures both
 // outcomes. Without this end-to-end, the unit tests green-light pieces the
 // JS layer can't actually reach.
 func TestFamily_ShareReadE2E(t *testing.T) {
 	root := t.TempDir()
 
 	// --- account layout ---
-	family := makeAccount(t, root, "family", &core.Config{
-		IsFamily: true,
-		Share: map[string]core.ShareConfig{
-			"alice": {Read: []string{"memory/weather.json"}},
-		},
+	team := makeAccount(t, root, "team", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"alice"}},
 	})
 	alice := makeAccount(t, root, "alice", &core.Config{})
 	bob := makeAccount(t, root, "bob", &core.Config{})
 
-	// Drop a file family wants to share.
-	writeAccountFile(t, filepath.Join(family.BaseDir, "memory", "weather.json"),
+	// Drop a file the team space shares with members.
+	writeAccountFile(t, filepath.Join(team.BaseDir, "memory", "weather.json"),
 		`{"today":"sunny","high":22}`)
 
 	registry := core.NewAccountRegistry(root, "alice")
-	registry.Register(family)
+	registry.Register(team)
 	registry.Register(alice)
 	registry.Register(bob)
 
@@ -51,7 +49,7 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 
 	sbox := sandbox.New(core.SandboxConfig{TimeoutSecs: 5})
 
-	// --- alice: allowlisted reader → success ---
+	// --- alice: team-space member -> success ---
 	aliceSess := &Session{
 		Sandbox:         sbox,
 		Config:          alice.Config,
@@ -62,7 +60,7 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		return resolveSkillCall(ctx, call, aliceSess, nil)
 	}
 	code := `
-		var r = Share.read("family", "memory/weather.json");
+		var r = Share.read("team", "memory/weather.json");
 		return r.content;
 	`
 	result, err := sbox.ExecuteWithResolverOpts(context.Background(), code, nil, resolver,
@@ -84,7 +82,7 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		t.Errorf("audit log missing reader identity; got: %s", logBuf.String())
 	}
 
-	// --- bob: not allowlisted → denied ---
+	// --- bob: not a team-space member -> denied ---
 	logBuf.Reset()
 	bobSess := &Session{
 		Sandbox:         sbox,
@@ -96,7 +94,7 @@ func TestFamily_ShareReadE2E(t *testing.T) {
 		return resolveSkillCall(ctx, call, bobSess, nil)
 	}
 	denyCode := `
-		var r = Share.read("family", "memory/weather.json");
+		var r = Share.read("team", "memory/weather.json");
 		return JSON.stringify(r);
 	`
 	result, err = sbox.ExecuteWithResolverOpts(context.Background(), denyCode, nil, bobResolver,

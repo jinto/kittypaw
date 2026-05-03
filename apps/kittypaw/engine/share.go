@@ -39,27 +39,24 @@ func executeShare(_ context.Context, call core.SkillCall, s *Session) (string, e
 		return jsonResult(map[string]any{"error": "path must be a string"})
 	}
 
-	// Family-only target gate (I5). Closes the case where a personal account's
-	// config contains a [share.<peer>] allowlist — the allowlist says "these
-	// paths are safe to share", but it does NOT say "the owner is reachable".
-	// Reachability is a property of the target account's role, and only the
-	// family account plays the owner role. Without this gate, a sloppy or
-	// hostile config could turn Plan B's "personal ↔ personal forbidden" rule
-	// into a documentation-only invariant.
+	// Team-space-only target gate. Closes the case where a personal account's
+	// config contains legacy [share.<peer>] entries or other stale sharing
+	// knobs. Reachability is a property of the target account's role; member
+	// authorization is enforced by core.ValidateSharedReadPath below.
 	//
-	// "unknown account" and "not family" collapse into one externally-visible
+	// "unknown account" and "not team space" collapse into one externally-visible
 	// outcome so a caller cannot enumerate account IDs by probing for which
 	// error string comes back; the audit log keeps the distinction internally
 	// for forensics. Same reason both branches share the rejection message.
 	owner := s.AccountRegistry.Get(targetID)
-	if owner == nil || owner.Config == nil || !owner.Config.IsSharedAccount() {
-		reason := "target_not_family"
+	if owner == nil || owner.Config == nil || !owner.Config.IsTeamSpaceAccount() {
+		reason := "target_not_team_space"
 		if owner == nil {
 			reason = "unknown_account"
 		}
 		slog.Warn("cross_account_read_rejected",
 			"from", s.AccountID, "to", targetID, "path", filepath.Clean(reqPath), "reason", reason)
-		return jsonResult(map[string]any{"error": "cross-account read: target is not the family account"})
+		return jsonResult(map[string]any{"error": "cross-account read: target is not the team space"})
 	}
 
 	realPath, err := core.ValidateSharedReadPath(owner.Config, owner.BaseDir, s.AccountID, reqPath)

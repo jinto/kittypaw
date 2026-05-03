@@ -13,34 +13,34 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-// newShareFixture stands up a two-account topology on disk (family owner +
-// alice reader) with a weather.json that only alice is cleared to read.
+// newShareFixture stands up a two-account topology on disk (team-space owner +
+// alice reader) with a weather.json that team-space members can read.
 // The fixture returns a Session wired as alice so each test exercises
 // the same execution path the sandbox uses at runtime — the exported
 // executeShare is the only thing under test; everything else is plumbing.
-func newShareFixture(t *testing.T) (sess *Session, familyDir string) {
+func newShareFixture(t *testing.T) (sess *Session, teamDir string) {
 	t.Helper()
 	root := t.TempDir()
 
-	familyDir = filepath.Join(root, "accounts", "family")
+	teamDir = filepath.Join(root, "accounts", "team")
 	aliceDir := filepath.Join(root, "accounts", "alice")
-	if err := os.MkdirAll(filepath.Join(familyDir, "memory"), 0o755); err != nil {
-		t.Fatalf("mkdir family: %v", err)
+	if err := os.MkdirAll(filepath.Join(teamDir, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir team: %v", err)
 	}
 	if err := os.MkdirAll(aliceDir, 0o755); err != nil {
 		t.Fatalf("mkdir alice: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(familyDir, "memory", "weather.json"), []byte(`{"t":18}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(teamDir, "memory", "weather.json"), []byte(`{"t":18}`), 0o644); err != nil {
 		t.Fatalf("write weather: %v", err)
 	}
 
-	reg := core.NewAccountRegistry(filepath.Join(root, "accounts"), "family")
+	reg := core.NewAccountRegistry(filepath.Join(root, "accounts"), "team")
 	reg.Register(&core.Account{
-		ID:      "family",
-		BaseDir: familyDir,
+		ID:      "team",
+		BaseDir: teamDir,
 		Config: &core.Config{
-			IsFamily: true,
-			Share:    map[string]core.ShareConfig{"alice": {Read: []string{"memory/weather.json"}}},
+			IsShared:  true,
+			TeamSpace: core.TeamSpaceConfig{Members: []string{"alice"}},
 		},
 	})
 	reg.Register(&core.Account{ID: "alice", BaseDir: aliceDir, Config: &core.Config{}})
@@ -50,7 +50,7 @@ func newShareFixture(t *testing.T) (sess *Session, familyDir string) {
 		AccountID:       "alice",
 		AccountRegistry: reg,
 	}
-	return sess, familyDir
+	return sess, teamDir
 }
 
 func mustCall(t *testing.T, accountID, path string) core.SkillCall {
@@ -60,15 +60,15 @@ func mustCall(t *testing.T, accountID, path string) core.SkillCall {
 	return core.SkillCall{SkillName: "Share", Method: "read", Args: []json.RawMessage{tid, p}}
 }
 
-// TestShareRead_Success pins the happy path — alice asking for an
-// allowlisted path returns the file body. The pair (Session.AccountID,
+// TestShareRead_Success pins the happy path — alice asking for a
+// team-space memory path returns the file body. The pair (Session.AccountID,
 // target Account from registry) is what makes the cross-account check
 // meaningful; without the session field wired up the whole surface is
 // dead code.
 func TestShareRead_Success(t *testing.T) {
 	sess, _ := newShareFixture(t)
 
-	out, err := executeShare(context.Background(), mustCall(t, "family", "memory/weather.json"), sess)
+	out, err := executeShare(context.Background(), mustCall(t, "team", "memory/weather.json"), sess)
 	if err != nil {
 		t.Fatalf("executeShare: %v", err)
 	}
@@ -81,19 +81,17 @@ func TestShareRead_Success(t *testing.T) {
 	}
 }
 
-// TestShareRead_AllowlistMiss checks that a path outside the owner's
-// Read allowlist surfaces as a JS-level error, not a filesystem leak.
+// TestShareRead_NotShareable checks that a path outside team-space shareable
+// data surfaces as a JS-level error, not a filesystem leak.
 // The reject path is the critical one: it's where a hostile or sloppy
 // skill would try to escalate, so the failure must be explicit.
-func TestShareRead_AllowlistMiss(t *testing.T) {
-	sess, familyDir := newShareFixture(t)
-	// Put an unlisted file on disk; the allowlist miss must fire before
-	// any filesystem operation.
-	if err := os.WriteFile(filepath.Join(familyDir, "memory", "private.json"), []byte(`{}`), 0o644); err != nil {
-		t.Fatalf("write private: %v", err)
+func TestShareRead_NotShareable(t *testing.T) {
+	sess, teamDir := newShareFixture(t)
+	if err := os.WriteFile(filepath.Join(teamDir, "config.toml"), []byte(`is_shared=true`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
-	out, err := executeShare(context.Background(), mustCall(t, "family", "memory/private.json"), sess)
+	out, err := executeShare(context.Background(), mustCall(t, "team", "config.toml"), sess)
 	if err != nil {
 		t.Fatalf("executeShare: %v", err)
 	}
@@ -101,8 +99,8 @@ func TestShareRead_AllowlistMiss(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !strings.Contains(resp["error"], "allowlist") {
-		t.Errorf("expected allowlist error, got %q", resp["error"])
+	if !strings.Contains(resp["error"], "shareable") {
+		t.Errorf("expected shareable error, got %q", resp["error"])
 	}
 }
 
@@ -112,7 +110,7 @@ func TestShareRead_AllowlistMiss(t *testing.T) {
 // AccountRouter's strict routing vanishes if share reads silently
 // rewrite unknown targets.
 //
-// The externally-visible error string is the same as a non-shared target
+// The externally-visible error string is the same as a non-team-space target
 // (defense against account ID enumeration via error oracle); the audit log
 // carries reason=unknown_account for forensics.
 func TestShareRead_UnknownAccount(t *testing.T) {
@@ -126,8 +124,8 @@ func TestShareRead_UnknownAccount(t *testing.T) {
 	out, _ := executeShare(context.Background(), mustCall(t, "grandma", "memory/weather.json"), sess)
 	var resp map[string]string
 	_ = json.Unmarshal([]byte(out), &resp)
-	if !strings.Contains(resp["error"], "target is not the family account") {
-		t.Errorf("expected unified family-target error, got %q", resp["error"])
+	if !strings.Contains(resp["error"], "target is not the team space") {
+		t.Errorf("expected unified team-space target error, got %q", resp["error"])
 	}
 	if !strings.Contains(buf.String(), `"reason":"unknown_account"`) {
 		t.Errorf("audit log should carry unknown_account reason; got: %s", buf.String())
@@ -146,7 +144,7 @@ func TestShareRead_AuditLog(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	if _, err := executeShare(context.Background(), mustCall(t, "family", "memory/weather.json"), sess); err != nil {
+	if _, err := executeShare(context.Background(), mustCall(t, "team", "memory/weather.json"), sess); err != nil {
 		t.Fatalf("executeShare: %v", err)
 	}
 
@@ -154,7 +152,7 @@ func TestShareRead_AuditLog(t *testing.T) {
 	if !strings.Contains(log, `"msg":"cross_account_read"`) {
 		t.Errorf("audit record missing: %s", log)
 	}
-	if !strings.Contains(log, `"from":"alice"`) || !strings.Contains(log, `"to":"family"`) {
+	if !strings.Contains(log, `"from":"alice"`) || !strings.Contains(log, `"to":"team"`) {
 		t.Errorf("audit record missing account labels: %s", log)
 	}
 }
@@ -167,7 +165,7 @@ func TestShareRead_AuditLog(t *testing.T) {
 func TestShareRead_NoRegistry(t *testing.T) {
 	sess := &Session{Config: &core.Config{}} // AccountID="", AccountRegistry=nil
 
-	out, _ := executeShare(context.Background(), mustCall(t, "family", "x"), sess)
+	out, _ := executeShare(context.Background(), mustCall(t, "team", "x"), sess)
 	var resp map[string]string
 	_ = json.Unmarshal([]byte(out), &resp)
 	if !strings.Contains(resp["error"], "unavailable") {
@@ -175,15 +173,30 @@ func TestShareRead_NoRegistry(t *testing.T) {
 	}
 }
 
-// TestShareRead_RejectsNonFamilyTarget is the invariant that closes the I5
+func TestShareRead_RejectsNonMember(t *testing.T) {
+	sess, _ := newShareFixture(t)
+	out, _ := executeShare(context.Background(), mustCall(t, "team", "memory/weather.json"), &Session{
+		AccountID:       "bob",
+		AccountRegistry: sess.AccountRegistry,
+	})
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if !strings.Contains(resp["error"], "team space") {
+		t.Errorf("expected team-space membership error, got %q", resp["error"])
+	}
+}
+
+// TestShareRead_RejectsNonTeamSpaceTarget is the invariant that closes the I5
 // hole: even if bob's config legally contains `[share.alice] read = [...]`,
-// alice cannot read from bob because bob is not the family account. The
-// allowlist grants a path inside the owner; the family-only gate decides
+// alice cannot read from bob because bob is not the team-space account. The
+// membership grants access to a team space; the owner gate decides
 // whether the owner is even reachable. Without this, Plan B's "personal ↔
 // personal forbidden" rule would depend entirely on admins never adding a
 // Share block to a personal config — a policy we can't enforce at the doc
 // layer.
-func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
+func TestShareRead_RejectsNonTeamSpaceTarget(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 
@@ -202,8 +215,8 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	}
 
 	reg := core.NewAccountRegistry(filepath.Join(root, "accounts"), "family")
-	// bob is a personal account (IsFamily=false) that has improperly granted
-	// alice a read allowlist. The gate MUST reject regardless.
+	// bob is a personal account (IsFamily=false) that has legacy share config.
+	// The team-space target gate MUST reject regardless.
 	reg.Register(&core.Account{
 		ID:      "bob",
 		BaseDir: bobDir,
@@ -233,7 +246,7 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// The error surface is checked loosely (substring "family") so future
+	// The error surface is checked loosely (substring "team space") so future
 	// wording changes don't force test churn, but the key property —
 	// rejected without a "content" field — is pinned.
 	if _, ok := resp["content"]; ok {
@@ -242,8 +255,8 @@ func TestShareRead_RejectsNonFamilyTarget(t *testing.T) {
 	if resp["error"] == "" {
 		t.Errorf("expected an error field, got %+v", resp)
 	}
-	if !strings.Contains(strings.ToLower(resp["error"]), "family") {
-		t.Errorf("expected family-only error, got %q", resp["error"])
+	if !strings.Contains(strings.ToLower(resp["error"]), "team space") {
+		t.Errorf("expected team-space-only error, got %q", resp["error"])
 	}
 
 	log := buf.String()
@@ -269,7 +282,7 @@ func TestShareRead_RejectsSelfTarget(t *testing.T) {
 	if resp["content"] != "" {
 		t.Errorf("self-target must not return content: %q", resp["content"])
 	}
-	if !strings.Contains(strings.ToLower(resp["error"]), "family") {
-		t.Errorf("expected family-only error for self target, got %q", resp["error"])
+	if !strings.Contains(strings.ToLower(resp["error"]), "team space") {
+		t.Errorf("expected team-space-only error for self target, got %q", resp["error"])
 	}
 }

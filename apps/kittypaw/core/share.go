@@ -10,15 +10,14 @@ import (
 
 // Cross-account read errors. These are sentinels so the sandbox (and
 // future audit log) can distinguish policy rejections from filesystem
-// errors — a "not in allowlist" message to the skill author is actionable,
-// while a "boundary escape" message signals a real security event that
-// operations should page on.
+// errors.
 var (
 	ErrCrossAccountPath           = errors.New("cross-account read: invalid path")
 	ErrCrossAccountAbsolute       = errors.New("cross-account read: absolute path not permitted")
 	ErrCrossAccountTraversal      = errors.New("cross-account read: path traversal rejected")
-	ErrCrossAccountUnauthorized   = errors.New("cross-account read: reader account not listed in share")
+	ErrCrossAccountUnauthorized   = errors.New("cross-account read: reader account is not a team space member")
 	ErrCrossAccountNotAllowlisted = errors.New("cross-account read: path not in share allowlist")
+	ErrCrossAccountNotShareable   = errors.New("cross-account read: path is not in team-space shareable data")
 	ErrCrossAccountBoundary       = errors.New("cross-account read: symlink escapes account boundary")
 	ErrCrossAccountHardlink       = errors.New("cross-account read: hardlink multi-reference rejected")
 	ErrCrossAccountNotFound       = errors.New("cross-account read: file not found")
@@ -34,13 +33,12 @@ var (
 //  1. Null bytes and empty strings.
 //  2. Absolute paths — only account-relative input allowed.
 //  3. `..` traversal after Clean.
-//  4. Allowlist lookup — cleaned paths compared so `memory/../memory/x`
-//     collapses to `memory/x` before the match.
+//  4. Team-space membership and shareable data root lookup.
 //  5. realpath symlink escape — EvalSymlinks + baseDir prefix check.
 //  6. Hardlink guard — nlink>1 rejects any file with a second reference,
-//     because a hardlink from outside baseDir to an inode inside baseDir
+//     because a hardlink from outside boundaryBase to an inode inside boundaryBase
 //     cannot be detected via realpath alone (both paths resolve to the
-//     same inode inside baseDir).
+//     same inode inside boundaryBase).
 func ValidateSharedReadPath(ownerCfg *Config, ownerBaseDir, readerAccountID, reqPath string) (string, error) {
 	if reqPath == "" || strings.ContainsRune(reqPath, 0) {
 		return "", ErrCrossAccountPath
@@ -53,28 +51,16 @@ func ValidateSharedReadPath(ownerCfg *Config, ownerBaseDir, readerAccountID, req
 		return "", ErrCrossAccountTraversal
 	}
 
-	if ownerCfg == nil || ownerCfg.Share == nil {
-		return "", ErrCrossAccountUnauthorized
-	}
-	share, ok := ownerCfg.Share[readerAccountID]
-	if !ok {
+	if ownerCfg == nil || !ownerCfg.IsTeamSpaceAccount() || !ownerCfg.TeamSpaceHasMember(readerAccountID) {
 		return "", ErrCrossAccountUnauthorized
 	}
 
-	allowed := false
-	for _, p := range share.Read {
-		if filepath.Clean(p) == cleaned {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return "", ErrCrossAccountNotAllowlisted
+	abs, boundaryBase, err := resolveTeamSpaceSharedPath(ownerCfg, ownerBaseDir, cleaned)
+	if err != nil {
+		return "", err
 	}
 
-	abs := filepath.Join(ownerBaseDir, cleaned)
-
-	realBase, err := filepath.EvalSymlinks(ownerBaseDir)
+	realBase, err := filepath.EvalSymlinks(boundaryBase)
 	if err != nil {
 		return "", fmt.Errorf("realpath baseDir: %w", err)
 	}
@@ -100,4 +86,29 @@ func ValidateSharedReadPath(ownerCfg *Config, ownerBaseDir, readerAccountID, req
 	}
 
 	return realFile, nil
+}
+
+func resolveTeamSpaceSharedPath(ownerCfg *Config, ownerBaseDir, cleaned string) (abs string, boundaryBase string, err error) {
+	parts := strings.Split(cleaned, string(filepath.Separator))
+	if len(parts) == 0 {
+		return "", "", ErrCrossAccountNotShareable
+	}
+	switch parts[0] {
+	case "memory":
+		return filepath.Join(ownerBaseDir, cleaned), filepath.Join(ownerBaseDir, "memory"), nil
+	case "workspace":
+		if len(parts) < 3 {
+			return "", "", ErrCrossAccountNotShareable
+		}
+		alias := parts[1]
+		rel := filepath.Join(parts[2:]...)
+		for _, root := range ownerCfg.WorkspaceRoots() {
+			if root.Alias == alias && root.Path != "" {
+				return filepath.Join(root.Path, rel), root.Path, nil
+			}
+		}
+		return "", "", ErrCrossAccountNotShareable
+	default:
+		return "", "", ErrCrossAccountNotShareable
+	}
 }
