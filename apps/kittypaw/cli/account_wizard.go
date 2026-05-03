@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jinto/kittypaw/core"
 	"github.com/mattn/go-isatty"
 	"golang.org/x/term"
 )
@@ -58,9 +59,11 @@ func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) e
 			return fmt.Errorf("read telegram token: %w", err)
 		}
 		f.telegramToken = strings.TrimSpace(token)
+		f.telegramTokenFromPrompt = true
 		if f.telegramToken == "" {
 			return fmt.Errorf("telegram token required")
 		}
+		f.adminChatID = runTelegramChatIDWizard(scanner, stdout, f.telegramToken)
 	}
 	if channels.kakao {
 		_, _ = fmt.Fprintln(stdout, "\n[2/5] KakaoTalk")
@@ -78,38 +81,8 @@ func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) e
 		return fmt.Errorf("at least one channel is required")
 	}
 
-	// [3/5] LLM provider
-	_, _ = fmt.Fprintln(stdout, "\n[3/5] LLM provider")
-	choice, err := promptAccountProviderChoice(scanner, stdin, stdout)
-	if err != nil {
-		return fmt.Errorf("read provider: %w", err)
-	}
-	f.llmProvider = mapProviderChoice(choice)
-
-	// [4/5] LLM api-key (skip for local) — secret, masked in TTY
-	if f.llmProvider != "local" {
-		_, _ = fmt.Fprintf(stdout, "\n[4/5] %s API key\n", f.llmProvider)
-		_, _ = fmt.Fprint(stdout, "  키: ")
-		key, err := readSecret(scanner, stdin, stdout)
-		if err != nil {
-			return fmt.Errorf("read api key: %w", err)
-		}
-		f.llmAPIKey = strings.TrimSpace(key)
-		if f.llmAPIKey == "" {
-			return fmt.Errorf("api-key required for %s", f.llmProvider)
-		}
-	}
-
-	// [5/5] LLM model — show default + accept Enter
-	defaultModel := defaultModelFor(f.llmProvider)
-	_, _ = fmt.Fprintf(stdout, "\n[5/5] LLM model [%s]: ", defaultModel)
-	model, err := readLine(scanner)
-	if err != nil {
-		return fmt.Errorf("read model: %w", err)
-	}
-	f.llmModel = strings.TrimSpace(model)
-	if f.llmModel == "" {
-		f.llmModel = defaultModel
+	if err := promptAccountLLM(scanner, stdin, stdout, f); err != nil {
+		return err
 	}
 
 	_, _ = fmt.Fprintln(stdout)
@@ -221,7 +194,7 @@ func mapAccountChannelChoice(s string) accountChannelSelection {
 }
 
 func promptAccountProviderChoice(scanner *bufio.Scanner, stdin io.Reader, stdout io.Writer) (string, error) {
-	options := []string{"anthropic", "openai", "local (Ollama / LM Studio)"}
+	options := setupLLMProviderChoices()
 	if f, ok := stdin.(*os.File); ok && f == os.Stdin && isatty.IsTerminal(f.Fd()) {
 		if out, ok := stdout.(*os.File); ok && out == os.Stdout && isatty.IsTerminal(out.Fd()) {
 			if idx, ok := promptChoiceInteractive("  ", options, 1); ok {
@@ -230,53 +203,141 @@ func promptAccountProviderChoice(scanner *bufio.Scanner, stdin io.Reader, stdout
 		}
 	}
 
-	_, _ = fmt.Fprintln(stdout, "  1) anthropic   2) openai   3) local (Ollama / LM Studio)")
+	for i, opt := range options {
+		_, _ = fmt.Fprintf(stdout, "  %d) %s\n", i+1, opt)
+	}
 	_, _ = fmt.Fprint(stdout, "  선택 [1]: ")
 	return readLine(scanner)
 }
 
-// mapProviderChoice resolves the numeric menu pick to a provider name.
-// Empty / "1" → anthropic (default). A free-form input passes through so a
-// caller can specify e.g. "openrouter" without the prompt knowing about it.
-func mapProviderChoice(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.Contains(s, "\x1b[") {
-		return providerFromChoiceIndex(choiceFromInput(s, 1, 3))
+func promptAccountLLM(scanner *bufio.Scanner, stdin io.Reader, stdout io.Writer, f *accountAddFlags) error {
+	_, _ = fmt.Fprintln(stdout, "\n[3/5] LLM provider")
+	choice, err := promptAccountProviderChoice(scanner, stdin, stdout)
+	if err != nil {
+		return fmt.Errorf("read provider: %w", err)
 	}
-	switch s {
-	case "", "1":
-		return "anthropic"
-	case "2":
-		return "openai"
-	case "3":
-		return "local"
+	provider, presetBaseURL := resolveAccountProviderChoice(choice)
+
+	var apiKey, localURL, localModel string
+	switch provider {
+	case "anthropic", "openai", "gemini", "openrouter":
+		displayProvider := provider
+		if provider == "openrouter" {
+			displayProvider = "openrouter"
+		}
+		_, _ = fmt.Fprintf(stdout, "\n[4/5] %s API key\n", displayProvider)
+		_, _ = fmt.Fprint(stdout, "  키: ")
+		key, err := readSecret(scanner, stdin, stdout)
+		if err != nil {
+			return fmt.Errorf("read api key: %w", err)
+		}
+		apiKey = strings.TrimSpace(key)
+		if apiKey == "" {
+			return fmt.Errorf("api-key required for %s", displayProvider)
+		}
+		if provider == "openrouter" {
+			localModel = core.OpenRouterDefaultModel
+			break
+		}
+		models := setupLLMModelChoices(provider)
+		modelIdx, err := promptAccountModelChoice(scanner, stdin, stdout, models)
+		if err != nil {
+			return fmt.Errorf("read model: %w", err)
+		}
+		localModel = models[modelIdx-1]
+	case "local":
+		localURL = promptAccountLine(scanner, stdout, "\n[4/5] Local URL", core.OllamaDefaultBaseURL)
+		localModel = promptAccountLine(scanner, stdout, "[5/5] Local model", "llama3")
 	default:
-		return s
+		return fmt.Errorf("unsupported provider %q", provider)
+	}
+
+	if presetBaseURL == core.OpenRouterBaseURL {
+		provider = "openrouter"
+	}
+	resolvedProvider, model, baseURL := core.ResolveLLMConfig(provider, localURL, localModel)
+	if presetBaseURL != "" {
+		baseURL = presetBaseURL
+	}
+	f.llmProvider = resolvedProvider
+	f.llmAPIKey = apiKey
+	f.llmModel = model
+	f.llmBaseURL = baseURL
+	return nil
+}
+
+func resolveAccountProviderChoice(s string) (provider, baseURL string) {
+	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, "openrouter") {
+		return "openrouter", core.OpenRouterBaseURL
+	}
+	if strings.Contains(s, "\x1b[") {
+		return providerFromChoiceIndex(choiceFromInput(s, 1, len(setupLLMProviderChoices())))
+	}
+	switch strings.ToLower(s) {
+	case "", "1", "anthropic", "claude":
+		return "anthropic", ""
+	case "2", "openai", "gpt":
+		return "openai", ""
+	case "3", "gemini", "google":
+		return "gemini", ""
+	case "4":
+		return "openrouter", core.OpenRouterBaseURL
+	case "5", "local", "ollama":
+		return "local", ""
+	default:
+		return s, ""
 	}
 }
 
-func providerFromChoiceIndex(idx int) string {
+func providerFromChoiceIndex(idx int) (string, string) {
 	switch idx {
 	case 2:
-		return "openai"
+		return "openai", ""
 	case 3:
-		return "local"
+		return "gemini", ""
+	case 4:
+		return "openrouter", core.OpenRouterBaseURL
+	case 5:
+		return "local", ""
 	default:
-		return "anthropic"
+		return "anthropic", ""
 	}
 }
 
-// defaultModelFor returns the default model name shown in the prompt for the
-// given provider. These mirror the defaults in the main setup wizard so a
-// user who picks "Enter" gets a working setup. Update both locations when
-// upstream defaults shift.
-func defaultModelFor(provider string) string {
-	switch provider {
-	case "openai":
-		return "gpt-4o"
-	case "local":
-		return "llama3"
-	default:
-		return "claude-sonnet-4-5"
+func promptAccountModelChoice(scanner *bufio.Scanner, stdin io.Reader, stdout io.Writer, models []string) (int, error) {
+	_, _ = fmt.Fprintln(stdout, "\n[5/5] LLM model")
+	if len(models) == 0 {
+		return 0, fmt.Errorf("no model choices available")
 	}
+	if f, ok := stdin.(*os.File); ok && f == os.Stdin && isatty.IsTerminal(f.Fd()) {
+		if out, ok := stdout.(*os.File); ok && out == os.Stdout && isatty.IsTerminal(out.Fd()) {
+			if idx, ok := promptChoiceInteractive("  Model > ", models, 1); ok {
+				return idx, nil
+			}
+		}
+	}
+	for i, model := range models {
+		_, _ = fmt.Fprintf(stdout, "  %d) %s\n", i+1, model)
+	}
+	_, _ = fmt.Fprint(stdout, "  선택 [1]: ")
+	return choiceFromInputForScanner(scanner, 1, len(models))
+}
+
+func choiceFromInputForScanner(scanner *bufio.Scanner, defaultIdx, optionCount int) (int, error) {
+	line, err := readLine(scanner)
+	if err != nil {
+		return 0, err
+	}
+	return choiceFromInput(line, defaultIdx, optionCount), nil
+}
+
+func promptAccountLine(scanner *bufio.Scanner, stdout io.Writer, label, def string) string {
+	_, _ = fmt.Fprintf(stdout, "%s [%s]: ", label, def)
+	value, _ := readLine(scanner)
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return def
+	}
+	return value
 }

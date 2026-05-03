@@ -64,6 +64,26 @@ func TestResolveAccountToken_FlagWarnsVisible(t *testing.T) {
 	}
 }
 
+func TestResolveAccountToken_PromptTokenDoesNotWarnVisible(t *testing.T) {
+	t.Setenv(accountEnvBotToken, "")
+	f := &accountAddFlags{
+		telegramToken:           "prompt-token",
+		telegramTokenFromPrompt: true,
+	}
+	var stderr bytes.Buffer
+
+	tok, err := resolveAccountToken(f, strings.NewReader(""), &stderr)
+	if err != nil {
+		t.Fatalf("resolveAccountToken: %v", err)
+	}
+	if tok != "prompt-token" {
+		t.Errorf("token = %q, want prompt-token", tok)
+	}
+	if stderr.String() != "" {
+		t.Errorf("prompt token should not emit process-list warning, stderr = %q", stderr.String())
+	}
+}
+
 // Silent accept would provision an account with an empty token — passes validation, fails at runtime.
 func TestResolveAccountToken_StdinEmpty(t *testing.T) {
 	f := &accountAddFlags{telegramTokenStdin: true}

@@ -18,6 +18,7 @@ type AccountOpts struct {
 	LLMProvider     string
 	LLMAPIKey       string
 	LLMModel        string
+	LLMBaseURL      string
 	LocalPassword   string
 	KakaoEnabled    bool
 	KakaoRelayWSURL string
@@ -140,6 +141,7 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		LLMProvider:      opts.LLMProvider,
 		LLMAPIKey:        opts.LLMAPIKey,
 		LLMModel:         opts.LLMModel,
+		LLMBaseURL:       opts.LLMBaseURL,
 		TelegramBotToken: opts.TelegramToken,
 		TelegramChatID:   opts.AdminChatID,
 		KakaoEnabled:     opts.KakaoEnabled,
@@ -167,6 +169,7 @@ func buildAccountConfig(opts AccountOpts) (*Config, error) {
 		LLMProvider:      opts.LLMProvider,
 		LLMAPIKey:        opts.LLMAPIKey,
 		LLMModel:         opts.LLMModel,
+		LLMBaseURL:       opts.LLMBaseURL,
 		TelegramBotToken: opts.TelegramToken,
 		TelegramChatID:   opts.AdminChatID,
 		KakaoEnabled:     opts.KakaoEnabled,

@@ -383,38 +383,7 @@ func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.Wizar
 
 	fmt.Printf("  ✓ %s\n", maskKey(token))
 	w.TelegramBotToken = token
-
-	// Guide user to send /start before auto-detect.
-	printTelegramGuide()
-	fmt.Printf("  > ")
-	scanner.Scan() // wait for Enter
-
-	// Auto-detect chat ID with retries.
-	const maxRetries = 3
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		fmt.Print("  Chat ID auto-detect... ")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		chatID, err := core.FetchTelegramChatID(ctx, token)
-		cancel()
-		if err == nil {
-			fmt.Printf("%s ✓\n", chatID)
-			w.TelegramChatID = chatID
-			return
-		}
-
-		if attempt < maxRetries {
-			printTelegramRetryHint(attempt)
-			fmt.Printf("  > ")
-			scanner.Scan()
-		} else {
-			fmt.Println()
-			printTelegramChatIDHelp()
-			manual := promptLine(scanner, "  Chat ID", "")
-			if manual != "" {
-				w.TelegramChatID = manual
-			}
-		}
-	}
+	w.TelegramChatID = runTelegramChatIDWizard(scanner, os.Stdout, token)
 }
 
 func printBotFatherGuide() {

@@ -19,17 +19,19 @@ import (
 )
 
 type accountAddFlags struct {
-	telegramToken      string
-	telegramTokenStdin bool
-	adminChatID        string
-	isShared           bool
-	llmProvider        string
-	llmAPIKey          string
-	llmModel           string
-	kakaoEnabled       bool
-	kakaoRelayWSURL    string
-	noActivate         bool
-	passwordStdin      bool
+	telegramToken           string
+	telegramTokenStdin      bool
+	adminChatID             string
+	isShared                bool
+	llmProvider             string
+	llmAPIKey               string
+	llmModel                string
+	llmBaseURL              string
+	kakaoEnabled            bool
+	kakaoRelayWSURL         string
+	telegramTokenFromPrompt bool
+	noActivate              bool
+	passwordStdin           bool
 }
 
 const accountEnvBotToken = "KITTYPAW_TELEGRAM_BOT_TOKEN"
@@ -109,7 +111,9 @@ func resolveAccountToken(f *accountAddFlags, stdin io.Reader, stderr io.Writer) 
 		return env, nil
 	}
 	if f.telegramToken != "" {
-		_, _ = fmt.Fprintln(stderr, "warning: bot token passed via flag is visible in the process list; prefer --telegram-bot-token-stdin")
+		if !f.telegramTokenFromPrompt {
+			_, _ = fmt.Fprintln(stderr, "warning: bot token passed via flag is visible in the process list; prefer --telegram-bot-token-stdin")
+		}
 		return f.telegramToken, nil
 	}
 	return "", nil
@@ -220,6 +224,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		LLMProvider:     f.llmProvider,
 		LLMAPIKey:       f.llmAPIKey,
 		LLMModel:        f.llmModel,
+		LLMBaseURL:      f.llmBaseURL,
 		LocalPassword:   password,
 		KakaoEnabled:    f.kakaoEnabled,
 		KakaoRelayWSURL: f.kakaoRelayWSURL,

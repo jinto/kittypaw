@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -14,12 +16,15 @@ import (
 // minimal interactive contract — a casual rewording of the prompts (or skipping
 // a step) breaks this test.
 func TestPromptAccountSetup_AllFields(t *testing.T) {
+	restoreTelegram := stubAccountTelegramPairing(t, "111")
+	defer restoreTelegram()
+
 	stdin := strings.NewReader(strings.Join([]string{
 		"1",                  // [1/5] channel → telegram
 		"123:fake-bot-token", // [2/5] telegram token
 		"1",                  // [3/5] provider → anthropic
 		"sk-fake-key",        // [4/5] api-key
-		"claude-opus",        // [5/5] model (override default)
+		"2",                  // [5/5] model → second Claude choice
 		"",
 	}, "\n"))
 	var stdout bytes.Buffer
@@ -32,14 +37,20 @@ func TestPromptAccountSetup_AllFields(t *testing.T) {
 	if f.telegramToken != "123:fake-bot-token" {
 		t.Errorf("telegramToken = %q, want %q", f.telegramToken, "123:fake-bot-token")
 	}
+	if !f.telegramTokenFromPrompt {
+		t.Error("telegramTokenFromPrompt = false, want true")
+	}
+	if f.adminChatID != "111" {
+		t.Errorf("adminChatID = %q, want 111", f.adminChatID)
+	}
 	if f.llmProvider != "anthropic" {
 		t.Errorf("llmProvider = %q, want anthropic", f.llmProvider)
 	}
 	if f.llmAPIKey != "sk-fake-key" {
 		t.Errorf("llmAPIKey = %q, want sk-fake-key", f.llmAPIKey)
 	}
-	if f.llmModel != "claude-opus" {
-		t.Errorf("llmModel = %q, want claude-opus", f.llmModel)
+	if want := core.ClaudeModelChoices()[1]; f.llmModel != want {
+		t.Errorf("llmModel = %q, want %q", f.llmModel, want)
 	}
 }
 
@@ -48,11 +59,15 @@ func TestPromptAccountSetup_AllFields(t *testing.T) {
 // here would either prompt for a key the user can't supply (Ollama needs none)
 // or set provider="3" literally.
 func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
+	restoreTelegram := stubAccountTelegramPairing(t, "111")
+	defer restoreTelegram()
+
 	stdin := strings.NewReader(strings.Join([]string{
 		"1",                  // [1/5] channel → telegram
 		"123:fake-bot-token", // [2/5] telegram token
-		"3",                  // [3/5] provider → local
-		"",                   // [5/5] model — Enter accepts default (llama3)
+		"5",                  // [3/5] provider → local
+		"",                   // local URL — Enter accepts default
+		"",                   // local model — Enter accepts default (llama3)
 	}, "\n"))
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
@@ -61,8 +76,8 @@ func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
-	if f.llmProvider != "local" {
-		t.Errorf("llmProvider = %q, want local", f.llmProvider)
+	if f.llmProvider != "openai" {
+		t.Errorf("llmProvider = %q, want openai-compatible local", f.llmProvider)
 	}
 	if f.llmAPIKey != "" {
 		t.Errorf("llmAPIKey = %q, want empty (local skips api-key prompt)", f.llmAPIKey)
@@ -70,15 +85,21 @@ func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
 	if f.llmModel != "llama3" {
 		t.Errorf("llmModel = %q, want default llama3", f.llmModel)
 	}
+	if f.llmBaseURL != core.OllamaDefaultBaseURL+"/chat/completions" {
+		t.Errorf("llmBaseURL = %q", f.llmBaseURL)
+	}
 }
 
 func TestPromptAccountSetupProviderAcceptsArrowSequence(t *testing.T) {
+	restoreTelegram := stubAccountTelegramPairing(t, "111")
+	defer restoreTelegram()
+
 	stdin := strings.NewReader(strings.Join([]string{
 		"1",                  // [1/5] channel → telegram
 		"123:fake-bot-token", // [2/5] telegram token
 		"\x1b[B",             // [3/5] down arrow → openai
 		"sk-fake-key",        // [4/5] api-key
-		"gpt-test",           // [5/5] model
+		"\x1b[B",             // [5/5] down arrow → second OpenAI model
 	}, "\n"))
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
@@ -93,8 +114,34 @@ func TestPromptAccountSetupProviderAcceptsArrowSequence(t *testing.T) {
 	if f.llmAPIKey != "sk-fake-key" {
 		t.Errorf("llmAPIKey = %q, want sk-fake-key", f.llmAPIKey)
 	}
-	if f.llmModel != "gpt-test" {
-		t.Errorf("llmModel = %q, want gpt-test", f.llmModel)
+	if want := core.OpenAIModelChoices()[1]; f.llmModel != want {
+		t.Errorf("llmModel = %q, want %q", f.llmModel, want)
+	}
+}
+
+func TestPromptAccountSetupGeminiProvider(t *testing.T) {
+	restoreTelegram := stubAccountTelegramPairing(t, "111")
+	defer restoreTelegram()
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"1",                  // channel → telegram
+		"123:fake-bot-token", // telegram token
+		"3",                  // provider → gemini
+		"gemini-key",         // api-key
+		"1",                  // default Gemini model
+	}, "\n"))
+	var stdout bytes.Buffer
+	f := &accountAddFlags{}
+
+	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+		t.Fatalf("promptAccountSetup: %v", err)
+	}
+
+	if f.llmProvider != "gemini" {
+		t.Fatalf("llmProvider = %q, want gemini", f.llmProvider)
+	}
+	if f.llmModel != core.GeminiModelChoices()[0] {
+		t.Fatalf("llmModel = %q, want %q", f.llmModel, core.GeminiModelChoices()[0])
 	}
 }
 
@@ -110,7 +157,7 @@ func TestPromptAccountSetupKakaoOnly(t *testing.T) {
 		"\x1b[B",      // [1/5] down arrow → KakaoTalk
 		"1",           // [3/5] provider → anthropic
 		"sk-fake-key", // [4/5] api-key
-		"claude-test", // [5/5] model
+		"1",           // [5/5] model
 	}, "\n"))
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
@@ -128,6 +175,9 @@ func TestPromptAccountSetupKakaoOnly(t *testing.T) {
 }
 
 func TestPromptAccountSetupBothChannels(t *testing.T) {
+	restoreTelegram := stubAccountTelegramPairing(t, "111")
+	defer restoreTelegram()
+
 	restore := stubAccountKakaoPairing(t, core.WizardResult{
 		KakaoEnabled:    true,
 		KakaoRelayWSURL: "wss://relay.example.com/ws/kakao-token",
@@ -138,8 +188,9 @@ func TestPromptAccountSetupBothChannels(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
 		"3",                  // [1/5] channel → both
 		"123:fake-bot-token", // [2/5] telegram token
-		"3",                  // [3/5] provider → local
-		"",                   // [5/5] model — Enter accepts default
+		"5",                  // [3/5] provider → local
+		"",                   // local URL
+		"",                   // local model — Enter accepts default
 	}, "\n"))
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
@@ -163,6 +214,38 @@ func stubAccountKakaoPairing(t *testing.T, result core.WizardResult) func() {
 		return result, nil
 	}
 	return func() { runKakaoPairingWizard = old }
+}
+
+func stubAccountTelegramPairing(t *testing.T, chatID string) func() {
+	t.Helper()
+	old := runTelegramChatIDWizard
+	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string) string {
+		return chatID
+	}
+	return func() { runTelegramChatIDWizard = old }
+}
+
+func TestPromptTelegramChatIDWaitsForStartAndDetects(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader("\n"))
+	var stdout bytes.Buffer
+	called := false
+
+	chatID := promptTelegramChatID(scanner, &stdout, "123:token", telegramPairingDeps{
+		fetchChatID: func(context.Context, string) (string, error) {
+			called = true
+			return "222", nil
+		},
+	})
+
+	if !called {
+		t.Fatal("fetchChatID was not called")
+	}
+	if chatID != "222" {
+		t.Fatalf("chatID = %q, want 222", chatID)
+	}
+	if out := stdout.String(); !strings.Contains(out, "/start") || !strings.Contains(out, "Chat ID auto-detect") {
+		t.Fatalf("stdout should guide Telegram /start and auto-detect, got %q", out)
+	}
 }
 
 // TestPromptAccountSetup_EmptyTokenFails — first prompt empty must reject
@@ -234,17 +317,23 @@ func TestNeedsAccountPrompt(t *testing.T) {
 }
 
 // TestMapProviderChoice — menu integers and free-form input both resolved.
-func TestMapProviderChoice(t *testing.T) {
-	cases := map[string]string{
-		"":           "anthropic",
-		"1":          "anthropic",
-		"2":          "openai",
-		"3":          "local",
-		"openrouter": "openrouter", // free-form passes through
+func TestResolveAccountProviderChoice(t *testing.T) {
+	cases := map[string]struct {
+		provider string
+		baseURL  string
+	}{
+		"":           {provider: "anthropic"},
+		"1":          {provider: "anthropic"},
+		"2":          {provider: "openai"},
+		"3":          {provider: "gemini"},
+		"4":          {provider: "openrouter", baseURL: core.OpenRouterBaseURL},
+		"openrouter": {provider: "openrouter", baseURL: core.OpenRouterBaseURL},
 	}
 	for in, want := range cases {
-		if got := mapProviderChoice(in); got != want {
-			t.Errorf("mapProviderChoice(%q) = %q, want %q", in, got, want)
+		gotProvider, gotBaseURL := resolveAccountProviderChoice(in)
+		if gotProvider != want.provider || gotBaseURL != want.baseURL {
+			t.Errorf("resolveAccountProviderChoice(%q) = (%q, %q), want (%q, %q)",
+				in, gotProvider, gotBaseURL, want.provider, want.baseURL)
 		}
 	}
 }
