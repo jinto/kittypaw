@@ -213,6 +213,21 @@ Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints
 push release tags, publish GitHub releases, or otherwise trigger release
 automation unless the user has explicitly approved that release.
 
+Binary release and stable auto-update promotion are two separate approvals:
+
+- `kittypaw/vX.Y.Z` binary releases require an explicit user instruction before
+  tagging or pushing.
+- `stable.json` updates require a separate explicit user instruction after the
+  released binary has been downloaded and tested locally. Treat this as the
+  "allow installed servers to auto-download" switch, not as part of ordinary
+  release automation.
+- Do not auto-update `stable.json` from CI or from the release workflow.
+- Before creating a new binary release, check the current `stable.json`. If it
+  still points at an older version and the previous binary release was never
+  promoted to stable, warn the user once before proceeding. This may be
+  intentional, but it can also indicate repeated binary releases without stable
+  promotion.
+
 ## Testing
 
 ```bash
