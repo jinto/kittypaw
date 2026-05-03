@@ -94,20 +94,15 @@ type Config struct {
 	Workspace        WorkspaceConfig     `toml:"workspace"`
 	User             UserConfig          `toml:"user"`
 
-	// IsShared marks an account as the shared/coordinator account. Shared
-	// accounts run scheduled skills on behalf of a group and fanout to
-	// individual accounts, but MUST NOT own chat channels — a misconfigured
-	// channel on a shared account would silently intercept updates meant for
-	// alice/bob. Enforced at startup by ValidateFamilyAccounts.
-	IsShared bool `toml:"is_shared"`
-	IsFamily bool `toml:"-"`
+	// IsShared marks an account as a team-space/coordinator account. Team
+	// spaces run scheduled skills for explicit members and fanout to member
+	// accounts, but MUST NOT own chat channels.
+	IsShared  bool            `toml:"is_shared"`
+	IsFamily  bool            `toml:"-"`
+	TeamSpace TeamSpaceConfig `toml:"team_space"`
 
-	// Share declares which per-path reads this account grants to specific
-	// peers, keyed by peer AccountID. Personal accounts list the family
-	// account as a peer ("alice grants family read access to these paths"),
-	// and family accounts likewise list personals. The check always runs
-	// against the *owning* account's config — alice reading family/x checks
-	// family.Share["alice"].Read. Empty map = no sharing (default).
+	// Share is the legacy per-path allowlist. It still parses for old configs,
+	// but team-space membership is owned by TeamSpace.Members.
 	Share map[string]ShareConfig `toml:"share"`
 }
 
@@ -118,6 +113,12 @@ type Config struct {
 // writes so a family skill bug can't corrupt alice's store.
 type ShareConfig struct {
 	Read []string `toml:"read"`
+}
+
+// TeamSpaceConfig controls which personal accounts can use a team-space
+// account. An empty Members list is deny-all.
+type TeamSpaceConfig struct {
+	Members []string `toml:"members"`
 }
 
 // UserConfig holds user-level settings surfaced to packages via __context__.user.
@@ -619,8 +620,24 @@ func (c *Config) FallbackModel() *ModelConfig {
 	return c.FindModel(c.LLM.Fallback)
 }
 
-func (c *Config) IsSharedAccount() bool {
+func (c *Config) IsTeamSpaceAccount() bool {
 	return c != nil && (c.IsShared || c.IsFamily)
+}
+
+func (c *Config) IsSharedAccount() bool {
+	return c.IsTeamSpaceAccount()
+}
+
+func (c *Config) TeamSpaceHasMember(accountID string) bool {
+	if c == nil || !c.IsTeamSpaceAccount() {
+		return false
+	}
+	for _, member := range c.TeamSpace.Members {
+		if member == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) WorkspaceRoots() []WorkspaceRoot {

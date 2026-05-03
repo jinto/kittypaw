@@ -127,6 +127,61 @@ func TestValidateFamilyAccounts_RejectsChannels(t *testing.T) {
 	}
 }
 
+func TestValidateTeamSpaceAccounts_RejectsChannels(t *testing.T) {
+	accounts := []*Account{
+		{ID: "alice", Config: &Config{}},
+		{ID: "team", Config: &Config{
+			IsShared: true,
+			Channels: []ChannelConfig{{ChannelType: ChannelTelegram, Token: "x"}},
+		}},
+	}
+	err := ValidateTeamSpaceAccounts(accounts)
+	if err == nil {
+		t.Fatal("expected team-space-with-channels to error")
+	}
+	if !strings.Contains(err.Error(), "team") || !strings.Contains(err.Error(), "telegram") {
+		t.Errorf("error should cite account id and channel type: %q", err.Error())
+	}
+}
+
+func TestValidateTeamSpaceMemberships(t *testing.T) {
+	accounts := []*Account{
+		{ID: "team", Config: &Config{IsShared: true, TeamSpace: TeamSpaceConfig{Members: []string{"alice", "bob"}}}},
+		{ID: "alice", Config: &Config{}},
+		{ID: "bob", Config: &Config{}},
+	}
+	if err := ValidateTeamSpaceMemberships(accounts); err != nil {
+		t.Fatalf("valid members rejected: %v", err)
+	}
+}
+
+func TestValidateTeamSpaceMemberships_RejectsUnknownMember(t *testing.T) {
+	accounts := []*Account{
+		{ID: "team", Config: &Config{IsShared: true, TeamSpace: TeamSpaceConfig{Members: []string{"alice", "ghost"}}}},
+		{ID: "alice", Config: &Config{}},
+	}
+	err := ValidateTeamSpaceMemberships(accounts)
+	if err == nil {
+		t.Fatal("expected unknown member error")
+	}
+	if !strings.Contains(err.Error(), "team") || !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should cite team and missing member: %q", err.Error())
+	}
+}
+
+func TestValidateTeamSpaceMemberships_RejectsSelfMember(t *testing.T) {
+	accounts := []*Account{
+		{ID: "team", Config: &Config{IsShared: true, TeamSpace: TeamSpaceConfig{Members: []string{"team"}}}},
+	}
+	err := ValidateTeamSpaceMemberships(accounts)
+	if err == nil {
+		t.Fatal("expected self-member error")
+	}
+	if !strings.Contains(err.Error(), "must not list itself") {
+		t.Errorf("error should cite self membership: %q", err.Error())
+	}
+}
+
 // TestValidateFamilyAccounts_PersonalWithChannelsOK confirms the check is
 // scoped to the family flag — personal accounts declaring channels are
 // the normal case and must pass.
