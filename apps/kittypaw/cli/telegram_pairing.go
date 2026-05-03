@@ -103,7 +103,7 @@ func promptTelegramChatIDViaServer(scanner *bufio.Scanner, stdout io.Writer, tok
 			return promptTelegramChatIDManual(scanner, stdout), true
 		}
 		if status.ChatID != "" {
-			_, _ = fmt.Fprintf(stdout, "  Telegram connected (Chat ID: %s) ✓\n", maskKey(status.ChatID))
+			_, _ = fmt.Fprintln(stdout, "  Telegram connected ✓")
 			return status.ChatID, true
 		}
 		if status.Status == "paired" {

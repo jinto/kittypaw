@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jinto/kittypaw/core"
@@ -90,5 +94,127 @@ func TestReadPasswordMaskedLoopEmptyEnterAllowsRetry(t *testing.T) {
 	}
 	if got != "" {
 		t.Fatalf("password = %q, want empty", got)
+	}
+}
+
+func TestWizardLLMDoesNotPrintAPIKeyPreview(t *testing.T) {
+	oldCheck := wizardLLMConnectionCheck
+	wizardLLMConnectionCheck = func(context.Context, core.LLMConfig) (bool, error) {
+		return true, nil
+	}
+	t.Cleanup(func() { wizardLLMConnectionCheck = oldCheck })
+
+	withTestStdin(t, "sk-proj-abcdefghijklmnopqrstuvwxyz1234\n", func() {
+		scanner := bufio.NewScanner(strings.NewReader("2\n\n"))
+		var w core.WizardResult
+
+		out := captureStdout(t, func() {
+			if err := wizardLLM(scanner, nil, &w); err != nil {
+				t.Fatalf("wizardLLM: %v", err)
+			}
+		})
+
+		assertNoSecretFragment(t, out, "sk-pro", "1234")
+	})
+}
+
+func TestWizardLLMConnectionErrorDoesNotPrintAPIKeyFragments(t *testing.T) {
+	oldCheck := wizardLLMConnectionCheck
+	wizardLLMConnectionCheck = func(context.Context, core.LLMConfig) (bool, error) {
+		return true, errors.New("provider rejected sk-proj-abcdefghijklmnopqrstuvwxyz1234 (sk-pro...1234)")
+	}
+	t.Cleanup(func() { wizardLLMConnectionCheck = oldCheck })
+
+	withTestStdin(t, "sk-proj-abcdefghijklmnopqrstuvwxyz1234\n", func() {
+		scanner := bufio.NewScanner(strings.NewReader("2\n\n\n"))
+		var w core.WizardResult
+
+		out := captureStdout(t, func() {
+			if err := wizardLLM(scanner, nil, &w); err != nil {
+				t.Fatalf("wizardLLM: %v", err)
+			}
+		})
+
+		assertNoSecretFragment(t, out, "sk-pro", "1234")
+	})
+}
+
+func TestWizardTelegramDoesNotPrintBotTokenPreview(t *testing.T) {
+	oldRun := runTelegramChatIDWizard
+	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string, string) string {
+		return "8172543364"
+	}
+	t.Cleanup(func() { runTelegramChatIDWizard = oldRun })
+
+	withTestStdin(t, "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234\n", func() {
+		scanner := bufio.NewScanner(strings.NewReader("y\n"))
+		var w core.WizardResult
+
+		out := captureStdout(t, func() {
+			wizardTelegram(scanner, "alice", nil, &w)
+		})
+
+		assertNoSecretFragment(t, out, "123456", "1234")
+	})
+}
+
+func TestWizardWebSearchDoesNotPrintFirecrawlKeyPreview(t *testing.T) {
+	withTestStdin(t, "fc-abcdefghijklmnopqrstuvwxyz1234\n", func() {
+		scanner := bufio.NewScanner(strings.NewReader("y\n"))
+		var w core.WizardResult
+
+		out := captureStdout(t, func() {
+			wizardWebSearch(scanner, nil, &w)
+		})
+
+		assertNoSecretFragment(t, out, "fc-abc", "1234")
+	})
+}
+
+func TestPromptTelegramChatIDDoesNotPrintDetectedChatID(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader(""))
+	var stdout strings.Builder
+
+	chatID := promptTelegramChatID(scanner, &stdout, "123:token", telegramPairingDeps{
+		serverChatID: func(context.Context, string) (telegramPairingStatus, error) {
+			return telegramPairingStatus{Status: "paired", ChatID: "8172543364", Source: "active_channel"}, nil
+		},
+	})
+
+	if chatID != "8172543364" {
+		t.Fatalf("chatID = %q, want detected id", chatID)
+	}
+	assertNoSecretFragment(t, stdout.String(), "817254", "3364")
+}
+
+func withTestStdin(t *testing.T, input string, fn func()) {
+	t.Helper()
+	old := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdin: %v", err)
+	}
+	if _, err := io.WriteString(w, input); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	os.Stdin = r
+	defer func() {
+		os.Stdin = old
+		if err := r.Close(); err != nil {
+			t.Fatalf("close stdin reader: %v", err)
+		}
+	}()
+	fn()
+}
+
+func assertNoSecretFragment(t *testing.T, output string, fragments ...string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if strings.Contains(output, fragment) {
+			t.Fatalf("output leaked secret fragment %q:\n%s", fragment, output)
+		}
 	}
 }

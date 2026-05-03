@@ -187,7 +187,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
 		} else if apiKey != "" {
-			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+			fmt.Println("  ✓ API key received")
 		}
 		claudeModels := setupLLMModelChoices(provider)
 		modelIdx := promptChoice(scanner, "  Model > ", claudeModels, 1)
@@ -203,7 +203,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
 		} else if apiKey != "" {
-			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+			fmt.Println("  ✓ API key received")
 		}
 		openAIModels := setupLLMModelChoices(provider)
 		modelIdx := promptChoice(scanner, "  Model > ", openAIModels, 1)
@@ -219,7 +219,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
 		} else if apiKey != "" {
-			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+			fmt.Println("  ✓ API key received")
 		}
 		geminiModels := setupLLMModelChoices(provider)
 		modelIdx := promptChoice(scanner, "  Model > ", geminiModels, 1)
@@ -235,7 +235,7 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 			apiKey = existing.LLM.APIKey
 			fmt.Println("  (keeping existing key)")
 		} else if apiKey != "" {
-			fmt.Printf("  ✓ %s\n", maskKey(apiKey))
+			fmt.Println("  ✓ API key received")
 		}
 	case 5:
 		provider = "local"
@@ -272,27 +272,31 @@ func wizardLLM(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResu
 	defer cancel()
 
 	start := time.Now()
-	p, err := llm.NewProviderFromConfig(testCfg)
+	keyChecked, err := wizardLLMConnectionCheck(ctx, testCfg)
 	if err != nil {
-		fmt.Printf("FAIL (%v)\n", err)
-		if !promptYesNo(scanner, "  Save anyway?", true) {
+		fmt.Printf("FAIL (%s)\n", redactSecretText(err.Error(), apiKey))
+		prompt := "  Save anyway?"
+		if keyChecked {
+			prompt = "  Key may be invalid. Save anyway?"
+		}
+		if !promptYesNo(scanner, prompt, true) {
 			return fmt.Errorf("aborted by user")
 		}
 		return nil
 	}
-
-	_, err = p.Generate(ctx, []core.LlmMessage{{Role: core.RoleUser, Content: "hi"}})
 	elapsed := time.Since(start)
-	if err != nil {
-		fmt.Printf("FAIL (%v)\n", err)
-		if !promptYesNo(scanner, "  Key may be invalid. Save anyway?", true) {
-			return fmt.Errorf("aborted by user")
-		}
-	} else {
-		fmt.Printf("%s %s OK (%dms)\n", resolvedProvider, model, elapsed.Milliseconds())
-	}
+	fmt.Printf("%s %s OK (%dms)\n", resolvedProvider, model, elapsed.Milliseconds())
 
 	return nil
+}
+
+var wizardLLMConnectionCheck = func(ctx context.Context, cfg core.LLMConfig) (bool, error) {
+	p, err := llm.NewProviderFromConfig(cfg)
+	if err != nil {
+		return false, err
+	}
+	_, err = p.Generate(ctx, []core.LlmMessage{{Role: core.RoleUser, Content: "hi"}})
+	return true, err
 }
 
 func setupLLMProviderChoices() []string {
@@ -357,9 +361,6 @@ func wizardTelegram(scanner *bufio.Scanner, accountID string, existing *core.Con
 
 	if existingToken != "" {
 		msg := "  ✓ Already connected"
-		if existingChatID != "" {
-			msg += fmt.Sprintf(" (Chat ID: %s)", maskKey(existingChatID))
-		}
 		fmt.Println(msg)
 		if !promptYesNo(scanner, "  > Reconfigure?", false) {
 			fmt.Println("  (keeping existing connection)")
@@ -384,11 +385,11 @@ func wizardTelegram(scanner *bufio.Scanner, accountID string, existing *core.Con
 		return
 	}
 
-	fmt.Printf("  ✓ %s\n", maskKey(token))
+	fmt.Println("  ✓ Bot token received")
 	w.TelegramBotToken = token
 	if token == existingToken && existingChatID != "" {
 		w.TelegramChatID = existingChatID
-		fmt.Printf("  Telegram connected (Chat ID: %s) ✓\n", maskKey(existingChatID))
+		fmt.Println("  Telegram connected ✓")
 		return
 	}
 	w.TelegramChatID = runTelegramChatIDWizard(scanner, os.Stdout, accountID, token)
@@ -582,7 +583,7 @@ func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.Wiza
 
 	hasExisting := existing != nil && existing.Web.FirecrawlKey != ""
 	if hasExisting {
-		fmt.Printf("  ✓ Firecrawl configured (%s)\n", maskKey(existing.Web.FirecrawlKey))
+		fmt.Println("  ✓ Firecrawl configured")
 		if !promptYesNo(scanner, "  > Reconfigure?", false) {
 			fmt.Println("  (keeping existing Firecrawl key)")
 			return
@@ -605,7 +606,7 @@ func wizardWebSearch(scanner *bufio.Scanner, existing *core.Config, w *core.Wiza
 		return
 	}
 
-	fmt.Printf("  ✓ %s\n", maskKey(key))
+	fmt.Println("  ✓ Firecrawl key received")
 	w.FirecrawlKey = key
 }
 
@@ -787,6 +788,24 @@ func maskKey(key string) string {
 		return "****"
 	}
 	return key[:6] + "..." + key[len(key)-4:]
+}
+
+func redactSecretText(text string, secrets ...string) string {
+	for _, secret := range secrets {
+		secret = strings.TrimSpace(secret)
+		if secret == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, secret, "[redacted]")
+		if masked := maskKey(secret); masked != "****" {
+			text = strings.ReplaceAll(text, masked, "[redacted]")
+		}
+		if len(secret) > 8 {
+			text = strings.ReplaceAll(text, secret[:6], "[redacted]")
+			text = strings.ReplaceAll(text, secret[len(secret)-4:], "[redacted]")
+		}
+	}
+	return text
 }
 
 // promptYesNo asks a yes/no question. defaultYes controls Enter behavior.
