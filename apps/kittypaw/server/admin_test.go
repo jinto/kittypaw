@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,6 +227,47 @@ func TestAddAccount_FamilyWithChannelsRejected(t *testing.T) {
 	}
 	if srv.accountRegistry.Get("family") != nil {
 		t.Error("family leaked into registry despite validation failure")
+	}
+}
+
+func TestAddAccount_UnknownTeamSpaceMemberRejectedStateUnchanged(t *testing.T) {
+	root := t.TempDir()
+	srv := newServerForAdminTest(t, root, nil)
+	srv.config.Server.APIKey = "default-key"
+
+	team := accountForDirectAdd(root, "team", true, nil)
+	team.Config.TeamSpace.Members = []string{"ghost"}
+
+	err := srv.AddAccount(team)
+	if err == nil {
+		t.Fatal("expected membership validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "team-space membership validation") {
+		t.Fatalf("AddAccount error = %v, want team-space membership validation", err)
+	}
+
+	if srv.accounts.Session("team") != nil {
+		t.Error("team leaked into AccountRouter after rejected AddAccount")
+	}
+	if srv.accountRegistry.Get("team") != nil {
+		t.Error("team leaked into AccountRegistry after rejected AddAccount")
+	}
+	for _, peer := range srv.accountList {
+		if peer != nil && peer.ID == "team" {
+			t.Fatal("team leaked into accountList after rejected AddAccount")
+		}
+	}
+	srv.accountMu.Lock()
+	_, ok := srv.accountDeps["team"]
+	srv.accountMu.Unlock()
+	if ok {
+		t.Error("accountDeps[team] leaked after rejected AddAccount")
+	}
+	if srv.config.Server.APIKey != "default-key" {
+		t.Fatalf("server config mutated after rejected AddAccount: api_key=%q", srv.config.Server.APIKey)
+	}
+	if _, err := os.Stat(filepath.Join(root, "team", "data")); !os.IsNotExist(err) {
+		t.Fatalf("account deps opened before validation; data dir stat err = %v", err)
 	}
 }
 

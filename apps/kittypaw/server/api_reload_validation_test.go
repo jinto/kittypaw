@@ -154,6 +154,57 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	}
 }
 
+func TestHandleReload_UnknownTeamSpaceMember_Rejects(t *testing.T) {
+	newCfg := core.DefaultConfig()
+	newCfg.LLM.APIKey = "new-key"
+	newCfg.IsShared = true
+	newCfg.TeamSpace.Members = []string{"ghost"}
+	writeReloadConfig(t, newCfg)
+
+	liveCfg := core.DefaultConfig()
+	liveCfg.LLM.APIKey = "old-key"
+	peers := []*core.Account{
+		{ID: DefaultAccountID, Config: &liveCfg},
+	}
+	srv, callN := newReloadTestServer(t, &liveCfg, peers)
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.handleReload))
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "team-space membership validation") {
+		t.Errorf("body = %q, want 'team-space membership validation' prefix", body)
+	}
+
+	if srv.config.LLM.APIKey != "old-key" {
+		t.Errorf("config swapped despite rejection: LLM.APIKey=%q", srv.config.LLM.APIKey)
+	}
+	if srv.config.IsSharedAccount() {
+		t.Errorf("shared flag flipped to true despite rejection")
+	}
+	if len(srv.config.TeamSpace.Members) != 0 {
+		t.Errorf("team-space members swapped despite rejection: %v", srv.config.TeamSpace.Members)
+	}
+	if peers[0].Config != &liveCfg {
+		t.Error("accountList default config pointer changed despite rejection")
+	}
+	if peers[0].Config.LLM.APIKey != "old-key" {
+		t.Errorf("accountList config mutated despite rejection: LLM.APIKey=%q", peers[0].Config.LLM.APIKey)
+	}
+	if n := atomic.LoadInt32(callN); n != 0 {
+		t.Errorf("Reconcile called %d times, want 0", n)
+	}
+}
+
 // TestHandleReload_SerializesWithAddAccount locks in the AC-RELOAD-VALIDATION
 // serialization contract: the entire validate→swap→reconcile sequence runs
 // under accountMu, not just the reconcile step. Without this lock the
