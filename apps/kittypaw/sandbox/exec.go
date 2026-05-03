@@ -88,7 +88,7 @@ func run(ctx context.Context, cfg core.SandboxConfig, code string, jsContext map
 			continue
 		}
 		if skill.Name == "Share" && !opts.exposeShare {
-			// Family accounts never even see the global; see execOpts doc.
+			// Team-space accounts never even see the global; see execOpts doc.
 			continue
 		}
 		obj := vm.NewObject()

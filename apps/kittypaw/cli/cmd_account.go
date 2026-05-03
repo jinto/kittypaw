@@ -275,7 +275,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		return fmt.Errorf("--is-shared and channel credentials are mutually exclusive")
 	}
 	if !f.isShared && token == "" && !f.kakaoEnabled {
-		return fmt.Errorf("a Telegram or KakaoTalk channel is required for non-shared accounts (set --telegram-bot-token-stdin, $%s, --telegram-bot-token, or use the interactive KakaoTalk setup; or pass --is-shared)", accountEnvBotToken)
+		return fmt.Errorf("a Telegram or KakaoTalk channel is required for personal accounts (set --telegram-bot-token-stdin, $%s, --telegram-bot-token, or use the interactive KakaoTalk setup; or pass --is-shared to create a team-space account)", accountEnvBotToken)
 	}
 	if token != "" && !core.ValidateTelegramToken(token) {
 		return errors.New("invalid telegram bot token format")
@@ -343,15 +343,16 @@ func newAccountRemoveCmd() *cobra.Command {
 
   1. If a server is running, deactivate the account (stops channels, drains
      sessions) via admin RPC — no restart required.
-  2. If the removed account is personal and a shared account exists, delete
-     the matching [share.<name>] stanza from the shared account config so stale
-     allowlist entries don't re-grant access if the name is re-used later.
+  2. If the removed account is a team-space member, remove it from
+     [team_space].members and delete any legacy [share.<name>] stanza from the
+     team-space account config so stale access is not re-granted if the name is
+     re-used later.
   3. Move ~/.kittypaw/accounts/<name>/ to ~/.kittypaw/.trash/<name>-<ts>/.
      The move is atomic (same partition) and reversible by manual rename.
   4. Print a warning that the Telegram bot token is still valid — the admin
      must revoke it via @BotFather /revoke.
 
-The command aborts BEFORE touching the shared account config or the account
+The command aborts BEFORE touching team-space membership/config or the account
 directory if the server returns an error, so a failed step 1 leaves the
 account fully runnable. Re-running after the server reports healthy
 completes the decommission.`,
@@ -392,7 +393,7 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 
 	if !removedIsShared {
 		if err := scrubTeamSpaceAccountReferences(accountsDir, name, stderr); err != nil {
-			return fmt.Errorf("update shared account config: %w", err)
+			return fmt.Errorf("update team-space account config: %w", err)
 		}
 	}
 
@@ -404,7 +405,7 @@ func runAccountRemove(name string, stdout, stderr io.Writer) error {
 	_, _ = fmt.Fprintf(stdout, "account %q decommissioned → %s\n", name, trashedPath)
 	_, _ = fmt.Fprintf(stderr, "warning: Telegram bot token for account %q is still valid. Revoke via @BotFather /revoke to fully decommission.\n", name)
 	if removedIsShared {
-		_, _ = fmt.Fprintln(stderr, "note: shared account removed — personal accounts will no longer see cross-account shares or fanout until a new shared account is provisioned.")
+		_, _ = fmt.Fprintln(stderr, "note: team-space account removed — members will no longer see cross-account shares or fanout until a new team-space account is provisioned.")
 	}
 	return nil
 }
@@ -430,7 +431,7 @@ func deactivateAccountOnServer(name string, stdout, stderr io.Writer) error {
 	cl := client.New(conn.BaseURL, conn.APIKey)
 	if _, err := cl.AccountRemove(name); err != nil {
 		// Treat 404 as benign (already gone). Everything else aborts so the
-		// CLI doesn't mutate shared account config or the filesystem while a real
+		// CLI doesn't mutate team-space config or the filesystem while a real
 		// drain error is pending — AC-RM5.
 		if strings.Contains(err.Error(), "404") {
 			_, _ = fmt.Fprintf(stderr, "info: server reports account %q not active (already decommissioned?); continuing.\n", name)
@@ -486,7 +487,7 @@ func scrubTeamSpaceAccountReferences(accountsDir, removed string, stderr io.Writ
 			return fmt.Errorf("atomic write %s: %w", cfgPath, err)
 		}
 		if removedLegacyShare {
-			_, _ = fmt.Fprintf(stderr, "info: removed [share.%s] from shared account config at %s\n", removed, cfgPath)
+			_, _ = fmt.Fprintf(stderr, "info: removed legacy [share.%s] from team-space account config at %s\n", removed, cfgPath)
 		}
 	}
 	return nil

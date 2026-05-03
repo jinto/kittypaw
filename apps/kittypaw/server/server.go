@@ -547,7 +547,7 @@ func (s *Server) StartChannels(ctx context.Context) error {
 //
 // Events with an empty or unknown AccountID are dropped by the AccountRouter
 // (no default fallback) to avoid cross-account privacy leaks — see C1 in
-// the family-multi-account spec.
+// the account-routing privacy constraint.
 func (s *Server) dispatchLoop(ctx context.Context) {
 	for {
 		select {

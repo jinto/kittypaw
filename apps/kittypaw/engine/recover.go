@@ -9,7 +9,7 @@ import (
 
 // RecoverAccountPanic is the single panic-recovery chokepoint for account
 // goroutines — one account's panic must not take down the shared server
-// (family-multi-account spec AC-T8). site names the caller
+// (account-level panic isolation). site names the caller
 // ("scheduler.runSkill", "server.dispatchLoop") so structured logs
 // identify which layer caught the panic. Nil-safe on sess and
 // sess.Health for bare-struct test fixtures.

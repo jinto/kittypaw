@@ -134,7 +134,7 @@ func TestRootCommandDoesNotExposeFamilyCommand(t *testing.T) {
 
 	for _, cmd := range root.Commands() {
 		if cmd.Name() == "family" {
-			t.Fatal("root command must not expose family; shared accounts are managed through account commands")
+			t.Fatal("root command must not expose family; team-space accounts are managed through account commands")
 		}
 	}
 }

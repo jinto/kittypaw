@@ -115,6 +115,28 @@ func TestNewAccountAddCmd_UsesSharedAccountFlag(t *testing.T) {
 	}
 }
 
+func TestAccountRemoveHelpUsesTeamSpaceTerminology(t *testing.T) {
+	cmd := newAccountRemoveCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("account remove --help: %v", err)
+	}
+
+	help := stdout.String() + stderr.String()
+	forbidden := []string{"family account", "shared account config"}
+	for _, term := range forbidden {
+		if strings.Contains(strings.ToLower(help), term) {
+			t.Fatalf("account remove help exposes %q:\n%s", term, help)
+		}
+	}
+	if !strings.Contains(strings.ToLower(help), "team-space") {
+		t.Fatalf("account remove help should describe team-space cleanup:\n%s", help)
+	}
+}
+
 func TestAccountCredentialsIntroLocalizedWithAccountID(t *testing.T) {
 	t.Run("korean with account id", func(t *testing.T) {
 		t.Setenv("LC_ALL", "")
@@ -600,7 +622,7 @@ func TestRunAccountRemove_SharedSelf_ExtraWarning(t *testing.T) {
 		t.Fatalf("runAccountRemove(shared): %v", err)
 	}
 
-	if !strings.Contains(stderr.String(), "shared account removed") {
+	if !strings.Contains(stderr.String(), "team-space account removed") {
 		t.Errorf("expected extra shared-removal warning, stderr = %q", stderr.String())
 	}
 	// alice's config is untouched (no cascade).
