@@ -68,7 +68,7 @@ func waitForCalls(t *testing.T, m *mockPushChannel, n int, d time.Duration) []pu
 	return m.calls()
 }
 
-// buildFamilyPushServer wires a Server + spawner with a family account and a
+// buildFamilyPushServer wires a Server + spawner with a team-space coordinator and a
 // personal account whose Config declares the supplied channels. Returns the
 // server, a shutdown func, and the personal account's registered mock channels
 // keyed by EventType for assertion access.
@@ -109,11 +109,11 @@ func buildFamilyPushServer(t *testing.T, personalCfg *core.Config, mocks map[cor
 }
 
 // TestFamilyMorningBrief_FansOutToAllPersonalAccounts enforces AC-U1: the
-// family account's skills (here simulated by direct Fanout.Send calls, one
+// team-space coordinator's skills (here simulated by direct Fanout.Send calls, one
 // per target) deliver to each personal account's own channel with that
-// account's own chat_id. A regression here is the defining family-account
+// account's own chat_id. A regression here is the defining team-space
 // failure mode — either the wrong target gets the wrong message, or the
-// chat_id falls back to the family's own (non-existent) AllowedChatIDs.
+// chat_id falls back to the coordinator's own (non-existent) AllowedChatIDs.
 //
 // The scheduled-skill trigger is exercised elsewhere in engine/schedule;
 // this test narrows in on the Fanout → dispatchLoop → channel.SendResponse
@@ -165,10 +165,10 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 
 	familySess := srv.accounts.Session("family")
 	if familySess == nil {
-		t.Fatal("family session not registered")
+		t.Fatal("team-space coordinator session not registered")
 	}
 	if familySess.Fanout == nil {
-		t.Fatal("family session's Fanout is nil (IsFamily wiring regression)")
+		t.Fatal("team-space coordinator session's Fanout is nil (IsFamily wiring regression)")
 	}
 
 	// Simulated morning-brief skill output — three account-specific texts.
@@ -200,8 +200,8 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 		}
 	}
 
-	// Negative: family itself must not receive any push (self-loop guard).
-	// No family mock registered, so spawner lookup would fail; but we can
+	// Negative: coordinator itself must not receive any push (self-loop guard).
+	// No coordinator mock registered, so spawner lookup would fail; but we can
 	// also confirm no cross-pollution by inspecting each personal mock for
 	// exactly-one call, which the loop above already does.
 }
@@ -209,7 +209,7 @@ func TestFamilyMorningBrief_FansOutToAllPersonalAccounts(t *testing.T) {
 // TestFamilyMorningBrief_BroadcastFansOutToAllPeers is the Broadcast
 // variant of AC-U1: one call, N-1 targets (the source account is excluded).
 // Locks in that Broadcast's "except source" guard works in the multi-
-// personal case — without it, family would push to itself and the event
+// personal case — without it, the coordinator would push to itself and the event
 // would bounce through dispatchLoop with no destination channel.
 func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 	root := t.TempDir()
@@ -249,7 +249,7 @@ func TestFamilyMorningBrief_BroadcastFansOutToAllPeers(t *testing.T) {
 
 	familySess := srv.accounts.Session("family")
 	if familySess == nil || familySess.Fanout == nil {
-		t.Fatal("family session / Fanout missing")
+		t.Fatal("team-space coordinator session / Fanout missing")
 	}
 
 	shared := "🌤 오늘 날씨 맑음 — 외출 추천"

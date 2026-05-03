@@ -14,7 +14,7 @@ import (
 
 // needsAccountPrompt returns true when `account add` was invoked without enough
 // info to proceed unattended: no channel source AND no LLM key (and the account
-// is not a shared coordinator). In that state we'd otherwise reject the command
+// is not a team-space coordinator). In that state we'd otherwise reject the command
 // — the interactive prompt is a friendlier path.
 func needsAccountPrompt(f *accountAddFlags) bool {
 	if f.isShared {

@@ -16,7 +16,7 @@ import (
 
 // TestServer_New_WiresAccountFieldsPerAccount is the TDD lead for PR-1:
 // server.New must build one engine.Session per account with AccountID,
-// AccountRegistry (shared pointer), and Fanout (family-only) wired.
+// AccountRegistry (shared pointer), and Fanout (team-space coordinator only) wired.
 // Until this test passes, Plan B's cross-account Share.read + Fanout
 // paths are dead code — see Plan C items C9/C11 in TASKS.md.
 func TestServer_New_WiresAccountFieldsPerAccount(t *testing.T) {

@@ -614,7 +614,7 @@ func (s *Server) handleCheckpointRollback(w http.ResponseWriter, r *http.Request
 // A duplicate Telegram bot_token or a team-space account with channels is
 // rejected with 409 Conflict, leaving s.config and the spawner untouched.
 // Pinned by TestHandleReload_DuplicateTelegramToken_Rejects and
-// TestHandleReload_FamilyWithChannels_Rejects.
+// the team-space account channels rejection test.
 //
 // Serialization contract: the entire validate→swap→reconcile sequence
 // runs under accountMu. Releasing the lock between snapshot and reconcile
