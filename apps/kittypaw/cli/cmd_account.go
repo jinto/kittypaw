@@ -26,6 +26,8 @@ type accountAddFlags struct {
 	llmProvider        string
 	llmAPIKey          string
 	llmModel           string
+	kakaoEnabled       bool
+	kakaoRelayWSURL    string
 	noActivate         bool
 	passwordStdin      bool
 }
@@ -61,10 +63,10 @@ Local Web UI credentials are required for every account. Use
 confirm the password interactively. When both stdin flags are set, stdin is
 framed as two lines: Telegram token first, local password second.
 
-Interactive fallback: when no token source AND no LLM key is supplied AND
-stdin is a TTY, a 4-step prompt walks through telegram token, LLM provider,
-api-key, and model. Secrets (token, api-key) are read with terminal echo
-disabled. CI / scripted callers passing any flag/env keep the original
+Interactive fallback: when no channel source AND no LLM key is supplied AND
+stdin is a TTY, a 5-step prompt walks through channel selection, channel
+credentials, LLM provider, api-key, and model. Secrets (token, api-key) are
+read with masked terminal input. CI / scripted callers passing any flag/env keep the original
 non-interactive path.
 
 If a server is already running, the account is hot-activated: channels spawn
@@ -171,14 +173,17 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 		return err
 	}
 
-	if f.isShared && token != "" {
-		return fmt.Errorf("--is-shared and a telegram bot token are mutually exclusive")
+	if f.isShared && (token != "" || f.kakaoEnabled) {
+		return fmt.Errorf("--is-shared and channel credentials are mutually exclusive")
 	}
-	if !f.isShared && token == "" {
-		return fmt.Errorf("a Telegram bot token is required for non-shared accounts (set --telegram-bot-token-stdin, $%s, or --telegram-bot-token, or pass --is-shared)", accountEnvBotToken)
+	if !f.isShared && token == "" && !f.kakaoEnabled {
+		return fmt.Errorf("a Telegram or KakaoTalk channel is required for non-shared accounts (set --telegram-bot-token-stdin, $%s, --telegram-bot-token, or use the interactive KakaoTalk setup; or pass --is-shared)", accountEnvBotToken)
 	}
 	if token != "" && !core.ValidateTelegramToken(token) {
 		return errors.New("invalid telegram bot token format")
+	}
+	if f.kakaoEnabled && strings.TrimSpace(f.kakaoRelayWSURL) == "" {
+		return errors.New("kakao relay URL is required")
 	}
 	if !f.passwordStdin && isatty.IsTerminal(os.Stdin.Fd()) {
 		_, _ = fmt.Fprintln(stdout)
@@ -209,13 +214,15 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	}
 
 	tt, err := core.InitAccount(accountsDir, name, core.AccountOpts{
-		TelegramToken: token,
-		AdminChatID:   chatID,
-		IsFamily:      f.isShared,
-		LLMProvider:   f.llmProvider,
-		LLMAPIKey:     f.llmAPIKey,
-		LLMModel:      f.llmModel,
-		LocalPassword: password,
+		TelegramToken:   token,
+		AdminChatID:     chatID,
+		IsFamily:        f.isShared,
+		LLMProvider:     f.llmProvider,
+		LLMAPIKey:       f.llmAPIKey,
+		LLMModel:        f.llmModel,
+		LocalPassword:   password,
+		KakaoEnabled:    f.kakaoEnabled,
+		KakaoRelayWSURL: f.kakaoRelayWSURL,
 	})
 	if err != nil {
 		return err

@@ -702,6 +702,30 @@ func TestWizardKakaoReconfigureValidatesBeforeWritingSecrets(t *testing.T) {
 	mustNotExist(t, filepath.Join(root, "accounts", "alice", "secrets.json"))
 }
 
+func TestWizardKakaoStoresRelayResult(t *testing.T) {
+	restore := stubAccountKakaoPairing(t, core.WizardResult{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: "wss://relay.example.com/ws/kakao-token",
+		APIServerURL:    core.DefaultAPIServerURL,
+	})
+	defer restore()
+
+	var w core.WizardResult
+	err := wizardKakao(bufio.NewScanner(strings.NewReader("y\n")), "alice", nil, &w, nil)
+	if err != nil {
+		t.Fatalf("wizardKakao: %v", err)
+	}
+	if !w.KakaoEnabled {
+		t.Fatal("KakaoEnabled = false, want true")
+	}
+	if w.KakaoRelayWSURL != "wss://relay.example.com/ws/kakao-token" {
+		t.Fatalf("KakaoRelayWSURL = %q", w.KakaoRelayWSURL)
+	}
+	if w.APIServerURL != core.DefaultAPIServerURL {
+		t.Fatalf("APIServerURL = %q", w.APIServerURL)
+	}
+}
+
 func TestSetupEnvAccountMustExist(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)

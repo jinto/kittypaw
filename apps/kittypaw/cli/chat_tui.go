@@ -367,7 +367,7 @@ func (w *chatTUICursorWriter) Write(p []byte) (int, error) {
 	if err != nil || n != len(p) {
 		return n, err
 	}
-	if !bytes.Contains(p, []byte("\n")) {
+	if !chatTUIWriteShouldRestoreCursor(p) {
 		return n, nil
 	}
 	if seq := w.cursor.sequence(); seq != "" {
@@ -376,6 +376,47 @@ func (w *chatTUICursorWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func chatTUIWriteShouldRestoreCursor(p []byte) bool {
+	if bytes.Contains(p, []byte("\n")) {
+		return true
+	}
+	for i := 0; i < len(p); i++ {
+		b := p[i]
+		if b == 0x1b {
+			i = skipANSISequence(p, i)
+			continue
+		}
+		if b >= 0x20 && b != 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func skipANSISequence(p []byte, esc int) int {
+	if esc+1 >= len(p) {
+		return esc
+	}
+	switch p[esc+1] {
+	case '[':
+		for i := esc + 2; i < len(p); i++ {
+			if p[i] >= 0x40 && p[i] <= 0x7e {
+				return i
+			}
+		}
+	case ']':
+		for i := esc + 2; i < len(p); i++ {
+			if p[i] == 0x07 {
+				return i
+			}
+			if p[i] == 0x1b && i+1 < len(p) && p[i+1] == '\\' {
+				return i + 1
+			}
+		}
+	}
+	return esc + 1
 }
 
 func (w *chatTUICursorWriter) Read(p []byte) (int, error) {

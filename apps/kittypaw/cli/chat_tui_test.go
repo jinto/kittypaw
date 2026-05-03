@@ -276,6 +276,26 @@ func TestChatTUICursorWriterAppendsCursorAfterRenderedFrame(t *testing.T) {
 	}
 }
 
+func TestChatTUICursorWriterAppendsCursorAfterInputLineDiffWithoutNewline(t *testing.T) {
+	cursor := &chatTUICursorState{}
+	cursor.setPosition(10, 14)
+	var out bytes.Buffer
+	writer := &chatTUICursorWriter{out: &out, cursor: cursor}
+
+	n, err := writer.Write([]byte("\ryou> 너는 "))
+
+	if err != nil {
+		t.Fatalf("Write returned error: %v", err)
+	}
+	if n != len("\ryou> 너는 ") {
+		t.Fatalf("Write returned n = %d, want %d", n, len("\ryou> 너는 "))
+	}
+	want := "\ryou> 너는 \x1b[?25h\x1b[10;14H"
+	if got := out.String(); got != want {
+		t.Fatalf("writer output = %q, want %q", got, want)
+	}
+}
+
 func TestChatTUICursorWriterLeavesControlWritesAlone(t *testing.T) {
 	cursor := &chatTUICursorState{}
 	cursor.setPosition(10, 13)

@@ -94,6 +94,42 @@ func TestInitAccount_HappyPath_Family(t *testing.T) {
 	}
 }
 
+func TestInitAccount_HappyPath_Kakao(t *testing.T) {
+	accountsDir := t.TempDir()
+	wsURL := "wss://relay.example.com/ws/kakao-token"
+
+	tt, err := InitAccount(accountsDir, "alice", AccountOpts{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: wsURL,
+		APIServerURL:    DefaultAPIServerURL,
+	})
+	if err != nil {
+		t.Fatalf("InitAccount kakao: %v", err)
+	}
+
+	cfg, err := LoadConfig(filepath.Join(tt.BaseDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if len(cfg.Channels) != 1 || cfg.Channels[0].ChannelType != ChannelKakaoTalk {
+		t.Fatalf("expected one kakao_talk channel, got %+v", cfg.Channels)
+	}
+
+	secrets, err := LoadSecretsFrom(filepath.Join(tt.BaseDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("LoadSecretsFrom: %v", err)
+	}
+	if got, ok := secrets.Get("channel/kakao", "ws_url"); !ok || got != wsURL {
+		t.Fatalf("channel/kakao ws_url = (%q, %v), want %q true", got, ok, wsURL)
+	}
+	if got, ok := NewAPITokenManager("", secrets).LoadKakaoRelayWSURL(DefaultAPIServerURL); !ok || got != wsURL {
+		t.Fatalf("host kakao ws_url = (%q, %v), want %q true", got, ok, wsURL)
+	}
+	if got, ok := secrets.Get("kittypaw-api", "api_url"); !ok || got != DefaultAPIServerURL {
+		t.Fatalf("kittypaw-api api_url = (%q, %v), want %q true", got, ok, DefaultAPIServerURL)
+	}
+}
+
 func TestInitAccountCreatesLocalAuthUser(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
@@ -180,6 +216,33 @@ func TestInitAccount_DuplicateTelegramToken(t *testing.T) {
 	}
 }
 
+func TestInitAccount_DuplicateKakaoRelayURL(t *testing.T) {
+	accountsDir := t.TempDir()
+	wsURL := "wss://relay.example.com/ws/shared"
+	if _, err := InitAccount(accountsDir, "alice", AccountOpts{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: wsURL,
+		APIServerURL:    DefaultAPIServerURL,
+	}); err != nil {
+		t.Fatalf("alice: %v", err)
+	}
+
+	_, err := InitAccount(accountsDir, "bob", AccountOpts{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: wsURL,
+		APIServerURL:    DefaultAPIServerURL,
+	})
+	if err == nil {
+		t.Fatal("expected duplicate kakao relay URL error, got nil")
+	}
+	if !strings.Contains(err.Error(), "kakao relay URL") {
+		t.Errorf("error should cite kakao relay URL: %q", err.Error())
+	}
+	if _, err := os.Stat(filepath.Join(accountsDir, "bob")); !os.IsNotExist(err) {
+		t.Errorf("bob dir should not exist after collision, err=%v", err)
+	}
+}
+
 // Family-no-channels invariant must reject before any file is written.
 func TestInitAccount_FamilyWithToken(t *testing.T) {
 	accountsDir := t.TempDir()
@@ -193,6 +256,25 @@ func TestInitAccount_FamilyWithToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "family") {
 		t.Errorf("error should cite family: %q", err.Error())
+	}
+	if _, err := os.Stat(filepath.Join(accountsDir, "family")); !os.IsNotExist(err) {
+		t.Errorf("family dir should not exist after rejection")
+	}
+}
+
+func TestInitAccount_FamilyWithKakao(t *testing.T) {
+	accountsDir := t.TempDir()
+
+	_, err := InitAccount(accountsDir, "family", AccountOpts{
+		IsFamily:        true,
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: "wss://relay.example.com/ws/family",
+	})
+	if err == nil {
+		t.Fatal("expected error for family + kakao, got nil")
+	}
+	if !strings.Contains(err.Error(), "shared account") {
+		t.Errorf("error should cite shared account: %q", err.Error())
 	}
 	if _, err := os.Stat(filepath.Join(accountsDir, "family")); !os.IsNotExist(err) {
 		t.Errorf("family dir should not exist after rejection")

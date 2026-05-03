@@ -171,6 +171,43 @@ func TestAccountAddTokenAndPasswordStdin(t *testing.T) {
 	}
 }
 
+func TestAccountAddKakaoOnly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("HOME", t.TempDir())
+	wsURL := "wss://relay.example.com/ws/kakao-token"
+
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		kakaoEnabled:    true,
+		kakaoRelayWSURL: wsURL,
+		passwordStdin:   true,
+		noActivate:      true,
+	}
+	if err := runAccountAdd("alice", f, strings.NewReader("pw123\n"), &stdout, &stderr); err != nil {
+		t.Fatalf("runAccountAdd: %v", err)
+	}
+
+	accountDir := filepath.Join(root, "accounts", "alice")
+	cfg, err := core.LoadConfig(filepath.Join(accountDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.Channels) != 1 || cfg.Channels[0].ChannelType != core.ChannelKakaoTalk {
+		t.Fatalf("channels = %+v, want one KakaoTalk channel", cfg.Channels)
+	}
+	secrets, err := core.LoadSecretsFrom(filepath.Join(accountDir, "secrets.json"))
+	if err != nil {
+		t.Fatalf("load secrets: %v", err)
+	}
+	if got, ok := secrets.Get("channel/kakao", "ws_url"); !ok || got != wsURL {
+		t.Fatalf("channel/kakao ws_url = (%q, %v), want %q true", got, ok, wsURL)
+	}
+	if got, ok := core.NewAPITokenManager("", secrets).LoadKakaoRelayWSURL(core.DefaultAPIServerURL); !ok || got != wsURL {
+		t.Fatalf("host kakao ws_url = (%q, %v), want %q true", got, ok, wsURL)
+	}
+}
+
 func TestAccountAddAuthRollback(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("KITTYPAW_CONFIG_DIR", root)
@@ -254,8 +291,8 @@ func TestRunAccountAdd_NoTokenRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing token, got nil")
 	}
-	if !strings.Contains(err.Error(), "Telegram bot token is required") {
-		t.Errorf("error should explain missing token: %q", err.Error())
+	if !strings.Contains(err.Error(), "Telegram or KakaoTalk channel is required") {
+		t.Errorf("error should explain missing channel: %q", err.Error())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".kittypaw", "accounts", "charlie")); !os.IsNotExist(statErr) {
 		t.Errorf("no account dir should be created on validation failure")
@@ -460,6 +497,27 @@ func TestRunAccountAdd_SharedWithTokenRejected(t *testing.T) {
 	err := runAccountAdd("shared", f, strings.NewReader(""), &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected rejection of shared+token, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error should say mutually exclusive: %q", err.Error())
+	}
+}
+
+func TestRunAccountAdd_SharedWithKakaoRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		isShared:        true,
+		kakaoEnabled:    true,
+		kakaoRelayWSURL: "wss://relay.example.com/ws/shared",
+		passwordStdin:   true,
+		noActivate:      true,
+	}
+	err := runAccountAdd("shared", f, strings.NewReader("pw123\n"), &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected rejection of shared+kakao, got nil")
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error should say mutually exclusive: %q", err.Error())

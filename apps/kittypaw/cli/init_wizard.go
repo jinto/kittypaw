@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -543,8 +544,6 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 		return nil
 	}
 
-	// KakaoTalk doesn't need an authenticated API session — it only needs the
-	// relay URL, which GET /discovery exposes anonymously.
 	apiURL := core.DefaultAPIServerURL
 	candidate := *w
 	candidate.APIServerURL = apiURL
@@ -553,82 +552,31 @@ func wizardKakao(scanner *bufio.Scanner, accountID string, existing *core.Config
 		return err
 	}
 
-	d, err := core.FetchDiscovery(apiURL)
+	result, err := runKakaoPairingWizard(os.Stdout)
 	if err != nil {
-		fmt.Printf("  Discovery 실패: %v\n", err)
-		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
-		return nil
-	}
-	if d.KakaoRelayURL == "" {
-		fmt.Println("  Discovery 응답에 kakao_relay_url이 없어 페어링을 건너뜁니다.")
+		printKakaoPairingSkipped(err)
 		return nil
 	}
 
-	secrets, err := core.LoadAccountSecrets(accountID)
-	if err != nil {
-		fmt.Printf("  secrets 로드 실패: %v\n", err)
-		return nil
-	}
-	mgr := core.NewAPITokenManager("", secrets)
-
-	reg, err := core.RegisterRelaySession(d.KakaoRelayURL)
-	if err != nil {
-		fmt.Printf("  릴레이 등록 실패: %v\n", err)
-		fmt.Println("  KakaoTalk 활성화를 건너뜁니다. 네트워크 확인 후 재실행하세요.")
-		return nil
-	}
-
-	wsURL := core.WSURLFromRelay(d.KakaoRelayURL, reg.Token)
-	if err := mgr.SaveKakaoRelayWSURL(apiURL, wsURL); err != nil {
-		fmt.Printf("  WS URL 저장 실패: %v\n", err)
-		return nil
-	}
-	if err := secrets.Set("channel/kakao", "ws_url", wsURL); err != nil {
-		fmt.Printf("  WS URL 저장 실패: %v\n", err)
-		return nil
-	}
-
-	// Persist apiURL so runSetup writes it to secrets under the bare
-	// "kittypaw-api" namespace that InjectKakaoWSURL reads at server start time.
-	w.APIServerURL = apiURL
-	w.KakaoEnabled = true
-	wizardKakaoPairing(scanner, d.KakaoRelayURL, reg)
+	w.APIServerURL = result.APIServerURL
+	w.KakaoEnabled = result.KakaoEnabled
+	w.KakaoRelayWSURL = result.KakaoRelayWSURL
 	return nil
 }
 
-func wizardKakaoPairing(_ *bufio.Scanner, relayBase string, reg *core.RelayRegistration) {
-	fmt.Println()
-
-	if err := copyToClipboard(reg.PairCode); err == nil {
-		fmt.Printf("  인증코드 %s 이 클립보드에 복사되었습니다.\n", reg.PairCode)
-	} else {
-		fmt.Printf("  인증코드: %s\n", reg.PairCode)
-	}
-
-	fmt.Printf("  인증코드 %s 을 채널에 전송하세요.\n", reg.PairCode)
-	fmt.Println()
-	if err := core.OpenBrowser(reg.ChannelURL); err != nil {
-		fmt.Printf("  채널 URL: %s\n", reg.ChannelURL)
-	}
-
-	fmt.Print("  페어링 대기 중")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println(" 시간 초과")
-			fmt.Println("  ✓ KakaoTalk 활성화 완료 (나중에 채널에서 인증코드를 전송하세요)")
-			return
-		case <-time.After(3 * time.Second):
-			fmt.Print(".")
-			if core.CheckRelayPairStatus(relayBase, reg.Token) {
-				fmt.Println(" OK")
-				fmt.Println("  ✓ KakaoTalk 페어링 완료!")
-				return
-			}
-		}
+func printKakaoPairingSkipped(err error) {
+	switch {
+	case errors.Is(err, errKakaoRelayUnavailable):
+		fmt.Println("  Discovery 응답에 kakao_relay_url이 없어 페어링을 건너뜁니다.")
+	case strings.Contains(err.Error(), "fetch kakao discovery"):
+		fmt.Printf("  Discovery 실패: %v\n", err)
+		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
+	case strings.Contains(err.Error(), "register kakao relay"):
+		fmt.Printf("  릴레이 등록 실패: %v\n", err)
+		fmt.Println("  KakaoTalk 활성화를 건너뜁니다. 네트워크 확인 후 재실행하세요.")
+	default:
+		fmt.Printf("  KakaoTalk 활성화 실패: %v\n", err)
+		fmt.Println("  KakaoTalk 활성화를 건너뜁니다.")
 	}
 }
 

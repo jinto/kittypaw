@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/jinto/kittypaw/core"
 )
 
 // TestPromptAccountSetup_AllFields walks the happy path: every prompt receives
@@ -12,10 +15,11 @@ import (
 // a step) breaks this test.
 func TestPromptAccountSetup_AllFields(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
-		"123:fake-bot-token", // [1/4] telegram token
-		"1",                  // [2/4] provider → anthropic
-		"sk-fake-key",        // [3/4] api-key
-		"claude-opus",        // [4/4] model (override default)
+		"1",                  // [1/5] channel → telegram
+		"123:fake-bot-token", // [2/5] telegram token
+		"1",                  // [3/5] provider → anthropic
+		"sk-fake-key",        // [4/5] api-key
+		"claude-opus",        // [5/5] model (override default)
 		"",
 	}, "\n"))
 	var stdout bytes.Buffer
@@ -45,9 +49,10 @@ func TestPromptAccountSetup_AllFields(t *testing.T) {
 // or set provider="3" literally.
 func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
 	stdin := strings.NewReader(strings.Join([]string{
-		"123:fake-bot-token", // [1/4] telegram token
-		"3",                  // [2/4] provider → local
-		"",                   // [4/4] model — Enter accepts default (llama3)
+		"1",                  // [1/5] channel → telegram
+		"123:fake-bot-token", // [2/5] telegram token
+		"3",                  // [3/5] provider → local
+		"",                   // [5/5] model — Enter accepts default (llama3)
 	}, "\n"))
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
@@ -67,10 +72,103 @@ func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
 	}
 }
 
+func TestPromptAccountSetupProviderAcceptsArrowSequence(t *testing.T) {
+	stdin := strings.NewReader(strings.Join([]string{
+		"1",                  // [1/5] channel → telegram
+		"123:fake-bot-token", // [2/5] telegram token
+		"\x1b[B",             // [3/5] down arrow → openai
+		"sk-fake-key",        // [4/5] api-key
+		"gpt-test",           // [5/5] model
+	}, "\n"))
+	var stdout bytes.Buffer
+	f := &accountAddFlags{}
+
+	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+		t.Fatalf("promptAccountSetup: %v", err)
+	}
+
+	if f.llmProvider != "openai" {
+		t.Errorf("llmProvider = %q, want openai", f.llmProvider)
+	}
+	if f.llmAPIKey != "sk-fake-key" {
+		t.Errorf("llmAPIKey = %q, want sk-fake-key", f.llmAPIKey)
+	}
+	if f.llmModel != "gpt-test" {
+		t.Errorf("llmModel = %q, want gpt-test", f.llmModel)
+	}
+}
+
+func TestPromptAccountSetupKakaoOnly(t *testing.T) {
+	restore := stubAccountKakaoPairing(t, core.WizardResult{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: "wss://relay.example.com/ws/kakao-token",
+		APIServerURL:    core.DefaultAPIServerURL,
+	})
+	defer restore()
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"\x1b[B",      // [1/5] down arrow → KakaoTalk
+		"1",           // [3/5] provider → anthropic
+		"sk-fake-key", // [4/5] api-key
+		"claude-test", // [5/5] model
+	}, "\n"))
+	var stdout bytes.Buffer
+	f := &accountAddFlags{}
+
+	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+		t.Fatalf("promptAccountSetup: %v", err)
+	}
+
+	if f.telegramToken != "" {
+		t.Fatalf("telegramToken = %q, want empty for Kakao-only", f.telegramToken)
+	}
+	if !f.kakaoEnabled || f.kakaoRelayWSURL != "wss://relay.example.com/ws/kakao-token" {
+		t.Fatalf("kakao = (%v, %q), want true ws URL", f.kakaoEnabled, f.kakaoRelayWSURL)
+	}
+}
+
+func TestPromptAccountSetupBothChannels(t *testing.T) {
+	restore := stubAccountKakaoPairing(t, core.WizardResult{
+		KakaoEnabled:    true,
+		KakaoRelayWSURL: "wss://relay.example.com/ws/kakao-token",
+		APIServerURL:    core.DefaultAPIServerURL,
+	})
+	defer restore()
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"3",                  // [1/5] channel → both
+		"123:fake-bot-token", // [2/5] telegram token
+		"3",                  // [3/5] provider → local
+		"",                   // [5/5] model — Enter accepts default
+	}, "\n"))
+	var stdout bytes.Buffer
+	f := &accountAddFlags{}
+
+	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+		t.Fatalf("promptAccountSetup: %v", err)
+	}
+
+	if f.telegramToken != "123:fake-bot-token" {
+		t.Fatalf("telegramToken = %q, want token", f.telegramToken)
+	}
+	if !f.kakaoEnabled || f.kakaoRelayWSURL == "" {
+		t.Fatalf("expected Kakao enabled with ws URL, got (%v, %q)", f.kakaoEnabled, f.kakaoRelayWSURL)
+	}
+}
+
+func stubAccountKakaoPairing(t *testing.T, result core.WizardResult) func() {
+	t.Helper()
+	old := runKakaoPairingWizard
+	runKakaoPairingWizard = func(io.Writer) (core.WizardResult, error) {
+		return result, nil
+	}
+	return func() { runKakaoPairingWizard = old }
+}
+
 // TestPromptAccountSetup_EmptyTokenFails — first prompt empty must reject
 // rather than silently create an account with no Telegram channel.
 func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
-	stdin := strings.NewReader("\n")
+	stdin := strings.NewReader("1\n\n")
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
@@ -80,6 +178,31 @@ func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "telegram token") {
 		t.Errorf("error %q does not mention 'telegram token'", err.Error())
+	}
+}
+
+func TestReadSecretMaskedLoopPrintsStarsAndHandlesBackspace(t *testing.T) {
+	input := []byte{'a', 'b', 'c', 127, 'd', '\n'}
+	pos := 0
+	var stdout bytes.Buffer
+
+	got, err := readSecretMaskedLoop(func(p []byte) (int, error) {
+		if pos >= len(input) {
+			return 0, nil
+		}
+		p[0] = input[pos]
+		pos++
+		return 1, nil
+	}, &stdout)
+	if err != nil {
+		t.Fatalf("readSecretMaskedLoop: %v", err)
+	}
+
+	if got != "abd" {
+		t.Fatalf("secret = %q, want abd", got)
+	}
+	if want := "***\b \b*\r\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 
@@ -97,6 +220,7 @@ func TestNeedsAccountPrompt(t *testing.T) {
 		{"token via stdin flag", &accountAddFlags{telegramTokenStdin: true}, false},
 		{"llm key only", &accountAddFlags{llmAPIKey: "sk-x"}, false},
 		{"local provider", &accountAddFlags{llmProvider: "local"}, false},
+		{"kakao configured", &accountAddFlags{kakaoEnabled: true}, false},
 		{"shared — no prompt regardless", &accountAddFlags{isShared: true}, false},
 	}
 	for _, tc := range cases {

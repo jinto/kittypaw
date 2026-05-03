@@ -5,19 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 var ErrAccountExists = errors.New("account already exists")
 
 type AccountOpts struct {
-	TelegramToken string
-	AdminChatID   string
-	IsFamily      bool
-	LLMProvider   string
-	LLMAPIKey     string
-	LLMModel      string
-	LocalPassword string
+	TelegramToken   string
+	AdminChatID     string
+	IsFamily        bool
+	LLMProvider     string
+	LLMAPIKey       string
+	LLMModel        string
+	LocalPassword   string
+	KakaoEnabled    bool
+	KakaoRelayWSURL string
+	APIServerURL    string
 }
 
 // InitAccount stages the tree under `.<id>.staging/` and renames into place,
@@ -27,8 +31,12 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		return nil, err
 	}
 
-	if opts.IsFamily && opts.TelegramToken != "" {
-		return nil, fmt.Errorf("shared account %q must not declare channels (telegram token rejected)", id)
+	opts.KakaoEnabled = opts.KakaoEnabled || strings.TrimSpace(opts.KakaoRelayWSURL) != ""
+	if opts.IsFamily && (opts.TelegramToken != "" || opts.KakaoEnabled) {
+		return nil, fmt.Errorf("shared account %q must not declare channels", id)
+	}
+	if opts.KakaoEnabled && strings.TrimSpace(opts.KakaoRelayWSURL) == "" {
+		return nil, fmt.Errorf("kakao relay URL is required when KakaoTalk is enabled")
 	}
 
 	if err := os.MkdirAll(accountsDir, 0o755); err != nil {
@@ -48,7 +56,7 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		return nil, fmt.Errorf("clean stale staging: %w", err)
 	}
 
-	if opts.TelegramToken != "" {
+	if opts.TelegramToken != "" || opts.KakaoRelayWSURL != "" {
 		existing, err := DiscoverAccounts(accountsDir)
 		if err != nil {
 			return nil, fmt.Errorf("discover existing accounts: %w", err)
@@ -56,8 +64,11 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		for _, peer := range existing {
 			if peer.Config != nil {
 				for _, ch := range peer.Config.Channels {
-					if ch.ChannelType == ChannelTelegram && ch.Token == opts.TelegramToken {
+					if opts.TelegramToken != "" && ch.ChannelType == ChannelTelegram && ch.Token == opts.TelegramToken {
 						return nil, fmt.Errorf("telegram bot_token already used by account %q", peer.ID)
+					}
+					if opts.KakaoRelayWSURL != "" && ch.ChannelType == ChannelKakaoTalk && ch.KakaoWSURL == opts.KakaoRelayWSURL {
+						return nil, fmt.Errorf("kakao relay URL already used by account %q", peer.ID)
 					}
 				}
 			}
@@ -65,8 +76,13 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 			if err != nil {
 				return nil, fmt.Errorf("load account secrets for %q: %w", peer.ID, err)
 			}
-			if token, ok := secrets.Get("channel/telegram", "bot_token"); ok && token == opts.TelegramToken {
-				return nil, fmt.Errorf("telegram bot_token already used by account %q", peer.ID)
+			if opts.TelegramToken != "" {
+				if token, ok := secrets.Get("channel/telegram", "bot_token"); ok && token == opts.TelegramToken {
+					return nil, fmt.Errorf("telegram bot_token already used by account %q", peer.ID)
+				}
+			}
+			if opts.KakaoRelayWSURL != "" && accountSecretsUseKakaoRelayURL(secrets, opts.APIServerURL, opts.KakaoRelayWSURL) {
+				return nil, fmt.Errorf("kakao relay URL already used by account %q", peer.ID)
 			}
 		}
 	}
@@ -126,6 +142,9 @@ func InitAccount(accountsDir, id string, opts AccountOpts) (*Account, error) {
 		LLMModel:         opts.LLMModel,
 		TelegramBotToken: opts.TelegramToken,
 		TelegramChatID:   opts.AdminChatID,
+		KakaoEnabled:     opts.KakaoEnabled,
+		KakaoRelayWSURL:  opts.KakaoRelayWSURL,
+		APIServerURL:     accountSetupAPIURL(opts),
 	}, cfg); err != nil {
 		_ = os.RemoveAll(stagingDir)
 		return nil, err
@@ -150,6 +169,9 @@ func buildAccountConfig(opts AccountOpts) (*Config, error) {
 		LLMModel:         opts.LLMModel,
 		TelegramBotToken: opts.TelegramToken,
 		TelegramChatID:   opts.AdminChatID,
+		KakaoEnabled:     opts.KakaoEnabled,
+		KakaoRelayWSURL:  opts.KakaoRelayWSURL,
+		APIServerURL:     accountSetupAPIURL(opts),
 	}
 	base := DefaultConfig()
 	cfg := MergeWizardSettings(&base, w)
@@ -158,4 +180,34 @@ func buildAccountConfig(opts AccountOpts) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func accountSetupAPIURL(opts AccountOpts) string {
+	apiURL := strings.TrimSpace(opts.APIServerURL)
+	if apiURL == "" && opts.KakaoRelayWSURL != "" {
+		return DefaultAPIServerURL
+	}
+	return apiURL
+}
+
+func accountSecretsUseKakaoRelayURL(secrets *SecretsStore, apiURL, wsURL string) bool {
+	if wsURL == "" || secrets == nil {
+		return false
+	}
+	if got, ok := secrets.Get("channel/kakao", "ws_url"); ok && got == wsURL {
+		return true
+	}
+	checkURLs := []string{strings.TrimSpace(apiURL), DefaultAPIServerURL}
+	mgr := NewAPITokenManager("", secrets)
+	seen := map[string]bool{}
+	for _, candidate := range checkURLs {
+		if candidate == "" || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if got, ok := mgr.LoadKakaoRelayWSURL(candidate); ok && got == wsURL {
+			return true
+		}
+	}
+	return false
 }

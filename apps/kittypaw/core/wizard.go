@@ -82,8 +82,9 @@ type WizardResult struct {
 	TelegramBotToken string
 	TelegramChatID   string
 
-	// KakaoTalk — relay WS URL comes from login (secrets), not wizard
-	KakaoEnabled bool
+	// KakaoTalk
+	KakaoEnabled    bool
+	KakaoRelayWSURL string
 
 	// Web search
 	FirecrawlKey string
@@ -247,6 +248,23 @@ func SaveWizardSecretsTo(secrets *SecretsStore, w WizardResult, cfg *Config) err
 	}
 	if w.TelegramBotToken != "" {
 		if err := secrets.Set("channel/telegram", "bot_token", w.TelegramBotToken); err != nil {
+			return err
+		}
+	}
+	if w.APIServerURL != "" {
+		if err := secrets.Set("kittypaw-api", "api_url", w.APIServerURL); err != nil {
+			return err
+		}
+	}
+	if w.KakaoRelayWSURL != "" {
+		apiURL := w.APIServerURL
+		if apiURL == "" {
+			apiURL = DefaultAPIServerURL
+		}
+		if err := NewAPITokenManager("", secrets).SaveKakaoRelayWSURL(apiURL, w.KakaoRelayWSURL); err != nil {
+			return err
+		}
+		if err := secrets.Set("channel/kakao", "ws_url", w.KakaoRelayWSURL); err != nil {
 			return err
 		}
 	}
