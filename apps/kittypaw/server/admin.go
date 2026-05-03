@@ -56,6 +56,9 @@ func (s *Server) AddAccount(t *core.Account) error {
 	if existing := s.accounts.Session(t.ID); existing != nil {
 		return fmt.Errorf("%w: %q", ErrAccountAlreadyActive, t.ID)
 	}
+	if s.removingAccount != nil && s.removingAccount[t.ID] {
+		return fmt.Errorf("%w: %q", ErrAccountAlreadyActive, t.ID)
+	}
 
 	// Build the would-be-final channel map so ValidateAccountChannels sees
 	// the incoming account alongside every live one. Without the snapshot
@@ -176,9 +179,9 @@ func (s *Server) RemoveAccount(id string) error {
 	}
 
 	s.accountMu.Lock()
-	defer s.accountMu.Unlock()
 
 	if s.accounts == nil || s.accounts.Session(id) == nil {
+		s.accountMu.Unlock()
 		return fmt.Errorf("%w: %q", ErrAccountNotActive, id)
 	}
 
@@ -186,15 +189,20 @@ func (s *Server) RemoveAccount(id string) error {
 		if err := s.spawner.Reconcile(id, nil); err != nil {
 			slog.Error("account_remove_reconcile_failed",
 				"account", id, "error", err)
+			s.accountMu.Unlock()
 			return fmt.Errorf("drain channels: %w", err)
 		}
 	}
 
-	if s.schedulers != nil {
-		s.schedulers.Remove(id)
-	}
-
 	td := s.accountDeps[id]
+	var scheduler *engine.Scheduler
+	if s.schedulers != nil {
+		scheduler = s.schedulers.Detach(id)
+	}
+	if s.removingAccount == nil {
+		s.removingAccount = make(map[string]bool)
+	}
+	s.removingAccount[id] = true
 	s.accounts.Remove(id)
 	for i, peer := range s.accountList {
 		if peer != nil && peer.ID == id {
@@ -205,12 +213,20 @@ func (s *Server) RemoveAccount(id string) error {
 	s.accountRegistry.Unregister(id)
 	delete(s.accountDeps, id)
 
+	s.accountMu.Unlock()
+	if scheduler != nil {
+		scheduler.Stop()
+		scheduler.Wait()
+	}
 	if td != nil {
 		if err := td.Close(); err != nil {
 			slog.Warn("account_remove_close_partial",
 				"account", id, "error", err)
 		}
 	}
+	s.accountMu.Lock()
+	delete(s.removingAccount, id)
+	s.accountMu.Unlock()
 
 	slog.Info("account_deactivated", "account", id)
 	return nil

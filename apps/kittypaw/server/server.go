@@ -42,6 +42,7 @@ type Server struct {
 	eventCh         chan core.Event         // shared event channel between channels and dispatch loop
 	accountMu       sync.Mutex              // serializes AddAccount/RemoveAccount — validation→register→reconcile must not interleave
 	accountDeps     map[string]*AccountDeps // retained close-targets (Store+MCP) for RemoveAccount; populated on successful AddAccount
+	removingAccount map[string]bool         // account IDs detached from routing but still draining scheduler/deps
 	localAuth       *core.LocalAuthStore
 	webSessionKey   []byte
 	masterAPIKey    string
@@ -132,6 +133,7 @@ func NewWithServerConfig(accounts []*AccountDeps, version string, sc core.TopLev
 		accountRegistry: registry,
 		eventCh:         eventCh,
 		accountDeps:     depsByID,
+		removingAccount: make(map[string]bool),
 		localAuth:       newLocalAuthStore(),
 		webSessionKey:   newWebSessionKey(),
 		masterAPIKey:    sc.MasterAPIKey,

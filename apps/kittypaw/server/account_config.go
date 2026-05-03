@@ -128,18 +128,21 @@ func (s *Server) applyAccountConfigLocked(accountID string, cfg *core.Config) er
 
 	oldSession := s.accounts.Session(accountID)
 	newSession := s.rebuildSessionForConfigLocked(td, oldSession)
-	if accountID == s.defaultAccountID() && oldSession != nil {
+	if oldSession != nil {
 		oldSession.Provider = newSession.Provider
 		oldSession.FallbackProvider = newSession.FallbackProvider
 		oldSession.Sandbox = newSession.Sandbox
+		oldSession.Store = newSession.Store
 		oldSession.Config = newSession.Config
 		oldSession.McpRegistry = newSession.McpRegistry
+		oldSession.BaseDir = newSession.BaseDir
 		oldSession.PackageManager = newSession.PackageManager
 		oldSession.APITokenMgr = newSession.APITokenMgr
+		oldSession.AccountID = newSession.AccountID
 		oldSession.AccountRegistry = newSession.AccountRegistry
 		oldSession.Fanout = newSession.Fanout
 		if err := oldSession.RefreshAllowedPaths(); err != nil {
-			slog.Warn("setup: failed to refresh default allowed paths after config update",
+			slog.Warn("setup: failed to refresh allowed paths after config update",
 				"account", td.Account.ID, "error", err)
 		}
 		newSession = oldSession
