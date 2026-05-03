@@ -114,6 +114,33 @@ func TestValidateSharedReadPath_MemberCanReadWorkspaceAlias(t *testing.T) {
 	}
 }
 
+func TestValidateSharedReadPath_RejectsSymlinkedMemoryRootEscape(t *testing.T) {
+	root := t.TempDir()
+	ownerBase := filepath.Join(root, "accounts", "team")
+	outsideMemory := filepath.Join(root, "outside-memory")
+	if err := os.MkdirAll(ownerBase, 0o755); err != nil {
+		t.Fatalf("mkdir owner: %v", err)
+	}
+	if err := os.MkdirAll(outsideMemory, 0o755); err != nil {
+		t.Fatalf("mkdir outside memory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideMemory, "weather.json"), []byte(`{"temp":99}`), 0o644); err != nil {
+		t.Fatalf("write outside weather: %v", err)
+	}
+	if err := os.Symlink(outsideMemory, filepath.Join(ownerBase, "memory")); err != nil {
+		t.Fatalf("symlink memory: %v", err)
+	}
+	cfg := &Config{
+		IsShared:  true,
+		TeamSpace: TeamSpaceConfig{Members: []string{"alice"}},
+	}
+
+	_, err := ValidateSharedReadPath(cfg, ownerBase, "alice", "memory/weather.json")
+	if !errors.Is(err, ErrCrossAccountBoundary) {
+		t.Errorf("symlinked memory root must reject as boundary escape, got %v", err)
+	}
+}
+
 // TestValidateSharedReadPath_TraversalMatrix is the anti-cutcorner guard.
 // Every attack shape listed must be rejected at the API boundary — a single
 // variant slipping through lets a hostile path string escape the account

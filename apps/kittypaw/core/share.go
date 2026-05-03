@@ -95,7 +95,7 @@ func resolveTeamSpaceSharedPath(ownerCfg *Config, ownerBaseDir, cleaned string) 
 	}
 	switch parts[0] {
 	case "memory":
-		return filepath.Join(ownerBaseDir, cleaned), filepath.Join(ownerBaseDir, "memory"), nil
+		return filepath.Join(ownerBaseDir, cleaned), ownerBaseDir, nil
 	case "workspace":
 		if len(parts) < 3 {
 			return "", "", ErrCrossAccountNotShareable
