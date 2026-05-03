@@ -91,6 +91,7 @@ type Config struct {
 	SkillInstall     SkillInstallConfig  `toml:"skill_install"`
 	Permissions      PermissionPolicy    `toml:"permissions"`
 	Web              WebConfig           `toml:"web"`
+	Browser          BrowserConfig       `toml:"browser"`
 	Workspace        WorkspaceConfig     `toml:"workspace"`
 	User             UserConfig          `toml:"user"`
 
@@ -160,6 +161,15 @@ type WebConfig struct {
 	TavilyAPIKey  string `toml:"-"`
 }
 
+// BrowserConfig controls the managed Chrome/CDP browser tool.
+type BrowserConfig struct {
+	Enabled        bool     `toml:"enabled"`
+	Headless       bool     `toml:"headless"`
+	ChromePath     string   `toml:"chrome_path"`
+	AllowedHosts   []string `toml:"allowed_hosts"`
+	TimeoutSeconds int      `toml:"timeout_seconds"`
+}
+
 // SkillInstallConfig controls skill installation behavior.
 type SkillInstallConfig struct {
 	MdExecutionMode string `toml:"md_execution_mode"` // "prompt" or "native", empty = ask user
@@ -182,6 +192,7 @@ type PermissionPolicy struct {
 // their config.toml [permissions] require_approval list.
 var DefaultRequireApproval = []string{
 	"Shell.exec", "Git.add", "Git.commit", "Git.push", "Git.pull", "File.delete",
+	"Browser.open", "Browser.navigate", "Browser.click", "Browser.type", "Browser.evaluate", "Browser.close",
 }
 
 // LLMConfig holds the primary LLM provider settings.
@@ -435,6 +446,10 @@ func DefaultConfig() Config {
 		},
 		Registry: RegistryConfig{
 			URL: DefaultRegistryURL,
+		},
+		Browser: BrowserConfig{
+			Enabled:        true,
+			TimeoutSeconds: 15,
 		},
 		Workspace: WorkspaceConfig{
 			Default:   "home",

@@ -451,6 +451,8 @@ func TestNeedsPermission(t *testing.T) {
 		{"supervised_git_push", "Git", "push", core.AutonomySupervised, nil, true},
 		{"supervised_git_pull", "Git", "pull", core.AutonomySupervised, nil, true},
 		{"supervised_file_delete", "File", "delete", core.AutonomySupervised, nil, true},
+		{"supervised_browser_open", "Browser", "open", core.AutonomySupervised, nil, true},
+		{"supervised_browser_evaluate", "Browser", "evaluate", core.AutonomySupervised, nil, true},
 
 		// Non-destructive ops not in default list
 		{"supervised_git_status", "Git", "status", core.AutonomySupervised, nil, false},
@@ -458,6 +460,7 @@ func TestNeedsPermission(t *testing.T) {
 		{"supervised_git_diff", "Git", "diff", core.AutonomySupervised, nil, false},
 		{"supervised_file_read", "File", "read", core.AutonomySupervised, nil, false},
 		{"supervised_http_get", "Http", "get", core.AutonomySupervised, nil, false},
+		{"supervised_browser_snapshot", "Browser", "snapshot", core.AutonomySupervised, nil, false},
 
 		// Custom list overrides defaults
 		{"custom_file_write", "File", "write", core.AutonomySupervised, []string{"File.write"}, true},
@@ -617,6 +620,43 @@ func TestResolveSkillCallCustomPermissionList(t *testing.T) {
 	}
 	if !strings.Contains(result, "custom") {
 		t.Errorf("expected 'custom' in output, got: %s", result)
+	}
+}
+
+type fakeBrowserController struct {
+	calls []core.SkillCall
+}
+
+func (f *fakeBrowserController) Execute(_ context.Context, call core.SkillCall) (string, error) {
+	f.calls = append(f.calls, call)
+	return `{"ok":true}`, nil
+}
+
+func (f *fakeBrowserController) Close() error { return nil }
+
+func TestResolveSkillCallBrowserDispatch(t *testing.T) {
+	fake := &fakeBrowserController{}
+	s := &Session{Config: &core.Config{AutonomyLevel: core.AutonomyFull}, BrowserController: fake}
+	got, err := resolveSkillCall(context.Background(), core.SkillCall{SkillName: "Browser", Method: "status"}, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"ok":true}` {
+		t.Fatalf("got %s", got)
+	}
+	if len(fake.calls) != 1 || fake.calls[0].Method != "status" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+}
+
+func TestResolveSkillCallBrowserNotConfigured(t *testing.T) {
+	s := &Session{Config: &core.Config{AutonomyLevel: core.AutonomyFull}}
+	got, err := resolveSkillCall(context.Background(), core.SkillCall{SkillName: "Browser", Method: "status"}, s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "browser not configured") {
+		t.Fatalf("got %s", got)
 	}
 }
 

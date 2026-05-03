@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jinto/kittypaw/browser"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/sandbox"
 	"github.com/jinto/kittypaw/store"
@@ -213,9 +214,13 @@ func buildAccountDeps(t *testing.T, root, id string, cfg *core.Config) *AccountD
 	apiTokenMgr := core.NewAPITokenManager(baseDir, secrets)
 
 	return &AccountDeps{
-		Account:     account,
-		Store:       st,
-		Sandbox:     sbox,
+		Account: account,
+		Store:   st,
+		Sandbox: sbox,
+		BrowserController: browser.NewController(browser.ControllerOptions{
+			Config:  cfg.Browser,
+			BaseDir: baseDir,
+		}),
 		PkgMgr:      pkgMgr,
 		APITokenMgr: apiTokenMgr,
 		Secrets:     secrets,
