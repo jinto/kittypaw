@@ -18,12 +18,19 @@ The internal app name, Go module, binary, service name, and JWT issuer stay
 - Keep `portal.kittypaw.app` as the identity, discovery, JWKS, and device
   authority.
 - Add Connect routes under `/connect/*`, served only on the Connect host.
+- Enforce Connect host routing with a host-only check, not by inferring from
+  whether the portal and API hosts are split. Connect must stay isolated even in
+  collapsed local/dev deployments.
+- Advertise `connect_base_url` from portal discovery so local KittyPaw can find
+  the Connect surface without hardcoding host replacement.
 - Do not rename `apps/portal` to `apps/connect`.
 - Do not create `apps/connect` in v1.
 - First provider: Gmail.
 - First Gmail scope target: `https://www.googleapis.com/auth/gmail.readonly`,
   because mail summary requires message bodies. This is a restricted scope and
   must be treated as a launch risk.
+- Use Connect-specific Google OAuth client settings. Do not reuse the existing
+  KittyPaw identity login client for Gmail restricted scopes.
 - Portal brokers OAuth and refreshes tokens, but v1 stores third-party Gmail
   tokens locally in the account-scoped KittyPaw secrets store. Portal should
   not persist Gmail access or refresh tokens in v1.
@@ -56,6 +63,18 @@ connect.kittypaw.app  -> external account connection UI and callbacks
 `CONNECT_BASE_URL=https://connect.kittypaw.app` should be added alongside the
 existing `BASE_URL=https://portal.kittypaw.app`.
 
+Use separate Google OAuth client environment variables for Connect:
+
+```text
+CONNECT_GOOGLE_CLIENT_ID=
+CONNECT_GOOGLE_CLIENT_SECRET=
+```
+
+The existing `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` remain for KittyPaw
+identity sign-in on `portal.kittypaw.app`. This separation keeps restricted
+Gmail scope testing from destabilizing the existing login client and lets the
+Connect client use its own redirect URI set.
+
 Google's current OAuth branding guidance allows subdomains once the top private
 domain is verified as an authorized domain. Therefore `kittypaw.app` should be
 the authorized domain, and `connect.kittypaw.app` can be used for Connect
@@ -84,6 +103,11 @@ For development and beta, use a separate Google Cloud project in testing mode
 with test users. Do not add unapproved restricted scopes to the production OAuth
 project before the app is ready for verification.
 
+The production Connect client can live in the same Google Cloud project as the
+identity client only if the team intentionally accepts project-level OAuth
+consent-screen coupling. The safer default is a separate Connect project or at
+least a separate OAuth client with separate environment variables.
+
 Sources checked:
 
 - Google OAuth branding and authorized domains:
@@ -109,6 +133,14 @@ GET  https://portal.kittypaw.app/discovery
 GET  https://portal.kittypaw.app/.well-known/jwks.json
 GET  https://portal.kittypaw.app/auth/google
 GET  https://portal.kittypaw.app/auth/cli/google
+```
+
+Portal discovery should add:
+
+```json
+{
+  "connect_base_url": "https://connect.kittypaw.app"
+}
 ```
 
 Connect routes are new:
@@ -193,14 +225,15 @@ KittyPaw local daemon should own runtime Gmail access.
 Flow:
 
 1. User runs `kittypaw connect gmail`.
-2. CLI opens `connect.kittypaw.app/connect/gmail/login`.
-3. Portal completes Google OAuth and creates a short-lived Connect code.
-4. CLI exchanges the Connect code for Gmail token data.
-5. CLI stores Gmail tokens in the selected account's `secrets.json`.
-6. When a Gmail access token expires, local KittyPaw calls
+2. CLI fetches portal discovery and resolves `connect_base_url`.
+3. CLI opens `connect.kittypaw.app/connect/gmail/login`.
+4. Portal completes Google OAuth and creates a short-lived Connect code.
+5. CLI exchanges the Connect code for Gmail token data.
+6. CLI stores Gmail tokens in the selected account's `secrets.json`.
+7. When a Gmail access token expires, local KittyPaw calls
    `POST /connect/gmail/refresh` with the Gmail refresh token and stores the new
    access token.
-7. MCP servers or packages receive only current access tokens via local
+8. MCP servers or packages receive only current access tokens via local
    config/env injection.
 
 Portal should not persist Gmail refresh tokens in v1. If Connect later needs a
@@ -208,7 +241,7 @@ server-side token vault for web or multi-device sync, that should be a separate
 design with encryption-at-rest, revocation, audit, and breach-response
 requirements.
 
-## Gmail API And MCP
+## Gmail API And First Workflow
 
 The first user-visible scenario should be read-only:
 
@@ -216,15 +249,14 @@ The first user-visible scenario should be read-only:
 "오늘 받은 중요한 메일 요약해줘"
 ```
 
-Implementation can use either:
+Use the native KittyPaw package path for the first Gmail workflow. A
+deterministic mail-digest package can source `oauth-gmail/access_token` from the
+local secrets store and call Gmail over HTTPS directly, which proves OAuth,
+refresh, source-bound config, and read-only Gmail access without introducing a
+new local MCP server binary.
 
-1. a small local Gmail MCP server that accepts `GMAIL_ACCESS_TOKEN` in its
-   environment; or
-2. a native KittyPaw Gmail tool package that calls Gmail directly.
-
-The recommended first cut is a small local MCP server or MCP-compatible wrapper,
-because the engine already exposes `Mcp.call` and `Mcp.listTools`. The missing
-piece is dynamic OAuth token injection into MCP server environments.
+MCP token injection remains useful for later third-party Gmail, Slack, and
+Notion MCP servers, but it should not block the first Gmail digest.
 
 ## Error Handling
 
