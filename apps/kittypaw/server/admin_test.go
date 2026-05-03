@@ -536,7 +536,7 @@ func TestHandleAdminAccountAdd_NonLocalhostRejected(t *testing.T) {
 // TestHandleAdminAccountAdd_HotReloadRouterReflectsImmediately is the AC-U3
 // end-to-end guard: once POST /api/v1/admin/accounts returns 200, the
 // dispatch path must see the new account *without* a server restart. A
-// regression here would push every new family member through a kill-9 +
+// regression here would push every new team-space member through a kill-9 +
 // relaunch, which is the exact pain AC-U3 exists to eliminate. The 30s
 // budget comes directly from the spec; in practice AddAccount is synchronous
 // and completes in milliseconds, so the bounded wait also guards against a
