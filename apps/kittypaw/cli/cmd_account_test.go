@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,6 +170,78 @@ func TestAccountAddCreatesAuthUser(t *testing.T) {
 			t.Fatal("account add must write local-server api key secret so local CLI chat can authenticate to /ws")
 		}
 	}
+}
+
+func TestRunAccountAddExistingAccountRejectedBeforeReadingStdin(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	accountsDir := filepath.Join(root, "accounts")
+	if _, err := core.InitAccount(accountsDir, "alice", core.AccountOpts{IsFamily: true}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+
+	stdin := &failOnRead{}
+	var stdout, stderr bytes.Buffer
+	f := &accountAddFlags{
+		telegramTokenStdin: true,
+		passwordStdin:      true,
+		noActivate:         true,
+	}
+	err := runAccountAdd("alice", f, stdin, &stdout, &stderr)
+	if !errors.Is(err, core.ErrAccountExists) {
+		t.Fatalf("runAccountAdd err = %v, want ErrAccountExists", err)
+	}
+	if !strings.Contains(err.Error(), "kittypaw setup --account alice") {
+		t.Fatalf("error should point to reconfigure command, got %q", err.Error())
+	}
+	if stdin.reads != 0 {
+		t.Fatalf("stdin reads = %d, want 0", stdin.reads)
+	}
+}
+
+func TestHandleAccountAddExistingReconfiguresOnYes(t *testing.T) {
+	var stdout bytes.Buffer
+	called := false
+	err := fmt.Errorf("%w: %q", core.ErrAccountExists, "alice")
+
+	got := handleAccountAddExisting(err, "alice", strings.NewReader("y\n"), &stdout, true, func(accountID string, stdin io.Reader) error {
+		called = true
+		if accountID != "alice" {
+			t.Fatalf("accountID = %q, want alice", accountID)
+		}
+		return nil
+	})
+	if got != nil {
+		t.Fatalf("handleAccountAddExisting: %v", got)
+	}
+	if !called {
+		t.Fatal("reconfigure was not called")
+	}
+	if !strings.Contains(stdout.String(), "Reconfigure") {
+		t.Fatalf("stdout = %q, want Reconfigure prompt", stdout.String())
+	}
+}
+
+func TestHandleAccountAddExistingReturnsOriginalOnNo(t *testing.T) {
+	var stdout bytes.Buffer
+	err := fmt.Errorf("%w: %q", core.ErrAccountExists, "alice")
+
+	got := handleAccountAddExisting(err, "alice", strings.NewReader("n\n"), &stdout, true, func(string, io.Reader) error {
+		t.Fatal("reconfigure should not run")
+		return nil
+	})
+	if !errors.Is(got, core.ErrAccountExists) {
+		t.Fatalf("handleAccountAddExisting err = %v, want ErrAccountExists", got)
+	}
+}
+
+type failOnRead struct {
+	reads int
+}
+
+func (r *failOnRead) Read([]byte) (int, error) {
+	r.reads++
+	return 0, io.ErrUnexpectedEOF
 }
 
 func TestAccountAddTokenAndPasswordStdin(t *testing.T) {

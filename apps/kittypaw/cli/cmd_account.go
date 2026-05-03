@@ -73,10 +73,18 @@ non-interactive path.
 
 If a server is already running, the account is hot-activated: channels spawn
 and dispatch begins without a restart (AC-U3). Pass --no-activate to skip
-the activation RPC and only stage files on disk.`,
+		the activation RPC and only stage files on disk.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAccountAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			err := runAccountAdd(args[0], f, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return handleAccountAddExisting(
+				err,
+				args[0],
+				cmd.InOrStdin(),
+				cmd.OutOrStdout(),
+				isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
+				runAccountSetupReconfigure,
+			)
 		},
 	}
 	cmd.Flags().StringVar(&f.telegramToken, "telegram-bot-token", "", "Telegram bot token (visible in ps; prefer --telegram-bot-token-stdin)")
@@ -159,7 +167,94 @@ func readStdinLine(stdin io.Reader) (string, error) {
 	return scanner.Text(), nil
 }
 
+func accountAddAccountsDirForNew(name string) (string, error) {
+	if err := core.ValidateAccountID(name); err != nil {
+		return "", err
+	}
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve config dir: %w", err)
+	}
+	accountsDir := filepath.Join(cfgDir, "accounts")
+	accountDir := filepath.Join(accountsDir, name)
+	if _, err := os.Stat(accountDir); err == nil {
+		return "", fmt.Errorf("%w: %q at %s (run `kittypaw setup --account %s` to reconfigure)", core.ErrAccountExists, name, accountDir, name)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat account dir: %w", err)
+	}
+	return accountsDir, nil
+}
+
+func handleAccountAddExisting(err error, name string, stdin io.Reader, stdout io.Writer, interactive bool, reconfigure func(string, io.Reader) error) error {
+	if err == nil || !errors.Is(err, core.ErrAccountExists) {
+		return err
+	}
+	if !interactive {
+		return err
+	}
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	_, _ = fmt.Fprintf(stdout, "account %q already exists.\n", name)
+	_, _ = fmt.Fprintf(stdout, "  > Reconfigure with `kittypaw setup --account %s`? (y/N): ", name)
+	scanner := bufio.NewScanner(stdin)
+	if !scanner.Scan() {
+		if scanErr := scanner.Err(); scanErr != nil {
+			return scanErr
+		}
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "y", "yes":
+		if reconfigure == nil {
+			return err
+		}
+		return reconfigure(name, stdin)
+	default:
+		return err
+	}
+}
+
+var runAccountSetupReconfigure = func(name string, stdin io.Reader) error {
+	cmd := &cobra.Command{}
+	cmd.SetIn(stdin)
+	return runSetup(cmd, &setupFlags{accountID: name})
+}
+
+func accountTelegramTokenOwner(token string) (string, bool, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", false, nil
+	}
+	cfgDir, err := core.ConfigDir()
+	if err != nil {
+		return "", false, err
+	}
+	accounts, err := core.DiscoverAccounts(filepath.Join(cfgDir, "accounts"))
+	if err != nil {
+		return "", false, err
+	}
+	for _, account := range accounts {
+		if account == nil {
+			continue
+		}
+		secrets, err := core.LoadSecretsFrom(filepath.Join(account.BaseDir, "secrets.json"))
+		if err != nil {
+			return "", false, fmt.Errorf("load account secrets for %q: %w", account.ID, err)
+		}
+		if existing, ok := secrets.Get("channel/telegram", "bot_token"); ok && existing == token {
+			return account.ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, stderr io.Writer) error {
+	accountsDir, err := accountAddAccountsDirForNew(name)
+	if err != nil {
+		return err
+	}
+
 	// Interactive fallback: if neither a Telegram token source nor an LLM key
 	// is in scope, walk the user through 4 quick prompts instead of erroring
 	// out. CI / scripted callers (any flag/env set) keep the non-interactive
@@ -198,12 +293,6 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	if err != nil {
 		return err
 	}
-
-	cfgDir, err := core.ConfigDir()
-	if err != nil {
-		return fmt.Errorf("resolve config dir: %w", err)
-	}
-	accountsDir := filepath.Join(cfgDir, "accounts")
 
 	chatID := f.adminChatID
 	if token != "" && chatID == "" {

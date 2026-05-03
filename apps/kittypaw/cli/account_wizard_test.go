@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -261,6 +262,37 @@ func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "telegram token") {
 		t.Errorf("error %q does not mention 'telegram token'", err.Error())
+	}
+}
+
+func TestPromptAccountSetupDuplicateTelegramTokenStopsBeforeChatIDWizard(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	token := "12345:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+	if _, err := core.InitAccount(filepath.Join(root, "accounts"), "alice", core.AccountOpts{
+		TelegramToken: token,
+	}); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+
+	old := runTelegramChatIDWizard
+	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string) string {
+		t.Fatal("telegram chat-id wizard should not run for a token already owned by another account")
+		return ""
+	}
+	defer func() { runTelegramChatIDWizard = old }()
+
+	stdin := strings.NewReader(strings.Join([]string{
+		"1",
+		token,
+	}, "\n"))
+	var stdout bytes.Buffer
+	err := promptAccountSetup(stdin, &stdout, &accountAddFlags{})
+	if err == nil {
+		t.Fatal("expected duplicate token error, got nil")
+	}
+	if !strings.Contains(err.Error(), "already used by account \"alice\"") {
+		t.Fatalf("error = %q, want existing account name", err.Error())
 	}
 }
 

@@ -63,6 +63,11 @@ func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) e
 		if f.telegramToken == "" {
 			return fmt.Errorf("telegram token required")
 		}
+		if owner, ok, err := accountTelegramTokenOwner(f.telegramToken); err != nil {
+			return fmt.Errorf("check telegram token: %w", err)
+		} else if ok {
+			return fmt.Errorf("telegram bot_token already used by account %q", owner)
+		}
 		f.adminChatID = runTelegramChatIDWizard(scanner, stdout, f.telegramToken)
 	}
 	if channels.kakao {
