@@ -156,6 +156,11 @@ func TestDetectPermissions(t *testing.T) {
 			want: []string{"File", "Http", "Llm", "Shell", "Storage"},
 		},
 		{
+			name: "browser global",
+			code: `Browser.open("https://example.com"); Browser.click("e1");`,
+			want: []string{"Browser"},
+		},
+		{
 			name: "duplicates removed",
 			code: `Http.get(a); Http.post(b); Http.get(c);`,
 			want: []string{"Http"},

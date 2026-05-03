@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -280,5 +281,66 @@ func TestPermissionPolicyDefaults(t *testing.T) {
 	// DefaultRequireApproval should have sensible entries.
 	if len(DefaultRequireApproval) < 4 {
 		t.Errorf("DefaultRequireApproval too short: %v", DefaultRequireApproval)
+	}
+	for _, want := range []string{
+		"Browser.open",
+		"Browser.navigate",
+		"Browser.click",
+		"Browser.type",
+		"Browser.evaluate",
+		"Browser.close",
+	} {
+		if !slices.Contains(DefaultRequireApproval, want) {
+			t.Fatalf("DefaultRequireApproval missing %s: %v", want, DefaultRequireApproval)
+		}
+	}
+}
+
+func TestBrowserConfigDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Browser.Enabled {
+		t.Fatal("browser should be enabled by default")
+	}
+	if cfg.Browser.Headless {
+		t.Fatal("browser should default to visible managed Chrome")
+	}
+	if cfg.Browser.ChromePath != "" {
+		t.Fatalf("ChromePath = %q, want empty auto-detect", cfg.Browser.ChromePath)
+	}
+	if cfg.Browser.TimeoutSeconds != 15 {
+		t.Fatalf("TimeoutSeconds = %d, want 15", cfg.Browser.TimeoutSeconds)
+	}
+	if cfg.Browser.AllowedHosts != nil {
+		t.Fatalf("AllowedHosts = %#v, want nil default", cfg.Browser.AllowedHosts)
+	}
+}
+
+func TestBrowserConfigParsing(t *testing.T) {
+	tomlContent := `
+[browser]
+enabled = false
+headless = true
+chrome_path = "/opt/chrome"
+allowed_hosts = ["localhost", "127.0.0.1"]
+timeout_seconds = 9
+`
+	var cfg Config
+	if _, err := toml.Decode(tomlContent, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if cfg.Browser.Enabled {
+		t.Fatal("enabled should parse false")
+	}
+	if !cfg.Browser.Headless {
+		t.Fatal("headless should parse true")
+	}
+	if cfg.Browser.ChromePath != "/opt/chrome" {
+		t.Fatalf("ChromePath = %q", cfg.Browser.ChromePath)
+	}
+	if cfg.Browser.TimeoutSeconds != 9 {
+		t.Fatalf("TimeoutSeconds = %d", cfg.Browser.TimeoutSeconds)
+	}
+	if got := cfg.Browser.AllowedHosts; len(got) != 2 || got[0] != "localhost" || got[1] != "127.0.0.1" {
+		t.Fatalf("AllowedHosts = %#v", got)
 	}
 }

@@ -451,6 +451,8 @@ func TestNeedsPermission(t *testing.T) {
 		{"supervised_git_push", "Git", "push", core.AutonomySupervised, nil, true},
 		{"supervised_git_pull", "Git", "pull", core.AutonomySupervised, nil, true},
 		{"supervised_file_delete", "File", "delete", core.AutonomySupervised, nil, true},
+		{"supervised_browser_open", "Browser", "open", core.AutonomySupervised, nil, true},
+		{"supervised_browser_evaluate", "Browser", "evaluate", core.AutonomySupervised, nil, true},
 
 		// Non-destructive ops not in default list
 		{"supervised_git_status", "Git", "status", core.AutonomySupervised, nil, false},
@@ -458,6 +460,7 @@ func TestNeedsPermission(t *testing.T) {
 		{"supervised_git_diff", "Git", "diff", core.AutonomySupervised, nil, false},
 		{"supervised_file_read", "File", "read", core.AutonomySupervised, nil, false},
 		{"supervised_http_get", "Http", "get", core.AutonomySupervised, nil, false},
+		{"supervised_browser_snapshot", "Browser", "snapshot", core.AutonomySupervised, nil, false},
 
 		// Custom list overrides defaults
 		{"custom_file_write", "File", "write", core.AutonomySupervised, []string{"File.write"}, true},
