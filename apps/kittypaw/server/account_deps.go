@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/jinto/kittypaw/browser"
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/engine"
 	"github.com/jinto/kittypaw/llm"
@@ -27,16 +28,17 @@ import (
 // when the OS watcher could not be created (inotify limit, etc.) — the
 // account is then in lazy-reindex mode.
 type AccountDeps struct {
-	Account     *core.Account
-	Store       *store.Store
-	Provider    llm.Provider
-	Fallback    llm.Provider
-	Sandbox     *sandbox.Sandbox
-	McpRegistry *mcpreg.Registry
-	PkgMgr      *core.PackageManager
-	APITokenMgr *core.APITokenManager
-	Secrets     *core.SecretsStore
-	LiveIndexer *engine.LiveIndexer
+	Account           *core.Account
+	Store             *store.Store
+	Provider          llm.Provider
+	Fallback          llm.Provider
+	Sandbox           *sandbox.Sandbox
+	McpRegistry       *mcpreg.Registry
+	BrowserController *browser.Controller
+	PkgMgr            *core.PackageManager
+	APITokenMgr       *core.APITokenManager
+	Secrets           *core.SecretsStore
+	LiveIndexer       *engine.LiveIndexer
 }
 
 // Close releases OS-owned resources: the LiveIndexer (fsnotify watchers),
@@ -53,6 +55,11 @@ func (td *AccountDeps) Close() error {
 	if td.LiveIndexer != nil {
 		if err := td.LiveIndexer.Close(); err != nil {
 			slog.Warn("close live indexer", "account", td.Account.ID, "error", err)
+		}
+	}
+	if td.BrowserController != nil {
+		if err := td.BrowserController.Close(); err != nil {
+			slog.Warn("close browser controller", "account", td.Account.ID, "error", err)
 		}
 	}
 	if td.McpRegistry != nil {
@@ -122,6 +129,10 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 	sbox := sandbox.New(t.Config.Sandbox)
 	pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
+	browserController := browser.NewController(browser.ControllerOptions{
+		Config:  t.Config.Browser,
+		BaseDir: t.BaseDir,
+	})
 
 	var mcpReg *mcpreg.Registry
 	if len(t.Config.MCPServers) > 0 {
@@ -139,15 +150,16 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 	}
 
 	return &AccountDeps{
-		Account:     t,
-		Store:       st,
-		Provider:    provider,
-		Fallback:    fallback,
-		Sandbox:     sbox,
-		McpRegistry: mcpReg,
-		PkgMgr:      pkgMgr,
-		APITokenMgr: apiTokenMgr,
-		Secrets:     secrets,
+		Account:           t,
+		Store:             st,
+		Provider:          provider,
+		Fallback:          fallback,
+		Sandbox:           sbox,
+		McpRegistry:       mcpReg,
+		BrowserController: browserController,
+		PkgMgr:            pkgMgr,
+		APITokenMgr:       apiTokenMgr,
+		Secrets:           secrets,
 	}, nil
 }
 
@@ -173,19 +185,20 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 	}
 
 	sess := &engine.Session{
-		Provider:         td.Provider,
-		FallbackProvider: td.Fallback,
-		Sandbox:          td.Sandbox,
-		Store:            td.Store,
-		Config:           td.Account.Config,
-		McpRegistry:      td.McpRegistry,
-		BaseDir:          td.Account.BaseDir,
-		PackageManager:   td.PkgMgr,
-		APITokenMgr:      td.APITokenMgr,
-		AccountID:        td.Account.ID,
-		AccountRegistry:  registry,
-		Health:           core.NewHealthState(),
-		SummaryFlight:    &singleflight.Group{},
+		Provider:          td.Provider,
+		FallbackProvider:  td.Fallback,
+		Sandbox:           td.Sandbox,
+		Store:             td.Store,
+		Config:            td.Account.Config,
+		McpRegistry:       td.McpRegistry,
+		BrowserController: td.BrowserController,
+		BaseDir:           td.Account.BaseDir,
+		PackageManager:    td.PkgMgr,
+		APITokenMgr:       td.APITokenMgr,
+		AccountID:         td.Account.ID,
+		AccountRegistry:   registry,
+		Health:            core.NewHealthState(),
+		SummaryFlight:     &singleflight.Group{},
 	}
 	if td.Account.Config.IsSharedAccount() {
 		sess.Fanout = core.NewChannelFanout(eventCh, registry, td.Account.ID)

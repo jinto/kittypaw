@@ -48,6 +48,13 @@ type turnState struct {
 // PermissionCallback is called when the agent needs user permission for an action.
 type PermissionCallback func(ctx context.Context, description, resource string) (bool, error)
 
+// BrowserController executes built-in Browser.* calls. It is an interface so
+// engine tests can use fakes without launching Chrome.
+type BrowserController interface {
+	Execute(context.Context, core.SkillCall) (string, error)
+	Close() error
+}
+
 // RunOptions holds per-call options for Session.Run. Callbacks are scoped to
 // a single Run invocation, avoiding shared mutable state across concurrent calls.
 type RunOptions struct {
@@ -59,14 +66,15 @@ type RunOptions struct {
 // Create once, call Run() for each event. Session is safe for concurrent use;
 // per-call state is passed via RunOptions.
 type Session struct {
-	Provider         llm.Provider
-	FallbackProvider llm.Provider
-	Sandbox          *sandbox.Sandbox
-	Store            *store.Store
-	Config           *core.Config
-	BaseDir          string             // account base directory (e.g. ~/.kittypaw/accounts/alice/)
-	McpRegistry      *mcpreg.Registry   // nil when no MCP servers configured
-	Budget           *SharedTokenBudget // shared across orchestration, MoA, File.summary
+	Provider          llm.Provider
+	FallbackProvider  llm.Provider
+	Sandbox           *sandbox.Sandbox
+	Store             *store.Store
+	Config            *core.Config
+	BaseDir           string           // account base directory (e.g. ~/.kittypaw/accounts/alice/)
+	McpRegistry       *mcpreg.Registry // nil when no MCP servers configured
+	BrowserController BrowserController
+	Budget            *SharedTokenBudget // shared across orchestration, MoA, File.summary
 	// SummaryFlight dedups concurrent File.summary misses; nil → per-call group.
 	SummaryFlight  *singleflight.Group
 	Indexer        Indexer                  // nil when workspace indexer is not initialized

@@ -163,6 +163,11 @@ func resolveSkillCall(ctx context.Context, call core.SkillCall, s *Session, perm
 		return executeVision(ctx, call, s)
 	case "Mcp":
 		return executeMCP(ctx, call, s)
+	case "Browser":
+		if s.BrowserController == nil {
+			return jsonResult(map[string]any{"error": "browser not configured"})
+		}
+		return s.BrowserController.Execute(ctx, call)
 	case "Agent":
 		return executeDelegate(ctx, call, s)
 	case "Share":
