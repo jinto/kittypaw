@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -43,7 +45,7 @@ func TestChatTUISubmitStartsTurnAndKeepsInputFocused(t *testing.T) {
 	if !strings.Contains(transcript, "you> haha") {
 		t.Fatalf("transcript missing submitted user text:\n%s", transcript)
 	}
-	if !strings.Contains(transcript, "paw> ...") {
+	if !strings.Contains(stripANSI(transcript), "paw> 생각중...") {
 		t.Fatalf("transcript missing pending paw placeholder:\n%s", transcript)
 	}
 	if got := <-started; got.Text != "haha" || got.ID != "turn-1" {
@@ -119,7 +121,7 @@ func TestChatTUIResultStartsQueuedTurn(t *testing.T) {
 	if !strings.Contains(transcript, "paw> done") {
 		t.Fatalf("transcript missing completed first response:\n%s", transcript)
 	}
-	if !strings.Contains(transcript, "paw> ...") {
+	if !strings.Contains(stripANSI(transcript), "paw> 생각중...") {
 		t.Fatalf("transcript missing pending second response:\n%s", transcript)
 	}
 }
@@ -154,6 +156,68 @@ func TestChatTUIViewDoesNotExceedSmallTerminalHeight(t *testing.T) {
 	}
 }
 
+func TestChatTUIViewDoesNotRenderInputSeparatorLine(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{Header: "KittyPaw chat"})
+	model.setSize(40, 10)
+
+	if strings.Contains(model.View(), strings.Repeat("-", 40)) {
+		t.Fatal("chat view must not render a horizontal separator above the input")
+	}
+}
+
+func TestChatTUIStartTurnUsesAnimatedPendingText(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{
+		Header: "KittyPaw chat",
+		Send: func(turn chatTurn) tea.Cmd {
+			return func() tea.Msg { return nil }
+		},
+	})
+	model.setSize(60, 12)
+
+	cmd := model.startTurn(chatTurn{ID: "turn-1", Text: "hello"})
+
+	if cmd == nil {
+		t.Fatal("startTurn must schedule the send command and typing animation")
+	}
+	transcript := formatChatTranscript(model.messages, 60)
+	if strings.Contains(transcript, "paw> ...") {
+		t.Fatalf("pending response must not use static ellipsis:\n%s", transcript)
+	}
+	if !strings.Contains(stripANSI(transcript), "paw> 생각중...") {
+		t.Fatalf("pending response missing initial typing frame:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "\x1b[38;5;") {
+		t.Fatalf("pending response must be colorized:\n%q", transcript)
+	}
+}
+
+func TestChatTUITypingTickAnimatesPendingText(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{Header: "KittyPaw chat"})
+	model.setSize(60, 12)
+	_ = model.startTurn(chatTurn{ID: "turn-1", Text: "hello"})
+	before := formatChatTranscript(model.messages, 60)
+
+	updated, cmd := model.Update(chatTypingTickMsg{})
+	model = updated.(chatTUIModel)
+
+	if cmd == nil {
+		t.Fatal("typing tick must schedule the next animation tick while in flight")
+	}
+	transcript := formatChatTranscript(model.messages, 60)
+	if !strings.Contains(stripANSI(transcript), "paw> 생각중...") {
+		t.Fatalf("typing tick changed visible pending text:\n%s", transcript)
+	}
+	if transcript == before {
+		t.Fatalf("typing tick did not advance the color wave:\n%s", transcript)
+	}
+}
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+func stripANSI(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
+}
+
 func TestChatTUIViewTracksTerminalCursorAtInputCursor(t *testing.T) {
 	cursor := &chatTUICursorState{}
 	model := newChatTUIModel(chatTUIOptions{
@@ -175,6 +239,21 @@ func TestChatTUIViewTracksTerminalCursorAtInputCursor(t *testing.T) {
 	if col != 13 {
 		t.Fatalf("cursor col = %d, want 13", col)
 	}
+}
+
+func TestChatTUIInitDoesNotShowCursorBeforeInputIsPositioned(t *testing.T) {
+	model := newChatTUIModel(chatTUIOptions{Header: "KittyPaw chat"})
+
+	if cmd := model.Init(); cmd != nil {
+		t.Fatal("Init must not show the cursor before the first WindowSizeMsg positions the input")
+	}
+}
+
+func TestChatTUICursorWriterExposesTerminalFileForResizeDetection(t *testing.T) {
+	var _ interface {
+		io.ReadWriteCloser
+		Fd() uintptr
+	} = (*chatTUICursorWriter)(nil)
 }
 
 func TestChatTUICursorWriterAppendsCursorAfterRenderedFrame(t *testing.T) {

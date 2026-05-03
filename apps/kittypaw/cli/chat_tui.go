@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -28,10 +29,20 @@ type chatTurnResultMsg struct {
 	Err  error
 }
 
+type chatTypingTickMsg struct{}
+
 type chatMessage struct {
-	Role string
-	Text string
+	Role         string
+	Text         string
+	Pending      bool
+	PendingFrame int
 }
+
+const chatTypingTickInterval = 160 * time.Millisecond
+
+const chatTypingText = "생각중..."
+
+var chatPendingWaveColors = []string{"240", "242", "244", "246", "248", "246"}
 
 type chatTUIOptions struct {
 	Header      string
@@ -56,6 +67,7 @@ type chatTUIModel struct {
 	queue      []chatTurn
 	inFlight   bool
 	currentPaw int
+	typingPos  int
 
 	send      func(chatTurn) tea.Cmd
 	newTurnID func() string
@@ -95,7 +107,7 @@ func newChatTUIModel(opts chatTUIOptions) chatTUIModel {
 }
 
 func (m chatTUIModel) Init() tea.Cmd {
-	return tea.ShowCursor
+	return nil
 }
 
 func (m chatTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -106,6 +118,17 @@ func (m chatTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatTurnResultMsg:
 		cmd := m.finishTurn(msg)
 		return m, cmd
+	case chatTypingTickMsg:
+		if !m.inFlight {
+			return m, nil
+		}
+		m.typingPos++
+		if m.currentPaw >= 0 && m.currentPaw < len(m.messages) {
+			m.messages[m.currentPaw].Text = chatTypingFrame(m.typingPos)
+			m.messages[m.currentPaw].PendingFrame = m.typingPos
+			m.refreshViewport()
+		}
+		return m, chatTypingTickCmd()
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
@@ -163,7 +186,7 @@ func (m *chatTUIModel) setSize(width, height int) {
 	if m.warning != "" {
 		headerLines++
 	}
-	footerLines := 2
+	footerLines := 1
 	viewportHeight := height - headerLines - footerLines
 	if viewportHeight < 1 {
 		viewportHeight = 1
@@ -197,10 +220,16 @@ func (m *chatTUIModel) submitInput() tea.Cmd {
 
 func (m *chatTUIModel) startTurn(turn chatTurn) tea.Cmd {
 	m.inFlight = true
-	m.messages = append(m.messages, chatMessage{Role: "paw", Text: "..."})
+	m.typingPos = 0
+	m.messages = append(m.messages, chatMessage{
+		Role:         "paw",
+		Text:         chatTypingFrame(m.typingPos),
+		Pending:      true,
+		PendingFrame: m.typingPos,
+	})
 	m.currentPaw = len(m.messages) - 1
 	m.refreshViewport()
-	return m.send(turn)
+	return tea.Batch(m.send(turn), chatTypingTickCmd())
 }
 
 func (m *chatTUIModel) finishTurn(result chatTurnResultMsg) tea.Cmd {
@@ -213,6 +242,7 @@ func (m *chatTUIModel) finishTurn(result chatTurnResultMsg) tea.Cmd {
 	}
 	if m.currentPaw >= 0 && m.currentPaw < len(m.messages) {
 		m.messages[m.currentPaw].Text = text
+		m.messages[m.currentPaw].Pending = false
 	}
 	m.inFlight = false
 	m.currentPaw = -1
@@ -232,8 +262,17 @@ func (m *chatTUIModel) refreshViewport() {
 }
 
 func (m chatTUIModel) footerView() string {
-	line := strings.Repeat("-", max(0, m.width))
-	return line + "\n" + m.input.View()
+	return m.input.View()
+}
+
+func chatTypingFrame(pos int) string {
+	return chatTypingText
+}
+
+func chatTypingTickCmd() tea.Cmd {
+	return tea.Tick(chatTypingTickInterval, func(time.Time) tea.Msg {
+		return chatTypingTickMsg{}
+	})
 }
 
 func (m chatTUIModel) trackTerminalCursor() {
@@ -339,6 +378,17 @@ func (w *chatTUICursorWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+func (w *chatTUICursorWriter) Read(p []byte) (int, error) {
+	if w.file == nil {
+		return 0, io.ErrClosedPipe
+	}
+	return w.file.Read(p)
+}
+
+func (w *chatTUICursorWriter) Close() error {
+	return nil
+}
+
 func (w *chatTUICursorWriter) Fd() uintptr {
 	if w.file == nil {
 		return ^uintptr(0)
@@ -353,12 +403,16 @@ func formatChatTranscript(messages []chatMessage, width int) string {
 	var blocks []string
 	for _, msg := range messages {
 		prefix := msg.Role + "> "
-		blocks = append(blocks, formatChatMessage(prefix, msg.Text, width))
+		blocks = append(blocks, formatChatMessageStyled(prefix, msg.Text, width, msg.Pending, msg.PendingFrame))
 	}
 	return strings.Join(blocks, "\n")
 }
 
 func formatChatMessage(prefix, text string, width int) string {
+	return formatChatMessageStyled(prefix, text, width, false, 0)
+}
+
+func formatChatMessageStyled(prefix, text string, width int, pending bool, pendingFrame int) string {
 	if text == "" {
 		text = " "
 	}
@@ -369,12 +423,12 @@ func formatChatMessage(prefix, text string, width int) string {
 		if i > 0 {
 			linePrefix = indent
 		}
-		out = append(out, wrapChatLine(linePrefix, line, width)...)
+		out = append(out, wrapChatLine(linePrefix, line, width, pending, pendingFrame)...)
 	}
 	return strings.Join(out, "\n")
 }
 
-func wrapChatLine(prefix, text string, width int) []string {
+func wrapChatLine(prefix, text string, width int, pending bool, pendingFrame int) []string {
 	prefixWidth := runewidth.StringWidth(prefix)
 	limit := max(1, width-prefixWidth)
 	indent := strings.Repeat(" ", prefixWidth)
@@ -383,7 +437,11 @@ func wrapChatLine(prefix, text string, width int) []string {
 	var current strings.Builder
 	currentWidth := 0
 	flush := func(p string) {
-		lines = append(lines, p+current.String())
+		content := current.String()
+		if pending {
+			content = colorPendingText(content, pendingFrame)
+		}
+		lines = append(lines, p+content)
 		current.Reset()
 		currentWidth = 0
 	}
@@ -399,6 +457,34 @@ func wrapChatLine(prefix, text string, width int) []string {
 	}
 	flush(prefix)
 	return lines
+}
+
+func colorPendingText(text string, frame int) string {
+	runes := []rune(text)
+	if len(runes) == 0 || len(chatPendingWaveColors) == 0 {
+		return text
+	}
+	var out strings.Builder
+	for i, r := range runes {
+		color := chatPendingWaveColors[positiveMod(i-frame, len(chatPendingWaveColors))]
+		out.WriteString("\x1b[38;5;")
+		out.WriteString(color)
+		out.WriteString("m")
+		out.WriteRune(r)
+	}
+	out.WriteString("\x1b[0m")
+	return out.String()
+}
+
+func positiveMod(n, mod int) int {
+	if mod <= 0 {
+		return 0
+	}
+	n %= mod
+	if n < 0 {
+		n += mod
+	}
+	return n
 }
 
 type chatInputHistory struct {
