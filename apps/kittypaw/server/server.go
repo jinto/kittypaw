@@ -65,10 +65,11 @@ const DefaultAccountID = "default"
 // Callers must pass at least one AccountDeps; New panics on an empty slice
 // because a server with no accounts has nothing to route to.
 //
-// One engine.Session is built per account. The family account (IsFamily=true)
-// receives a ChannelFanout wired to the shared eventCh so its skills can
-// push to personal accounts via Fanout.send; personal accounts keep Fanout
-// nil so the JS global stays hidden (I5 — personal cannot reach personal).
+// One engine.Session is built per account. Team-space accounts
+// (Config.IsTeamSpaceAccount()) receive a ChannelFanout wired to the shared
+// eventCh so their skills can push to configured members via Fanout.send;
+// personal accounts keep Fanout nil so the JS global stays hidden
+// (I5 — personal cannot reach personal).
 // Every session shares the same *core.AccountRegistry pointer so Share.read
 // can resolve peer accounts by ID.
 //

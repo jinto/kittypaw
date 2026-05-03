@@ -112,20 +112,27 @@ func TestChannelFanout_Broadcast(t *testing.T) {
 		t.Fatalf("broadcast: %v", err)
 	}
 
-	got := map[string]bool{}
+	var got []string
 	for i := 0; i < 2; i++ {
 		select {
 		case ev := <-ch:
-			got[ev.AccountID] = true
+			got = append(got, ev.AccountID)
 		case <-time.After(time.Second):
 			t.Fatalf("only %d events received, want 2", i)
 		}
 	}
-	if !got["alice"] || !got["bob"] {
+	if len(got) != 2 || got[0] != "alice" || got[1] != "bob" {
 		t.Errorf("broadcast targets = %v, want alice+bob", got)
 	}
-	if got["team"] {
-		t.Error("broadcast must exclude source account")
+	for _, id := range got {
+		if id == "team" {
+			t.Error("broadcast must exclude source account")
+		}
+	}
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected extra event: %#v", ev)
+	default:
 	}
 }
 
