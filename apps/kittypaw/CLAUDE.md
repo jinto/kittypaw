@@ -209,6 +209,10 @@ for local verification.
 
 Version is injected via ldflags (`-X main.version`). `kittypaw --version` prints it.
 
+새버전 릴리즈는 반드시 사용자의 동의를 얻어서 진행한다. Do not create or
+push release tags, publish GitHub releases, or otherwise trigger release
+automation unless the user has explicitly approved that release.
+
 ## Testing
 
 ```bash
