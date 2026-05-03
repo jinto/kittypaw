@@ -283,6 +283,18 @@ func TestQualityBlock_FramesSearchCandidatesWithoutOverclaiming(t *testing.T) {
 	}
 }
 
+func TestQualityBlock_UsesJudgmentForFreshnessDependentRecommendations(t *testing.T) {
+	for _, phrase := range []string{
+		"freshness-dependent recommendation",
+		"Use judgment, not keyword matching",
+		"stale knowledge would likely reduce answer quality",
+	} {
+		if !strings.Contains(QualityBlock, phrase) {
+			t.Fatalf("QualityBlock missing freshness-judgment rule %q", phrase)
+		}
+	}
+}
+
 // --- channelHint ---
 
 func TestChannelHint_KnownChannels(t *testing.T) {

@@ -35,7 +35,7 @@ func needsAccountPrompt(f *accountAddFlags) bool {
 // Secrets (telegram token, api-key) are read with masked terminal input when
 // stdin is a TTY — keeps shoulder-surfers and scrollback buffers from picking
 // up the value. Tests use a non-TTY io.Reader and exercise the scanner path.
-func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) error {
+func promptAccountSetup(accountID string, stdin io.Reader, stdout io.Writer, f *accountAddFlags) error {
 	scanner := bufio.NewScanner(stdin)
 
 	_, _ = fmt.Fprintln(stdout)
@@ -68,7 +68,7 @@ func promptAccountSetup(stdin io.Reader, stdout io.Writer, f *accountAddFlags) e
 		} else if ok {
 			return fmt.Errorf("telegram bot_token already used by account %q", owner)
 		}
-		f.adminChatID = runTelegramChatIDWizard(scanner, stdout, f.telegramToken)
+		f.adminChatID = runTelegramChatIDWizard(scanner, stdout, accountID, f.telegramToken)
 	}
 	if channels.kakao {
 		_, _ = fmt.Fprintln(stdout, "\n[2/5] KakaoTalk")

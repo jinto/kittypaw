@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"reflect"
 	"testing"
 
@@ -46,5 +48,47 @@ func TestSetupLLMModelChoices(t *testing.T) {
 	}
 	if got := setupLLMModelChoices("gemini")[0]; got != core.GeminiDefaultModel {
 		t.Fatalf("gemini default model = %q, want %q", got, core.GeminiDefaultModel)
+	}
+}
+
+func TestReadPasswordMaskedLoopCtrlCAborts(t *testing.T) {
+	input := []byte{3}
+	pos := 0
+
+	got, err := readPasswordMaskedLoop(func(p []byte) (int, error) {
+		if pos >= len(input) {
+			return 0, io.EOF
+		}
+		p[0] = input[pos]
+		pos++
+		return 1, nil
+	}, io.Discard)
+
+	if !errors.Is(err, errPromptCanceled) {
+		t.Fatalf("err = %v, want errPromptCanceled", err)
+	}
+	if got != "" {
+		t.Fatalf("password = %q, want empty", got)
+	}
+}
+
+func TestReadPasswordMaskedLoopEmptyEnterAllowsRetry(t *testing.T) {
+	input := []byte{'\n'}
+	pos := 0
+
+	got, err := readPasswordMaskedLoop(func(p []byte) (int, error) {
+		if pos >= len(input) {
+			return 0, io.EOF
+		}
+		p[0] = input[pos]
+		pos++
+		return 1, nil
+	}, io.Discard)
+
+	if err != nil {
+		t.Fatalf("err = %v, want nil for empty Enter", err)
+	}
+	if got != "" {
+		t.Fatalf("password = %q, want empty", got)
 	}
 }

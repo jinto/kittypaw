@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -261,7 +260,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 	// path. Non-TTY shells fall through to the original error so failure modes
 	// stay loud.
 	if needsAccountPrompt(f) && isatty.IsTerminal(os.Stdin.Fd()) {
-		if err := promptAccountSetup(stdin, stdout, f); err != nil {
+		if err := promptAccountSetup(name, stdin, stdout, f); err != nil {
 			return err
 		}
 	}
@@ -296,9 +295,7 @@ func runAccountAdd(name string, f *accountAddFlags, stdin io.Reader, stdout, std
 
 	chatID := f.adminChatID
 	if token != "" && chatID == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		detected, derr := core.FetchTelegramChatID(ctx, token)
-		cancel()
+		detected, derr := detectTelegramChatID(name, token)
 		if derr == nil {
 			chatID = detected
 		} else {

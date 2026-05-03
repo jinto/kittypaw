@@ -141,6 +141,16 @@ func (c *Client) Reload() (map[string]any, error) {
 	return c.post("/api/v1/reload", nil)
 }
 
+// TelegramPairingChatID asks the local server to coordinate Telegram chat_id
+// detection. When the daemon is already polling the bot token, this avoids a
+// second competing getUpdates consumer in the CLI process.
+func (c *Client) TelegramPairingChatID(accountID, token string) (map[string]any, error) {
+	return c.post("/api/telegram/pairing/chat-id", map[string]string{
+		"account_id": accountID,
+		"token":      token,
+	})
+}
+
 // AccountActivate registers an on-disk account with the running server, spawning
 // its channels without a restart. The account directory must already exist
 // (typically created by `kittypaw account add`). Errors surface the HTTP status

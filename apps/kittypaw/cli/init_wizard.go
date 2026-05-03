@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,8 @@ import (
 	"github.com/jinto/kittypaw/core"
 	"github.com/jinto/kittypaw/llm"
 )
+
+var errPromptCanceled = errors.New("prompt canceled")
 
 // setupFlags holds the cobra flag values for `kittypaw setup`.
 type setupFlags struct {
@@ -71,7 +74,7 @@ func runWizard(flags setupFlags, existing *core.Config) (core.WizardResult, erro
 	}
 
 	// [2/6] Telegram
-	wizardTelegram(scanner, existing, &w)
+	wizardTelegram(scanner, flags.accountID, existing, &w)
 	if err := validateWizardResult(flags.validate, w); err != nil {
 		return w, err
 	}
@@ -333,7 +336,7 @@ func setupLLMModelChoices(provider string) []string {
 // Step [2/5]: Telegram
 // ---------------------------------------------------------------------------
 
-func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.WizardResult) {
+func wizardTelegram(scanner *bufio.Scanner, accountID string, existing *core.Config, w *core.WizardResult) {
 	fmt.Println()
 	fmt.Println("  [2/6] Telegram (optional)")
 
@@ -383,7 +386,12 @@ func wizardTelegram(scanner *bufio.Scanner, existing *core.Config, w *core.Wizar
 
 	fmt.Printf("  ✓ %s\n", maskKey(token))
 	w.TelegramBotToken = token
-	w.TelegramChatID = runTelegramChatIDWizard(scanner, os.Stdout, token)
+	if token == existingToken && existingChatID != "" {
+		w.TelegramChatID = existingChatID
+		fmt.Printf("  Telegram connected (Chat ID: %s) ✓\n", maskKey(existingChatID))
+		return
+	}
+	w.TelegramChatID = runTelegramChatIDWizard(scanner, os.Stdout, accountID, token)
 }
 
 func printBotFatherGuide() {
@@ -732,33 +740,45 @@ func promptPassword(prompt string) (string, error) {
 	}
 	defer term.Restore(fd, oldState) //nolint:errcheck
 
+	password, err := readPasswordMaskedLoop(os.Stdin.Read, os.Stdout)
+	return strings.TrimSpace(password), err
+}
+
+func readPasswordMaskedLoop(read func([]byte) (int, error), stdout io.Writer) (string, error) {
 	var buf []byte
 	var b [1]byte
 	for {
-		if _, err := os.Stdin.Read(b[:]); err != nil {
-			break
+		n, err := read(b[:])
+		if err != nil {
+			_, _ = fmt.Fprint(stdout, "\r\n")
+			if err == io.EOF {
+				return strings.TrimSpace(string(buf)), nil
+			}
+			return "", err
+		}
+		if n == 0 {
+			_, _ = fmt.Fprint(stdout, "\r\n")
+			return strings.TrimSpace(string(buf)), nil
 		}
 		switch b[0] {
 		case '\r', '\n': // Enter
-			fmt.Print("\r\n")
+			_, _ = fmt.Fprint(stdout, "\r\n")
 			return strings.TrimSpace(string(buf)), nil
 		case 3: // Ctrl+C
-			fmt.Print("\r\n")
-			return "", nil
+			_, _ = fmt.Fprint(stdout, "\r\n")
+			return "", errPromptCanceled
 		case 127, 8: // DEL, Backspace
 			if len(buf) > 0 {
 				buf = buf[:len(buf)-1]
-				fmt.Print("\b \b")
+				_, _ = fmt.Fprint(stdout, "\b \b")
 			}
 		default:
 			if b[0] >= 32 { // printable
 				buf = append(buf, b[0])
-				fmt.Print("*")
+				_, _ = fmt.Fprint(stdout, "*")
 			}
 		}
 	}
-	fmt.Print("\r\n")
-	return strings.TrimSpace(string(buf)), nil
 }
 
 // maskKey returns a masked version of an API key, e.g. "sk-ant-...x2f4".

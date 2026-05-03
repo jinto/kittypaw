@@ -147,6 +147,29 @@ func (s *ChannelSpawner) GetChannel(accountID string, eventType core.EventType) 
 	return rc.ch, true
 }
 
+type lastChatIDReporter interface {
+	LastChatID() (string, bool)
+}
+
+// TelegramLastChatID returns the latest chat_id observed by the live Telegram
+// channel for accountID/token. The third return value indicates that a matching
+// channel is active even if it has not observed a chat yet.
+func (s *ChannelSpawner) TelegramLastChatID(accountID, token string) (string, bool, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rc, ok := s.running[spawnerKey{AccountID: accountID, ChannelType: string(core.EventTelegram)}]
+	if !ok || rc.config.Token != token {
+		return "", false, false
+	}
+	reporter, ok := rc.ch.(lastChatIDReporter)
+	if !ok {
+		return "", false, true
+	}
+	chatID, found := reporter.LastChatID()
+	return chatID, found, true
+}
+
 // ReplaceSpawn stops the existing channel for (accountID, ch.Name()) if
 // any and spawns a new one. Used when a channel's config has changed.
 func (s *ChannelSpawner) ReplaceSpawn(accountID string, ch channel.Channel, cfg core.ChannelConfig) error {

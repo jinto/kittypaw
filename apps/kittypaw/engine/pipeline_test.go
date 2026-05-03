@@ -771,6 +771,27 @@ func TestClassifyIntent_CandidateNameReplyRoutesToInstallConsent(t *testing.T) {
 	}
 }
 
+func TestClassifyIntent_RecommendationDoesNotBrowseSkills(t *testing.T) {
+	intent := classifyIntent("요즘 드라마 추천해줘", nil, nil)
+	if intent.Kind != IntentLegacyFallback {
+		t.Fatalf("intent = %v, want legacy fallback so LLM can judge search need", intent.Kind)
+	}
+}
+
+func TestClassifyIntent_ExplicitSkillBrowseStillBrowses(t *testing.T) {
+	cases := []string{
+		"어떤 스킬 있어?",
+		"스킬 목록 보여줘",
+		"사용 가능한 기능 뭐야?",
+	}
+	for _, in := range cases {
+		intent := classifyIntent(in, nil, nil)
+		if intent.Kind != IntentBrowse {
+			t.Fatalf("%q intent = %v, want browse", in, intent.Kind)
+		}
+	}
+}
+
 func TestClassifyIntent_AffirmativeConfirmsPendingClarification(t *testing.T) {
 	state := NewPipelineState()
 	state.RecordPendingClarification(PendingClarification{

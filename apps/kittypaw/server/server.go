@@ -347,6 +347,11 @@ func (s *Server) setupRoutes() chi.Router {
 	// the /api/v1 control token and points clients at /chat/ws.
 	r.Get("/api/chat/bootstrap", s.handleChatBootstrap)
 
+	// Telegram pairing is used by CLI setup/account flows as well as settings.
+	// The handler resolves the account from a web session, per-account API key,
+	// or server master key because /api/v1 auth is default-account oriented.
+	r.Post("/api/telegram/pairing/chat-id", s.handleTelegramPairingChatID)
+
 	// Authenticated post-setup settings. First-run setup stays in the CLI;
 	// these endpoints only mutate already configured accounts.
 	r.Route("/api/settings", func(r chi.Router) {
@@ -393,6 +398,7 @@ func (s *Server) setupRoutes() chi.Router {
 		// Status / history
 		r.Get("/status", s.handleStatus)
 		r.Get("/executions", s.handleExecutions)
+		r.Post("/telegram/pairing/chat-id", s.handleTelegramPairingChatID)
 
 		// Skills
 		r.Get("/skills", s.handleSkills)

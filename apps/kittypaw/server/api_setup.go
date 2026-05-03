@@ -290,6 +290,11 @@ func (s *Server) handleSetupTelegram(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSetupTelegramChatID(w http.ResponseWriter, r *http.Request) {
+	acct, err := s.setupAccount(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var body struct {
 		Token string `json:"token"`
 	}
@@ -301,13 +306,13 @@ func (s *Server) handleSetupTelegramChatID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	chatID, err := core.FetchTelegramChatID(r.Context(), body.Token)
+	result, err := s.telegramPairingChatID(r.Context(), acct.ID, strings.TrimSpace(body.Token))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to fetch chat ID: "+err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"chat_id": chatID})
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ---------------------------------------------------------------------------

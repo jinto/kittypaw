@@ -31,7 +31,7 @@ func TestPromptAccountSetup_AllFields(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func TestPromptAccountSetup_LocalSkipsAPIKey(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestPromptAccountSetupProviderAcceptsArrowSequence(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestPromptAccountSetupGeminiProvider(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestPromptAccountSetupKakaoOnly(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestPromptAccountSetupBothChannels(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	if err := promptAccountSetup(stdin, &stdout, f); err != nil {
+	if err := promptAccountSetup("new", stdin, &stdout, f); err != nil {
 		t.Fatalf("promptAccountSetup: %v", err)
 	}
 
@@ -220,7 +220,7 @@ func stubAccountKakaoPairing(t *testing.T, result core.WizardResult) func() {
 func stubAccountTelegramPairing(t *testing.T, chatID string) func() {
 	t.Helper()
 	old := runTelegramChatIDWizard
-	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string) string {
+	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string, string) string {
 		return chatID
 	}
 	return func() { runTelegramChatIDWizard = old }
@@ -249,6 +249,94 @@ func TestPromptTelegramChatIDWaitsForStartAndDetects(t *testing.T) {
 	}
 }
 
+func TestPromptTelegramChatIDUsesServerPairingWithoutStartPrompt(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader(""))
+	var stdout bytes.Buffer
+	directCalled := false
+
+	chatID := promptTelegramChatID(scanner, &stdout, "123:token", telegramPairingDeps{
+		serverChatID: func(context.Context, string) (telegramPairingStatus, error) {
+			return telegramPairingStatus{Status: "paired", ChatID: "333", Source: "active_channel"}, nil
+		},
+		fetchChatID: func(context.Context, string) (string, error) {
+			directCalled = true
+			return "", nil
+		},
+	})
+
+	if chatID != "333" {
+		t.Fatalf("chatID = %q, want 333", chatID)
+	}
+	if directCalled {
+		t.Fatal("direct FetchTelegramChatID must not run when server pairing succeeds")
+	}
+	if out := stdout.String(); strings.Contains(out, "/start") {
+		t.Fatalf("stdout must not ask for /start when server pairing is already complete, got %q", out)
+	}
+}
+
+func TestPromptTelegramChatIDServerUnavailableFallsBackToDirect(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader("\n"))
+	var stdout bytes.Buffer
+	directCalled := false
+
+	chatID := promptTelegramChatID(scanner, &stdout, "123:token", telegramPairingDeps{
+		serverChatID: func(context.Context, string) (telegramPairingStatus, error) {
+			return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+		},
+		fetchChatID: func(context.Context, string) (string, error) {
+			directCalled = true
+			return "444", nil
+		},
+	})
+
+	if chatID != "444" {
+		t.Fatalf("chatID = %q, want 444", chatID)
+	}
+	if !directCalled {
+		t.Fatal("direct FetchTelegramChatID should run when local server is unavailable")
+	}
+	if out := stdout.String(); !strings.Contains(out, "/start") {
+		t.Fatalf("stdout should keep the server-off /start guide, got %q", out)
+	}
+}
+
+func TestPromptTelegramChatIDServerWaitingPollsWithoutDirectFetch(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader(""))
+	var stdout bytes.Buffer
+	polls := 0
+	directCalled := false
+
+	chatID := promptTelegramChatID(scanner, &stdout, "123:token", telegramPairingDeps{
+		serverChatID: func(context.Context, string) (telegramPairingStatus, error) {
+			polls++
+			if polls == 1 {
+				return telegramPairingStatus{Status: "waiting"}, nil
+			}
+			return telegramPairingStatus{Status: "paired", ChatID: "555", Source: "active_channel"}, nil
+		},
+		fetchChatID: func(context.Context, string) (string, error) {
+			directCalled = true
+			return "", nil
+		},
+		serverPollInterval: 0,
+		maxServerPolls:     2,
+	})
+
+	if chatID != "555" {
+		t.Fatalf("chatID = %q, want 555", chatID)
+	}
+	if polls != 2 {
+		t.Fatalf("server polls = %d, want 2", polls)
+	}
+	if directCalled {
+		t.Fatal("direct FetchTelegramChatID must not run while server pairing is polling")
+	}
+	if out := stdout.String(); strings.Contains(out, "/start") {
+		t.Fatalf("stdout must not ask for /start during server-coordinated pairing, got %q", out)
+	}
+}
+
 // TestPromptAccountSetup_EmptyTokenFails — first prompt empty must reject
 // rather than silently create an account with no Telegram channel.
 func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
@@ -256,7 +344,7 @@ func TestPromptAccountSetup_EmptyTokenFails(t *testing.T) {
 	var stdout bytes.Buffer
 	f := &accountAddFlags{}
 
-	err := promptAccountSetup(stdin, &stdout, f)
+	err := promptAccountSetup("new", stdin, &stdout, f)
 	if err == nil {
 		t.Fatal("expected error for empty token, got nil")
 	}
@@ -276,7 +364,7 @@ func TestPromptAccountSetupDuplicateTelegramTokenStopsBeforeChatIDWizard(t *test
 	}
 
 	old := runTelegramChatIDWizard
-	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string) string {
+	runTelegramChatIDWizard = func(*bufio.Scanner, io.Writer, string, string) string {
 		t.Fatal("telegram chat-id wizard should not run for a token already owned by another account")
 		return ""
 	}
@@ -287,7 +375,7 @@ func TestPromptAccountSetupDuplicateTelegramTokenStopsBeforeChatIDWizard(t *test
 		token,
 	}, "\n"))
 	var stdout bytes.Buffer
-	err := promptAccountSetup(stdin, &stdout, &accountAddFlags{})
+	err := promptAccountSetup("new", stdin, &stdout, &accountAddFlags{})
 	if err == nil {
 		t.Fatal("expected duplicate token error, got nil")
 	}

@@ -580,9 +580,10 @@ func isScheduledWeatherEntry(entry core.RegistryEntry) bool {
 }
 
 // isBrowse detects "show me what's available" queries — the user wants
-// a registry overview, not a specific install. Phrasing is varied
-// enough that a substring list beats a regex; the length cap blocks
-// long prose that *contains* "스킬" but isn't actually browsing.
+// a registry overview, not a specific install or a general recommendation.
+// Keep this intentionally narrow: general requests like "요즘 드라마 추천해줘"
+// must fall through to the LLM so it can decide whether freshness/search is
+// needed. Only explicit skill/function/tool-list phrasing belongs here.
 func isBrowse(text string) bool {
 	const browseMaxRunes = 30
 	if runeCount(text) > browseMaxRunes {
@@ -590,11 +591,14 @@ func isBrowse(text string) bool {
 	}
 	lowered := strings.ToLower(text)
 	patterns := []string{
-		"어떤 스킬", "어떤 기능", "무슨 스킬",
+		"어떤 스킬", "무슨 스킬", "사용 가능한 스킬",
 		"스킬 목록", "스킬 뭐", "스킬은 뭐", "스킬들",
-		"스킬 추천", "추천 스킬", "어떤 거", "뭐 있",
+		"스킬 추천", "추천 스킬",
+		"어떤 기능", "무슨 기능", "사용 가능한 기능",
+		"기능 목록", "기능 뭐", "할 수 있는 기능",
 		"what skills", "available skills", "list skills",
-		"browse", "list of", "추천해",
+		"what can you do", "available tools", "list tools",
+		"browse skills",
 	}
 	for _, p := range patterns {
 		if strings.Contains(lowered, p) {

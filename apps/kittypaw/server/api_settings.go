@@ -113,7 +113,8 @@ func (s *Server) handleSettingsTelegram(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSettingsTelegramChatID(w http.ResponseWriter, r *http.Request) {
-	if _, status, err := s.settingsAccount(r); err != nil {
+	acct, status, err := s.settingsAccount(r)
+	if err != nil {
 		writeError(w, status, err.Error())
 		return
 	}
@@ -129,12 +130,12 @@ func (s *Server) handleSettingsTelegramChatID(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	chatID, err := core.FetchTelegramChatID(r.Context(), body.Token)
+	result, err := s.telegramPairingChatID(r.Context(), acct.ID, strings.TrimSpace(body.Token))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to fetch chat ID: "+err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"chat_id": chatID})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSettingsWorkspacesList(w http.ResponseWriter, r *http.Request) {

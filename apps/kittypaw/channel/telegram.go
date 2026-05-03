@@ -201,6 +201,18 @@ func NewTelegram(accountID, botToken string) *TelegramChannel {
 
 func (t *TelegramChannel) Name() string { return "telegram" }
 
+// LastChatID reports the most recent Telegram chat_id observed by this
+// channel. Setup/account pairing uses this when the daemon is already polling
+// the bot token, avoiding a second competing getUpdates consumer.
+func (t *TelegramChannel) LastChatID() (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.chatID == 0 {
+		return "", false
+	}
+	return strconv.FormatInt(t.chatID, 10), true
+}
+
 // Start long-polls the Telegram Bot API for updates. It blocks until
 // ctx is canceled, emitting core.Event values on eventCh.
 func (t *TelegramChannel) Start(ctx context.Context, eventCh chan<- core.Event) error {
