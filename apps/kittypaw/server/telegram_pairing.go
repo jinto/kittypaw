@@ -29,17 +29,28 @@ func (s *Server) handleTelegramPairingChatID(w http.ResponseWriter, r *http.Requ
 
 	requestedAccountID := strings.TrimSpace(body.AccountID)
 	token := strings.TrimSpace(body.Token)
-	accountID, status, err := s.telegramPairingRequestAccountID(r, requestedAccountID)
-	if err != nil {
-		writeError(w, status, err.Error())
-		return
-	}
 	if token == "" {
 		writeError(w, http.StatusBadRequest, "token is required")
 		return
 	}
 	if !core.ValidateTelegramToken(token) {
 		writeError(w, http.StatusBadRequest, "invalid bot token format")
+		return
+	}
+
+	if requestAuthToken(r) == "" && isLocalhost(r) {
+		result, ok := s.localTelegramPairingChatIDByToken(token)
+		if !ok {
+			writeError(w, http.StatusNotFound, "no running Telegram channel is using this bot token")
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	accountID, status, err := s.telegramPairingRequestAccountID(r, requestedAccountID)
+	if err != nil {
+		writeError(w, status, err.Error())
 		return
 	}
 
@@ -110,6 +121,24 @@ func (s *Server) telegramPairingChatID(ctx context.Context, accountID, token str
 		return telegramPairingResult{}, fmt.Errorf("failed to fetch chat ID: %w", err)
 	}
 	return telegramPairingResult{Status: "paired", ChatID: chatID, Source: "telegram_api"}, nil
+}
+
+func (s *Server) localTelegramPairingChatIDByToken(token string) (telegramPairingResult, bool) {
+	if s.spawner == nil {
+		return telegramPairingResult{}, false
+	}
+	_, chatID, found, active := s.spawner.TelegramLastChatIDByToken(token)
+	if !active {
+		return telegramPairingResult{}, false
+	}
+	if found {
+		return telegramPairingResult{Status: "paired", ChatID: chatID, Source: "active_channel"}, true
+	}
+	return telegramPairingResult{
+		Status:  "waiting",
+		Source:  "active_channel",
+		Message: "waiting for a Telegram message received by the running local server",
+	}, true
 }
 
 func (s *Server) configuredTelegramChatID(accountID, token string) (string, bool) {

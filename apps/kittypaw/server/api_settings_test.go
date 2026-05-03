@@ -150,6 +150,51 @@ func TestTelegramPairingChatIDUsesActiveChannelLastChatID(t *testing.T) {
 	}
 }
 
+func TestTelegramPairingChatIDAllowsLocalhostActiveChannelWithoutAuth(t *testing.T) {
+	token := "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"
+	cfg := core.DefaultConfig()
+	cfg.LLM.Provider = "anthropic"
+	cfg.LLM.APIKey = "configured"
+	cfg.LLM.Model = "claude-test"
+	cfg.Server.APIKey = "api-key"
+	cfg.Channels = []core.ChannelConfig{{
+		ID:          "telegram",
+		ChannelType: core.ChannelTelegram,
+		Token:       token,
+	}}
+	srv := newServerWithLocalUserAndConfig(t, "alice", "pw", &cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv.spawner = NewChannelSpawner(ctx, srv.eventCh)
+	if err := srv.spawner.TrySpawn("alice", &telegramPairingTestChannel{chatID: "8172543364"}, cfg.Channels[0]); err != nil {
+		t.Fatalf("spawn telegram channel: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/telegram/pairing/chat-id", strings.NewReader(`{
+		"account_id":"new-account",
+		"token":"`+token+`"
+	}`))
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.setupRoutes().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("pairing chat-id code = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var body struct {
+		Status string `json:"status"`
+		ChatID string `json:"chat_id"`
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Status != "paired" || body.ChatID != "8172543364" || body.Source != "active_channel" {
+		t.Fatalf("pairing result = %#v, want paired active_channel chat_id", body)
+	}
+}
+
 func TestTelegramPairingChatIDFetchesWhenNoActiveChannel(t *testing.T) {
 	token := "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"
 	oldFetch := fetchTelegramChatID

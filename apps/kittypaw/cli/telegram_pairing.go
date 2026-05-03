@@ -2,10 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -14,6 +17,10 @@ import (
 )
 
 var errTelegramPairingServerUnavailable = errors.New("telegram pairing server unavailable")
+
+var telegramPairingLocalBaseURLs = func() []string {
+	return []string{"http://127.0.0.1:3000", "http://localhost:3000"}
+}
 
 type telegramPairingStatus struct {
 	Status  string
@@ -132,26 +139,116 @@ func promptTelegramChatIDManual(scanner *bufio.Scanner, stdout io.Writer) string
 }
 
 func defaultTelegramPairingClient(accountID string) func(context.Context, string) (telegramPairingStatus, error) {
-	return func(_ context.Context, token string) (telegramPairingStatus, error) {
+	return func(ctx context.Context, token string) (telegramPairingStatus, error) {
 		conn, err := client.NewDaemonConnForAccount(flagRemote, accountID)
 		if err != nil && accountID != "" {
 			conn, err = client.NewDaemonConn(flagRemote)
 		}
 		if err != nil {
-			return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+			return telegramPairingChatIDFromLocalServerIfLocal(ctx, token)
 		}
 		cl := client.New(conn.BaseURL, conn.APIKey)
 		res, err := cl.TelegramPairingChatID(accountID, token)
 		if err != nil {
-			if strings.Contains(err.Error(), "request failed") ||
-				strings.Contains(err.Error(), "connection refused") ||
-				strings.Contains(err.Error(), "no such host") {
-				return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+			if isTelegramPairingConnectionError(err) {
+				return telegramPairingChatIDFromLocalServerIfLocal(ctx, token)
 			}
 			return telegramPairingStatus{}, err
 		}
 		return telegramPairingStatusFromMap(res), nil
 	}
+}
+
+type telegramPairingHTTPError struct {
+	status int
+	body   string
+}
+
+func (e telegramPairingHTTPError) Error() string {
+	return fmt.Sprintf("server error %d: %s", e.status, e.body)
+}
+
+func telegramPairingChatIDFromLocalServerIfLocal(ctx context.Context, token string) (telegramPairingStatus, error) {
+	if flagRemote != "" {
+		return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+	}
+	return telegramPairingChatIDFromLocalServer(ctx, token)
+}
+
+func telegramPairingChatIDFromLocalServer(ctx context.Context, token string) (telegramPairingStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var lastErr error
+	for _, baseURL := range telegramPairingLocalBaseURLs() {
+		status, err := requestTelegramPairingLocal(ctx, baseURL, token)
+		if err == nil {
+			return status, nil
+		}
+		if isTelegramPairingNoActiveLocalToken(err) {
+			return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+		}
+		lastErr = err
+		if !isTelegramPairingConnectionError(err) {
+			return telegramPairingStatus{}, err
+		}
+	}
+	if lastErr != nil && !isTelegramPairingConnectionError(lastErr) {
+		return telegramPairingStatus{}, lastErr
+	}
+	return telegramPairingStatus{}, errTelegramPairingServerUnavailable
+}
+
+func requestTelegramPairingLocal(ctx context.Context, baseURL, token string) (telegramPairingStatus, error) {
+	body, err := json.Marshal(map[string]string{"token": token})
+	if err != nil {
+		return telegramPairingStatus{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/api/telegram/pairing/chat-id", bytes.NewReader(body))
+	if err != nil {
+		return telegramPairingStatus{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	httpClient := &http.Client{Timeout: 2 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return telegramPairingStatus{}, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return telegramPairingStatus{}, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return telegramPairingStatus{}, telegramPairingHTTPError{status: resp.StatusCode, body: string(data)}
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(data, &res); err != nil {
+		return telegramPairingStatus{}, fmt.Errorf("parse response: %w", err)
+	}
+	return telegramPairingStatusFromMap(res), nil
+}
+
+func isTelegramPairingConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "request failed") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host")
+}
+
+func isTelegramPairingNoActiveLocalToken(err error) bool {
+	var httpErr telegramPairingHTTPError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	return httpErr.status == http.StatusNotFound &&
+		strings.Contains(httpErr.body, "no running Telegram channel is using this bot token")
 }
 
 func telegramPairingStatusFromMap(res map[string]any) telegramPairingStatus {

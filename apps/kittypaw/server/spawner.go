@@ -170,6 +170,28 @@ func (s *ChannelSpawner) TelegramLastChatID(accountID, token string) (string, bo
 	return chatID, found, true
 }
 
+// TelegramLastChatIDByToken returns the latest chat_id observed by any live
+// Telegram channel using token. It is used by localhost setup flows before the
+// target account exists on disk, where account-scoped API-key discovery cannot
+// yet succeed but the running server may already be consuming that bot token.
+func (s *ChannelSpawner) TelegramLastChatIDByToken(token string) (accountID, chatID string, found, active bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for key, rc := range s.running {
+		if key.ChannelType != string(core.EventTelegram) || rc.config.Token != token {
+			continue
+		}
+		reporter, ok := rc.ch.(lastChatIDReporter)
+		if !ok {
+			return key.AccountID, "", false, true
+		}
+		chatID, found := reporter.LastChatID()
+		return key.AccountID, chatID, found, true
+	}
+	return "", "", false, false
+}
+
 // ReplaceSpawn stops the existing channel for (accountID, ch.Name()) if
 // any and spawns a new one. Used when a channel's config has changed.
 func (s *ChannelSpawner) ReplaceSpawn(accountID string, ch channel.Channel, cfg core.ChannelConfig) error {
