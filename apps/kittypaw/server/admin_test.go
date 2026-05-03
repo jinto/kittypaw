@@ -137,14 +137,14 @@ func TestAddAccount_StoresDeps(t *testing.T) {
 }
 
 // TestAddAccount_RollbackRemovesDeps: if AddAccount fails after storing deps,
-// the map entry must be cleaned up. Use a family-with-channels failure which
+// the map entry must be cleaned up. Use a team-space-with-channels failure which
 // rejects AFTER ValidateAccountID but BEFORE accountDeps insertion — we just
 // need to ensure the map never ends up with a dangling entry.
 func TestAddAccount_RollbackPreservesDepsMap(t *testing.T) {
 	root := t.TempDir()
 	srv := newServerForAdminTest(t, root, nil)
 
-	// family with channels is rejected by ValidateFamilyAccounts BEFORE OpenAccountDeps
+	// team-space with channels is rejected by ValidateTeamSpaceAccounts BEFORE OpenAccountDeps
 	fam := accountForDirectAdd(root, "family", true, []core.ChannelConfig{
 		{ChannelType: core.ChannelTelegram, Token: "f"},
 	})
@@ -211,8 +211,8 @@ func TestAddAccount_ChannelCollision(t *testing.T) {
 	}
 }
 
-// TestAddAccount_FamilyWithChannelsRejected guards the family invariant:
-// a hot-added family account must never declare channels.
+// TestAddAccount_FamilyWithChannelsRejected guards the team-space invariant:
+// a hot-added team-space account must never declare channels.
 func TestAddAccount_FamilyWithChannelsRejected(t *testing.T) {
 	root := t.TempDir()
 	srv := newServerForAdminTest(t, root, nil)
@@ -221,7 +221,7 @@ func TestAddAccount_FamilyWithChannelsRejected(t *testing.T) {
 		{ChannelType: core.ChannelTelegram, Token: "f"},
 	})
 	if err := srv.AddAccount(fam); err == nil {
-		t.Error("family account with channels: want error, got nil")
+		t.Error("team-space account with channels: want error, got nil")
 	}
 	if srv.accountRegistry.Get("family") != nil {
 		t.Error("family leaked into registry despite validation failure")

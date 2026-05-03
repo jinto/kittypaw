@@ -438,8 +438,11 @@ func validateSetupConfig(cfgDir, accountID string, cfg *core.Config) error {
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		return fmt.Errorf("channel validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(finalAccounts); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	if err := core.ValidateTeamSpaceAccounts(finalAccounts); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(finalAccounts); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 	return nil
 }

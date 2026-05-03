@@ -49,8 +49,11 @@ func (s *Server) validateAccountConfigUpdateWithKakaoAPIURLLocked(accountID stri
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		return fmt.Errorf("channel validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(accounts); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	if err := core.ValidateTeamSpaceAccounts(accounts); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(accounts); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 	return nil
 }

@@ -25,7 +25,7 @@ var ErrAccountNotActive = errors.New("account not active")
 // live server: opens its deps, builds a session, hot-wires it into
 // the AccountRegistry / AccountRouter / ChannelSpawner, and spawns its
 // channels — all without a server restart. This powers AC-U3 (30-second
-// add of a new family member).
+// add of a new team-space member).
 //
 // Invariants (enforced under accountMu so two concurrent admin calls
 // can't corrupt state):
@@ -33,7 +33,8 @@ var ErrAccountNotActive = errors.New("account not active")
 //   - Bot-token / Kakao-URL collisions against live accounts are
 //     rejected via ValidateAccountChannels BEFORE any channel spawn —
 //     otherwise the new channel would silently steal updates.
-//   - Family accounts must not declare channels (ValidateFamilyAccounts).
+//   - Team-space accounts must not declare channels (ValidateTeamSpaceAccounts).
+//   - Team-space members must resolve to existing accounts.
 //   - Any failure after a side-effect (registry, router, accountList,
 //     spawner) unwinds every earlier side-effect in reverse order.
 //     Deps opened by OpenAccountDeps are also closed on failure.
@@ -72,8 +73,12 @@ func (s *Server) AddAccount(t *core.Account) error {
 	if err := core.ValidateAccountChannels(snapshot); err != nil {
 		return fmt.Errorf("channel validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(append(append([]*core.Account(nil), s.accountList...), t)); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	proposedAccounts := append(append([]*core.Account(nil), s.accountList...), t)
+	if err := core.ValidateTeamSpaceAccounts(proposedAccounts); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(proposedAccounts); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 
 	td, err := OpenAccountDeps(t)

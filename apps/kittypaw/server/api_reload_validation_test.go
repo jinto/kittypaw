@@ -15,7 +15,7 @@ import (
 
 // AC-RELOAD-VALIDATION: pin the symmetry contract with StartChannels and
 // AddAccount — the reload path MUST run ValidateAccountChannels and
-// ValidateFamilyAccounts before any state mutation. These tests cover the
+// ValidateTeamSpaceAccounts before any state mutation. These tests cover the
 // two classes of invalid config that the validators catch:
 //   (1) a new default-account bot_token that collides with a live peer,
 //   (2) a default account flipping is_shared=true while still owning channels.
@@ -106,9 +106,9 @@ func TestHandleReload_DuplicateTelegramToken_Rejects(t *testing.T) {
 }
 
 // TestHandleReload_FamilyWithChannels_Rejects locks in the coordinator-only
-// rule for shared accounts: a reload that flips is_shared=true while still
-// declaring [telegram]/[kakao] channels must 409. A family account owning a
-// chat channel would silently intercept updates meant for the personal
+// rule for team-space accounts: a reload that flips is_shared=true while still
+// declaring [telegram]/[kakao] channels must 409. A team-space account owning
+// a chat channel would silently intercept updates meant for the personal
 // account that actually owns the real bot_token.
 func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 	newCfg := core.DefaultConfig()
@@ -139,8 +139,8 @@ func TestHandleReload_FamilyWithChannels_Rejects(t *testing.T) {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "shared account validation") {
-		t.Errorf("body = %q, want 'shared account validation' prefix", body)
+	if !strings.Contains(string(body), "team space validation") {
+		t.Errorf("body = %q, want 'team space validation' prefix", body)
 	}
 
 	if srv.config.LLM.APIKey != "old-key" {

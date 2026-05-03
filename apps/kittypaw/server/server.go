@@ -494,13 +494,15 @@ func (s *Server) ProcessEvent(ctx context.Context, event core.Event) (string, er
 // channel configs, and starts the dispatch and retry goroutines. Must be
 // called before ListenAndServe.
 //
-// Two startup validations run BEFORE any channel spawns:
+// Startup validations run BEFORE any channel spawns:
 //   - ValidateAccountChannels: a single Telegram bot token / Kakao relay
 //     URL cannot be claimed by two accounts (C3 — prevents silent update
 //     races where one account's bot steals another's messages).
-//   - ValidateFamilyAccounts: shared accounts must not declare channels
-//     (C10 — shared is a coordinator, not a channel owner; a misconfigured
-//     [telegram] on shared would race the real personal bot for updates).
+//   - ValidateTeamSpaceAccounts: team-space accounts must not declare channels
+//     (C10 — team-space is a coordinator, not a channel owner; a misconfigured
+//     [telegram] on team-space would race the real personal bot for updates).
+//   - ValidateTeamSpaceMemberships: configured members must resolve to
+//     existing accounts before Fanout.send can target them.
 func (s *Server) StartChannels(ctx context.Context) error {
 	accountChannels := make(map[string][]core.ChannelConfig, len(s.accountList))
 	for _, t := range s.accountList {
@@ -513,8 +515,11 @@ func (s *Server) StartChannels(ctx context.Context) error {
 	if err := core.ValidateAccountChannels(accountChannels); err != nil {
 		return fmt.Errorf("channel config validation: %w", err)
 	}
-	if err := core.ValidateFamilyAccounts(s.accountList); err != nil {
-		return fmt.Errorf("shared account validation: %w", err)
+	if err := core.ValidateTeamSpaceAccounts(s.accountList); err != nil {
+		return fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(s.accountList); err != nil {
+		return fmt.Errorf("team-space membership validation: %w", err)
 	}
 
 	s.spawner = NewChannelSpawner(ctx, s.eventCh)

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -149,6 +150,23 @@ func TestServerNewUsesMasterAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"api_key":"master-key"`) {
 		t.Fatalf("bootstrap body = %q, want master api key", rec.Body.String())
+	}
+}
+
+func TestStartChannelsRejectsUnknownTeamSpaceMember(t *testing.T) {
+	root := t.TempDir()
+	teamDeps := buildAccountDeps(t, root, "team", &core.Config{
+		IsShared:  true,
+		TeamSpace: core.TeamSpaceConfig{Members: []string{"ghost"}},
+	})
+	srv := New([]*AccountDeps{teamDeps}, "test")
+
+	err := srv.StartChannels(context.Background())
+	if err == nil {
+		t.Fatal("expected membership validation error")
+	}
+	if !strings.Contains(err.Error(), "team-space membership validation") {
+		t.Fatalf("error = %v, want membership validation", err)
 	}
 }
 

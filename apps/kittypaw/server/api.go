@@ -611,7 +611,7 @@ func (s *Server) handleCheckpointRollback(w http.ResponseWriter, r *http.Request
 //
 // Validation contract (symmetric with StartChannels and AddAccount): the
 // proposed config is checked against live accounts BEFORE any state swap.
-// A duplicate Telegram bot_token or a family account with channels is
+// A duplicate Telegram bot_token or a team-space account with channels is
 // rejected with 409 Conflict, leaving s.config and the spawner untouched.
 // Pinned by TestHandleReload_DuplicateTelegramToken_Rejects and
 // TestHandleReload_FamilyWithChannels_Rejects.
@@ -644,8 +644,8 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 	defer s.accountMu.Unlock()
 
 	// Build the would-be-final snapshot (selected default account substituted with
-	// the proposed cfg, all other accounts as-is) and run the same two
-	// validators StartChannels / AddAccount do.
+	// the proposed cfg, all other accounts as-is) and run the same validators
+	// StartChannels / AddAccount do.
 	snapshot := make(map[string][]core.ChannelConfig, len(s.accountList)+1)
 	accounts := make([]*core.Account, 0, len(s.accountList)+1)
 	defaultSeen := false
@@ -677,9 +677,14 @@ func (s *Server) handleReload(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusConflict, "channel validation: "+err.Error())
 		return
 	}
-	if err := core.ValidateFamilyAccounts(accounts); err != nil {
-		slog.Error("reload rejected", "reason", "shared_account_with_channels", "error", err)
-		writeError(w, http.StatusConflict, "shared account validation: "+err.Error())
+	if err := core.ValidateTeamSpaceAccounts(accounts); err != nil {
+		slog.Error("reload rejected", "reason", "team_space_account_with_channels", "error", err)
+		writeError(w, http.StatusConflict, "team space validation: "+err.Error())
+		return
+	}
+	if err := core.ValidateTeamSpaceMemberships(accounts); err != nil {
+		slog.Error("reload rejected", "reason", "team_space_membership", "error", err)
+		writeError(w, http.StatusConflict, "team-space membership validation: "+err.Error())
 		return
 	}
 
