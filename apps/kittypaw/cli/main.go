@@ -2244,6 +2244,12 @@ func bootstrap() ([]*server.AccountDeps, core.TopLevelServerConfig, error) {
 			return nil, core.TopLevelServerConfig{}, fmt.Errorf("server.toml default_account %q not found under %s", serverCfg.DefaultAccount, accountsRoot)
 		}
 	}
+	if err := core.ValidateTeamSpaceAccounts(accounts); err != nil {
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("team space validation: %w", err)
+	}
+	if err := core.ValidateTeamSpaceMemberships(accounts); err != nil {
+		return nil, core.TopLevelServerConfig{}, fmt.Errorf("team-space membership validation: %w", err)
+	}
 
 	deps := make([]*server.AccountDeps, 0, len(accounts))
 	closeOnErr := func() {

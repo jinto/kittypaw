@@ -547,6 +547,27 @@ func TestBootstrapRejectsMissingConfiguredDefaultAccount(t *testing.T) {
 	}
 }
 
+func TestBootstrapRejectsUnknownTeamSpaceMemberBeforeOpeningDeps(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", root)
+	t.Setenv("KITTYPAW_ACCOUNT", "")
+	mustWriteTestConfigWith(t, filepath.Join(root, "accounts", "team", "config.toml"), func(cfg *core.Config) {
+		cfg.IsShared = true
+		cfg.TeamSpace.Members = []string{"ghost"}
+	})
+
+	_, _, err := bootstrap()
+	if err == nil {
+		t.Fatal("expected membership validation error")
+	}
+	if !strings.Contains(err.Error(), "team-space membership validation") {
+		t.Fatalf("bootstrap error = %v, want team-space membership validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "accounts", "team", "data")); !os.IsNotExist(statErr) {
+		t.Fatalf("account deps were opened before validation; data dir stat err = %v", statErr)
+	}
+}
+
 func TestResolveServeBindUsesServerTomlUnlessFlagChanged(t *testing.T) {
 	flagBind = ":3000"
 	cmd := newServerStartCmd()
