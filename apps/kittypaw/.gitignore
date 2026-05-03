@@ -35,6 +35,7 @@ Thumbs.db
 
 # Temp
 /tmp/
+.worktrees/
 
 # Competitors (cloned for reference, not part of project)
 /competitors/
