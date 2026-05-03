@@ -179,7 +179,11 @@ func (h *OAuthHandler) HandleCLICallback(cfg CLILoginConfig) http.HandlerFunc {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, cliCodePageHTML, displayCode)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			_, _ = w.Write([]byte(CLIAuthCodePageHTML(displayCode)))
 
 		default:
 			http.Error(w, "invalid mode in state", http.StatusBadRequest)
@@ -210,24 +214,3 @@ func (h *OAuthHandler) HandleCLIExchange(cfg CLILoginConfig) http.HandlerFunc {
 		_ = json.NewEncoder(w).Encode(tokens)
 	}
 }
-
-const cliCodePageHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>KittyPaw Login</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f7; }
-  .card { background: white; border-radius: 12px; padding: 48px; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.1); }
-  .code { font-size: 48px; font-weight: 700; letter-spacing: 8px; color: #1d1d1f; margin: 24px 0; font-family: 'SF Mono', 'Fira Code', monospace; }
-  .hint { color: #86868b; font-size: 14px; }
-</style>
-</head>
-<body>
-<div class="card">
-  <h2>Enter this code in your terminal</h2>
-  <div class="code">%s</div>
-  <p class="hint">This code expires in 5 minutes.</p>
-</div>
-</body>
-</html>`

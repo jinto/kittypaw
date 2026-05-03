@@ -222,6 +222,11 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 	r.Group(func(r chi.Router) {
 		r.Use(identityOnly)
+		r.Get("/", handlePortalHome(cfg))
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(identityOnly)
 		r.Use(ratelimit.Middleware(limiter, "refresh"))
 		r.Post("/auth/devices/refresh", oauthHandler.HandleDeviceRefresh())
 	})

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -446,7 +447,27 @@ func writeHTMLMessage(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, "<!doctype html><html><body><p>%s</p><p><a href=\"/\">Return to KittyChat</a></p></body></html>", message)
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KittyChat sign-in</title>
+  <link rel="stylesheet" href="/assets/style.css?v=20260504-1">
+</head>
+<body>
+  <main class="entry-shell auth-shell">
+    <section class="entry-panel auth-message-panel">
+      <p class="eyebrow">KittyChat</p>
+      <h1>Sign-in needs attention</h1>
+      <p class="lede">%s</p>
+      <div class="entry-actions">
+        <a class="primary-action" href="/">Return to KittyChat</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>`, html.EscapeString(message))
 }
 
 type proxyRecorder struct {

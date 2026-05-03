@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,38 @@ func TestDiscoveryReturnsChatRelayURL(t *testing.T) {
 	}
 }
 
+func TestPortalHomeEndpoint(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ChatRelayURL = "https://chat.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want html", ct)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		`id="portal-home"`,
+		`KittyPaw Portal`,
+		`href="https://chat.kittypaw.app"`,
+		`href="/discovery"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("portal home missing %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestDiscoveryReturnsPortalAuthBaseURLAndAPIBaseURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.BaseURL = "https://portal.kittypaw.app/"
@@ -203,6 +236,7 @@ func TestSplitHostsRestrictIdentityRoutesToPortalHost(t *testing.T) {
 		path   string
 	}{
 		{method: http.MethodGet, path: "/discovery"},
+		{method: http.MethodGet, path: "/"},
 		{method: http.MethodGet, path: "/.well-known/jwks.json"},
 		{method: http.MethodGet, path: "/auth/google"},
 		{method: http.MethodPost, path: "/auth/devices/refresh"},

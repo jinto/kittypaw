@@ -76,6 +76,12 @@ func TestRouterServesHostedChatEntry(t *testing.T) {
 	if body := rr.Body.String(); strings.Contains(body, `disabled`) {
 		t.Fatalf("login link should be enabled now that PKCE BFF is live:\n%s", body)
 	}
+	if body := rr.Body.String(); strings.Contains(body, `class="secondary-action" href="/manual/"`) {
+		t.Fatalf("manual qa link should not render as a secondary button:\n%s", body)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, `class="operator-link" href="/manual/"`) {
+		t.Fatalf("manual qa should render as a small operator link:\n%s", body)
+	}
 }
 
 func TestRouterServesHostedChatApp(t *testing.T) {

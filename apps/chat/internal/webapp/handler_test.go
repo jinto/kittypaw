@@ -118,6 +118,40 @@ func TestCallbackExchangesCodeAndSetsHttpOnlySessionCookie(t *testing.T) {
 	}
 }
 
+func TestCallbackFailurePageUsesStyledShell(t *testing.T) {
+	handler := newTestHandler(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(tokenResponse{
+			AccessToken:  "rejected-token",
+			RefreshToken: "refresh-token",
+			TokenType:    "Bearer",
+			ExpiresIn:    900,
+		})
+	}, nil)
+
+	state := startLogin(t, handler)
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=oauth-code&state="+url.QueryEscape(state), nil)
+	rr := httptest.NewRecorder()
+
+	handler.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("content-type = %q, want html", ct)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`class="entry-panel auth-message-panel"`,
+		`Login token was rejected.`,
+		`Return to KittyChat`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("styled callback page missing %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestAppAPIRoutesProxiesWithServerSideBearerToken(t *testing.T) {
 	var authHeader string
 	openAI := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
