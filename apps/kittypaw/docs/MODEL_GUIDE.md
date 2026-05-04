@@ -7,6 +7,8 @@
 
 This is a fact-only running log of which models work as a KittyPaw assistant, which fail, and **why**. Each row is reproducible from the [Methodology](#8-methodology) section. Speculation is labeled.
 
+> **로컬에서 직접 `/model` 시연하기**: `make dev-models` (격리된 dev harness — 사용자 `~/.kittypaw/` 무영향). 사용 가이드 → [DEV_MODELS.md](./DEV_MODELS.md).
+
 ---
 
 ## 1. Decision Matrix (TL;DR)
