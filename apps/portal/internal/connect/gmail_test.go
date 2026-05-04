@@ -44,6 +44,9 @@ func TestGmailProviderAuthURL(t *testing.T) {
 	if q.Get("include_granted_scopes") != "true" {
 		t.Fatalf("include_granted_scopes = %q", q.Get("include_granted_scopes"))
 	}
+	if q.Get("prompt") != "consent" {
+		t.Fatalf("prompt = %q", q.Get("prompt"))
+	}
 }
 
 func TestGmailProviderExchangeAndRefresh(t *testing.T) {

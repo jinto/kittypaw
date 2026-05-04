@@ -55,6 +55,7 @@ func (p *GmailProvider) AuthURL(state, verifier string) string {
 		"code_challenge_method":  {"S256"},
 		"access_type":            {"offline"},
 		"include_granted_scopes": {"true"},
+		"prompt":                 {"consent"},
 	}
 	return p.authURL() + "?" + params.Encode()
 }
