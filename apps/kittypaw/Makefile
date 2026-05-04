@@ -3,7 +3,7 @@ PKG       := ./cli
 BUILDTIME := $(shell TZ=Asia/Seoul date +%Y-%m-%d\ %H:%M\ KST)
 LDFLAGS   := -X 'main.version=dev ($(BUILDTIME))'
 
-.PHONY: build test test-unit test-integration test-e2e test-ci lint fmt run clean eval-secretary eval-user-flows eval-local smoke
+.PHONY: build test test-unit test-integration test-e2e test-ci lint fmt run clean eval-secretary eval-user-flows eval-local smoke dev-models-setup dev-models-server dev-models-chat dev-models-stop dev-models-clean dev-models-status
 
 build:
 	@mkdir -p bin
@@ -49,3 +49,23 @@ smoke: eval-local
 
 clean:
 	rm -f $(BINARY)
+
+# Local /model command demo harness — isolated KittyPaw HOME so the user's
+# real ~/.kittypaw/ daemon is untouched. See scripts/dev-models.sh.
+dev-models-setup:
+	scripts/dev-models.sh setup
+
+dev-models-server: build
+	scripts/dev-models.sh server
+
+dev-models-chat:
+	scripts/dev-models.sh chat
+
+dev-models-stop:
+	scripts/dev-models.sh stop
+
+dev-models-clean:
+	scripts/dev-models.sh clean --yes
+
+dev-models-status:
+	scripts/dev-models.sh status
