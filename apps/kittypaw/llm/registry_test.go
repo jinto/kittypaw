@@ -181,6 +181,105 @@ func TestEnvAPIKeyCerebras(t *testing.T) {
 	_ = os.Unsetenv("CEREBRAS_API_KEY")
 }
 
+func TestNewProviderGroq(t *testing.T) {
+	p, err := NewProvider("groq", "test-key", "llama-3.3-70b-versatile", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(groq): %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider for groq, got %T", p)
+	}
+	if op.apiMode != openAIAPIModeChat {
+		t.Errorf("apiMode = %q, want chat", op.apiMode)
+	}
+	if op.baseURL != groqDefaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", op.baseURL, groqDefaultBaseURL)
+	}
+}
+
+func TestNewProviderGroqAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("GROQ_API_KEY", "groq-env-key")
+	p, err := NewProvider("groq", "", "llama-3.3-70b-versatile", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(groq): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.apiKey != "groq-env-key" {
+		t.Errorf("apiKey = %q, want from GROQ_API_KEY", op.apiKey)
+	}
+}
+
+func TestNewProviderDeepSeek(t *testing.T) {
+	p, err := NewProvider("deepseek", "test-key", "deepseek-chat", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(deepseek): %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider for deepseek, got %T", p)
+	}
+	if op.baseURL != deepseekDefaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", op.baseURL, deepseekDefaultBaseURL)
+	}
+}
+
+func TestNewProviderDeepSeekAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "ds-env-key")
+	p, err := NewProvider("deepseek", "", "deepseek-chat", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(deepseek): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.apiKey != "ds-env-key" {
+		t.Errorf("apiKey = %q, want from DEEPSEEK_API_KEY", op.apiKey)
+	}
+}
+
+func TestNewProviderOpenRouter(t *testing.T) {
+	p, err := NewProvider("openrouter", "test-key", "qwen/qwen3-235b-a22b-instruct-2507", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(openrouter): %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider for openrouter, got %T", p)
+	}
+	if op.baseURL != openRouterDefaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", op.baseURL, openRouterDefaultBaseURL)
+	}
+}
+
+func TestNewProviderOpenRouterAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "or-env-key")
+	p, err := NewProvider("openrouter", "", "qwen/qwen3-235b", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(openrouter): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.apiKey != "or-env-key" {
+		t.Errorf("apiKey = %q, want from OPENROUTER_API_KEY", op.apiKey)
+	}
+}
+
+func TestNewProviderBaseURLOverridesAcrossOpenAICompatible(t *testing.T) {
+	// Custom base_url wins for groq / deepseek / openrouter the same way it
+	// does for cerebras / ollama / openai.
+	for _, prov := range []string{"groq", "deepseek", "openrouter"} {
+		p, err := NewProviderFromModelConfig(core.ModelConfig{
+			Provider:  prov,
+			APIKey:    "k",
+			Model:     "m",
+			MaxTokens: 256,
+			BaseURL:   "http://custom/v1/chat/completions",
+		})
+		if err != nil {
+			t.Fatalf("NewProviderFromModelConfig(%s): %v", prov, err)
+		}
+		op := p.(*OpenAIProvider)
+		if op.baseURL != "http://custom/v1/chat/completions" {
+			t.Errorf("%s baseURL = %q, want override", prov, op.baseURL)
+		}
+	}
+}
+
 func TestNewProviderFromModelConfig(t *testing.T) {
 	p, err := NewProviderFromModelConfig(core.ModelConfig{
 		Provider:      "openai",

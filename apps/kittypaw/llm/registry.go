@@ -16,6 +16,13 @@ const (
 	// can lift this via ModelConfig.ContextWindow.
 	cerebrasDefaultBaseURL    = "https://api.cerebras.ai/v1/chat/completions"
 	cerebrasFreeContextWindow = 8192
+
+	// Groq, DeepSeek, OpenRouter are also OpenAI Chat Completions-compatible.
+	// Context windows vary per model so no default cap is forced — callers
+	// can opt into one via ModelConfig.ContextWindow.
+	groqDefaultBaseURL       = "https://api.groq.com/openai/v1/chat/completions"
+	deepseekDefaultBaseURL   = "https://api.deepseek.com/v1/chat/completions"
+	openRouterDefaultBaseURL = "https://openrouter.ai/api/v1/chat/completions"
 )
 
 // Option is a functional option for NewProvider.
@@ -93,8 +100,34 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 			WithContextWindow(contextWindow),
 		), nil
 
+	case "groq", "deepseek", "openrouter":
+		baseURL := openAICompatibleBaseURL(provider)
+		if o.baseURL != "" {
+			baseURL = o.baseURL
+		}
+		openaiOpts := []OpenAIOption{WithBaseURL(baseURL)}
+		if o.contextWindow > 0 {
+			openaiOpts = append(openaiOpts, WithContextWindow(o.contextWindow))
+		}
+		return NewOpenAI(apiKey, model, maxTokens, openaiOpts...), nil
+
 	default:
 		return nil, fmt.Errorf("llm: unknown provider %q", provider)
+	}
+}
+
+// openAICompatibleBaseURL returns the canonical Chat Completions endpoint for
+// providers that share the OpenAI wire shape but differ only in host / path.
+func openAICompatibleBaseURL(provider string) string {
+	switch strings.ToLower(provider) {
+	case "groq":
+		return groqDefaultBaseURL
+	case "deepseek":
+		return deepseekDefaultBaseURL
+	case "openrouter":
+		return openRouterDefaultBaseURL
+	default:
+		return ""
 	}
 }
 
@@ -130,6 +163,12 @@ func envAPIKey(provider string) string {
 		return os.Getenv("GEMINI_API_KEY")
 	case "cerebras":
 		return os.Getenv("CEREBRAS_API_KEY")
+	case "groq":
+		return os.Getenv("GROQ_API_KEY")
+	case "deepseek":
+		return os.Getenv("DEEPSEEK_API_KEY")
+	case "openrouter":
+		return os.Getenv("OPENROUTER_API_KEY")
 	default:
 		return ""
 	}
