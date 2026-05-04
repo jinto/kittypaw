@@ -35,6 +35,8 @@ WEB_REDIRECT_URI_ALLOWLIST=https://chat.kittypaw.app/auth/callback
 `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`은 KittyPaw identity login용입니다.
 Gmail restricted scopes는 `CONNECT_GOOGLE_CLIENT_ID`/
 `CONNECT_GOOGLE_CLIENT_SECRET`에 별도 OAuth client를 설정합니다.
+Gmail OAuth 배포 전/후 체크리스트는
+`docs/operations/connect-gmail-oauth.md`를 따릅니다.
 
 nginx의 `server_name`에는 portal과 connect host를 모두 넣습니다:
 
