@@ -8,7 +8,15 @@ import (
 	"github.com/jinto/kittypaw/core"
 )
 
-const ollamaDefaultBaseURL = "http://localhost:11434/v1/chat/completions"
+const (
+	ollamaDefaultBaseURL = "http://localhost:11434/v1/chat/completions"
+
+	// Cerebras Cloud is OpenAI Chat Completions-compatible. The free tier
+	// (1M tokens/day, no expiry) caps context at 8,192 tokens; paid tiers
+	// can lift this via ModelConfig.ContextWindow.
+	cerebrasDefaultBaseURL    = "https://api.cerebras.ai/v1/chat/completions"
+	cerebrasFreeContextWindow = 8192
+)
 
 // Option is a functional option for NewProvider.
 type Option func(*providerOpts)
@@ -71,6 +79,20 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 			WithBaseURL(baseURL),
 		), nil
 
+	case "cerebras":
+		baseURL := cerebrasDefaultBaseURL
+		if o.baseURL != "" {
+			baseURL = o.baseURL
+		}
+		contextWindow := cerebrasFreeContextWindow
+		if o.contextWindow > 0 {
+			contextWindow = o.contextWindow
+		}
+		return NewOpenAI(apiKey, model, maxTokens,
+			WithBaseURL(baseURL),
+			WithContextWindow(contextWindow),
+		), nil
+
 	default:
 		return nil, fmt.Errorf("llm: unknown provider %q", provider)
 	}
@@ -106,6 +128,8 @@ func envAPIKey(provider string) string {
 		return os.Getenv("OPENAI_API_KEY")
 	case "gemini", "google":
 		return os.Getenv("GEMINI_API_KEY")
+	case "cerebras":
+		return os.Getenv("CEREBRAS_API_KEY")
 	default:
 		return ""
 	}
