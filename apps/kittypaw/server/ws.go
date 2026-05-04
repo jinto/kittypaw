@@ -269,6 +269,9 @@ func (s *Server) handleWebSocketWithAccount(
 					}
 				},
 			}
+			// Chat-path /model override fallback. See engine/session.go
+			// ApplyActiveModel doc for the schedule-path isolation contract.
+			runOpts = acct.Session.ApplyActiveModel(runOpts)
 
 			// RunTurn dedupes retries that share clientMsg.TurnID via
 			// Session.turnCache. Empty TurnID falls through to plain

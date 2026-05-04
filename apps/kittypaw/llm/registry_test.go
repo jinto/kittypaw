@@ -198,6 +198,104 @@ func TestNewProviderGroq(t *testing.T) {
 	}
 }
 
+// TestGroqSupportsReasoningFormat pins the whitelist: thinking models
+// (qwen/, openai/gpt-oss prefix) get reasoning_format=parsed; everyone
+// else (Llama family) does not. Without the gate Groq returns 400
+// "reasoning_format is not supported with this model" for Llama models.
+// See MODEL_GUIDE.md § 5.13.
+func TestGroqSupportsReasoningFormat(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{"qwen/qwen3-32b", true},
+		{"openai/gpt-oss-120b", true},
+		{"openai/gpt-oss-20b", true},
+		{"openai/gpt-oss-safeguard-20b", true},
+		{"llama-3.3-70b-versatile", false},
+		{"llama-3.1-8b-instant", false},
+		{"meta-llama/llama-4-scout-17b-16e-instruct", false},
+		{"groq/compound", false},
+		{"whisper-large-v3", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := groqSupportsReasoningFormat(c.model); got != c.want {
+			t.Errorf("groqSupportsReasoningFormat(%q) = %v, want %v", c.model, got, c.want)
+		}
+	}
+}
+
+// TestNewProviderGroq_QwenAutoReasoningFormat: registry case "groq" with
+// a thinking model ID auto-applies WithReasoningFormat("parsed"). Without
+// this the agent loop sees raw <think> tokens in content and exposes them
+// to the chat user (UX broken). § 5.13 measurement evidence.
+func TestNewProviderGroq_QwenAutoReasoningFormat(t *testing.T) {
+	p, err := NewProvider("groq", "k", "qwen/qwen3-32b", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(groq, qwen3-32b): %v", err)
+	}
+	op := p.(*OpenAIProvider)
+	if op.reasoningFormat != "parsed" {
+		t.Errorf("reasoningFormat = %q, want %q (qwen/ prefix → auto)",
+			op.reasoningFormat, "parsed")
+	}
+}
+
+func TestNewProviderGroq_GptOssAutoReasoningFormat(t *testing.T) {
+	p, err := NewProvider("groq", "k", "openai/gpt-oss-120b", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(groq, gpt-oss-120b): %v", err)
+	}
+	op := p.(*OpenAIProvider)
+	if op.reasoningFormat != "parsed" {
+		t.Errorf("reasoningFormat = %q, want %q (openai/gpt-oss prefix → auto)",
+			op.reasoningFormat, "parsed")
+	}
+}
+
+// TestNewProviderGroq_LlamaNoReasoningFormat: Llama family on Groq does
+// NOT get reasoning_format. Sending it would 400 (measured 2026-05-05).
+func TestNewProviderGroq_LlamaNoReasoningFormat(t *testing.T) {
+	p, err := NewProvider("groq", "k", "llama-3.3-70b-versatile", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(groq, llama-3.3): %v", err)
+	}
+	op := p.(*OpenAIProvider)
+	if op.reasoningFormat != "" {
+		t.Errorf("reasoningFormat = %q, want empty (llama → no auto, would 400)",
+			op.reasoningFormat)
+	}
+}
+
+// TestNewProviderDeepSeek_NoReasoningFormat / OpenRouter regression:
+// reasoning_format is Groq-only. deepseek/openrouter models (even those
+// with qwen/ prefix on OpenRouter) must NOT receive the field. The gate
+// in registry.go is `strings.ToLower(provider) == "groq"` — pinning that
+// here.
+func TestNewProviderDeepSeek_NoReasoningFormat(t *testing.T) {
+	p, err := NewProvider("deepseek", "k", "deepseek-chat", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(deepseek): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.reasoningFormat != "" {
+		t.Errorf("reasoningFormat = %q, want empty (deepseek)", op.reasoningFormat)
+	}
+}
+
+func TestNewProviderOpenRouter_NoReasoningFormat(t *testing.T) {
+	// Even with a Qwen-prefix model on OpenRouter, the option must NOT
+	// be applied — OpenRouter's wire is plain OpenAI-compat and an
+	// unknown field could 400 depending on the upstream router.
+	p, err := NewProvider("openrouter", "k", "qwen/qwen3-235b-a22b-instruct-2507", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(openrouter): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.reasoningFormat != "" {
+		t.Errorf("reasoningFormat = %q, want empty (openrouter)", op.reasoningFormat)
+	}
+}
+
 func TestNewProviderGroqAPIKeyFromEnv(t *testing.T) {
 	t.Setenv("GROQ_API_KEY", "groq-env-key")
 	p, err := NewProvider("groq", "", "llama-3.3-70b-versatile", 1024)
@@ -234,6 +332,64 @@ func TestNewProviderDeepSeekAPIKeyFromEnv(t *testing.T) {
 	}
 }
 
+func TestNewProviderMistral(t *testing.T) {
+	p, err := NewProvider("mistral", "test-key", "mistral-medium-latest", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(mistral): %v", err)
+	}
+	op, ok := p.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected *OpenAIProvider for mistral, got %T", p)
+	}
+	if op.apiMode != openAIAPIModeChat {
+		t.Errorf("apiMode = %q, want chat", op.apiMode)
+	}
+	if op.baseURL != mistralDefaultBaseURL {
+		t.Errorf("baseURL = %q, want %q", op.baseURL, mistralDefaultBaseURL)
+	}
+	// Mistral 모델은 reasoning_format 비대상 (Groq 전용 옵션). 누설 ❌.
+	if op.reasoningFormat != "" {
+		t.Errorf("reasoningFormat = %q, want empty (Groq-only option)", op.reasoningFormat)
+	}
+}
+
+func TestNewProviderMistralAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "mistral-env-key")
+	p, err := NewProvider("mistral", "", "mistral-medium-latest", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(mistral): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.apiKey != "mistral-env-key" {
+		t.Errorf("apiKey = %q, want from MISTRAL_API_KEY", op.apiKey)
+	}
+}
+
+// TestNewProviderMistral_NoOPENAIKeyContamination: MISTRAL_API_KEY 비어
+// 있고 OPENAI_API_KEY가 박혀있어도 mistral provider는 OPENAI 키를
+// 가져오면 안 됨 (provider identity 분리 — 각 vendor 키는 별도 source).
+func TestNewProviderMistral_NoOPENAIKeyContamination(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "openai-env-key")
+	t.Setenv("MISTRAL_API_KEY", "")
+	_ = os.Unsetenv("MISTRAL_API_KEY")
+
+	p, err := NewProvider("mistral", "", "mistral-medium-latest", 1024)
+	if err != nil {
+		t.Fatalf("NewProvider(mistral): %v", err)
+	}
+	if op := p.(*OpenAIProvider); op.apiKey == "openai-env-key" {
+		t.Errorf("apiKey leaked from OPENAI_API_KEY: %q (mistral must not read OpenAI key)", op.apiKey)
+	}
+}
+
+// TestEnvAPIKeyMistral pins the table entry — case-insensitive lookup,
+// reads MISTRAL_API_KEY only.
+func TestEnvAPIKeyMistral(t *testing.T) {
+	t.Setenv("MISTRAL_API_KEY", "v")
+	if got := envAPIKey("mistral"); got != "v" {
+		t.Errorf("envAPIKey(mistral) = %q, want v", got)
+	}
+}
+
 func TestNewProviderOpenRouter(t *testing.T) {
 	p, err := NewProvider("openrouter", "test-key", "qwen/qwen3-235b-a22b-instruct-2507", 1024)
 	if err != nil {
@@ -260,9 +416,9 @@ func TestNewProviderOpenRouterAPIKeyFromEnv(t *testing.T) {
 }
 
 func TestNewProviderBaseURLOverridesAcrossOpenAICompatible(t *testing.T) {
-	// Custom base_url wins for groq / deepseek / openrouter the same way it
-	// does for cerebras / ollama / openai.
-	for _, prov := range []string{"groq", "deepseek", "openrouter"} {
+	// Custom base_url wins for groq / deepseek / openrouter / mistral the
+	// same way it does for cerebras / ollama / openai.
+	for _, prov := range []string{"groq", "deepseek", "openrouter", "mistral"} {
 		p, err := NewProviderFromModelConfig(core.ModelConfig{
 			Provider:  prov,
 			APIKey:    "k",

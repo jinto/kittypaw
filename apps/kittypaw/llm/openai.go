@@ -44,6 +44,13 @@ type OpenAIProvider struct {
 	baseURL       string
 	apiMode       openAIAPIMode
 	client        *http.Client
+
+	// reasoningFormat is a Groq-only non-standard knob. When set, it is
+	// injected into the chat completions request body. See § 5.13 in
+	// MODEL_GUIDE.md for why qwen/qwen3-32b and openai/gpt-oss-* on Groq
+	// need "parsed" or "hidden" to keep <think> tokens out of `content`.
+	// Empty string = no injection (OpenAI standard / non-Groq providers).
+	reasoningFormat string
 }
 
 // OpenAIOption is a functional option for NewOpenAI.
@@ -77,6 +84,19 @@ func WithContextWindow(size int) OpenAIOption {
 func WithHTTPClient(c *http.Client) OpenAIOption {
 	return func(p *OpenAIProvider) {
 		p.client = c
+	}
+}
+
+// WithReasoningFormat injects Groq's non-standard `reasoning_format` field
+// ("parsed" surfaces reasoning in a separate field, "hidden" drops it) into
+// the chat completions request body. Only meaningful for Groq's thinking
+// models (qwen/qwen3-32b, openai/gpt-oss-*). Sending it to a non-thinking
+// Groq model (llama-3.3-70b-versatile, llama-3.1-8b-instant) returns 400
+// "reasoning_format is not supported with this model" — the registry
+// gates this with groqSupportsReasoningFormat() before applying.
+func WithReasoningFormat(format string) OpenAIOption {
+	return func(p *OpenAIProvider) {
+		p.reasoningFormat = format
 	}
 }
 
@@ -246,6 +266,9 @@ func (o *OpenAIProvider) buildChatRequestBodyWithTools(messages []core.LlmMessag
 	}
 	if len(tools) > 0 {
 		body["tools"] = convertToolsToOpenAI(tools)
+	}
+	if o.reasoningFormat != "" {
+		body["reasoning_format"] = o.reasoningFormat
 	}
 	return body
 }
@@ -426,7 +449,10 @@ func textFromMessage(m core.LlmMessage) string {
 // --- JSON (non-streaming) response parsing ---
 
 type openAIChoiceMessage struct {
-	Content   string                   `json:"content"`
+	// Content is `any` to accept both the OpenAI standard string shape and
+	// the list-of-blocks shape Mistral magistral (and future native-reasoning
+	// models) emit. Unwrap via extractContent.
+	Content   any                      `json:"content"`
 	ToolCalls []openAIResponseToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -541,6 +567,76 @@ func decodeArguments(raw json.RawMessage) (map[string]any, error) {
 	}
 }
 
+// extractContent unwraps the OpenAI Chat Completions `content` field into a
+// final answer string + an optional reasoning string.
+//
+// Two on-the-wire shapes:
+//
+//   - string ("hello") — OpenAI standard, mistral-medium-latest, Groq llama,
+//     Cerebras qwen-3-235b-instruct, ollama/LM Studio, etc.
+//   - list of blocks — Mistral magistral / future native-reasoning models:
+//     [{type:"text", text:"..."},
+//     {type:"thinking", thinking:[{type:"text", text:"..."}], closed:true}, ...]
+//
+// `nil` content (Mistral magistral may emit absent content under some
+// finish_reason values) returns ("", "", nil). Empty arrays / empty text /
+// missing text fields all return zero strings without error.
+//
+// Unknown block types are skipped with a slog.Warn — no JSON-fallback string
+// (silent drop of the raw block was rejected as too lossy in plan v3, JSON
+// re-serialization was rejected as too noisy; warn-and-skip lets ops see
+// novel formats without polluting the assistant message). Truly unexpected
+// content types (number, object) return an error.
+func extractContent(c any) (text, reasoning string, err error) {
+	switch v := c.(type) {
+	case nil:
+		return "", "", nil
+	case string:
+		return v, "", nil
+	case []any:
+		var textB, reasoningB strings.Builder
+		for _, b := range v {
+			block, ok := b.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch block["type"] {
+			case "text":
+				if t, ok := block["text"].(string); ok {
+					textB.WriteString(t)
+				}
+				// missing/non-string text field is a no-op — skip silently
+			case "thinking":
+				// nested thinking array of inner blocks (Mistral magistral)
+				inner, ok := block["thinking"].([]any)
+				if !ok {
+					continue
+				}
+				for _, item := range inner {
+					itemMap, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					if itemMap["type"] == "text" {
+						if t, ok := itemMap["text"].(string); ok {
+							if reasoningB.Len() > 0 {
+								reasoningB.WriteString("\n")
+							}
+							reasoningB.WriteString(t)
+						}
+					}
+				}
+			default:
+				slog.Warn("openai: unknown content block type",
+					"type", block["type"])
+			}
+		}
+		return textB.String(), reasoningB.String(), nil
+	default:
+		return "", "", fmt.Errorf("openai: unexpected content type: %T", c)
+	}
+}
+
 func (o *OpenAIProvider) parseChatJSONResponse(r io.Reader) (*Response, error) {
 	var resp openAIResponse
 	if err := json.NewDecoder(io.LimitReader(r, llmMaxResponseBytes)).Decode(&resp); err != nil {
@@ -554,7 +650,11 @@ func (o *OpenAIProvider) parseChatJSONResponse(r io.Reader) (*Response, error) {
 	)
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		contentText = choice.Message.Content
+		var extractErr error
+		contentText, _, extractErr = extractContent(choice.Message.Content)
+		if extractErr != nil {
+			return nil, fmt.Errorf("openai: %w", extractErr)
+		}
 		if contentText != "" {
 			blocks = append(blocks, core.ContentBlock{
 				Type: core.BlockTypeText,

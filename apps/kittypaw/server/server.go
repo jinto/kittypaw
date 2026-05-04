@@ -640,6 +640,13 @@ func (s *Server) dispatchLoop(ctx context.Context) {
 				}
 			}
 
+			// Chat-path /model override fallback: when the user has set
+			// `/model <id>` and this dispatched event has no explicit
+			// per-event ModelOverride, use the chat-set override. Schedule
+			// path (engine/schedule.go) does NOT call ApplyActiveModel and
+			// keeps its per-job model.
+			runOpts = session.ApplyActiveModel(runOpts)
+
 			var response string
 			var runErr error
 			panicked := false

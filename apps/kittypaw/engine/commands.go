@@ -42,6 +42,8 @@ func tryHandleCommand(ctx context.Context, text string, s *Session) (string, boo
 			return handlePersona(parts[1], s), true
 		}
 		return "사용법: /persona <profile-id>", true
+	case "/model":
+		return handleModel(parts[1:], s), true
 	default:
 		return "", false
 	}
@@ -54,7 +56,9 @@ func handleHelp() string {
 /skills — 스킬 목록
 /run <name> — 스킬 실행
 /teach <설명> — 새 스킬 학습
-/persona <profile-id> — 기본 대화상대 변경`
+/persona <profile-id> — 기본 대화상대 변경
+/model — 현재 LLM 정보 표시
+/model <id> — 채팅 중에 모델 변경 (재시작 시 기본값 복귀)`
 }
 
 func handleStatus(s *Session) string {
@@ -141,6 +145,143 @@ func handleTeach(ctx context.Context, description string, s *Session) string {
 		fmt.Fprintf(&sb, "권한: %s\n", strings.Join(result.Permissions, ", "))
 	}
 	fmt.Fprintf(&sb, "\n코드:\n%s", result.Code)
+	return sb.String()
+}
+
+// handleModel implements `/model` (info) and `/model <id>` (turn-level swap).
+//
+// arg matrix:
+//   - 0 args      → info: current active + registered models list
+//   - 1 arg, blank → usage
+//   - 1 arg, == current active id → "Already on <id>" (no-op, no Set)
+//   - 1 arg, registered id        → Set + "Switched to <id> (this turn only — restart resets to default)"
+//   - 1 arg, unknown id           → "Unknown model: <id>. Available: ..." (no Set)
+//   - >=2 args    → usage
+//
+// Switch state lives in Session.activeModelOverride (atomic.Pointer) and
+// resets on daemon restart — no config.toml mutation. ID match is
+// case-sensitive (config IDs are user-authored exact strings; coercion
+// would mask typos rather than help). Special characters are not
+// validated — IDs come from config which is the trust boundary.
+func handleModel(args []string, s *Session) string {
+	if s == nil || s.Config == nil {
+		return "model 정보를 위한 세션이 준비되지 않았습니다."
+	}
+	models := s.Config.LLM.Models
+	current := currentModelID(s)
+
+	if len(args) == 0 {
+		return formatModelInfo(current, models, s)
+	}
+	if len(args) >= 2 {
+		return modelUsage()
+	}
+	id := strings.TrimSpace(args[0])
+	if id == "" {
+		return modelUsage()
+	}
+	if id == current {
+		return fmt.Sprintf("이미 %q를 사용 중입니다.", id)
+	}
+	if !modelIDExists(id, models) {
+		available := modelIDList(models)
+		if available == "" {
+			return fmt.Sprintf("등록된 모델이 없습니다 — %q로 변경할 수 없습니다.", id)
+		}
+		return fmt.Sprintf("알 수 없는 모델: %q\n사용 가능: %s", id, available)
+	}
+	s.SetActiveModel(id)
+	return fmt.Sprintf("%q로 변경했습니다 (이번 turn부터 적용 — 데몬 재시작 시 기본값으로 복귀).", id)
+}
+
+// currentModelID returns the active model ID — chat-set override > config
+// default > first registered. Empty string when no models are registered.
+func currentModelID(s *Session) string {
+	if id := s.GetActiveModel(); id != "" {
+		return id
+	}
+	if m := s.Config.DefaultModel(); m != nil {
+		return m.ID
+	}
+	return ""
+}
+
+func modelIDExists(id string, models []core.ModelConfig) bool {
+	for i := range models {
+		if models[i].ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func modelIDList(models []core.ModelConfig) string {
+	if len(models) == 0 {
+		return ""
+	}
+	ids := make([]string, len(models))
+	for i := range models {
+		ids[i] = models[i].ID
+	}
+	return strings.Join(ids, ", ")
+}
+
+func modelUsage() string {
+	return "사용법: /model (정보 표시) 또는 /model <id> (모델 변경)"
+}
+
+// formatModelInfo prints the active model + the list of registered alternatives.
+// Fields shown match what KittyPaw actually stores in core.ModelConfig:
+// provider, model, base_url, context_window, max_tokens. Temperature and
+// thinking flag are deliberately omitted — they are not config fields, and
+// inferring them from model-name heuristics would lie about state.
+func formatModelInfo(current string, models []core.ModelConfig, s *Session) string {
+	var sb strings.Builder
+	if current == "" {
+		sb.WriteString("현재 모델: (없음 — 등록된 모델이 없습니다)\n")
+	} else {
+		var active *core.ModelConfig
+		for i := range models {
+			if models[i].ID == current {
+				active = &models[i]
+				break
+			}
+		}
+		if active == nil {
+			fmt.Fprintf(&sb, "현재 모델: %s (config 등록 정보를 찾지 못했습니다)\n", current)
+		} else {
+			fmt.Fprintf(&sb, "현재 모델: %s\n", active.ID)
+			fmt.Fprintf(&sb, "  provider: %s\n", active.Provider)
+			fmt.Fprintf(&sb, "  model: %s\n", active.Model)
+			if active.BaseURL != "" {
+				fmt.Fprintf(&sb, "  base_url: %s\n", active.BaseURL)
+			} else {
+				sb.WriteString("  base_url: (provider 기본값)\n")
+			}
+			if active.ContextWindow > 0 {
+				fmt.Fprintf(&sb, "  context_window: %d\n", active.ContextWindow)
+			}
+			if active.MaxTokens > 0 {
+				fmt.Fprintf(&sb, "  max_tokens: %d\n", active.MaxTokens)
+			}
+			if s.GetActiveModel() != "" {
+				sb.WriteString("  (이번 채팅 세션 한정 — 데몬 재시작 시 기본값으로 복귀)\n")
+			}
+		}
+	}
+
+	if len(models) == 0 {
+		return sb.String() + "\n등록된 모델: 없음"
+	}
+	sb.WriteString("\n등록된 모델:\n")
+	for i := range models {
+		marker := "  "
+		if models[i].ID == current {
+			marker = "* "
+		}
+		fmt.Fprintf(&sb, "%s%s — %s/%s\n", marker, models[i].ID, models[i].Provider, models[i].Model)
+	}
+	sb.WriteString("\n변경: /model <id>")
 	return sb.String()
 }
 

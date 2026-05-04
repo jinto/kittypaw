@@ -462,6 +462,9 @@ R3 production agent framework 채택 조사(2026-05-05)에서 발견 — Qwen3-C
 | `groq` | `https://api.groq.com/openai/v1/chat/completions` | `GROQ_API_KEY` | 모델별 |
 | `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` | 모델별 |
 | `openrouter` | `https://openrouter.ai/api/v1/chat/completions` | `OPENROUTER_API_KEY` | 모델별 |
+| `mistral` | `https://api.mistral.ai/v1/chat/completions` | `MISTRAL_API_KEY` | 모델별 (대부분 128K~256K) |
+
+**Provider identity 분리 원칙**: 같은 OpenAI Chat Completions wire를 공유하더라도 **provider 명시**로 등록 (`provider="mistral"` 등). 그래야 KittyPaw `envAPIKey`가 vendor별 ENV(`MISTRAL_API_KEY` 등)를 정확히 lookup. 우회로 `provider="openai" + base_url=...mistral.ai`를 쓰면 `OPENAI_API_KEY`를 가져와 키 충돌. **Gemini OpenAI-compat endpoint** (`/v1beta/openai/chat/completions`)는 현재 `provider="gemini"` 분기가 자체 wire(GeminiProvider)로 라우팅되므로 사용 시 `provider="openai" + base_url override` 우회만 가능 — 별도 phase에서 `gemini-openai` sub-mode 추가 검토.
 
 ### 6.2 max_tokens 권장값
 

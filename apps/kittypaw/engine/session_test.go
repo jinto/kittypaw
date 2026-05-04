@@ -504,3 +504,87 @@ func TestAppendSuggestionForBranchResponse_SilenceWindowSuppresses(t *testing.T)
 		t.Errorf("silenced candidate must not surface; got %q", got)
 	}
 }
+
+// --- ApplyActiveModel: chat-path /model swap fold-in ---
+//
+// Contract (engine/session.go ApplyActiveModel doc):
+//   - active=="" → returns opts unchanged
+//   - opts==nil + active=="x" → returns &RunOptions{ModelOverride:"x"}
+//   - opts.ModelOverride=="" + active=="x" → returns copy with override="x"
+//   - opts.ModelOverride=="y" + active=="x" → returns opts unchanged
+//     (explicit per-call wins, schedule path is unaffected by chat /model)
+//
+// The schedule-path isolation is enforced by NOT calling ApplyActiveModel
+// in engine/schedule.go (TestSchedule_DoesNotCallApplyActiveModel pins this).
+
+func TestApplyActiveModel_NilOpts_NoActive(t *testing.T) {
+	s := &Session{}
+	got := s.ApplyActiveModel(nil)
+	if got != nil {
+		t.Errorf("got %+v, want nil", got)
+	}
+}
+
+func TestApplyActiveModel_NilOpts_WithActive(t *testing.T) {
+	s := &Session{}
+	s.SetActiveModel("groq-qwen")
+	got := s.ApplyActiveModel(nil)
+	if got == nil || got.ModelOverride != "groq-qwen" {
+		t.Errorf("got %+v, want ModelOverride=groq-qwen", got)
+	}
+}
+
+func TestApplyActiveModel_OptsBlank_WithActive(t *testing.T) {
+	s := &Session{}
+	s.SetActiveModel("groq-qwen")
+	in := &RunOptions{}
+	got := s.ApplyActiveModel(in)
+	if got.ModelOverride != "groq-qwen" {
+		t.Errorf("ModelOverride = %q, want groq-qwen", got.ModelOverride)
+	}
+	// Caller's input must not be mutated (callers may reuse RunOptions).
+	if in.ModelOverride != "" {
+		t.Errorf("input opts mutated: ModelOverride = %q", in.ModelOverride)
+	}
+}
+
+func TestApplyActiveModel_OptsExplicit_WinsOverActive(t *testing.T) {
+	// Explicit per-call ModelOverride (e.g. chat_relay_dispatcher's
+	// body.ModelOverride or schedule.go's per-job model) must win over
+	// the chat-set /model override.
+	s := &Session{}
+	s.SetActiveModel("groq-qwen")
+	in := &RunOptions{ModelOverride: "main"}
+	got := s.ApplyActiveModel(in)
+	if got.ModelOverride != "main" {
+		t.Errorf("ModelOverride = %q, want main (explicit wins)", got.ModelOverride)
+	}
+}
+
+func TestApplyActiveModel_NoActive_ReturnsOptsUnchanged(t *testing.T) {
+	s := &Session{}
+	in := &RunOptions{ModelOverride: "main"}
+	got := s.ApplyActiveModel(in)
+	if got != in {
+		t.Errorf("got %p, want unchanged %p", got, in)
+	}
+}
+
+// TestSchedule_DoesNotCallApplyActiveModel: static check that schedule.go
+// never funnels chat-set /model overrides into scheduler-launched runs.
+// Re-pinning the contract via grep — call this whenever schedule.go is
+// touched. Keeps the chat REPL `/model <id>` from contaminating cron-style
+// reflectionTick / tickOnce executions, which must always honor the
+// per-job model selection.
+func TestSchedule_DoesNotCallApplyActiveModel(t *testing.T) {
+	data, err := os.ReadFile("schedule.go")
+	if err != nil {
+		t.Fatalf("read schedule.go: %v", err)
+	}
+	src := string(data)
+	for _, banned := range []string{"ApplyActiveModel", "GetActiveModel"} {
+		if strings.Contains(src, banned) {
+			t.Errorf("schedule.go must not call %s — chat-path only contract (see ApplyActiveModel doc)", banned)
+		}
+	}
+}

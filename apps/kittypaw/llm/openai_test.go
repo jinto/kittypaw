@@ -931,3 +931,200 @@ func TestOpenAIGenerateWithToolsParallelResponse(t *testing.T) {
 		t.Errorf("parallel order broken: %v %v", resp.ContentBlocks[0].ID, resp.ContentBlocks[1].ID)
 	}
 }
+
+// --- extractContent: list-of-blocks unwrap (Mistral magistral, future
+// native-reasoning models). String shape is the OpenAI standard and stays
+// unchanged. See plan v3 § Out of Scope: reasoning string is recovered but
+// not surfaced to caller — held for future Response struct extension.
+
+func TestExtractContent_String(t *testing.T) {
+	text, reason, err := extractContent("hello")
+	if err != nil || text != "hello" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"hello\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_NullContent(t *testing.T) {
+	text, reason, err := extractContent(nil)
+	if err != nil || text != "" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_EmptyArray(t *testing.T) {
+	text, reason, err := extractContent([]any{})
+	if err != nil || text != "" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_ListOfBlocks_TextOnly(t *testing.T) {
+	text, reason, err := extractContent([]any{
+		map[string]any{"type": "text", "text": "hi"},
+	})
+	if err != nil || text != "hi" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"hi\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_ListOfBlocks_EmptyText(t *testing.T) {
+	text, reason, err := extractContent([]any{
+		map[string]any{"type": "text", "text": ""},
+	})
+	if err != nil || text != "" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_ListOfBlocks_TextFieldMissing(t *testing.T) {
+	text, reason, err := extractContent([]any{
+		map[string]any{"type": "text"},
+	})
+	if err != nil || text != "" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_ListOfBlocks_ThinkingPlusText(t *testing.T) {
+	text, reason, err := extractContent([]any{
+		map[string]any{
+			"type": "thinking",
+			"thinking": []any{
+				map[string]any{"type": "text", "text": "deliberation"},
+			},
+		},
+		map[string]any{"type": "text", "text": "final"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if text != "final" {
+		t.Errorf("text = %q, want \"final\"", text)
+	}
+	if reason != "deliberation" {
+		t.Errorf("reasoning = %q, want \"deliberation\"", reason)
+	}
+}
+
+func TestExtractContent_ListOfBlocks_MultipleText(t *testing.T) {
+	text, reason, err := extractContent([]any{
+		map[string]any{"type": "text", "text": "hi"},
+		map[string]any{"type": "text", "text": " world"},
+	})
+	if err != nil || text != "hi world" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"hi world\", \"\", nil)", text, reason, err)
+	}
+}
+
+// TestExtractContent_MagistralFixture pins the exact response shape Mistral
+// `magistral-medium-latest` emits today (2026-05-05 measurement). Includes
+// the `closed: true` field, nested `thinking[]` array of inner text blocks,
+// and a final `{type:"text", text:"..."}` block.
+func TestExtractContent_MagistralFixture(t *testing.T) {
+	raw := `[
+		{
+			"type": "thinking",
+			"thinking": [
+				{"type": "text", "text": "Okay, the user wants me to introduce myself in one line."}
+			],
+			"closed": true
+		},
+		{"type": "text", "text": "안녕! 나는를 도울 수 있는 인공지능 언어 모델이야. 😊"}
+	]`
+	var c any
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	text, reason, err := extractContent(c)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	want := "안녕! 나는를 도울 수 있는 인공지능 언어 모델이야. 😊"
+	if text != want {
+		t.Errorf("text = %q, want %q", text, want)
+	}
+	if !strings.Contains(reason, "Okay, the user wants") {
+		t.Errorf("reasoning lost magistral thinking text; got %q", reason)
+	}
+}
+
+func TestExtractContent_UnknownType_EmptyFallback(t *testing.T) {
+	// Unknown block type → silently skipped (slog.Warn). No JSON re-serialize
+	// dump in the assistant message — that was rejected as too noisy. Caller
+	// sees clean empty text rather than unexplained JSON garbage.
+	text, reason, err := extractContent([]any{
+		map[string]any{"type": "foo", "bar": "baz"},
+	})
+	if err != nil || text != "" || reason != "" {
+		t.Errorf("got (%q, %q, %v); want (\"\", \"\", nil)", text, reason, err)
+	}
+}
+
+func TestExtractContent_NotStringNotArray(t *testing.T) {
+	// Numbers/objects are wire violations from the provider's side. Surface
+	// loudly rather than coerce — the agent loop has no graceful policy for
+	// "the LLM returned 42 as content".
+	cases := []any{
+		42,
+		map[string]any{"foo": "bar"},
+		true,
+	}
+	for _, c := range cases {
+		_, _, err := extractContent(c)
+		if err == nil {
+			t.Errorf("extractContent(%v) err=nil, want non-nil", c)
+		}
+	}
+}
+
+// TestOpenAIProvider_WithReasoningFormat: sending the option injects
+// `reasoning_format` into the chat completions body. Without it the
+// field must NOT appear (Groq is the only provider that accepts it).
+func TestOpenAIProvider_WithReasoningFormat(t *testing.T) {
+	p := NewOpenAI("k", "qwen/qwen3-32b", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"),
+		WithReasoningFormat("parsed"))
+	body := p.buildRequestBody([]core.LlmMessage{{Role: core.RoleUser, Content: "hi"}})
+	if got := body["reasoning_format"]; got != "parsed" {
+		t.Errorf("reasoning_format = %v, want \"parsed\"", got)
+	}
+}
+
+func TestOpenAIProvider_WithoutReasoningFormat_OmittedFromBody(t *testing.T) {
+	p := NewOpenAI("k", "gpt-4", 1024,
+		WithBaseURL("http://example.com/v1/chat/completions"))
+	body := p.buildRequestBody([]core.LlmMessage{{Role: core.RoleUser, Content: "hi"}})
+	if _, ok := body["reasoning_format"]; ok {
+		t.Errorf("reasoning_format must not appear when option not set")
+	}
+}
+
+// TestParseChatJSONResponse_ListOfBlocks pins parseChatJSONResponse's
+// integration with extractContent for the magistral wire shape — the
+// caller path that flows through Generate(). Companion to the existing
+// TestOpenAIJSONResponse string-shape coverage.
+func TestParseChatJSONResponse_ListOfBlocks(t *testing.T) {
+	body := `{
+		"choices": [{"message": {"content": [
+			{"type": "thinking", "thinking": [{"type": "text", "text": "deliberation"}], "closed": true},
+			{"type": "text", "text": "final answer"}
+		]}}],
+		"usage": {"prompt_tokens": 5, "completion_tokens": 9},
+		"model": "magistral-medium-latest"
+	}`
+	srv, p := newOpenAITestServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	})
+	defer srv.Close()
+
+	resp, err := p.Generate(context.Background(), []core.LlmMessage{
+		{Role: core.RoleUser, Content: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	if resp.Content != "final answer" {
+		t.Errorf("Content = %q, want \"final answer\"", resp.Content)
+	}
+}

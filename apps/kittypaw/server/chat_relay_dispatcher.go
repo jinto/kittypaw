@@ -101,6 +101,9 @@ func (d *chatRelayDispatcher) dispatchChatCompletions(
 		Payload:   raw,
 	}
 	opts := &engine.RunOptions{ModelOverride: body.ModelOverride(acct.Session.Config)}
+	// Chat-path /model override fallback (only applies when the relay
+	// caller did NOT specify model — explicit body.Model wins).
+	opts = acct.Session.ApplyActiveModel(opts)
 	output, err := acct.Session.RunTurn(ctx, req.ID, event, opts)
 	if err != nil {
 		return jsonDispatch(http.StatusInternalServerError, openAIError(err.Error())), nil
