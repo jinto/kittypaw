@@ -209,6 +209,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		"auth_base_url":       strings.TrimRight(cfg.BaseURL, "/") + "/auth",
 		"skills_registry_url": cfg.SkillsRegistryURL,
 	}
+	if cfg.ConnectBaseURL != "" {
+		discovery["connect_base_url"] = cfg.ConnectBaseURL
+	}
 	if cfg.KakaoRelayURL != "" {
 		discovery["kakao_relay_url"] = cfg.KakaoRelayURL
 	}
@@ -217,13 +220,19 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	}
 
 	identityOnly := hostBoundaryMiddleware(cfg.BaseURL, cfg.APIBaseURL, cfg.BaseURL)
+	connectOnly := hostOnlyMiddleware(cfg.ConnectBaseURL)
 
 	r.Get("/health", handleHealth)
 
-	r.Group(func(r chi.Router) {
-		r.Use(identityOnly)
-		r.Get("/", handlePortalHome(cfg))
-	})
+	r.Get("/", handleHostRoot(cfg))
+
+	if cfg.ConnectBaseURL != "" {
+		r.Group(func(r chi.Router) {
+			r.Use(connectOnly)
+			r.Get("/connect", handleConnectHome(cfg))
+			r.Get("/connect/", handleConnectHome(cfg))
+		})
+	}
 
 	r.Group(func(r chi.Router) {
 		r.Use(identityOnly)
@@ -310,6 +319,23 @@ func hostBoundaryMiddleware(identityBaseURL, resourceBaseURL, allowedBaseURL str
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestHost := canonicalHost(r.Host)
 			if requestHost == allowedHost || isLocalRequestHost(requestHost) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
+	}
+}
+
+func hostOnlyMiddleware(allowedBaseURL string) func(http.Handler) http.Handler {
+	allowedHost := canonicalURLHost(allowedBaseURL)
+	if allowedHost == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestHost := canonicalHost(r.Host)
+			if requestHost == allowedHost || isLocalRequestHost(requestHost) || isLocalRequestHost(allowedHost) {
 				next.ServeHTTP(w, r)
 				return
 			}

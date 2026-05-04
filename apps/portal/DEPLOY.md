@@ -1,7 +1,9 @@
 # Kitty Portal 배포 메모
 
 Portal은 `portal.kittypaw.app`에서 auth authority와 service discovery를
-제공합니다. `/v1/*` 데이터 API는 `apps/kittyapi`가 담당합니다.
+제공하고, 같은 `kittyportal` 서버가 `connect.kittypaw.app`에서 KittyPaw
+Connect account-linking surface를 제공합니다. `/v1/*` 데이터 API는
+`apps/kittyapi`가 담당합니다.
 
 ## 환경 변수
 
@@ -11,6 +13,7 @@ Portal은 `portal.kittypaw.app`에서 auth authority와 service discovery를
 PORT=9714
 UNIX_SOCKET=/home/jinto/kittyportal/kittyportal.sock
 BASE_URL=https://portal.kittypaw.app
+CONNECT_BASE_URL=https://connect.kittypaw.app
 API_BASE_URL=https://api.kittypaw.app
 DATABASE_URL=postgres://...
 JWT_PRIVATE_KEY_PEM_B64=
@@ -19,9 +22,24 @@ GOOGLE_CLIENT_SECRET=
 # GOOGLE_AUTH_URL=        # unset in prod; local fake OAuth only
 # GOOGLE_TOKEN_URL=       # unset in prod; local fake OAuth only
 # GOOGLE_USERINFO_URL=    # unset in prod; local fake OAuth only
+CONNECT_GOOGLE_CLIENT_ID=
+CONNECT_GOOGLE_CLIENT_SECRET=
+# CONNECT_GOOGLE_AUTH_URL=       # unset in prod; local fake OAuth only
+# CONNECT_GOOGLE_TOKEN_URL=      # unset in prod; local fake OAuth only
+# CONNECT_GOOGLE_USERINFO_URL=   # unset in prod; local fake OAuth only
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 WEB_REDIRECT_URI_ALLOWLIST=https://chat.kittypaw.app/auth/callback
+```
+
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`은 KittyPaw identity login용입니다.
+Gmail restricted scopes는 `CONNECT_GOOGLE_CLIENT_ID`/
+`CONNECT_GOOGLE_CLIENT_SECRET`에 별도 OAuth client를 설정합니다.
+
+nginx의 `server_name`에는 portal과 connect host를 모두 넣습니다:
+
+```bash
+DEPLOY_DOMAIN="portal.kittypaw.app connect.kittypaw.app" uv run fab setup
 ```
 
 ## RS256 서명 키
@@ -46,6 +64,10 @@ curl https://portal.kittypaw.app/health
 curl https://portal.kittypaw.app/discovery
 curl https://portal.kittypaw.app/.well-known/jwks.json
 curl https://portal.kittypaw.app/v1/geo/resolve       # 404
+curl https://connect.kittypaw.app/
+curl https://connect.kittypaw.app/connect
+curl https://connect.kittypaw.app/discovery           # 404
+curl https://portal.kittypaw.app/connect              # 404
 bash deploy/smoke.sh
 ```
 

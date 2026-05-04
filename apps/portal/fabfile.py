@@ -66,7 +66,7 @@ def setup(ctx):
     c.run(f"mkdir -p {REMOTE_DIR}")
 
     if not DOMAIN:
-        print("ERROR: set DEPLOY_DOMAIN env var (e.g. portal.kittypaw.app)")
+        print('ERROR: set DEPLOY_DOMAIN env var (e.g. "portal.kittypaw.app connect.kittypaw.app")')
         sys.exit(1)
 
     c.put(str(LOCAL_ROOT / "deploy" / "kittyportal.service"), "/tmp/kittyportal.service")
