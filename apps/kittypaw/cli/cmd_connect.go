@@ -20,6 +20,7 @@ import (
 var (
 	connectOpenBrowser = core.OpenBrowser
 	connectHTTPClient  = http.DefaultClient
+	connectGmailRunner = runConnectGmail
 )
 
 func newConnectCmd() *cobra.Command {
@@ -27,6 +28,7 @@ func newConnectCmd() *cobra.Command {
 		Use:   "connect",
 		Short: "Connect external service accounts",
 	}
+	addPersistentAccountFlag(cmd)
 	cmd.AddCommand(newConnectGmailCmd())
 	return cmd
 }
@@ -44,22 +46,30 @@ func newConnectGmailCmd() *cobra.Command {
 			if apiURL == "" {
 				apiURL = core.DefaultAPIServerURL
 			}
-			secrets, err := core.LoadAccountSecrets(core.DefaultAccountID)
+			accountID, err := resolveCLIAccountWithContext(flagAccount)
 			if err != nil {
-				return fmt.Errorf("load secrets: %w", err)
+				return err
 			}
-			apiMgr := core.NewAPITokenManager("", secrets)
-			serviceMgr := core.NewServiceTokenManager(secrets)
 			useCode := flagCode || !term.IsTerminal(int(os.Stdin.Fd()))
-			if useCode {
-				return connectGmailCode(apiURL, apiMgr, serviceMgr)
-			}
-			return connectGmailHTTP(apiURL, apiMgr, serviceMgr)
+			return connectGmailRunner(apiURL, accountID, useCode)
 		},
 	}
 	cmd.Flags().BoolVar(&flagCode, "code", false, "use code-paste mode")
 	cmd.Flags().StringVar(&flagAPIURL, "api-url", "", "API server URL (default "+core.DefaultAPIServerURL+")")
 	return cmd
+}
+
+func runConnectGmail(apiURL, accountID string, useCode bool) error {
+	secrets, err := core.LoadAccountSecrets(accountID)
+	if err != nil {
+		return fmt.Errorf("load secrets: %w", err)
+	}
+	apiMgr := core.NewAPITokenManager("", secrets)
+	serviceMgr := core.NewServiceTokenManager(secrets)
+	if useCode {
+		return connectGmailCode(apiURL, apiMgr, serviceMgr)
+	}
+	return connectGmailHTTP(apiURL, apiMgr, serviceMgr)
 }
 
 func connectGmailCode(apiURL string, apiMgr *core.APITokenManager, serviceMgr *core.ServiceTokenManager) error {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +16,30 @@ func TestRootCommandRegistersConnectGmail(t *testing.T) {
 	cmd, _, err := root.Find([]string{"connect", "gmail"})
 	if err != nil || cmd == nil || cmd.Name() != "gmail" {
 		t.Fatalf("Find(connect gmail) = (%v, %v), want gmail command", cmd, err)
+	}
+}
+
+func TestConnectGmailUsesSelectedAccount(t *testing.T) {
+	rootDir := t.TempDir()
+	t.Setenv("KITTYPAW_CONFIG_DIR", rootDir)
+	mustWriteTestConfig(t, filepath.Join(rootDir, "accounts", "alice", "config.toml"))
+	mustWriteTestConfig(t, filepath.Join(rootDir, "accounts", "bob", "config.toml"))
+
+	oldRunner := connectGmailRunner
+	t.Cleanup(func() { connectGmailRunner = oldRunner })
+	var gotAccount string
+	connectGmailRunner = func(apiURL, accountID string, useCode bool) error {
+		gotAccount = accountID
+		return nil
+	}
+
+	root := newRootCmd()
+	root.SetArgs([]string{"connect", "gmail", "--account", "bob", "--code", "--api-url", "https://portal.example"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if gotAccount != "bob" {
+		t.Fatalf("connect gmail account = %q, want bob", gotAccount)
 	}
 }
 
