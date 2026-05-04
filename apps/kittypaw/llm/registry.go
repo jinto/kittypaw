@@ -105,6 +105,7 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 		), nil
 
 	case "groq", "deepseek", "openrouter", "mistral":
+		// `provider` was already lowercased by the outer switch.
 		baseURL := openAICompatibleBaseURL(provider)
 		if o.baseURL != "" {
 			baseURL = o.baseURL
@@ -118,7 +119,7 @@ func NewProvider(provider, apiKey, model string, maxTokens int, opts ...Option) 
 		// Sending it to non-thinking Groq models (llama-3.3-70b,
 		// llama-3.1-8b) returns 400 — the whitelist gates this.
 		// See MODEL_GUIDE.md § 5.13 for measurement evidence.
-		if strings.ToLower(provider) == "groq" && groqSupportsReasoningFormat(model) {
+		if provider == "groq" && groqSupportsReasoningFormat(model) {
 			openaiOpts = append(openaiOpts, WithReasoningFormat("parsed"))
 		}
 		return NewOpenAI(apiKey, model, maxTokens, openaiOpts...), nil

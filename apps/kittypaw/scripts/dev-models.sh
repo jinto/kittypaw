@@ -20,6 +20,10 @@ set -euo pipefail
 
 TEST_HOME="${KITTYPAW_DEV_HOME:-/tmp/kittypaw-dev-models}"
 TEST_PORT="${KITTYPAW_DEV_PORT:-3001}"
+# Loopback by default — the daemon holds vendor API keys and binding to all
+# interfaces (0.0.0.0) would expose them to the LAN. Override with
+# KITTYPAW_DEV_BIND=0.0.0.0:3001 only when intentional.
+TEST_BIND="${KITTYPAW_DEV_BIND:-127.0.0.1:$TEST_PORT}"
 LOG_FILE="${KITTYPAW_DEV_LOG:-/tmp/kittypaw-dev-models.log}"
 
 # bin/kittypaw is a sibling of this script's apps/kittypaw root.
@@ -110,8 +114,8 @@ server)
     echo "port :$TEST_PORT already in use — stop the existing daemon first or set KITTYPAW_DEV_PORT" >&2
     exit 1
   fi
-  echo "starting daemon on :$TEST_PORT (HOME=$TEST_HOME, log=$LOG_FILE)"
-  HOME="$TEST_HOME" "$KP_BIN" server start --bind ":$TEST_PORT" > "$LOG_FILE" 2>&1 &
+  echo "starting daemon on $TEST_BIND (HOME=$TEST_HOME, log=$LOG_FILE)"
+  HOME="$TEST_HOME" "$KP_BIN" server start --bind "$TEST_BIND" > "$LOG_FILE" 2>&1 &
   sleep 2
   if ! lsof -nP -iTCP:"$TEST_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "daemon failed to bind :$TEST_PORT — see $LOG_FILE" >&2
@@ -148,7 +152,7 @@ clean)
 
 status)
   echo "TEST_HOME=$TEST_HOME"
-  echo "TEST_PORT=$TEST_PORT"
+  echo "TEST_BIND=$TEST_BIND"
   echo "LOG_FILE=$LOG_FILE"
   if [[ -f "$TEST_HOME/accounts/default/config.toml" ]]; then
     echo "config: present"
@@ -184,6 +188,10 @@ Usage:
 Env:
   KITTYPAW_DEV_HOME    isolation home (default: /tmp/kittypaw-dev-models)
   KITTYPAW_DEV_PORT    daemon port    (default: 3001)
+  KITTYPAW_DEV_BIND    bind address   (default: 127.0.0.1:\$KITTYPAW_DEV_PORT;
+                                       loopback only — vendor keys live in
+                                       this daemon, override only when LAN
+                                       access is intentional)
   GROQ_API_KEY         required for server
   MISTRAL_API_KEY      required for server
 
