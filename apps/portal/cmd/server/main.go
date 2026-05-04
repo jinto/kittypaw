@@ -22,6 +22,7 @@ import (
 
 	"github.com/kittypaw-app/kittyportal/internal/auth"
 	"github.com/kittypaw-app/kittyportal/internal/config"
+	"github.com/kittypaw-app/kittyportal/internal/connect"
 	"github.com/kittypaw-app/kittyportal/internal/janitor"
 	"github.com/kittypaw-app/kittyportal/internal/model"
 	"github.com/kittypaw-app/kittyportal/internal/ratelimit"
@@ -177,6 +178,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 	states := auth.NewStateStore()
 	webCodes := auth.NewWebCodeStore()
+	connectCodes := connect.NewCodeStore(connect.CodeStoreOptions{})
 	oauthHandler := &auth.OAuthHandler{
 		UserStore:         userStore,
 		RefreshTokenStore: refreshStore,
@@ -227,10 +229,26 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	r.Get("/", handleHostRoot(cfg))
 
 	if cfg.ConnectBaseURL != "" {
+		connectHandler := connect.NewHandler(
+			connect.NewGmailProvider(connect.GmailConfig{
+				ClientID:     cfg.ConnectGoogleClientID,
+				ClientSecret: cfg.ConnectGoogleClientSecret,
+				BaseURL:      cfg.ConnectBaseURL,
+				AuthURL:      cfg.ConnectGoogleAuthURL,
+				TokenURL:     cfg.ConnectGoogleTokenURL,
+				UserInfoURL:  cfg.ConnectGoogleUserInfoURL,
+			}, &http.Client{Timeout: 10 * time.Second}),
+			states,
+			connectCodes,
+		)
 		r.Group(func(r chi.Router) {
 			r.Use(connectOnly)
 			r.Get("/connect", handleConnectHome(cfg))
 			r.Get("/connect/", handleConnectHome(cfg))
+			r.Get("/connect/gmail/login", connectHandler.HandleGmailLogin())
+			r.Get("/connect/gmail/callback", connectHandler.HandleGmailCallback())
+			r.Post("/connect/cli/exchange", connectHandler.HandleCLIExchange())
+			r.Post("/connect/gmail/refresh", connectHandler.HandleGmailRefresh())
 		})
 	}
 
