@@ -133,17 +133,17 @@ KITTYPAW_DEV_PORT=3010 scripts/dev-models.sh go
 
 ```
 KITTYPAW_CONFIG_DIR=/tmp/kittypaw-dev-models
-└── server.toml              # bind + master_api_key (DaemonConn 의존)
-└── daemon.pid               # local discovery
+├── server.toml              # bind + master_api_key (DaemonConn 의존, 키는 setup마다 무작위 16-byte hex)
+├── daemon.pid               # local discovery (server start 후)
 └── accounts/default/
-    ├── config.toml          # [[llm.models]] 4 entries
-    ├── account.toml
+    ├── config.toml          # [[llm.models]] 4 entries (wizard 후 overwrite)
+    ├── account.toml         # wizard 자동 생성
     └── secrets.json         # wizard 자동 생성
 ```
 
-setup wizard가 `--password-stdin --no-chat --no-service --force`로 비interactive 호출되어 `account.toml` + `secrets.json`을 박음 (auth token / WS handshake에 필요). `config.toml`은 wizard 후 dev-models가 4 모델 template으로 overwrite.
+setup wizard가 `--password-stdin --no-chat --no-service --force`로 비interactive 호출되어 `account.toml` + `secrets.json`을 박는다. (`auth.json`은 server-wide Web UI credentials이고 별도 — chat WS handshake는 server.toml의 `master_api_key`로 인증되므로 dev harness엔 불필요.) `config.toml`은 wizard 후 dev-models가 4 모델 template으로 overwrite.
 
-`server.toml`에 `bind = "127.0.0.1:3001"` + `master_api_key = "dev-models-master-key"` 박음. chat client (`client/daemon.go:Connect`)가 이 둘을 읽어 BaseURL + APIKey 결정 — 박지 않으면 WS 401 또는 health-check 10초 timeout.
+`server.toml`에 `bind = "127.0.0.1:3001"` + 무작위 `master_api_key` 박음. chat client (`client/daemon.go:Connect`)가 이 둘을 읽어 BaseURL + APIKey 결정 — 박지 않으면 WS 401 또는 health-check 10초 timeout.
 
 > **CLAUDE.md "Testing Isolation" 섹션의 `KITTYPAW_HOME` 명시는 stale docs**. 코드는 `KITTYPAW_HOME` env var를 안 봄 (검증 2026-05-05). 격리 환경 만들 때는 `KITTYPAW_CONFIG_DIR` 사용 — 본 harness가 그 패턴 박제.
 
