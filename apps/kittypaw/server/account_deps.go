@@ -37,6 +37,7 @@ type AccountDeps struct {
 	BrowserController *browser.Controller
 	PkgMgr            *core.PackageManager
 	APITokenMgr       *core.APITokenManager
+	ServiceTokenMgr   *core.ServiceTokenManager
 	Secrets           *core.SecretsStore
 	LiveIndexer       *engine.LiveIndexer
 }
@@ -129,6 +130,7 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 	sbox := sandbox.New(t.Config.Sandbox)
 	pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
+	serviceTokenMgr := core.NewServiceTokenManager(secrets)
 	browserController := browser.NewController(browser.ControllerOptions{
 		Config:  t.Config.Browser,
 		BaseDir: t.BaseDir,
@@ -159,6 +161,7 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 		BrowserController: browserController,
 		PkgMgr:            pkgMgr,
 		APITokenMgr:       apiTokenMgr,
+		ServiceTokenMgr:   serviceTokenMgr,
 		Secrets:           secrets,
 	}, nil
 }
@@ -195,6 +198,7 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 		BaseDir:           td.Account.BaseDir,
 		PackageManager:    td.PkgMgr,
 		APITokenMgr:       td.APITokenMgr,
+		ServiceTokenMgr:   td.ServiceTokenMgr,
 		AccountID:         td.Account.ID,
 		AccountRegistry:   registry,
 		Health:            core.NewHealthState(),

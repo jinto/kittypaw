@@ -1559,6 +1559,23 @@ func runSkillOrPackageWithParams(ctx context.Context, name string, s *Session, p
 			config["access_token"] = tok
 		}
 	}
+	for _, f := range pkg.Config {
+		if f.Key != "access_token" || f.Source != "oauth-gmail/access_token" {
+			continue
+		}
+		if s.ServiceTokenMgr == nil {
+			return jsonResult(map[string]any{
+				"error": fmt.Sprintf("skill %q requires Gmail connection — run: kittypaw connect gmail", name),
+			})
+		}
+		tok, err := s.ServiceTokenMgr.LoadAccessToken("gmail")
+		if err != nil || tok == "" {
+			return jsonResult(map[string]any{
+				"error": fmt.Sprintf("skill %q requires Gmail connection — run: kittypaw connect gmail", name),
+			})
+		}
+		config["access_token"] = tok
+	}
 
 	// Build __context__ JSON string — packages use JSON.parse(__context__).
 	// Includes user context based on the package's [permissions].context declaration.
