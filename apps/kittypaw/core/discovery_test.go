@@ -17,6 +17,7 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app",
   "auth_base_url": "https://portal.kittypaw.app/auth",
+  "connect_base_url": "https://connect.kittypaw.app",
   "chat_relay_url": "https://chat.kittypaw.app",
   "kakao_relay_url": "https://kakao.kittypaw.app",
   "skills_registry_url": "https://github.com/kittypaw-app/skills"
@@ -34,6 +35,9 @@ func TestFetchDiscovery_HappyPath(t *testing.T) {
 	if got.AuthBaseURL != "https://portal.kittypaw.app/auth" {
 		t.Errorf("AuthBaseURL = %q", got.AuthBaseURL)
 	}
+	if got.ConnectBaseURL != "https://connect.kittypaw.app" {
+		t.Errorf("ConnectBaseURL = %q", got.ConnectBaseURL)
+	}
 	if got.ChatRelayURL != "https://chat.kittypaw.app" {
 		t.Errorf("ChatRelayURL = %q", got.ChatRelayURL)
 	}
@@ -50,6 +54,7 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 		fmt.Fprint(w, `{
   "api_base_url": "https://api.kittypaw.app/",
   "auth_base_url": "https://portal.kittypaw.app/auth///",
+  "connect_base_url": "https://connect.kittypaw.app///",
   "chat_relay_url": "https://chat.kittypaw.app///",
   "kakao_relay_url": "https://kakao.kittypaw.app///",
   "skills_registry_url": "https://github.com/kittypaw-app/skills/"
@@ -66,6 +71,9 @@ func TestFetchDiscovery_TrailingSlashTrimmed(t *testing.T) {
 	}
 	if got.AuthBaseURL != "https://portal.kittypaw.app/auth" {
 		t.Errorf("AuthBaseURL trailing slash not trimmed: %q", got.AuthBaseURL)
+	}
+	if got.ConnectBaseURL != "https://connect.kittypaw.app" {
+		t.Errorf("ConnectBaseURL trailing slashes not trimmed: %q", got.ConnectBaseURL)
 	}
 	if got.ChatRelayURL != "https://chat.kittypaw.app" {
 		t.Errorf("ChatRelayURL trailing slashes not trimmed: %q", got.ChatRelayURL)
@@ -107,6 +115,21 @@ func TestFetchDiscovery_EmptyRelayOK(t *testing.T) {
 	}
 	if got.ChatRelayURL != "" || got.KakaoRelayURL != "" || got.SkillsRegistryURL != "" {
 		t.Errorf("expected empty chat/relay/skills, got %+v", got)
+	}
+}
+
+func TestFetchDiscovery_MissingConnectBaseURLOK(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"api_base_url":"https://api.x"}`)
+	}))
+	defer ts.Close()
+
+	got, err := FetchDiscovery(ts.URL)
+	if err != nil {
+		t.Fatalf("FetchDiscovery: %v", err)
+	}
+	if got.ConnectBaseURL != "" {
+		t.Fatalf("ConnectBaseURL = %q, want empty for old portals", got.ConnectBaseURL)
 	}
 }
 

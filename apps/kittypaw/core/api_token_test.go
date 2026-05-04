@@ -325,6 +325,53 @@ func TestAPITokenManager_SaveAuthBaseURL_EmptyDeletes(t *testing.T) {
 	}
 }
 
+func TestAPITokenManager_SaveLoadAndResolveConnectBaseURL(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+	apiURL := "https://portal.kittypaw.app"
+	ns := NamespaceForURL(apiURL)
+
+	if err := mgr.SaveConnectBaseURL(apiURL, "https://connect.kittypaw.app/"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := mgr.LoadConnectBaseURL(apiURL)
+	if !ok || got != "https://connect.kittypaw.app" {
+		t.Fatalf("LoadConnectBaseURL = (%q, %v), want connect base URL", got, ok)
+	}
+	if stored, ok := secrets.Get(ns, "connect_base_url"); !ok || stored != "https://connect.kittypaw.app" {
+		t.Fatalf("stored connect base URL = (%q, %v), want connect_base_url", stored, ok)
+	}
+	if resolved := mgr.ResolveConnectBaseURL(apiURL); resolved != "https://connect.kittypaw.app" {
+		t.Fatalf("ResolveConnectBaseURL = %q", resolved)
+	}
+
+	if err := mgr.SaveConnectBaseURL(apiURL, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = mgr.LoadConnectBaseURL(apiURL)
+	if ok || got != "" {
+		t.Fatalf("after empty save, LoadConnectBaseURL = (%q, %v), want empty false", got, ok)
+	}
+}
+
+func TestAPITokenManager_ResolveConnectBaseURLFallbacks(t *testing.T) {
+	secrets := &SecretsStore{
+		path: t.TempDir() + "/secrets.json",
+		data: make(map[string]map[string]string),
+	}
+	mgr := NewAPITokenManager("", secrets)
+
+	if got := mgr.ResolveConnectBaseURL("https://portal.kittypaw.app"); got != "https://connect.kittypaw.app" {
+		t.Fatalf("portal fallback = %q", got)
+	}
+	if got := mgr.ResolveConnectBaseURL("http://localhost:8080"); got != "http://localhost:8080" {
+		t.Fatalf("localhost fallback = %q", got)
+	}
+}
+
 func TestAPITokenManager_SaveLoadAndClearChatRelayDeviceTokens(t *testing.T) {
 	secrets := &SecretsStore{
 		path: t.TempDir() + "/secrets.json",

@@ -21,6 +21,7 @@ const discoveryBodyLimit = 64 * 1024
 type DiscoveryResponse struct {
 	APIBaseURL        string `json:"api_base_url"`
 	AuthBaseURL       string `json:"auth_base_url"`
+	ConnectBaseURL    string `json:"connect_base_url"`
 	ChatRelayURL      string `json:"chat_relay_url"`
 	KakaoRelayURL     string `json:"kakao_relay_url"`
 	SkillsRegistryURL string `json:"skills_registry_url"`
@@ -59,6 +60,7 @@ func FetchDiscovery(base string) (*DiscoveryResponse, error) {
 	}
 	d.APIBaseURL = strings.TrimRight(d.APIBaseURL, "/")
 	d.AuthBaseURL = strings.TrimRight(d.AuthBaseURL, "/")
+	d.ConnectBaseURL = strings.TrimRight(d.ConnectBaseURL, "/")
 	d.ChatRelayURL = strings.TrimRight(d.ChatRelayURL, "/")
 	d.KakaoRelayURL = strings.TrimRight(d.KakaoRelayURL, "/")
 	d.SkillsRegistryURL = strings.TrimRight(d.SkillsRegistryURL, "/")
