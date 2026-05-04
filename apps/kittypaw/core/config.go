@@ -316,6 +316,7 @@ type MCPServerConfig struct {
 	Command string            `toml:"command"`
 	Args    []string          `toml:"args"`
 	Env     map[string]string `toml:"env"`
+	EnvFrom map[string]string `toml:"env_from"`
 }
 
 // ChannelConfig defines a messaging channel.

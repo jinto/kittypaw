@@ -30,11 +30,16 @@ type serverEntry struct {
 	tools   []*mcp.Tool // cached after connect
 }
 
+// EnvResolver resolves source-bound MCP environment values such as
+// oauth-gmail/access_token at subprocess start time.
+type EnvResolver func(source string) (string, error)
+
 // Registry manages connections to multiple MCP servers.
 type Registry struct {
-	configs map[string]core.MCPServerConfig
-	entries map[string]*serverEntry
-	mu      sync.RWMutex
+	configs     map[string]core.MCPServerConfig
+	entries     map[string]*serverEntry
+	envResolver EnvResolver
+	mu          sync.RWMutex
 }
 
 // NewRegistry creates a Registry from the given server configurations.
@@ -48,6 +53,14 @@ func NewRegistry(servers []core.MCPServerConfig) *Registry {
 		configs: configs,
 		entries: make(map[string]*serverEntry),
 	}
+}
+
+// SetEnvResolver installs the runtime resolver used for MCP config env_from
+// values. It should be set before Connect/ConnectAll.
+func (r *Registry) SetEnvResolver(resolver EnvResolver) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.envResolver = resolver
 }
 
 // ValidateConfig checks that all server configs have required fields.
@@ -124,8 +137,12 @@ func (r *Registry) Connect(ctx context.Context, name string) error {
 	// Use background context for the subprocess lifetime — ctx only bounds
 	// the connect handshake, not the process lifecycle.
 	cmd := exec.Command(cfg.Command, cfg.Args...)
-	if len(cfg.Env) > 0 {
-		cmd.Env = append(os.Environ(), envSlice(cfg.Env)...)
+	resolvedEnv, err := r.resolveCommandEnv(cfg)
+	if err != nil {
+		return err
+	}
+	if len(resolvedEnv) > 0 {
+		cmd.Env = append(os.Environ(), resolvedEnv...)
 	}
 
 	transport := &mcp.CommandTransport{Command: cmd}
@@ -261,6 +278,40 @@ func contentToJSON(result *mcp.CallToolResult) string {
 func errorJSON(msg string) string {
 	data, _ := json.Marshal(map[string]any{"error": msg})
 	return string(data)
+}
+
+func (r *Registry) resolveCommandEnv(cfg core.MCPServerConfig) ([]string, error) {
+	if len(cfg.Env) == 0 && len(cfg.EnvFrom) == 0 {
+		return nil, nil
+	}
+
+	resolved := make(map[string]string, len(cfg.Env)+len(cfg.EnvFrom))
+	for key, value := range cfg.Env {
+		resolved[key] = value
+	}
+	if len(cfg.EnvFrom) == 0 {
+		return envSlice(resolved), nil
+	}
+
+	r.mu.RLock()
+	resolver := r.envResolver
+	r.mu.RUnlock()
+	if resolver == nil {
+		for _, source := range cfg.EnvFrom {
+			return nil, fmt.Errorf("MCP server %q: env source %q requires a resolver", cfg.Name, source)
+		}
+	}
+	for key, source := range cfg.EnvFrom {
+		value, err := resolver(source)
+		if err != nil {
+			return nil, fmt.Errorf("MCP server %q: env source %q for %s: %w", cfg.Name, source, key, err)
+		}
+		if value == "" {
+			return nil, fmt.Errorf("MCP server %q: env source %q for %s resolved empty", cfg.Name, source, key)
+		}
+		resolved[key] = value
+	}
+	return envSlice(resolved), nil
 }
 
 func envSlice(env map[string]string) []string {

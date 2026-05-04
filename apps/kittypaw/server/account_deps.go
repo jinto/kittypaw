@@ -143,6 +143,9 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 			return nil, fmt.Errorf("MCP config for %s: %w", t.ID, err)
 		}
 		mcpReg = mcpreg.NewRegistry(t.Config.MCPServers)
+		mcpReg.SetEnvResolver(func(source string) (string, error) {
+			return resolveMCPEnvSource(serviceTokenMgr, source)
+		})
 		connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
 			slog.Warn("some MCP servers failed to connect",
@@ -164,6 +167,25 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 		ServiceTokenMgr:   serviceTokenMgr,
 		Secrets:           secrets,
 	}, nil
+}
+
+func resolveMCPEnvSource(tokens *core.ServiceTokenManager, source string) (string, error) {
+	switch source {
+	case "oauth-gmail/access_token":
+		if tokens == nil {
+			return "", fmt.Errorf("missing Gmail connection — run: kittypaw connect gmail")
+		}
+		token, err := tokens.LoadAccessToken("gmail")
+		if err != nil {
+			return "", err
+		}
+		if token == "" {
+			return "", fmt.Errorf("missing Gmail connection — run: kittypaw connect gmail")
+		}
+		return token, nil
+	default:
+		return "", fmt.Errorf("unsupported MCP env source %q", source)
+	}
 }
 
 // buildAccountSession wires a single AccountDeps into a ready-to-dispatch
