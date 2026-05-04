@@ -62,6 +62,47 @@ type RunOptions struct {
 	ModelOverride string // use a named model from config [[models]] for this run
 }
 
+// SetActiveModel records the user's `/model <id>` choice for subsequent chat
+// turns. Empty string clears the override (revert to config default).
+func (s *Session) SetActiveModel(id string) {
+	s.activeModelOverride.Store(&id)
+}
+
+// GetActiveModel returns the chat-set model override, or "" when none is set.
+func (s *Session) GetActiveModel() string {
+	if p := s.activeModelOverride.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// ApplyActiveModel folds the chat-path /model override into RunOptions.
+// Caller contract: chat-path dispatchers (server.go:dispatchLoop chat case,
+// ws.go chat handler, chat_relay_dispatcher) MUST call this after building
+// RunOptions and before invoking Session.Run; the schedule path
+// (schedule.go:tickOnce / reflectionTick) MUST NOT call this — schedule
+// jobs always run with the configured default, never inheriting a chat-set
+// override.
+//
+// Precedence: explicit RunOptions.ModelOverride wins over the chat
+// override. This keeps schedule.go's per-job model selection unchanged
+// even when a chat user has set a /model override in the same session.
+func (s *Session) ApplyActiveModel(opts *RunOptions) *RunOptions {
+	id := s.GetActiveModel()
+	if id == "" {
+		return opts
+	}
+	if opts == nil {
+		return &RunOptions{ModelOverride: id}
+	}
+	if opts.ModelOverride != "" {
+		return opts
+	}
+	out := *opts
+	out.ModelOverride = id
+	return &out
+}
+
 // Session holds the injected dependencies for processing events.
 // Create once, call Run() for each event. Session is safe for concurrent use;
 // per-call state is passed via RunOptions.
@@ -81,6 +122,15 @@ type Session struct {
 	PackageManager *core.PackageManager     // nil when packages are not configured
 	APITokenMgr    *core.APITokenManager    // nil when API token management is not configured
 	allowedPaths   atomic.Pointer[[]string] // cached workspace paths for isPathAllowed
+
+	// activeModelOverride: turn-level model swap from the chat REPL `/model`
+	// command. Read by chat-path handlers via GetActiveModel and forwarded
+	// into RunOptions.ModelOverride before Run is invoked. atomic.Pointer
+	// keeps this safe for the concurrent-use Session contract (line 66) —
+	// scheduler tick goroutines and dispatchLoop never read this field;
+	// the schedule path manufactures its own RunOptions (schedule.go:428).
+	// Reset to default on daemon restart (no config persistence).
+	activeModelOverride atomic.Pointer[string]
 
 	// AccountID is the account this Session belongs to. Empty only for
 	// legacy single-account callers that haven't migrated to the account
