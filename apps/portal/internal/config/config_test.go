@@ -87,6 +87,56 @@ func TestConfig_LoadGoogleOAuthEndpointOverrides(t *testing.T) {
 	}
 }
 
+func TestConfig_LoadConnectSettings(t *testing.T) {
+	pemStr := generatePEM(t, 2048)
+	b64 := base64.StdEncoding.EncodeToString([]byte(pemStr))
+
+	cfg, err := loadWithEnv(t, map[string]string{
+		"JWT_PRIVATE_KEY_PEM_B64":      b64,
+		"BASE_URL":                     "https://portal.kittypaw.app",
+		"CONNECT_BASE_URL":             "https://connect.kittypaw.app/",
+		"CONNECT_GOOGLE_CLIENT_ID":     "connect-client-id",
+		"CONNECT_GOOGLE_CLIENT_SECRET": "connect-secret",
+		"CONNECT_GOOGLE_AUTH_URL":      "http://connect-oauth.local/auth",
+		"CONNECT_GOOGLE_TOKEN_URL":     "http://connect-oauth.local/token",
+		"CONNECT_GOOGLE_USERINFO_URL":  "http://connect-oauth.local/userinfo",
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ConnectBaseURL != "https://connect.kittypaw.app" {
+		t.Fatalf("ConnectBaseURL = %q", cfg.ConnectBaseURL)
+	}
+	if cfg.ConnectGoogleClientID != "connect-client-id" {
+		t.Fatalf("ConnectGoogleClientID = %q", cfg.ConnectGoogleClientID)
+	}
+	if cfg.ConnectGoogleClientSecret != "connect-secret" {
+		t.Fatalf("ConnectGoogleClientSecret = %q", cfg.ConnectGoogleClientSecret)
+	}
+	if cfg.ConnectGoogleAuthURL != "http://connect-oauth.local/auth" {
+		t.Fatalf("ConnectGoogleAuthURL = %q", cfg.ConnectGoogleAuthURL)
+	}
+	if cfg.ConnectGoogleTokenURL != "http://connect-oauth.local/token" {
+		t.Fatalf("ConnectGoogleTokenURL = %q", cfg.ConnectGoogleTokenURL)
+	}
+	if cfg.ConnectGoogleUserInfoURL != "http://connect-oauth.local/userinfo" {
+		t.Fatalf("ConnectGoogleUserInfoURL = %q", cfg.ConnectGoogleUserInfoURL)
+	}
+}
+
+func TestConfig_LoadForTestConnectBaseURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	if cfg.ConnectBaseURL == "" {
+		t.Fatal("ConnectBaseURL should default in tests")
+	}
+	if cfg.ConnectGoogleClientID == "" {
+		t.Fatal("ConnectGoogleClientID should default in tests")
+	}
+	if cfg.ConnectGoogleClientSecret == "" {
+		t.Fatal("ConnectGoogleClientSecret should default in tests")
+	}
+}
+
 func TestConfig_LoadUnixSocket(t *testing.T) {
 	pemStr := generatePEM(t, 2048)
 	b64 := base64.StdEncoding.EncodeToString([]byte(pemStr))

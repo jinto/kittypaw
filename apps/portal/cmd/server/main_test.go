@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,6 +198,128 @@ func TestPortalHomeEndpoint(t *testing.T) {
 	}
 }
 
+func TestConnectHomeEndpoint(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/connect", nil)
+	req.Host = "connect.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "KittyPaw Connect") {
+		t.Fatalf("connect page missing brand: %s", w.Body.String())
+	}
+}
+
+func TestConnectGmailLoginRouteUsesConnectGoogleClient(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	cfg.GoogleClientID = "identity-client-id"
+	cfg.ConnectGoogleClientID = "connect-client-id"
+	cfg.ConnectGoogleAuthURL = "https://accounts.example/auth"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/connect/gmail/login?mode=code", nil)
+	req.Host = "connect.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if got := u.Query().Get("client_id"); got != "connect-client-id" {
+		t.Fatalf("client_id = %q, want connect client, Location=%s", got, loc)
+	}
+	if got := u.Query().Get("redirect_uri"); got != "https://connect.kittypaw.app/connect/gmail/callback" {
+		t.Fatalf("redirect_uri = %q", got)
+	}
+}
+
+func TestConnectHostRootShowsConnectHome(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "connect.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "KittyPaw Connect") {
+		t.Fatalf("connect root missing brand: %s", w.Body.String())
+	}
+}
+
+func TestConnectRoutesOnlyServedOnConnectHost(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/connect", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("portal host status = %d, want 404", w.Code)
+	}
+}
+
+func TestConnectRoutesStayHostBoundWhenAPIHostIsCollapsed(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = cfg.BaseURL
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/connect", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("portal host status = %d, want 404", w.Code)
+	}
+}
+
+func TestIdentityRoutesNotServedOnConnectHost(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "connect.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("connect host discovery status = %d, want 404", w.Code)
+	}
+}
+
 func TestDiscoveryReturnsPortalAuthBaseURLAndAPIBaseURL(t *testing.T) {
 	cfg := config.LoadForTest()
 	cfg.BaseURL = "https://portal.kittypaw.app/"
@@ -221,6 +344,31 @@ func TestDiscoveryReturnsPortalAuthBaseURLAndAPIBaseURL(t *testing.T) {
 	}
 	if got := body["auth_base_url"]; got != "https://portal.kittypaw.app/auth" {
 		t.Fatalf("auth_base_url = %q, want portal auth host", got)
+	}
+}
+
+func TestDiscoveryIncludesConnectBaseURL(t *testing.T) {
+	cfg := config.LoadForTest()
+	cfg.BaseURL = "https://portal.kittypaw.app"
+	cfg.APIBaseURL = "https://api.kittypaw.app"
+	cfg.ConnectBaseURL = "https://connect.kittypaw.app"
+	r, cleanup := NewRouter(cfg, nil, nil, nil)
+	t.Cleanup(cleanup)
+
+	req := httptest.NewRequest(http.MethodGet, "/discovery", nil)
+	req.Host = "portal.kittypaw.app"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got := body["connect_base_url"]; got != "https://connect.kittypaw.app" {
+		t.Fatalf("connect_base_url = %q", got)
 	}
 }
 

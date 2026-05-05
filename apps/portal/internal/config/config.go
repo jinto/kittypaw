@@ -19,24 +19,30 @@ import (
 const MinJWTKeyBits = 2048
 
 type Config struct {
-	Port               string
-	UnixSocket         string
-	DatabaseURL        string
-	JWTPrivateKey      *rsa.PrivateKey // RS256 signing key (Plan 21 PR-B cutover; replaces HS256 secret)
-	JWTKID             string          // RFC 7638 thumbprint of JWTPrivateKey's public half
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleAuthURL      string
-	GoogleTokenURL     string
-	GoogleUserInfoURL  string
-	GitHubClientID     string
-	GitHubClientSecret string
-	BaseURL            string
-	AllowedOrigins     []string
-	KakaoRelayURL      string
-	ChatRelayURL       string
-	APIBaseURL         string
-	SkillsRegistryURL  string
+	Port                      string
+	UnixSocket                string
+	DatabaseURL               string
+	JWTPrivateKey             *rsa.PrivateKey // RS256 signing key (Plan 21 PR-B cutover; replaces HS256 secret)
+	JWTKID                    string          // RFC 7638 thumbprint of JWTPrivateKey's public half
+	GoogleClientID            string
+	GoogleClientSecret        string
+	GoogleAuthURL             string
+	GoogleTokenURL            string
+	GoogleUserInfoURL         string
+	ConnectBaseURL            string
+	ConnectGoogleClientID     string
+	ConnectGoogleClientSecret string
+	ConnectGoogleAuthURL      string
+	ConnectGoogleTokenURL     string
+	ConnectGoogleUserInfoURL  string
+	GitHubClientID            string
+	GitHubClientSecret        string
+	BaseURL                   string
+	AllowedOrigins            []string
+	KakaoRelayURL             string
+	ChatRelayURL              string
+	APIBaseURL                string
+	SkillsRegistryURL         string
 	// WebRedirectURIAllowlist — exact-match list of redirect_uri values
 	// accepted by the web OAuth flow (Plan 25). CSV from env. Empty list
 	// disables the web flow entirely (HandleWebGoogleLogin will reject
@@ -47,21 +53,27 @@ type Config struct {
 
 func Load() (*Config, error) {
 	c := &Config{
-		Port:               env("PORT", "8080"),
-		UnixSocket:         os.Getenv("UNIX_SOCKET"),
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleAuthURL:      os.Getenv("GOOGLE_AUTH_URL"),
-		GoogleTokenURL:     os.Getenv("GOOGLE_TOKEN_URL"),
-		GoogleUserInfoURL:  os.Getenv("GOOGLE_USERINFO_URL"),
-		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
-		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-		BaseURL:            env("BASE_URL", "http://localhost:8080"),
-		KakaoRelayURL:      os.Getenv("KAKAO_RELAY_URL"),
-		ChatRelayURL:       os.Getenv("CHAT_RELAY_URL"),
-		APIBaseURL:         os.Getenv("API_BASE_URL"),
-		SkillsRegistryURL:  env("SKILLS_REGISTRY_URL", "https://github.com/kittypaw-app/skills"),
+		Port:                      env("PORT", "8080"),
+		UnixSocket:                os.Getenv("UNIX_SOCKET"),
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:        os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleAuthURL:             os.Getenv("GOOGLE_AUTH_URL"),
+		GoogleTokenURL:            os.Getenv("GOOGLE_TOKEN_URL"),
+		GoogleUserInfoURL:         os.Getenv("GOOGLE_USERINFO_URL"),
+		ConnectBaseURL:            strings.TrimRight(env("CONNECT_BASE_URL", ""), "/"),
+		ConnectGoogleClientID:     os.Getenv("CONNECT_GOOGLE_CLIENT_ID"),
+		ConnectGoogleClientSecret: os.Getenv("CONNECT_GOOGLE_CLIENT_SECRET"),
+		ConnectGoogleAuthURL:      os.Getenv("CONNECT_GOOGLE_AUTH_URL"),
+		ConnectGoogleTokenURL:     os.Getenv("CONNECT_GOOGLE_TOKEN_URL"),
+		ConnectGoogleUserInfoURL:  os.Getenv("CONNECT_GOOGLE_USERINFO_URL"),
+		GitHubClientID:            os.Getenv("GITHUB_CLIENT_ID"),
+		GitHubClientSecret:        os.Getenv("GITHUB_CLIENT_SECRET"),
+		BaseURL:                   env("BASE_URL", "http://localhost:8080"),
+		KakaoRelayURL:             os.Getenv("KAKAO_RELAY_URL"),
+		ChatRelayURL:              os.Getenv("CHAT_RELAY_URL"),
+		APIBaseURL:                os.Getenv("API_BASE_URL"),
+		SkillsRegistryURL:         env("SKILLS_REGISTRY_URL", "https://github.com/kittypaw-app/skills"),
 	}
 
 	required := map[string]string{
@@ -136,12 +148,15 @@ func Load() (*Config, error) {
 func LoadForTest() *Config {
 	priv, kid := loadForTestKey()
 	return &Config{
-		Port:           env("PORT", "8080"),
-		BaseURL:        env("BASE_URL", "http://localhost:8080"),
-		APIBaseURL:     env("BASE_URL", "http://localhost:8080"),
-		AllowedOrigins: []string{"http://localhost:8080"},
-		JWTPrivateKey:  priv,
-		JWTKID:         kid,
+		Port:                      env("PORT", "8080"),
+		BaseURL:                   env("BASE_URL", "http://localhost:8080"),
+		ConnectBaseURL:            "https://connect.kittypaw.app",
+		ConnectGoogleClientID:     "connect-client-id",
+		ConnectGoogleClientSecret: "connect-secret",
+		APIBaseURL:                env("BASE_URL", "http://localhost:8080"),
+		AllowedOrigins:            []string{"http://localhost:8080"},
+		JWTPrivateKey:             priv,
+		JWTKID:                    kid,
 	}
 }
 

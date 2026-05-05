@@ -114,6 +114,7 @@ const (
 	kakaoRelayURLKey        = "kakao_relay_url"
 	kakaoRelayWSURLKey      = "kakao_relay_ws_url"
 	authBaseURLKey          = "auth_base_url"
+	connectBaseURLKey       = "connect_base_url"
 )
 
 // SaveChatRelayURL stores the chat relay server base URL from GET /discovery.
@@ -207,6 +208,36 @@ func (m *APITokenManager) ResolveAuthBaseURL(apiURL string) string {
 		return strings.TrimRight(got, "/")
 	}
 	return strings.TrimRight(apiURL, "/") + "/auth"
+}
+
+// SaveConnectBaseURL stores the Connect surface base URL from GET /discovery.
+// Empty value deletes the key so stale topology does not persist.
+func (m *APITokenManager) SaveConnectBaseURL(apiURL, connectBaseURL string) error {
+	return m.saveOrDelete(NamespaceForURL(apiURL), connectBaseURLKey, strings.TrimRight(connectBaseURL, "/"))
+}
+
+// LoadConnectBaseURL returns the stored Connect surface base URL.
+func (m *APITokenManager) LoadConnectBaseURL(apiURL string) (string, bool) {
+	return m.secrets.Get(NamespaceForURL(apiURL), connectBaseURLKey)
+}
+
+// ResolveConnectBaseURL returns the discovered Connect URL, a conservative
+// portal.* -> connect.* production fallback, or the API URL for collapsed
+// local/dev deployments.
+func (m *APITokenManager) ResolveConnectBaseURL(apiURL string) string {
+	if got, ok := m.LoadConnectBaseURL(apiURL); ok && got != "" {
+		return strings.TrimRight(got, "/")
+	}
+	trimmed := strings.TrimRight(apiURL, "/")
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" {
+		return trimmed
+	}
+	if parsed.Scheme == "https" && strings.HasPrefix(parsed.Host, "portal.") {
+		parsed.Host = "connect." + strings.TrimPrefix(parsed.Host, "portal.")
+		return strings.TrimRight(parsed.String(), "/")
+	}
+	return trimmed
 }
 
 // PairChatRelayDevice calls POST {auth_base_url}/devices/pair with the user's

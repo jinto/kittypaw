@@ -131,6 +131,35 @@ access = "read_write"
 	}
 }
 
+func TestMCPServerConfigEnvFromParsing(t *testing.T) {
+	tomlContent := `
+[[mcp_servers]]
+name = "gmail"
+command = "gmail-mcp"
+args = ["--stdio"]
+
+[mcp_servers.env]
+STATIC_VALUE = "present"
+
+[mcp_servers.env_from]
+GMAIL_ACCESS_TOKEN = "oauth-gmail/access_token"
+`
+	var cfg Config
+	if _, err := toml.Decode(tomlContent, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cfg.MCPServers) != 1 {
+		t.Fatalf("MCPServers len = %d", len(cfg.MCPServers))
+	}
+	server := cfg.MCPServers[0]
+	if server.Env["STATIC_VALUE"] != "present" {
+		t.Fatalf("static env did not parse: %#v", server.Env)
+	}
+	if server.EnvFrom["GMAIL_ACCESS_TOKEN"] != "oauth-gmail/access_token" {
+		t.Fatalf("env_from did not parse: %#v", server.EnvFrom)
+	}
+}
+
 func TestTeamSpaceConfigParsing(t *testing.T) {
 	tomlContent := `
 is_shared = true

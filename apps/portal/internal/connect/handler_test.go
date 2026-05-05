@@ -1,0 +1,200 @@
+package connect
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/kittypaw-app/kittyportal/internal/auth"
+)
+
+func testHandler(t *testing.T) (*Handler, *auth.StateStore, *CodeStore, *httptest.Server) {
+	t.Helper()
+	fakeGoogle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Form.Get("grant_type") {
+			case "authorization_code":
+				fmt.Fprint(w, `{"access_token":"gmail-access","refresh_token":"gmail-refresh","token_type":"Bearer","expires_in":3600,"scope":"`+GmailReadOnlyScope+`"}`)
+			case "refresh_token":
+				fmt.Fprint(w, `{"access_token":"gmail-access-2","token_type":"Bearer","expires_in":3600,"scope":"`+GmailReadOnlyScope+`"}`)
+			default:
+				t.Fatalf("grant_type = %q", r.Form.Get("grant_type"))
+			}
+		case "/userinfo":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"email":"alice@example.com"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(fakeGoogle.Close)
+
+	states := auth.NewStateStore()
+	t.Cleanup(states.Close)
+	codes := NewCodeStore(CodeStoreOptions{
+		TTL:        time.Minute,
+		MaxEntries: 10,
+	})
+	provider := NewGmailProvider(GmailConfig{
+		ClientID:     "connect-client-id",
+		ClientSecret: "connect-secret",
+		BaseURL:      "https://connect.kittypaw.app",
+		AuthURL:      fakeGoogle.URL + "/auth",
+		TokenURL:     fakeGoogle.URL + "/token",
+		UserInfoURL:  fakeGoogle.URL + "/userinfo",
+	}, fakeGoogle.Client())
+	return NewHandler(provider, states, codes), states, codes, fakeGoogle
+}
+
+func TestHandlerGmailLoginRedirectsToGoogle(t *testing.T) {
+	h, _, _, fakeGoogle := testHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/connect/gmail/login?mode=http&port=12345", nil)
+	w := httptest.NewRecorder()
+	h.HandleGmailLogin()(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasPrefix(loc, fakeGoogle.URL+"/auth?") {
+		t.Fatalf("Location = %q", loc)
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if u.Query().Get("state") == "" {
+		t.Fatalf("state missing: %s", loc)
+	}
+}
+
+func TestHandlerGmailLoginRejectsInvalidModeAndPort(t *testing.T) {
+	h, _, _, _ := testHandler(t)
+	for _, rawURL := range []string{
+		"/connect/gmail/login?mode=bad",
+		"/connect/gmail/login?mode=http&port=abc",
+		"/connect/gmail/login?mode=http&port=80",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+			w := httptest.NewRecorder()
+			h.HandleGmailLogin()(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+func TestHandlerGmailCallbackReturnsOnlyOneTimeCode(t *testing.T) {
+	h, states, _, _ := testHandler(t)
+	state, err := states.CreateWithMeta("verifier-1", map[string]string{"mode": "http", "port": "12345"})
+	if err != nil {
+		t.Fatalf("CreateWithMeta: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/connect/gmail/callback?code=google-code&state="+url.QueryEscape(state), nil)
+	w := httptest.NewRecorder()
+	h.HandleGmailCallback()(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", w.Code, w.Body.String())
+	}
+	loc := w.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if u.Scheme != "http" || u.Host != "127.0.0.1:12345" || u.Path != "/callback" {
+		t.Fatalf("Location = %q", loc)
+	}
+	q := u.Query()
+	if q.Get("code") == "" {
+		t.Fatalf("one-time code missing: %s", loc)
+	}
+	if q.Get("access_token") != "" || q.Get("refresh_token") != "" {
+		t.Fatalf("tokens leaked in redirect: %s", loc)
+	}
+}
+
+func TestHandlerCodeModeAndExchangeConsumeOnce(t *testing.T) {
+	h, states, _, _ := testHandler(t)
+	state, err := states.CreateWithMeta("verifier-1", map[string]string{"mode": "code"})
+	if err != nil {
+		t.Fatalf("CreateWithMeta: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/connect/gmail/callback?code=google-code&state="+url.QueryEscape(state), nil)
+	w := httptest.NewRecorder()
+	h.HandleGmailCallback()(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("callback status = %d; body=%s", w.Code, w.Body.String())
+	}
+
+	displayCode := extractDisplayCode(t, w.Body.String())
+	body := []byte(fmt.Sprintf(`{"code":%q}`, displayCode))
+	exchange := httptest.NewRecorder()
+	h.HandleCLIExchange()(exchange, httptest.NewRequest(http.MethodPost, "/connect/cli/exchange", bytes.NewReader(body)))
+	if exchange.Code != http.StatusOK {
+		t.Fatalf("exchange status = %d; body=%s", exchange.Code, exchange.Body.String())
+	}
+	var tokens TokenSet
+	if err := json.NewDecoder(exchange.Body).Decode(&tokens); err != nil {
+		t.Fatalf("decode exchange: %v", err)
+	}
+	if tokens.AccessToken != "gmail-access" || tokens.RefreshToken != "gmail-refresh" || tokens.Email != "alice@example.com" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+
+	replay := httptest.NewRecorder()
+	h.HandleCLIExchange()(replay, httptest.NewRequest(http.MethodPost, "/connect/cli/exchange", bytes.NewReader(body)))
+	if replay.Code != http.StatusUnauthorized {
+		t.Fatalf("replay status = %d, want 401", replay.Code)
+	}
+}
+
+func TestHandlerRefresh(t *testing.T) {
+	h, _, _, _ := testHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/connect/gmail/refresh", strings.NewReader(`{"refresh_token":"gmail-refresh"}`))
+	w := httptest.NewRecorder()
+	h.HandleGmailRefresh()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var tokens TokenSet
+	if err := json.NewDecoder(w.Body).Decode(&tokens); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if tokens.AccessToken != "gmail-access-2" || tokens.RefreshToken != "" {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+}
+
+func extractDisplayCode(t *testing.T, body string) string {
+	t.Helper()
+	const marker = `data-code="`
+	start := strings.Index(body, marker)
+	if start < 0 {
+		t.Fatalf("body missing data-code marker: %s", body)
+	}
+	start += len(marker)
+	end := strings.Index(body[start:], `"`)
+	if end < 0 {
+		t.Fatalf("body missing data-code terminator: %s", body)
+	}
+	return body[start : start+end]
+}

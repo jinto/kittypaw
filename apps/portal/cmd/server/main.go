@@ -22,6 +22,7 @@ import (
 
 	"github.com/kittypaw-app/kittyportal/internal/auth"
 	"github.com/kittypaw-app/kittyportal/internal/config"
+	"github.com/kittypaw-app/kittyportal/internal/connect"
 	"github.com/kittypaw-app/kittyportal/internal/janitor"
 	"github.com/kittypaw-app/kittyportal/internal/model"
 	"github.com/kittypaw-app/kittyportal/internal/ratelimit"
@@ -177,6 +178,7 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 
 	states := auth.NewStateStore()
 	webCodes := auth.NewWebCodeStore()
+	connectCodes := connect.NewCodeStore(connect.CodeStoreOptions{})
 	oauthHandler := &auth.OAuthHandler{
 		UserStore:         userStore,
 		RefreshTokenStore: refreshStore,
@@ -209,6 +211,9 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 		"auth_base_url":       strings.TrimRight(cfg.BaseURL, "/") + "/auth",
 		"skills_registry_url": cfg.SkillsRegistryURL,
 	}
+	if cfg.ConnectBaseURL != "" {
+		discovery["connect_base_url"] = cfg.ConnectBaseURL
+	}
 	if cfg.KakaoRelayURL != "" {
 		discovery["kakao_relay_url"] = cfg.KakaoRelayURL
 	}
@@ -217,13 +222,35 @@ func NewRouter(cfg *config.Config, userStore model.UserStore, refreshStore model
 	}
 
 	identityOnly := hostBoundaryMiddleware(cfg.BaseURL, cfg.APIBaseURL, cfg.BaseURL)
+	connectOnly := hostOnlyMiddleware(cfg.ConnectBaseURL)
 
 	r.Get("/health", handleHealth)
 
-	r.Group(func(r chi.Router) {
-		r.Use(identityOnly)
-		r.Get("/", handlePortalHome(cfg))
-	})
+	r.Get("/", handleHostRoot(cfg))
+
+	if cfg.ConnectBaseURL != "" {
+		connectHandler := connect.NewHandler(
+			connect.NewGmailProvider(connect.GmailConfig{
+				ClientID:     cfg.ConnectGoogleClientID,
+				ClientSecret: cfg.ConnectGoogleClientSecret,
+				BaseURL:      cfg.ConnectBaseURL,
+				AuthURL:      cfg.ConnectGoogleAuthURL,
+				TokenURL:     cfg.ConnectGoogleTokenURL,
+				UserInfoURL:  cfg.ConnectGoogleUserInfoURL,
+			}, &http.Client{Timeout: 10 * time.Second}),
+			states,
+			connectCodes,
+		)
+		r.Group(func(r chi.Router) {
+			r.Use(connectOnly)
+			r.Get("/connect", handleConnectHome(cfg))
+			r.Get("/connect/", handleConnectHome(cfg))
+			r.Get("/connect/gmail/login", connectHandler.HandleGmailLogin())
+			r.Get("/connect/gmail/callback", connectHandler.HandleGmailCallback())
+			r.Post("/connect/cli/exchange", connectHandler.HandleCLIExchange())
+			r.Post("/connect/gmail/refresh", connectHandler.HandleGmailRefresh())
+		})
+	}
 
 	r.Group(func(r chi.Router) {
 		r.Use(identityOnly)
@@ -310,6 +337,23 @@ func hostBoundaryMiddleware(identityBaseURL, resourceBaseURL, allowedBaseURL str
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestHost := canonicalHost(r.Host)
 			if requestHost == allowedHost || isLocalRequestHost(requestHost) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+		})
+	}
+}
+
+func hostOnlyMiddleware(allowedBaseURL string) func(http.Handler) http.Handler {
+	allowedHost := canonicalURLHost(allowedBaseURL)
+	if allowedHost == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestHost := canonicalHost(r.Host)
+			if requestHost == allowedHost || isLocalRequestHost(requestHost) || isLocalRequestHost(allowedHost) {
 				next.ServeHTTP(w, r)
 				return
 			}

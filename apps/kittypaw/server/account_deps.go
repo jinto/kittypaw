@@ -37,6 +37,7 @@ type AccountDeps struct {
 	BrowserController *browser.Controller
 	PkgMgr            *core.PackageManager
 	APITokenMgr       *core.APITokenManager
+	ServiceTokenMgr   *core.ServiceTokenManager
 	Secrets           *core.SecretsStore
 	LiveIndexer       *engine.LiveIndexer
 }
@@ -129,6 +130,7 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 	sbox := sandbox.New(t.Config.Sandbox)
 	pkgMgr := core.NewPackageManagerFrom(t.BaseDir, secrets)
 	apiTokenMgr := core.NewAPITokenManager(t.BaseDir, secrets)
+	serviceTokenMgr := core.NewServiceTokenManager(secrets)
 	browserController := browser.NewController(browser.ControllerOptions{
 		Config:  t.Config.Browser,
 		BaseDir: t.BaseDir,
@@ -141,6 +143,9 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 			return nil, fmt.Errorf("MCP config for %s: %w", t.ID, err)
 		}
 		mcpReg = mcpreg.NewRegistry(t.Config.MCPServers)
+		mcpReg.SetEnvResolver(func(source string) (string, error) {
+			return resolveMCPEnvSource(serviceTokenMgr, source)
+		})
 		connectCtx, connectCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if errs := mcpReg.ConnectAll(connectCtx); len(errs) > 0 {
 			slog.Warn("some MCP servers failed to connect",
@@ -159,8 +164,28 @@ func OpenAccountDeps(t *core.Account) (*AccountDeps, error) {
 		BrowserController: browserController,
 		PkgMgr:            pkgMgr,
 		APITokenMgr:       apiTokenMgr,
+		ServiceTokenMgr:   serviceTokenMgr,
 		Secrets:           secrets,
 	}, nil
+}
+
+func resolveMCPEnvSource(tokens *core.ServiceTokenManager, source string) (string, error) {
+	switch source {
+	case "oauth-gmail/access_token":
+		if tokens == nil {
+			return "", fmt.Errorf("missing Gmail connection — run: kittypaw connect gmail")
+		}
+		token, err := tokens.LoadAccessToken("gmail")
+		if err != nil {
+			return "", err
+		}
+		if token == "" {
+			return "", fmt.Errorf("missing Gmail connection — run: kittypaw connect gmail")
+		}
+		return token, nil
+	default:
+		return "", fmt.Errorf("unsupported MCP env source %q", source)
+	}
 }
 
 // buildAccountSession wires a single AccountDeps into a ready-to-dispatch
@@ -195,6 +220,7 @@ func buildAccountSession(td *AccountDeps, registry *core.AccountRegistry, eventC
 		BaseDir:           td.Account.BaseDir,
 		PackageManager:    td.PkgMgr,
 		APITokenMgr:       td.APITokenMgr,
+		ServiceTokenMgr:   td.ServiceTokenMgr,
 		AccountID:         td.Account.ID,
 		AccountRegistry:   registry,
 		Health:            core.NewHealthState(),

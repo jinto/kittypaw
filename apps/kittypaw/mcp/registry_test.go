@@ -2,6 +2,7 @@ package mcpreg
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -127,6 +128,81 @@ func TestIsConnectedBeforeConnect(t *testing.T) {
 	}
 	if reg.IsConnected("nonexistent") {
 		t.Error("expected IsConnected('nonexistent') == false")
+	}
+}
+
+func TestResolveCommandEnvMergesStaticAndSourceEnv(t *testing.T) {
+	cfg := core.MCPServerConfig{
+		Name:    "gmail",
+		Command: "gmail-mcp",
+		Env: map[string]string{
+			"STATIC_VALUE": "present",
+		},
+		EnvFrom: map[string]string{
+			"GMAIL_ACCESS_TOKEN": "oauth-gmail/access_token",
+		},
+	}
+	reg := NewRegistry([]core.MCPServerConfig{cfg})
+	reg.SetEnvResolver(func(source string) (string, error) {
+		if source != "oauth-gmail/access_token" {
+			t.Fatalf("unexpected source: %s", source)
+		}
+		return "gmail-token", nil
+	})
+
+	env, err := reg.resolveCommandEnv(cfg)
+	if err != nil {
+		t.Fatalf("resolveCommandEnv: %v", err)
+	}
+	values := envMap(env)
+	if values["STATIC_VALUE"] != "present" {
+		t.Fatalf("static env not preserved: %v", values)
+	}
+	if values["GMAIL_ACCESS_TOKEN"] != "gmail-token" {
+		t.Fatalf("source env not resolved: %v", values)
+	}
+}
+
+func TestResolveCommandEnvRequiresResolverForSourceEnv(t *testing.T) {
+	cfg := core.MCPServerConfig{
+		Name:    "gmail",
+		Command: "gmail-mcp",
+		EnvFrom: map[string]string{
+			"GMAIL_ACCESS_TOKEN": "oauth-gmail/access_token",
+		},
+	}
+	reg := NewRegistry([]core.MCPServerConfig{cfg})
+
+	_, err := reg.resolveCommandEnv(cfg)
+	if err == nil {
+		t.Fatal("expected missing resolver error")
+	}
+	if !strings.Contains(err.Error(), "env source") || !strings.Contains(err.Error(), "oauth-gmail/access_token") {
+		t.Fatalf("expected source-specific error, got: %v", err)
+	}
+}
+
+func TestConnectStopsBeforeSubprocessWhenSourceEnvFails(t *testing.T) {
+	reg := NewRegistry([]core.MCPServerConfig{{
+		Name:    "gmail",
+		Command: "definitely-not-a-real-mcp-command",
+		EnvFrom: map[string]string{
+			"GMAIL_ACCESS_TOKEN": "oauth-gmail/access_token",
+		},
+	}})
+	reg.SetEnvResolver(func(source string) (string, error) {
+		return "", errors.New("missing Gmail connection — run: kittypaw connect gmail")
+	})
+
+	err := reg.Connect(context.Background(), "gmail")
+	if err == nil {
+		t.Fatal("expected connect error")
+	}
+	if !strings.Contains(err.Error(), "kittypaw connect gmail") {
+		t.Fatalf("expected connect guidance, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "executable file not found") {
+		t.Fatalf("subprocess started before env resolution failed: %v", err)
 	}
 }
 
@@ -289,4 +365,15 @@ func TestShutdownIdempotent(t *testing.T) {
 	// Should not panic when called on empty registry
 	reg.Shutdown()
 	reg.Shutdown()
+}
+
+func envMap(env []string) map[string]string {
+	values := make(map[string]string, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	return values
 }
